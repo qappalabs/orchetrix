@@ -123,7 +123,7 @@ class OrchestrixGUI(QMainWindow):
         
         # Logo
         logo = QLabel()
-        logo_pixmap = QPixmap("C:/Developer/logos/Group 31.png")  # Replace with your logo path
+        logo_pixmap = QPixmap("logos/Group 31.png")  # Replace with your logo path
         scaled_pixmap = logo_pixmap.scaled(120, 30, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
         logo.setPixmap(scaled_pixmap)
         logo.setStyleSheet("padding: 0; margin: 0;")
