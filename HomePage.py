@@ -80,6 +80,25 @@ class NameCell(QWidget):
         layout.addWidget(name_label)
         layout.addStretch()
 
+
+class StatusItem(QTableWidgetItem):
+    def __init__(self, status):
+        super().__init__(status)
+        self.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        
+        # Define status colors
+        self.status_colors = {
+            "active": "#4CAF50",      # Green
+            "available": "#00FF00",    # Bright Green
+            "disconnected": "#FF0000"  # Red
+        }
+        
+        # Set color based on status
+        self.status_lower = status.lower()
+        if self.status_lower in self.status_colors:
+            self.setForeground(QColor(self.status_colors[self.status_lower]))
+        self.setFlags(Qt.ItemFlag.ItemIsEnabled)
+
 class OrchestrixGUI(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -322,6 +341,8 @@ class OrchestrixGUI(QMainWindow):
         self.table = QTableWidget()
         self.table.setColumnCount(6)
         self.table.setHorizontalHeaderLabels(["Name", "Kind", "Source", "Label", "Status", ""])
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         # Browser header with search
         browser_header = QWidget()
         browser_header_layout = QHBoxLayout(browser_header)
@@ -371,6 +392,8 @@ class OrchestrixGUI(QMainWindow):
                 padding: 4px;
             }
         """)
+        # Make table non-editable
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         # Add table data
         data = [
             ("⚙️", "Catalog", None, "General", "app", "", "active"),
@@ -389,18 +412,17 @@ class OrchestrixGUI(QMainWindow):
             icon, name, color, kind, source, label, status = item
             # Name column with icon
             self.table.setCellWidget(row, 0, NameCell(icon, name, color))
-            # Other columns
-            self.table.setItem(row, 1, QTableWidgetItem(kind))
-            self.table.setItem(row, 2, QTableWidgetItem(source))
-            self.table.setItem(row, 3, QTableWidgetItem(label))
-            # Status with color
-            status_item = QTableWidgetItem(status)
-            if status == "available":
-                status_item.setForeground(QColor("#00FF00"))
-            elif status == "disconnected":
-                status_item.setForeground(QColor("#FF0000"))
+            
+            # Other columns (now non-editable)
+            for col, value in enumerate([kind, source, label], start=1):
+                item = QTableWidgetItem(value)
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self.table.setItem(row, col, item)
+            
+            status_item = StatusItem(status)
+            status_item.setFlags(status_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             self.table.setItem(row, 4, status_item)
-            # Menu button
+            # Menu button with popup
             menu_btn = QPushButton("⋮")
             menu_btn.setStyleSheet("""
                 QPushButton {
@@ -413,6 +435,7 @@ class OrchestrixGUI(QMainWindow):
                     border-radius: 3px;
                 }
             """)
+            menu_btn.clicked.connect(lambda checked, row=row: self.show_menu_popup(row))
             self.table.setCellWidget(row, 5, menu_btn)
         # Set column widths
         header = self.table.horizontalHeader()
@@ -484,6 +507,83 @@ class OrchestrixGUI(QMainWindow):
         menu = self.cluster_dropdown.menu()
         for action in menu.actions():
             action.setChecked(action.text() == cluster_name)
+
+    def show_menu_popup(self, row):
+        # Get the menu button widget
+        menu_btn = self.table.cellWidget(row, 5)
+        if not menu_btn:
+            return
+
+        # Create popup menu
+        popup = QMenu(self)
+        popup.setStyleSheet("""
+            QMenu {
+                background-color: #2D2D2D;
+                border: 1px solid #3D3D3D;
+                padding: 5px 0px;
+            }
+            QMenu::item {
+                padding: 8px 15px;
+                color: white;
+                min-width: 150px;
+            }
+            QMenu::item:selected {
+                background-color: #3D3D3D;
+            }
+            QMenu::separator {
+                height: 1px;
+                background-color: #3D3D3D;
+                margin: 5px 0px;
+            }
+        """)
+
+        # Get item name for context
+        name_widget = self.table.cellWidget(row, 0)
+        name_label = name_widget.findChild(QLabel, "name_label")
+        item_name = name_label.text() if name_label else ""
+
+        # Add menu actions based on item type
+        if "Cluster" in item_name:
+            popup.addAction("Connect").triggered.connect(lambda: self.handle_menu_action("connect", row))
+            popup.addAction("Disconnect").triggered.connect(lambda: self.handle_menu_action("disconnect", row))
+            popup.addSeparator()
+            popup.addAction("Settings").triggered.connect(lambda: self.handle_menu_action("settings", row))
+        elif "Web Links" in self.table.item(row, 1).text():
+            popup.addAction("Open in Browser").triggered.connect(lambda: self.handle_menu_action("open", row))
+            popup.addAction("Copy URL").triggered.connect(lambda: self.handle_menu_action("copy", row))
+        else:
+            popup.addAction("Open").triggered.connect(lambda: self.handle_menu_action("open", row))
+            popup.addAction("Settings").triggered.connect(lambda: self.handle_menu_action("settings", row))
+
+        popup.addSeparator()
+        popup.addAction("Remove").triggered.connect(lambda: self.handle_menu_action("remove", row))
+
+        # Show popup at button position
+        popup.exec(menu_btn.mapToGlobal(menu_btn.rect().bottomLeft()))
+
+    def handle_menu_action(self, action, row):
+        name_widget = self.table.cellWidget(row, 0)
+        name_label = name_widget.findChild(QLabel, "name_label")
+        item_name = name_label.text() if name_label else ""
+        
+        if action == "connect":
+            print(f"Connecting to {item_name}...")
+            # Add your connect logic here
+        elif action == "disconnect":
+            print(f"Disconnecting from {item_name}...")
+            # Add your disconnect logic here
+        elif action == "settings":
+            print(f"Opening settings for {item_name}...")
+            # Add your settings logic here
+        elif action == "open":
+            print(f"Opening {item_name}...")
+            # Add your open logic here
+        elif action == "copy":
+            print(f"Copying URL for {item_name}...")
+            # Add your copy logic here
+        elif action == "remove":
+            print(f"Removing {item_name}...")
+            # Add your remove logic here
 
 def main():
     app = QApplication(sys.argv)
