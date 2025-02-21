@@ -1,13 +1,14 @@
 import sys
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-                               QPushButton, QLabel, QFrame, QTabWidget, QGridLayout, QSizePolicy,
-                               QGraphicsDropShadowEffect, QMenu, QToolButton, QToolTip)
-from PyQt6.QtCore import Qt, QSize, QPropertyAnimation, QEasingCurve, QEvent, QTimer, QPoint
+                           QPushButton, QLabel, QFrame, QTabWidget, QGridLayout, QSizePolicy,
+                           QGraphicsDropShadowEffect, QMenu, QToolButton, QToolTip, QLineEdit)
+from PyQt6.QtCore import Qt, QSize, QPropertyAnimation, QEasingCurve, QEvent, QTimer, QPoint, QRect
 from PyQt6.QtGui import (QIcon, QFont, QColor, QPalette, QPixmap, QPainter, QLinearGradient, 
-                         QGradient, QShortcut, QAction, QGuiApplication)
+                       QGradient, QShortcut, QAction, QGuiApplication)
 
 class NavMenuDropdown(QMenu):
     def __init__(self, parent=None):
+        
         super().__init__(parent)
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.FramelessWindowHint | Qt.WindowType.NoDropShadowWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -19,7 +20,7 @@ class NavMenuDropdown(QMenu):
                 padding: 5px;
             }
             QMenu::item {
-                padding: 8px 16px;
+                padding: 1px 16px;
                 border-radius: 4px;
                 margin: 2px 5px;
                 color: #e0e0e0;
@@ -55,28 +56,28 @@ class NavIconButton(QToolButton):
         # Colors
         self.bg_dark = "#1a1a1a"
         self.accent_blue = "#2196F3"
-        self.accent_light_blue = "#64B5F6"  # Blue active state (when page is selected)
+        self.accent_light_blue = "#64B5F6"
         self.text_light = "#f0f0f0"
-        self.text_secondary = "#a8a8a8"
+        self.text_secondary = "#888888"
         
         self.setup_ui()
         if self.has_dropdown:
             self.setup_dropdown()
             
     def setup_ui(self):
-        self.setFixedSize(50, 50)
+        self.setFixedSize(40, 40)
         self.setText(self.icon_text)
         self.setToolTip(self.item_text)
         self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFont(QFont("Segoe UI", 18))
+        self.setFont(QFont("Segoe UI", 16))
         self.setAutoRaise(True)
         self.update_style()
         self.clicked.connect(self.activate)
         if self.has_dropdown:
             self.clicked.connect(self.show_dropdown)
         self.installEventFilter(self)
-    
+            
     def setup_dropdown(self):
         self.dropdown_menu = NavMenuDropdown(self.parent_window)
         title_action = QAction(f"{self.icon_text} {self.item_text}", self)
@@ -85,55 +86,37 @@ class NavIconButton(QToolButton):
         self.dropdown_menu.addSeparator()
         
         if self.item_text == "Workloads":
-            self.dropdown_menu.addAction("Overview")
-            self.dropdown_menu.addAction("Pods")
-            self.dropdown_menu.addAction("Deployments")
-            self.dropdown_menu.addAction("Daemon Sets")
-            self.dropdown_menu.addAction("Stateful Sets")
-            self.dropdown_menu.addAction("Replica Sets")
-            self.dropdown_menu.addAction("Replication Controllers")
-            self.dropdown_menu.addAction("Jobs")
-            self.dropdown_menu.addAction("Cron Jobs")
+            menu_items = ["Overview", "Pods", "Deployments", "Daemon Sets", 
+                         "Stateful Sets", "Replica Sets", "Replication Controllers",
+                         "Jobs", "Cron Jobs"]
         elif self.item_text == "Config":
-            self.dropdown_menu.addAction("Config Maps")
-            self.dropdown_menu.addAction("Secrets")
-            self.dropdown_menu.addAction("Resource Quotas")
-            self.dropdown_menu.addAction("Limit Ranges")
-            self.dropdown_menu.addAction("Horizontal Pod Autoscalers")
-            self.dropdown_menu.addAction("Pod Disruption Budgets")
-            self.dropdown_menu.addAction("Priority Classes")
-            self.dropdown_menu.addAction("Runtime Classes")
-            self.dropdown_menu.addAction("Leases")
-            self.dropdown_menu.addAction("Mutating Webhook Configurations")
-            self.dropdown_menu.addAction("Validating Webhook Configurations")
+            menu_items = ["Config Maps", "Secrets", "Resource Quotas", "Limit Ranges",
+                         "Horizontal Pod Autoscalers", "Pod Disruption Budgets",
+                         "Priority Classes", "Runtime Classes", "Leases"]
         elif self.item_text == "Network":
-            self.dropdown_menu.addAction("Services")
-            self.dropdown_menu.addAction("Endpoints")
-            self.dropdown_menu.addAction("Ingresses")
-            self.dropdown_menu.addAction("Ingress Classes")
-            self.dropdown_menu.addAction("Network Policies")
-            self.dropdown_menu.addAction("Port Forwarding")
+            menu_items = ["Services", "Endpoints", "Ingresses", "Ingress Classes",
+                         "Network Policies"]
         elif self.item_text == "Storage":
-            self.dropdown_menu.addAction("Persistent Volume Claims")
-            self.dropdown_menu.addAction("Persistent Volumes")
-            self.dropdown_menu.addAction("Storage Classes")
+            menu_items = ["Persistent Volume Claims", "Persistent Volumes", 
+                         "Storage Classes"]
         elif self.item_text == "Helm":
-            self.dropdown_menu.addAction("Charts")
-            self.dropdown_menu.addAction("Releases")
+            menu_items = ["Charts", "Releases"]
         elif self.item_text == "Access Control":
-            self.dropdown_menu.addAction("Service Accounts")
-            self.dropdown_menu.addAction("Cluster Roles")
-            self.dropdown_menu.addAction("Roles")
-            self.dropdown_menu.addAction("Cluster Role Bindings")
-            self.dropdown_menu.addAction("Role Bindings")
+            menu_items = ["Service Accounts", "Cluster Roles", "Roles",
+                         "Cluster Role Bindings", "Role Bindings"]
         elif self.item_text == "Custom Resources":
-            self.dropdown_menu.addAction("Definitions")
-    
+            menu_items = ["Definitions"]
+        else:
+            menu_items = []
+            
+        for item in menu_items:
+            self.dropdown_menu.addAction(item)
+            
     def show_dropdown(self):
         if self.has_dropdown:
             self.dropdown_open = True
             self.update_style()
-            pos = self.mapToGlobal(QPoint(0, self.height()))
+            pos = self.mapToGlobal(QPoint(self.width(), 0))
             self.dropdown_menu.popup(pos)
             self.dropdown_menu.aboutToHide.connect(self.dropdown_closed)
             QTimer.singleShot(50, lambda: self.setDown(False))
@@ -142,41 +125,21 @@ class NavIconButton(QToolButton):
         self.dropdown_open = False
         self.update_style()
     
-    def mouseReleaseEvent(self, event):
-        super().mouseReleaseEvent(event)
-        self.setDown(False)
-    
     def activate(self):
         if hasattr(self.parent_window, "set_active_nav_button"):
             self.parent_window.set_active_nav_button(self)
     
     def update_style(self):
-        if self.dropdown_open:
+        if self.is_active:
             self.setStyleSheet(f"""
                 QToolButton {{
-                    background-color: rgba(255, 255, 255, 0.08);
+                    background-color: rgba(255, 255, 255, 0.1);
                     color: {self.text_light};
                     border: none;
-                    border-radius: 6px;
-                    font-size: 18px;
-                    padding: 4px;
+                    border-radius: 0;
                 }}
                 QToolButton:hover {{
-                    background-color: rgba(255, 255, 255, 0.08);
-                }}
-            """)
-        elif self.is_active:
-            self.setStyleSheet(f"""
-                QToolButton {{
-                    background-color: {self.accent_light_blue};
-                    color: white;
-                    border: none;
-                    border-radius: 6px;
-                    font-size: 18px;
-                    padding: 4px;
-                }}
-                QToolButton:hover {{
-                    background-color: {self.accent_light_blue};
+                    background-color: rgba(255, 255, 255, 0.15);
                 }}
             """)
         else:
@@ -185,12 +148,10 @@ class NavIconButton(QToolButton):
                     background-color: transparent;
                     color: {self.text_secondary};
                     border: none;
-                    border-radius: 6px;
-                    font-size: 18px;
-                    padding: 4px;
+                    border-radius: 0;
                 }}
                 QToolButton:hover {{
-                    background-color: rgba(255, 255, 255, 0.08);
+                    background-color: rgba(255, 255, 255, 0.1);
                     color: {self.text_light};
                 }}
             """)
@@ -198,12 +159,33 @@ class NavIconButton(QToolButton):
     def eventFilter(self, obj, event):
         if event.type() == QEvent.Type.Enter:
             QToolTip.showText(
-                self.mapToGlobal(QPoint(self.width() // 2, self.height())),
+                self.mapToGlobal(QPoint(self.width() + 5, self.height() // 2)),
                 self.item_text,
-                self
+                self,
+                QRect(),
+                2000
             )
-            return False
         return super().eventFilter(obj, event)
+
+class SearchBar(QLineEdit):
+    def __init__(self, placeholder_text, parent=None):
+        super().__init__(parent)
+        self.setPlaceholderText(placeholder_text)
+        self.setFixedHeight(28)  # Reduced from 30 to 28
+        self.setMinimumWidth(300)  # Slightly reduced width
+        self.setStyleSheet("""
+            QLineEdit {
+                background-color: #333333;
+                border: none;
+                border-radius: 3px;  /* Reduced radius */
+                color: #ffffff;
+                padding: 4px 10px;  /* Reduced padding */
+                font-size: 12px;  /* Reduced font size */
+            }
+            QLineEdit:focus {
+                background-color: #404040;
+            }
+        """)
 
 class DockerDesktopUI(QMainWindow):
     def __init__(self):
@@ -211,189 +193,103 @@ class DockerDesktopUI(QMainWindow):
         self.setWindowTitle("Docker Desktop")
         self.setMinimumSize(1000, 700)
         
-        self.bg_dark = "#1a1a1a"
-        self.bg_sidebar = "#222222"
-        self.bg_header = "#262626"
-        self.text_light = "#f0f0f0"
-        self.text_secondary = "#a8a8a8"
-        self.accent_blue = "#2196F3"
-        self.accent_green = "#4CAF50"
-        self.border_color = "#333333"
-        self.tab_inactive = "#303030"
-        self.card_bg = "#252525"
-        
-        font = QFont("Segoe UI", 9)
-        QApplication.setFont(font)
-        
-        QToolTip.setFont(QFont('Segoe UI', 10))
+        # Set up custom tooltip style for the entire application
         app = QApplication.instance()
         if app:
             app.setStyleSheet("""
                 QToolTip {
-                    background-color: #2d2d2d;
-                    color: #e0e0e0;
+                    background-color: #333333;
+                    color: #ffffff;
                     border: 1px solid #444444;
+                    padding: 4px 8px;
                     border-radius: 4px;
-                    padding: 5px;
-                    opacity: 230;
+                    font-size: 12px;
                 }
             """)
         
+        # Colors
+        self.bg_dark = "#1a1a1a"
+        self.bg_sidebar = "#1e1e1e"
+        self.bg_header = "#1e1e1e"
+        self.text_light = "#ffffff"
+        self.text_secondary = "#888888"
+        self.accent_blue = "#0095ff"
+        self.accent_green = "#4CAF50"
+        self.border_color = "#2d2d2d"
+        self.tab_inactive = "#2d2d2d"
+        self.card_bg = "#1e1e1e"
+        
+        self.setup_ui()
+        
+    def setup_ui(self):
         self.setStyleSheet(f"""
             QMainWindow, QWidget {{
                 background-color: {self.bg_dark};
                 color: {self.text_light};
-                font-family: 'Segoe UI', 'SF Pro Display', 'Helvetica Neue', sans-serif;
-            }}
-            QPushButton {{
-                border: none;
-                color: {self.text_secondary};
-                padding: 6px 12px;
-                border-radius: 4px;
-                font-weight: 500;
-            }}
-            QPushButton:hover {{
-                background-color: rgba(255, 255, 255, 0.08);
-            }}
-            QPushButton:pressed {{
-                background-color: rgba(255, 255, 255, 0.12);
+                font-family: 'Segoe UI', sans-serif;
             }}
             QTabWidget::pane {{
                 border: none;
-                padding-top: 2px;
             }}
             QTabBar::tab {{
-                background-color: {self.tab_inactive};
+                background-color: transparent;
                 color: {self.text_secondary};
                 padding: 8px 24px;
-                border-top-left-radius: 4px;
-                border-top-right-radius: 4px;
+                border: none;
                 margin-right: 2px;
-                font-weight: 500;
-                border-bottom: 2px solid transparent;
+                font-size: 13px;
             }}
             QTabBar::tab:selected {{
-                background-color: {self.bg_dark};
                 color: {self.text_light};
                 border-bottom: 2px solid {self.accent_blue};
             }}
             QTabBar::tab:hover:!selected {{
-                background-color: rgba(255, 255, 255, 0.05);
                 color: {self.text_light};
             }}
         """)
         
         main_widget = QWidget()
-        main_layout = QVBoxLayout(main_widget)
+        main_layout = QHBoxLayout(main_widget)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
         
-        self.nav_buttons = []
+        sidebar = self.create_sidebar()
+        main_layout.addWidget(sidebar)
         
-        nav_header = self.create_nav_header()
-        main_layout.addWidget(nav_header)
+        right_container = QWidget()
+        right_layout = QVBoxLayout(right_container)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(0)
+        
+        header = self.create_header()
+        right_layout.addWidget(header)
         
         tab_container = self.create_tab_container()
-        main_layout.addWidget(tab_container)
+        right_layout.addWidget(tab_container)
         
         content_area = self.create_content_area()
-        main_layout.addWidget(content_area, 1)
+        right_layout.addWidget(content_area, 1)
         
-        footer = self.create_footer()
-        main_layout.addWidget(footer)
-        
+        main_layout.addWidget(right_container, 1)
         self.setCentralWidget(main_widget)
-        
-        self.setWindowOpacity(0)
-        self.show()
-        self.fade_in_animation()
     
-    def fade_in_animation(self):
-        self.animation = QPropertyAnimation(self, b"windowOpacity")
-        self.animation.setDuration(250)
-        self.animation.setStartValue(0)
-        self.animation.setEndValue(1)
-        self.animation.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self.animation.start()
-    
-    def set_active_nav_button(self, active_button):
-        for btn in self.nav_buttons:
-            btn.is_active = False
-            btn.update_style()
-        active_button.is_active = True
-        active_button.update_style()
-    
-    def create_nav_header(self):
-        nav_header = QWidget()
-        nav_header.setFixedHeight(60)
-        nav_header.setStyleSheet(f"""
-            background-color: {self.bg_header};
-            border-bottom: 1px solid {self.border_color};
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                    stop:0 #2c2c2c, stop:1 #262626);
+    def create_sidebar(self):
+        sidebar = QWidget()
+        sidebar.setFixedWidth(40)
+        sidebar.setStyleSheet(f"""
+            background-color: {self.bg_sidebar};
+            border-right: 1px solid {self.border_color};
         """)
         
-        shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(8)
-        shadow.setColor(QColor(0, 0, 0, 80))
-        shadow.setOffset(0, 4)
-        nav_header.setGraphicsEffect(shadow)
+        layout = QVBoxLayout(sidebar)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         
-        layout = QHBoxLayout(nav_header)
-        layout.setContentsMargins(10, 0, 10, 0)
-        layout.setSpacing(8)
-        
-        logo_btn = QPushButton()
-        logo_btn.setFixedSize(160, 40)
-        logo_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        
-        logo_layout = QHBoxLayout(logo_btn)
-        logo_layout.setContentsMargins(10, 0, 10, 0)
-        logo_layout.setSpacing(8)
-        
-        logo = QLabel("DD")
-        logo.setFixedSize(30, 30)
-        logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        logo.setStyleSheet(f"""
-            background-color: {self.accent_green};
-            color: white;
-            font-weight: bold;
-            font-size: 14px;
-            border-radius: 5px;
-        """)
-        
-        name_label = QLabel("docker-desktop")
-        name_label.setStyleSheet("""
-            font-size: 14px;
-            font-weight: 500;
-            color: #e0e0e0;
-        """)
-        
-        dropdown_icon = QLabel("▼")
-        dropdown_icon.setStyleSheet("""
-            font-size: 8px;
-            color: #b8b8b8;
-        """)
-        
-        logo_layout.addWidget(logo)
-        logo_layout.addWidget(name_label)
-        logo_layout.addWidget(dropdown_icon)
-        
-        logo_btn.setStyleSheet("""
-            background-color: transparent;
-            border: none;
-            border-radius: 4px;
-            text-align: left;
-        """)
-        
-        nav_items_container = QWidget()
-        nav_items_layout = QHBoxLayout(nav_items_container)
-        nav_items_layout.setContentsMargins(0, 0, 0, 0)
-        nav_items_layout.setSpacing(5)
-        
-        items = [
+        # Create nav buttons
+        self.nav_buttons = []
+        nav_items = [
             ("⚙️", "Cluster", True),
-            ("🖥️", "Nodes", False),
+            ("💻", "Nodes", False),
             ("📦", "Workloads", False, True),
             ("📝", "Config", False, True),
             ("🌐", "Network", False, True),
@@ -405,19 +301,110 @@ class DockerDesktopUI(QMainWindow):
             ("🧩", "Custom Resources", False, True)
         ]
         
-        for item in items:
-            has_dropdown = len(item) > 3 and item[3]
-            nav_btn = NavIconButton(item[0], item[1], item[2], has_dropdown, self)
+        for item in nav_items:
+            nav_btn = NavIconButton(item[0], item[1], item[2], item[3] if len(item) > 3 else False, self)
             self.nav_buttons.append(nav_btn)
-            nav_items_layout.addWidget(nav_btn)
+            layout.addWidget(nav_btn)
         
-        nav_items_layout.addStretch(1)
-        
-        layout.addWidget(logo_btn)
-        layout.addWidget(nav_items_container, 1)
-        
-        return nav_header
+        layout.addStretch(1)
+        return sidebar
     
+    def create_header(self):
+        header = QWidget()
+        header.setFixedHeight(40)
+        header.setStyleSheet(f"""
+            background-color: {self.bg_header};
+            border-bottom: 1px solid {self.border_color};
+        """)
+        
+        layout = QHBoxLayout(header)
+        layout.setContentsMargins(16, 0, 16, 0)
+        layout.setSpacing(16)
+        
+        # Create cluster dropdown menu first
+        cluster_menu = QMenu()
+        cluster_menu.setStyleSheet(f"""
+            QMenu {{
+                background-color: {self.bg_sidebar};
+                color: {self.text_light};
+                border: 1px solid {self.border_color};
+                border-radius: 4px;
+                padding: 8px 0px;
+            }}
+            QMenu::item {{
+                padding: 8px 24px;
+                font-size: 13px;
+            }}
+            QMenu::item:selected {{
+                background-color: rgba(255, 255, 255, 0.1);
+            }}
+        """)
+        
+        # Add menu items
+        cluster_menu.addAction("docker-desktop")
+        cluster_menu.addSeparator()
+        cluster_menu.addAction("dev-cluster")
+        cluster_menu.addAction("staging-cluster")
+        cluster_menu.addAction("production-cluster")
+        
+        # Updated cluster dropdown button
+        cluster_dropdown = QToolButton()
+        cluster_dropdown.setFixedSize(160, 28)
+        cluster_dropdown.setMinimumWidth(200)
+        
+        # Create horizontal layout for text and arrow
+        button_layout = QHBoxLayout(cluster_dropdown)
+        button_layout.setContentsMargins(12, 0, 32, 0)
+        button_layout.setSpacing(8)
+        
+        # Text label
+        text_label = QLabel("docker-desktop")
+        text_label.setStyleSheet(f"color: #55c732; background: transparent;")
+        
+        # Arrow label
+        arrow_label = QLabel("▼")
+        arrow_label.setFixedWidth(20)  # Fixed width for arrow
+        arrow_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight)
+        arrow_label.setStyleSheet(f"color: {self.text_secondary}; background: transparent; padding-right: 8px;")
+        
+        button_layout.addWidget(text_label)
+        button_layout.addStretch()
+        button_layout.addWidget(arrow_label)
+        
+        cluster_dropdown.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        cluster_dropdown.setMenu(cluster_menu)
+        cluster_dropdown.setStyleSheet(f"""
+            QToolButton {{
+                background-color: transparent;
+                border: none;
+                background-color: rgba(255, 255, 255, 0.1);
+                font-size: 13px;
+                text-align: left;
+                padding-left: 12px;
+                padding-right: 32px;
+                position: relative;
+            }}
+            QToolButton::menu-indicator {{
+                image: none;
+            }}
+            QToolButton:hover {{
+                background-color: rgba(255, 255, 255, 0.1);
+                border-radius: 4px;
+            }}
+        """)
+        
+        search_bar = SearchBar("Search...", self)
+        search_bar.setFixedHeight(28)
+        namespace_search = SearchBar("Search namespace...", self)
+        namespace_search.setFixedHeight(28)
+        
+        layout.addWidget(cluster_dropdown)
+        layout.addStretch(1)
+        layout.addWidget(search_bar)
+        layout.addWidget(namespace_search)
+        
+        return header
+
     def create_tab_container(self):
         tab_widget = QTabWidget()
         tab_widget.setFixedHeight(44)
@@ -445,99 +432,75 @@ class DockerDesktopUI(QMainWindow):
     def create_metric_panel(self):
         panel = QWidget()
         panel.setStyleSheet(f"""
-            background-color: {self.card_bg};
-            border-radius: 8px;
+            QWidget {{
+                background-color: {self.card_bg};
+                border-radius: 4px;
+            }}
         """)
         
-        shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(20)
-        shadow.setColor(QColor(0, 0, 0, 40))
-        shadow.setOffset(0, 4)
-        panel.setGraphicsEffect(shadow)
-        
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(16)
         
+        # Tab-like buttons
         tabs = QWidget()
         tabs_layout = QHBoxLayout(tabs)
         tabs_layout.setContentsMargins(0, 0, 0, 0)
-        tabs_layout.setSpacing(8)
+        tabs_layout.setSpacing(4)
         
-        cpu_tab = QLabel("CPU")
-        cpu_tab.setStyleSheet(f"""
-            padding: 6px 16px;
-            border-radius: 4px;
-            background-color: {self.tab_inactive};
-            font-weight: 500;
+        cpu_btn = QPushButton("CPU")
+        cpu_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #333333;
+                color: #ffffff;
+                border: none;
+                padding: 6px 16px;
+                font-size: 13px;
+                border-radius: 4px;
+            }
         """)
         
-        memory_tab = QLabel("Memory")
-        memory_tab.setStyleSheet("""
-            padding: 6px 16px;
-            font-weight: 500;
-            opacity: 0.7;
+        memory_btn = QPushButton("Memory")
+        memory_btn.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                color: #888888;
+                border: none;
+                padding: 6px 16px;
+                font-size: 13px;
+            }
+            QPushButton:hover {
+                color: #ffffff;
+            }
         """)
         
-        tabs_layout.addWidget(cpu_tab)
-        tabs_layout.addWidget(memory_tab)
-        tabs_layout.addStretch(1)
+        tabs_layout.addWidget(cpu_btn)
+        tabs_layout.addWidget(memory_btn)
+        tabs_layout.addStretch()
         
-        info_icon = QLabel("i")
-        info_icon.setFixedSize(28, 28)
-        info_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        info_icon.setStyleSheet(f"""
-            border: 1px solid {self.text_secondary};
-            border-radius: 14px;
-            color: {self.text_secondary};
-            font-style: italic;
-            font-weight: 600;
-            font-family: 'Georgia', serif;
-        """)
+        # Info message
+        info_container = QWidget()
+        info_layout = QVBoxLayout(info_container)
+        info_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
-        error_msg = QLabel("Metrics are not available due to missing or invalid Prometheus configuration.")
-        error_msg.setWordWrap(True)
-        error_msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        error_msg.setStyleSheet(f"""
-            color: {self.text_secondary};
-            font-size: 14px;
-            line-height: 1.4;
-            letter-spacing: 0.2px;
-            max-width: 300px;
-        """)
+        info_msg = QLabel("Metrics are not available due to missing or invalid Prometheus")
+        info_msg.setStyleSheet("color: #888888; font-size: 13px;")
+        info_msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         settings_link = QLabel("Open cluster settings")
-        settings_link.setStyleSheet(f"""
-            color: {self.accent_blue};
-            font-size: 14px;
-            font-weight: 500;
-            padding: 4px 8px;
-            border-radius: 4px;
+        settings_link.setStyleSheet("""
+            color: #0095ff;
+            font-size: 13px;
+            margin-top: 8px;
         """)
+        settings_link.setAlignment(Qt.AlignmentFlag.AlignCenter)
         settings_link.setCursor(Qt.CursorShape.PointingHandCursor)
-        settings_link.enterEvent = lambda e: settings_link.setStyleSheet(f"""
-            color: {self.accent_blue};
-            font-size: 14px;
-            font-weight: 500;
-            background-color: rgba(33, 150, 243, 0.08);
-            padding: 4px 8px;
-            border-radius: 4px;
-        """)
-        settings_link.leaveEvent = lambda e: settings_link.setStyleSheet(f"""
-            color: {self.accent_blue};
-            font-size: 14px;
-            font-weight: 500;
-            padding: 4px 8px;
-            border-radius: 4px;
-        """)
         
-        layout.addWidget(tabs, 0, Qt.AlignmentFlag.AlignLeft)
-        layout.addStretch(1)
-        layout.addWidget(info_icon, 0, Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(error_msg, 0, Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(settings_link, 0, Qt.AlignmentFlag.AlignCenter)
-        layout.addStretch(1)
+        info_layout.addWidget(info_msg)
+        info_layout.addWidget(settings_link)
+        
+        layout.addWidget(tabs)
+        layout.addWidget(info_container, 1, Qt.AlignmentFlag.AlignCenter)
         
         return panel
     
@@ -545,113 +508,58 @@ class DockerDesktopUI(QMainWindow):
         panel = QWidget()
         panel.setStyleSheet(f"""
             background-color: {self.card_bg};
-            border-radius: 8px;
+            border-radius: 4px;
         """)
-        
-        shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(20)
-        shadow.setColor(QColor(0, 0, 0, 40))
-        shadow.setOffset(0, 4)
-        panel.setGraphicsEffect(shadow)
         
         layout = QVBoxLayout(panel)
+        layout.setContentsMargins(32, 48, 32, 48)
+        layout.setSpacing(8)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.setContentsMargins(32, 32, 32, 32)
-        layout.setSpacing(16)
         
-        # Updated success icon container: now without border for a clean round appearance.
-        success_icon_container = QWidget()
-        success_icon_container.setFixedSize(70, 70)
-        success_icon_container.setStyleSheet(f"""
-            background-color: {self.accent_green};
-            border-radius: 35px;
-        """)
-        
-        success_icon_layout = QVBoxLayout(success_icon_container)
-        success_icon_layout.setContentsMargins(0, 0, 0, 0)
-        success_icon_layout.setSpacing(0)
+        # Success icon
         success_icon = QLabel("✓")
+        success_icon.setFixedSize(80, 80)
         success_icon.setStyleSheet("""
+            background-color: #4CAF50;
             color: white;
-            font-size: 32px;
-            font-weight: 300;
+            font-size: 40px;
+            border-radius: 40px;
+            qproperty-alignment: AlignCenter;
         """)
-        success_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        success_icon_layout.addWidget(success_icon)
         
-        icon_shadow = QGraphicsDropShadowEffect()
-        icon_shadow.setBlurRadius(15)
-        icon_shadow.setColor(QColor(0, 0, 0, 60))
-        icon_shadow.setOffset(0, 0)
-        success_icon_container.setGraphicsEffect(icon_shadow)
-        
+        # Status text
         status_title = QLabel("No issues found")
         status_title.setStyleSheet("""
-            font-size: 22px;
+            color: white;
+            font-size: 20px;
             font-weight: 500;
-            letter-spacing: 0.3px;
-            margin-top: 8px;
+            margin-top: 16px;
         """)
+        status_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         status_subtitle = QLabel("Everything is fine in the Cluster")
-        status_subtitle.setStyleSheet(f"""
-            color: {self.text_secondary};
-            font-size: 15px;
-            letter-spacing: 0.2px;
+        status_subtitle.setStyleSheet("""
+            color: #888888;
+            font-size: 14px;
             margin-top: 4px;
         """)
+        status_subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
-        layout.addWidget(success_icon_container, 0, Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(status_title, 0, Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(status_subtitle, 0, Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(success_icon, 0, Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(status_title)
+        layout.addWidget(status_subtitle)
         
         return panel
     
-    def create_footer(self):
-        footer = QWidget()
-        footer.setFixedHeight(36)
-        footer.setStyleSheet(f"""
-            background-color: {self.bg_sidebar};
-            border-top: 1px solid {self.border_color};
-        """)
-        
-        layout = QHBoxLayout(footer)
-        layout.setContentsMargins(16, 0, 16, 0)
-        
-        add_tab = QPushButton("+")
-        add_tab.setFixedSize(28, 28)
-        add_tab.setStyleSheet(f"""
-            background-color: transparent;
-            color: {self.text_secondary};
-            font-size: 18px;
-            font-weight: 300;
-            border-radius: 4px;
-            padding: 0;
-        """)
-        add_tab.setCursor(Qt.CursorShape.PointingHandCursor)
-        add_tab.enterEvent = lambda e: add_tab.setStyleSheet(f"""
-            background-color: rgba(255, 255, 255, 0.08);
-            color: {self.text_light};
-            font-size: 18px;
-            font-weight: 300;
-            border-radius: 4px;
-            padding: 0;
-        """)
-        add_tab.leaveEvent = lambda e: add_tab.setStyleSheet(f"""
-            background-color: transparent;
-            color: {self.text_secondary};
-            font-size: 18px;
-            font-weight: 300;
-            border-radius: 4px;
-            padding: 0;
-        """)
-        
-        layout.addStretch(1)
-        layout.addWidget(add_tab)
-        
-        return footer
+    def set_active_nav_button(self, active_button):
+        for btn in self.nav_buttons:
+            btn.is_active = False
+            btn.update_style()
+        active_button.is_active = True
+        active_button.update_style()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = DockerDesktopUI()
+    window.show()
     sys.exit(app.exec())
