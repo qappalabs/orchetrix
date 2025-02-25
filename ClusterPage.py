@@ -2,12 +2,13 @@ import sys
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                            QPushButton, QLabel, QFrame, QTabWidget, QGridLayout, QSizePolicy,
                            QGraphicsDropShadowEffect, QMenu, QToolButton, QToolTip, QLineEdit, 
-                           QStackedWidget)  # Remove QActionGroup from here
+                           QStackedWidget)
 from PyQt6.QtCore import Qt, QSize, QPropertyAnimation, QEasingCurve, QEvent, QTimer, QPoint, QRect
 from PyQt6.QtGui import (QIcon, QFont, QColor, QPalette, QPixmap, QPainter, QLinearGradient, 
-                       QGradient, QShortcut, QAction, QGuiApplication, QActionGroup)  # Add QActionGroup here
+                       QGradient, QShortcut, QAction, QGuiApplication, QActionGroup)
 
 from PodsPage import PodsPage
+from NodesPage import NodesPage
 
 class NavMenuDropdown(QMenu):
     def __init__(self, parent=None):
@@ -151,6 +152,7 @@ class NavIconButton(QToolButton):
         # Handle specific actions
         if item == "Pods":
             self.parent_window.show_pods_page()
+    
     def show_dropdown(self):
         if self.has_dropdown:
             self.dropdown_open = True
@@ -347,17 +349,17 @@ class DockerDesktopUI(QMainWindow):
         
         layout.addStretch(1)
 
-        x_btn = NavIconButton("🖱️", "X Button", False, False, self)
-        y_btn = NavIconButton("⌨️", "Terminal", False, False, self)
-        z_btn = NavIconButton("🛠️", "Download", False, False, self)
+        compare_btn = NavIconButton("🖱️", "Compare", False, False, self)
+        terminal_btn = NavIconButton("⌨️", "Terminal", False, False, self)
+        download_btn = NavIconButton("🛠️", "Download", False, False, self)
         
-        self.nav_buttons.append(x_btn)
-        self.nav_buttons.append(y_btn)
-        self.nav_buttons.append(z_btn)
+        self.nav_buttons.append(compare_btn)
+        self.nav_buttons.append(terminal_btn)
+        self.nav_buttons.append(download_btn)
         
-        layout.addWidget(x_btn)
-        layout.addWidget(y_btn)
-        layout.addWidget(z_btn)
+        layout.addWidget(compare_btn)
+        layout.addWidget(terminal_btn)
+        layout.addWidget(download_btn)
         return sidebar
     
     def create_header(self):
@@ -467,10 +469,12 @@ class DockerDesktopUI(QMainWindow):
 
         # Create pages
         self.cluster_page = self.create_cluster_page()
+        self.nodes_page = NodesPage()
         self.pods_page = PodsPage()
 
         # Add pages to stack
         self.content_stack.addWidget(self.cluster_page)
+        self.content_stack.addWidget(self.nodes_page)
         self.content_stack.addWidget(self.pods_page)
         
         return content_widget
@@ -527,6 +531,7 @@ class DockerDesktopUI(QMainWindow):
         
         layout.addWidget(tab_widget)
         return page
+    
     def create_metric_panel(self):
         panel = QWidget()
         panel.setStyleSheet(f"""
@@ -649,8 +654,8 @@ class DockerDesktopUI(QMainWindow):
         
         return panel
     
-    def reset_nav_buttons(self):
-        """Reset all navigation buttons to their default state"""
+    def reset_all_buttons_and_dropdowns(self):
+        """Reset all navigation buttons and their dropdowns to default state"""
         for btn in self.nav_buttons:
             btn.is_active = False
             btn.active_by_child = False
@@ -667,17 +672,18 @@ class DockerDesktopUI(QMainWindow):
     def set_active_nav_button(self, active_button):
         """Set the active navigation button and handle page switching"""
         # Reset all buttons and their dropdowns
-        self.reset_nav_buttons()
+        self.reset_all_buttons_and_dropdowns()
         
         # Set the clicked button as active
         active_button.is_active = True
         active_button.update_style()
 
         # Switch pages based on button
-        if active_button.item_text == "Pods":
-            self.content_stack.setCurrentWidget(self.pods_page)
+        if active_button.item_text == "Nodes":
+            self.content_stack.setCurrentWidget(self.nodes_page)
         elif active_button.item_text == "Cluster":
             self.content_stack.setCurrentWidget(self.cluster_page)
+        # Other cases will be handled by dropdown menu items
 
     def show_pods_page(self):
         """Show the pods page and update navigation state"""
@@ -703,32 +709,7 @@ class DockerDesktopUI(QMainWindow):
         
         # Switch to pods page
         self.content_stack.setCurrentWidget(self.pods_page)
-    def reset_all_buttons_and_dropdowns(self):
-        """Reset all navigation buttons and their dropdowns to default state"""
-        for btn in self.nav_buttons:
-            btn.is_active = False
-            btn.active_by_child = False
-            btn.selected_item = None
-            
-            # Reset dropdown menu items if exists
-            if btn.dropdown_menu:
-                for action in btn.dropdown_menu.actions():
-                    if isinstance(action, QAction):
-                        action.setProperty("selected", "false")
-            
-            btn.update_style()
 
-    def set_active_nav_button(self, active_button):
-        # Reset all buttons and their dropdowns
-        self.reset_all_buttons_and_dropdowns()
-        
-        # Set the clicked button as active
-        active_button.is_active = True
-        active_button.update_style()
-
-        # Switch pages based on button
-        if active_button.item_text == "Cluster":
-            self.content_stack.setCurrentWidget(self.cluster_page)
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = DockerDesktopUI()

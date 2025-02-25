@@ -56,11 +56,6 @@
 #                 background-color: rgba(33, 150, 243, 0.2);
 #                 border: none;
 #             }
-#             # QTableWidget::item:focus {
-#             #     border: none;
-#             #     outline: none;
-#             #     background-color: transparent;
-#             # }
 #             QHeaderView::section {
 #                 background-color: #252525;
 #                 color: #888888;
@@ -69,14 +64,6 @@
 #                 border-bottom: 1px solid #2d2d2d;
 #                 font-size: 12px;
 #             }
-#             # QToolButton {
-#             #     border: none;
-#             #     border-radius: 4px;
-#             #     padding: 4px;
-#             # }
-#             # QToolButton:hover {
-#             #     background-color: rgba(255, 255, 255, 0.1);
-#             # }
 #         """)
 #         # Additional table properties
 #         self.table.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # Disable focus highlighting
@@ -109,11 +96,32 @@
 #             else:
 #                 self.table.horizontalHeader().setSectionResizeMode(i, QHeaderView.ResizeMode.Stretch)
 
+#         # Enable sorting
+#         self.table.setSortingEnabled(True)
+        
+#         # Set up select all checkbox
 #         select_all_checkbox = self.create_select_all_checkbox()
 #         self.set_header_widget(0, select_all_checkbox)
 
+#         # Set sortable columns
+#         self.table.horizontalHeader().setSortIndicatorShown(True)
+        
+#         # Connect header click to sort handler
+#         self.table.horizontalHeader().sectionClicked.connect(self.handle_header_click)
+
 #         layout.addLayout(header)
 #         layout.addWidget(self.table)
+
+#     def handle_header_click(self, logicalIndex):
+#         # Only enable sorting for specific columns
+#         sortable_columns = [2, 3, 5, 7, 9]  # Namespace,Container, Age, Node, Status
+#         if logicalIndex not in sortable_columns:
+#             # If not a sortable column, disable sorting
+#             self.table.horizontalHeader().setSortIndicator(-1, Qt.SortOrder.AscendingOrder)
+#             self.table.setSortingEnabled(False)
+#             return
+#         else:
+#             self.table.setSortingEnabled(True)
 
 #     def create_action_button(self, row):
 #         button = QToolButton()
@@ -325,6 +333,12 @@
 #                 item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 #                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 
+#                 # Make age column sortable with correct data
+#                 if col == 4:  # Age column
+#                     # Extract number of days for sorting
+#                     days = int(value.replace('d', ''))
+#                     item.setData(Qt.ItemDataRole.UserRole, days)
+                
 #                 # Status column styling (now at index 9)
 #                 if col == 8:  # Status column
 #                     if value == "Running":
@@ -335,15 +349,8 @@
 #             # Add action button (now at last column)
 #             action_button = self.create_action_button(row)
 #             self.table.setCellWidget(row, 10, action_button)
-#         # Add click handler for rows
-#             # self.table.cellClicked.connect(self.handle_row_click)
-#             # pod_name = self.table.item(row, 1).text()
-#             # print(f"Clicked pod: {pod_name}")
-#             # Add your pod click handling logic here
 
 #     def set_header_widget(self, col, widget):
-
-
 #         header = self.table.horizontalHeader()
         
 #         container = QWidget()
@@ -351,6 +358,11 @@
 #         layout.setContentsMargins(12, 0, 0, 0)  # Adjusted left margin to match checkbox padding
 #         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 #         layout.addWidget(widget)
+        
+#         # Apply background color to match the header background
+#         container.setStyleSheet("""
+#             background-color: #252525;
+#         """)
         
 #         header.setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
 #         header.resizeSection(col, 40)  # Match the column width
@@ -362,12 +374,31 @@
 #                              header.sectionSize(col), header.height())
 #         container.show()
 
+#     # Helper method to update sorting icons
+#     def update_sort_indicators(self):
+#         # Add arrow indicators to sortable columns
+#         header = self.table.horizontalHeader()
+#         for col in [2, 3, 5, 7, 9]:  # Namespace, Containers,Age, Node, Status
+#             label_text = self.table.horizontalHeaderItem(col).text()
+#             if not "↑" in label_text and not "↓" in label_text:
+#                 self.table.horizontalHeaderItem(col).setText(f"{label_text} ↕")
 
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, 
                            QTableWidgetItem, QLabel, QHeaderView, QPushButton,
-                           QMenu, QToolButton, QCheckBox)
+                           QMenu, QToolButton, QCheckBox, QComboBox)
 from PyQt6.QtCore import Qt, QSize, QPoint
 from PyQt6.QtGui import QColor, QFont, QIcon
+
+class SortableTableWidgetItem(QTableWidgetItem):
+    """Custom QTableWidgetItem that can be sorted with values"""
+    def __init__(self, text, value=0):
+        super().__init__(text)
+        self.value = value
+        
+    def __lt__(self, other):
+        if hasattr(other, 'value'):
+            return self.value < other.value
+        return super().__lt__(other)
 
 class PodsPage(QWidget):
     def __init__(self, parent=None):
@@ -381,7 +412,7 @@ class PodsPage(QWidget):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(16)
 
-        # Header section
+        # Header section with sorting dropdown
         header = QHBoxLayout()
         title = QLabel("Pods")
         title.setStyleSheet("""
@@ -389,8 +420,65 @@ class PodsPage(QWidget):
             font-weight: bold;
             color: #ffffff;
         """)
+        
+        items_count = QLabel("9 items")
+        items_count.setStyleSheet("""
+            color: #9ca3af;
+            font-size: 12px;
+            margin-left: 8px;
+            font-family: 'Segoe UI';
+        """)
+        items_count.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        
         header.addWidget(title)
+        header.addWidget(items_count)
         header.addStretch()
+        
+        # Add sorting dropdown
+        sort_label = QLabel("Sort by:")
+        sort_label.setStyleSheet("""
+            color: #e2e8f0;
+            font-size: 13px;
+            margin-right: 8px;
+        """)
+        
+        self.sort_combo = QComboBox()
+        self.sort_combo.addItem("Name")
+        self.sort_combo.addItem("Namespace")
+        self.sort_combo.addItem("Containers (Highest)")
+        self.sort_combo.addItem("Restarts (Highest)")
+        self.sort_combo.addItem("Age (Newest)")
+        self.sort_combo.setStyleSheet("""
+            QComboBox {
+                background-color: #2d2d2d;
+                color: #e2e8f0;
+                border: 1px solid #444444;
+                border-radius: 4px;
+                padding: 4px 12px;
+                min-width: 150px;
+            }
+            QComboBox::drop-down {
+                subcontrol-origin: padding;
+                subcontrol-position: center right;
+                width: 20px;
+                border-left: none;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                width: 0;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #2d2d2d;
+                color: #e2e8f0;
+                border: 1px solid #444444;
+                selection-background-color: #2196F3;
+            }
+        """)
+        
+        self.sort_combo.currentTextChanged.connect(self.sort_table)
+        
+        header.addWidget(sort_label)
+        header.addWidget(self.sort_combo)
 
         # Create table
         self.table = QTableWidget()
@@ -404,22 +492,26 @@ class PodsPage(QWidget):
             QTableWidget {
                 background-color: #1e1e1e;
                 border: none;
-                gridline-color: transparent;
-                outline: none;  /* Remove focus outline */
+                gridline-color: #2d2d2d;
+                outline: none;
             }
             QTableWidget::item {
-                padding: 0;  /* Remove padding to prevent checkbox misalignment */
+                padding: 8px;
                 border: none;
-                outline: none;  /* Remove item focus outline */
+                outline: none;
             }
             QTableWidget::item:hover {
                 background-color: rgba(255, 255, 255, 0.05);
                 border-radius: 4px;
-                
             }
             QTableWidget::item:selected {
                 background-color: rgba(33, 150, 243, 0.2);
                 border: none;
+            }
+            QTableWidget::item:focus {
+                border: none;
+                outline: none;
+                background-color: transparent;
             }
             QHeaderView::section {
                 background-color: #252525;
@@ -429,64 +521,59 @@ class PodsPage(QWidget):
                 border-bottom: 1px solid #2d2d2d;
                 font-size: 12px;
             }
+            QToolButton {
+                border: none;
+                border-radius: 4px;
+                padding: 4px;
+            }
+            QToolButton:hover {
+                background-color: rgba(255, 255, 255, 0.1);
+            }
         """)
+        
         # Additional table properties
         self.table.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # Disable focus highlighting
         self.table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)  # Disable selection
         
         # Configure table properties
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # Name column
         self.table.horizontalHeader().setStretchLastSection(False)
         self.table.horizontalHeader().setSectionResizeMode(10, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(10, 30)  # Width for action column
+        self.table.setColumnWidth(10, 40)  # Width for action column
         self.table.setShowGrid(True)
-        self.table.setAlternatingRowColors(True)
+        self.table.setAlternatingRowColors(False)
         self.table.verticalHeader().setVisible(False)
         
-        # Configure table properties
-        self.table.horizontalHeader().setSectionsMovable(False)  # Prevent column moving
-        self.table.setShowGrid(True)  # Hide grid
-        self.table.setAlternatingRowColors(False)  # Disable alternating colors
-        self.table.verticalHeader().setVisible(False)  # Hide vertical header
-        
-        # Make columns responsive but not resizable by user
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # Name column
-        
-        # Fixed widths for other columns
-        column_widths = [40, None, 120, 100, 80, 80, 100, 120, 100, 100, 40]  # Changed first column to 40
+        # Fixed widths for columns
+        column_widths = [40, None, 120, 100, 80, 80, 100, 120, 100, 100, 40]
         for i, width in enumerate(column_widths):
-            if width is not None:
-                self.table.horizontalHeader().setSectionResizeMode(i, QHeaderView.ResizeMode.Fixed)
-                self.table.setColumnWidth(i, width)
-            else:
-                self.table.horizontalHeader().setSectionResizeMode(i, QHeaderView.ResizeMode.Stretch)
-
-        # Enable sorting
-        self.table.setSortingEnabled(True)
+            if i != 1:  # Skip the Name column which is set to stretch
+                if width is not None:
+                    self.table.horizontalHeader().setSectionResizeMode(i, QHeaderView.ResizeMode.Fixed)
+                    self.table.setColumnWidth(i, width)
+        
+        # Disable the built-in sorting
+        self.table.setSortingEnabled(False)
         
         # Set up select all checkbox
         select_all_checkbox = self.create_select_all_checkbox()
         self.set_header_widget(0, select_all_checkbox)
 
-        # Set sortable columns
-        self.table.horizontalHeader().setSortIndicatorShown(True)
-        
-        # Connect header click to sort handler
-        self.table.horizontalHeader().sectionClicked.connect(self.handle_header_click)
-
         layout.addLayout(header)
         layout.addWidget(self.table)
 
-    def handle_header_click(self, logicalIndex):
-        # Only enable sorting for specific columns
-        sortable_columns = [2, 3, 5, 7, 9]  # Namespace,Container, Age, Node, Status
-        if logicalIndex not in sortable_columns:
-            # If not a sortable column, disable sorting
-            self.table.horizontalHeader().setSortIndicator(-1, Qt.SortOrder.AscendingOrder)
-            self.table.setSortingEnabled(False)
-            return
-        else:
-            self.table.setSortingEnabled(True)
+    def sort_table(self, sort_by):
+        """Sort the table based on the selected criteria"""
+        if sort_by == "Name":
+            self.table.sortItems(1, Qt.SortOrder.AscendingOrder)
+        elif sort_by == "Namespace":
+            self.table.sortItems(2, Qt.SortOrder.AscendingOrder)
+        elif sort_by == "Containers (Highest)":
+            self.table.sortItems(3, Qt.SortOrder.DescendingOrder)
+        elif sort_by == "Restarts (Highest)":
+            self.table.sortItems(4, Qt.SortOrder.DescendingOrder)
+        elif sort_by == "Age (Newest)":
+            self.table.sortItems(5, Qt.SortOrder.AscendingOrder)
 
     def create_action_button(self, row):
         button = QToolButton()
@@ -517,39 +604,6 @@ class PodsPage(QWidget):
         # Center align the text
         button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-
-        # Update table styling to fix cursor property
-        self.table.setStyleSheet("""
-            QTableWidget {
-                background-color: #1e1e1e;
-                border: none;
-                gridline-color: #2d2d2d;
-                outline: none;
-            }
-            QTableWidget::item {
-                padding: 8px;
-                border: none;
-                outline: none;
-            }
-            QTableWidget::item:hover {
-                background-color: rgba(255, 255, 255, 0.05);
-                border-radius: 4px;
-            }
-            QTableWidget::item:selected {
-                background-color: rgba(33, 150, 243, 0.2);
-                border: none;
-            }
-            QHeaderView::section {
-                background-color: #252525;
-                color: #888888;
-                padding: 8px;
-                border: none;
-                border-bottom: 1px solid #2d2d2d;
-                font-size: 12px;
-            }
-        """)
-        
-        # Set cursor programmatically
         button.setCursor(Qt.CursorShape.PointingHandCursor)
 
         # Rest of the menu creation code...
@@ -568,8 +622,8 @@ class PodsPage(QWidget):
                 font-size: 13px;
             }
             QMenu::item:selected {
-            background-color: rgba(33, 150, 243, 0.2);
-            color: #ffffff;
+                background-color: rgba(33, 150, 243, 0.2);
+                color: #ffffff;
             }
             QMenu::item[dangerous="true"] {
                 color: #ff4444;
@@ -591,7 +645,6 @@ class PodsPage(QWidget):
         delete_action.triggered.connect(lambda: self.handle_action("Delete", row))
 
         button.setMenu(menu)
-        button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         return button
 
     def handle_action(self, action, row):
@@ -694,20 +747,34 @@ class PodsPage(QWidget):
             
             # Add rest of the data (shifted one column to the right)
             for col, value in enumerate(pod):
-                item = QTableWidgetItem(value)
-                item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+                # Use SortableTableWidgetItem for columns that need sorting
+                if col == 2:  # Containers column
+                    containers = int(value)
+                    item = SortableTableWidgetItem(value, containers)
+                elif col == 3:  # Restarts column
+                    restarts = int(value)
+                    item = SortableTableWidgetItem(value, restarts)
+                elif col == 4:  # Age column
+                    # Extract number for proper sorting (e.g., "69d" -> 69)
+                    days = int(value.replace('d', ''))
+                    item = SortableTableWidgetItem(value, days)
+                else:
+                    item = QTableWidgetItem(value)
+                
+                # Set alignment based on column
+                if col in [2, 3, 4]:  # Containers, Restarts, Age columns
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                else:
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+                
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 
-                # Make age column sortable with correct data
-                if col == 4:  # Age column
-                    # Extract number of days for sorting
-                    days = int(value.replace('d', ''))
-                    item.setData(Qt.ItemDataRole.UserRole, days)
-                
-                # Status column styling (now at index 9)
+                # Status column styling
                 if col == 8:  # Status column
                     if value == "Running":
                         item.setForeground(QColor("#4CAF50"))
+                else:
+                    item.setForeground(QColor("#e2e8f0"))
                 
                 self.table.setItem(row, col + 1, item)  # Shift one column right
             
@@ -738,12 +805,3 @@ class PodsPage(QWidget):
         container.setGeometry(header.sectionPosition(col), 0, 
                              header.sectionSize(col), header.height())
         container.show()
-
-    # Helper method to update sorting icons
-    def update_sort_indicators(self):
-        # Add arrow indicators to sortable columns
-        header = self.table.horizontalHeader()
-        for col in [2, 3, 5, 7, 9]:  # Namespace, Containers,Age, Node, Status
-            label_text = self.table.horizontalHeaderItem(col).text()
-            if not "↑" in label_text and not "↓" in label_text:
-                self.table.horizontalHeaderItem(col).setText(f"{label_text} ↕")
