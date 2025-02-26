@@ -1,14 +1,16 @@
 import sys
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                            QPushButton, QLabel, QFrame, QTabWidget, QGridLayout, QSizePolicy,
-                           QGraphicsDropShadowEffect, QMenu, QToolButton, QToolTip, QLineEdit)
+                           QGraphicsDropShadowEffect, QMenu, QToolButton, QToolTip, QLineEdit,
+                           QStackedWidget)
 from PyQt6.QtCore import Qt, QSize, QPropertyAnimation, QEasingCurve, QEvent, QTimer, QPoint, QRect
 from PyQt6.QtGui import (QIcon, QFont, QColor, QPalette, QPixmap, QPainter, QLinearGradient, 
                        QGradient, QShortcut, QAction, QGuiApplication)
+from NodesPage import NodesPage
+from OverviewPage import OverviewPage
 
 class NavMenuDropdown(QMenu):
     def __init__(self, parent=None):
-        
         super().__init__(parent)
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.FramelessWindowHint | Qt.WindowType.NoDropShadowWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -110,7 +112,9 @@ class NavIconButton(QToolButton):
             menu_items = []
             
         for item in menu_items:
-            self.dropdown_menu.addAction(item)
+            action = self.dropdown_menu.addAction(item)
+            action.triggered.connect(lambda checked=False, item_name=item: 
+                                     self.parent_window.handle_dropdown_selection(item_name))
             
     def show_dropdown(self):
         if self.has_dropdown:
@@ -171,16 +175,16 @@ class SearchBar(QLineEdit):
     def __init__(self, placeholder_text, parent=None):
         super().__init__(parent)
         self.setPlaceholderText(placeholder_text)
-        self.setFixedHeight(28)  # Reduced from 30 to 28
-        self.setMinimumWidth(300)  # Slightly reduced width
+        self.setFixedHeight(28)
+        self.setMinimumWidth(300)
         self.setStyleSheet("""
             QLineEdit {
                 background-color: #333333;
                 border: none;
-                border-radius: 3px;  /* Reduced radius */
+                border-radius: 3px;
                 color: #ffffff;
-                padding: 4px 10px;  /* Reduced padding */
-                font-size: 12px;  /* Reduced font size */
+                padding: 4px 10px;
+                font-size: 12px;
             }
             QLineEdit:focus {
                 background-color: #404040;
@@ -192,6 +196,12 @@ class DockerDesktopUI(QMainWindow):
         super().__init__()
         self.setWindowTitle("Docker Desktop")
         self.setMinimumSize(1000, 700)
+        
+        # Create stacked widget for managing pages
+        self.stacked_widget = QStackedWidget()
+        
+        # Dictionary to store pages for easy navigation
+        self.pages = {}
         
         # Set up custom tooltip style for the entire application
         app = QApplication.instance()
@@ -220,6 +230,22 @@ class DockerDesktopUI(QMainWindow):
         self.card_bg = "#1e1e1e"
         
         self.setup_ui()
+
+    def create_cluster_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        
+        # Add tab container
+        tab_container = self.create_tab_container()
+        layout.addWidget(tab_container)
+        
+        # Add content area
+        content_area = self.create_content_area()
+        layout.addWidget(content_area)
+        
+        return page
         
     def setup_ui(self):
         self.setStyleSheet(f"""
@@ -264,14 +290,28 @@ class DockerDesktopUI(QMainWindow):
         header = self.create_header()
         right_layout.addWidget(header)
         
-        tab_container = self.create_tab_container()
-        right_layout.addWidget(tab_container)
+        # Create pages
+        self.cluster_page = self.create_cluster_page()
+        self.nodes_page = NodesPage()
+        self.overview_page = OverviewPage()
         
-        content_area = self.create_content_area()
-        right_layout.addWidget(content_area, 1)
+        # Add pages to stacked widget
+        self.stacked_widget.addWidget(self.cluster_page)
+        self.stacked_widget.addWidget(self.nodes_page)
+        self.stacked_widget.addWidget(self.overview_page)
         
+        # Register pages in dictionary for easy access
+        self.pages["Cluster"] = self.cluster_page
+        self.pages["Nodes"] = self.nodes_page
+        self.pages["Overview"] = self.overview_page
+        
+        right_layout.addWidget(self.stacked_widget)
         main_layout.addWidget(right_container, 1)
+        
         self.setCentralWidget(main_widget)
+        
+        # Set initial page
+        self.stacked_widget.setCurrentWidget(self.cluster_page)
     
     def create_sidebar(self):
         sidebar = QWidget()
@@ -307,6 +347,18 @@ class DockerDesktopUI(QMainWindow):
             layout.addWidget(nav_btn)
         
         layout.addStretch(1)
+        Compare_btn = NavIconButton("🖱️", "Compare", False, False, self)
+        Terminal_btn = NavIconButton("⌨️", "Terminal", False, False, self)
+        Download_btn = NavIconButton("🛠️", "Download", False, False, self)
+        
+        self.nav_buttons.append(Compare_btn)
+        self.nav_buttons.append(Terminal_btn)
+        self.nav_buttons.append(Download_btn)
+        
+        layout.addWidget(Compare_btn)
+        layout.addWidget(Terminal_btn)
+        layout.addWidget(Download_btn)
+
         return sidebar
     
     def create_header(self):
@@ -557,6 +609,31 @@ class DockerDesktopUI(QMainWindow):
             btn.update_style()
         active_button.is_active = True
         active_button.update_style()
+        
+        # Switch pages based on button clicked
+        if active_button.item_text == "Nodes":
+            self.stacked_widget.setCurrentWidget(self.nodes_page)
+        elif active_button.item_text == "Cluster":
+            self.stacked_widget.setCurrentWidget(self.cluster_page)
+            
+    def handle_dropdown_selection(self, item_name):
+        """Handle dropdown menu selections"""
+        print(f"Selected dropdown item: {item_name}")
+        if item_name in self.pages:
+            self.stacked_widget.setCurrentWidget(self.pages[item_name])
+        
+        # Find and set the correct nav button as active
+        if item_name == "Overview" or item_name in ["Pods", "Deployments", "Daemon Sets", 
+                                                   "Stateful Sets", "Replica Sets", 
+                                                   "Replication Controllers", "Jobs", "Cron Jobs"]:
+            # Set Workloads nav button as active
+            for btn in self.nav_buttons:
+                if btn.item_text == "Workloads":
+                    btn.is_active = True
+                    btn.update_style()
+                else:
+                    btn.is_active = False 
+                    btn.update_style()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
