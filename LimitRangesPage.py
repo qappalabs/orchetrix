@@ -15,7 +15,7 @@ class CustomHeader(QHeaderView):
     def __init__(self, orientation, parent=None):
         super().__init__(orientation, parent)
         # Define which columns will be sortable
-        self.sortable_columns = {1, 2, 3, 4}  # Name, Namespace, Keys, Age
+        self.sortable_columns = {1, 2, 3}  # Name, Namespace, Age
         self.setSectionsClickable(True)
         self.setHighlightSections(True)
 
@@ -61,10 +61,10 @@ class SortableTableWidgetItem(QTableWidgetItem):
             return self.value < other.value
         return super().__lt__(other)
 
-class ConfigMapsPage(QWidget):
+class LimitRangesPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.selected_config_maps = set()  # Track selected config maps
+        self.selected_limit_ranges = set()  # Track selected limit ranges
         self.setup_ui()
         self.load_data()
 
@@ -75,14 +75,14 @@ class ConfigMapsPage(QWidget):
 
         # Header section
         header = QHBoxLayout()
-        title = QLabel("Config Maps")
+        title = QLabel("Limit Ranges")
         title.setStyleSheet("""
             font-size: 20px;
             font-weight: bold;
             color: #ffffff;
         """)
 
-        self.items_count = QLabel("11 items")
+        self.items_count = QLabel("0 items")
         self.items_count.setStyleSheet("""
             color: #9ca3af;
             font-size: 12px;
@@ -97,8 +97,8 @@ class ConfigMapsPage(QWidget):
 
         # Create table
         self.table = QTableWidget()
-        self.table.setColumnCount(6)  # Checkbox, Name, Namespace, Keys, Age, Actions
-        headers = ["", "Name", "Namespace", "Keys", "Age", ""]
+        self.table.setColumnCount(5)  # Checkbox, Name, Namespace, Age, Actions
+        headers = ["", "Name", "Namespace", "Age", ""]
         self.table.setHorizontalHeaderLabels(headers)
 
         # Use the custom header to control sorting
@@ -161,19 +161,18 @@ class ConfigMapsPage(QWidget):
         # Configure table properties
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # Name column
         self.table.horizontalHeader().setStretchLastSection(False)
-        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(5, 40)  # Width for action column
+
+        # Set fixed width for specific columns
+        column_widths = [40, None, 120, 80, 40]  # Adjusted for 5 columns
+        for i, width in enumerate(column_widths):
+            if width is not None:  # Apply fixed width to all columns except Name (which stretches)
+                if i != 1:  # Skip Name column which is set to stretch
+                    self.table.horizontalHeader().setSectionResizeMode(i, QHeaderView.ResizeMode.Fixed)
+                    self.table.setColumnWidth(i, width)
+
         self.table.setShowGrid(True)
         self.table.setAlternatingRowColors(False)
         self.table.verticalHeader().setVisible(False)
-
-        # Fixed widths for columns
-        column_widths = [40, None, 120, 200, 80, 40]
-        for i, width in enumerate(column_widths):
-            if i != 1:  # Skip the Name column which is set to stretch
-                if width is not None:
-                    self.table.horizontalHeader().setSectionResizeMode(i, QHeaderView.ResizeMode.Fixed)
-                    self.table.setColumnWidth(i, width)
 
         # Temporarily disable sorting during data loading
         self.table.setSortingEnabled(False)
@@ -188,11 +187,11 @@ class ConfigMapsPage(QWidget):
         # Override mousePressEvent to handle selections properly
         self.table.mousePressEvent = self.custom_table_mousePressEvent
 
-        # Add click handler for rows
-        self.table.cellClicked.connect(self.handle_row_click)
-
         layout.addLayout(header)
         layout.addWidget(self.table)
+
+        # Add click handler for rows
+        self.table.cellClicked.connect(self.handle_row_click)
 
     def custom_table_mousePressEvent(self, event):
         """
@@ -203,7 +202,7 @@ class ConfigMapsPage(QWidget):
         index = self.table.indexAt(event.pos())
 
         # Check if we're clicking on a cell that has a widget (checkbox or action button)
-        if index.isValid() and (index.column() == 0 or index.column() == 5):
+        if index.isValid() and (index.column() == 0 or index.column() == 4):
             # Let the event pass through to the widget without selecting the row
             QTableWidget.mousePressEvent(self.table, event)
         elif item:
@@ -227,10 +226,10 @@ class ConfigMapsPage(QWidget):
         return super().eventFilter(obj, event)
 
     def handle_row_click(self, row, column):
-        if column != 5:  # Don't trigger for action button column
-            config_map_name = self.table.item(row, 1).text()
-            print(f"Clicked config map: {config_map_name}")
-            # Add your config map click handling logic here
+        if column != 4:  # Don't trigger for action button column
+            limit_ranges_name = self.table.item(row, 1).text()
+            print(f"Clicked limit ranges: {limit_ranges_name}")
+            # Add your limit ranges click handling logic here
 
     def create_action_button(self, row):
         button = QToolButton()
@@ -290,6 +289,11 @@ class ConfigMapsPage(QWidget):
             }
         """)
 
+        # Create View action with eye icon
+        view_action = menu.addAction("View")
+        view_action.setIcon(QIcon("icons/view.png"))
+        view_action.triggered.connect(lambda: self.handle_action("View", row))
+
         # Create Edit action with pencil icon
         edit_action = menu.addAction("Edit")
         edit_action.setIcon(QIcon("icons/edit.png"))
@@ -314,15 +318,18 @@ class ConfigMapsPage(QWidget):
         return action_container
 
     def handle_action(self, action, row):
-        config_map_name = self.table.item(row, 1).text()
-        if action == "Edit":
-            print(f"Editing config map: {config_map_name}")
+        limit_ranges_name = self.table.item(row, 1).text()
+        if action == "View":
+            print(f"Viewing limit ranges: {limit_ranges_name}")
+            # Add view logic here
+        elif action == "Edit":
+            print(f"Editing limit ranges: {limit_ranges_name}")
             # Add edit logic here
         elif action == "Delete":
-            print(f"Deleting config map: {config_map_name}")
+            print(f"Deleting limit ranges: {limit_ranges_name}")
             # Add delete logic here
 
-    def create_checkbox(self, row, config_map_name):
+    def create_checkbox(self, row, limit_ranges_name):
         checkbox = QCheckBox()
         checkbox.setStyleSheet("""
             QCheckBox {
@@ -345,10 +352,10 @@ class ConfigMapsPage(QWidget):
             }
         """)
 
-        checkbox.stateChanged.connect(lambda state: self.handle_checkbox_change(state, config_map_name))
+        checkbox.stateChanged.connect(lambda state: self.handle_checkbox_change(state, limit_ranges_name))
         return checkbox
 
-    def create_checkbox_container(self, row, config_map_name):
+    def create_checkbox_container(self, row, limit_ranges_name):
         """Create a container widget for the checkbox to prevent row selection"""
         container = QWidget()
         container.setStyleSheet("background-color: transparent;")
@@ -357,17 +364,17 @@ class ConfigMapsPage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        checkbox = self.create_checkbox(row, config_map_name)
+        checkbox = self.create_checkbox(row, limit_ranges_name)
         layout.addWidget(checkbox)
 
         return container
 
-    def handle_checkbox_change(self, state, config_map_name):
+    def handle_checkbox_change(self, state, limit_ranges_name):
         if state == Qt.CheckState.Checked.value:
-            self.selected_config_maps.add(config_map_name)
+            self.selected_limit_ranges.add(limit_ranges_name)
         else:
-            self.selected_config_maps.discard(config_map_name)
-        print(f"Selected config maps: {self.selected_config_maps}")
+            self.selected_limit_ranges.discard(limit_ranges_name)
+        print(f"Selected limit ranges: {self.selected_limit_ranges}")
 
     def create_select_all_checkbox(self):
         checkbox = QCheckBox()
@@ -406,61 +413,53 @@ class ConfigMapsPage(QWidget):
                         break
 
     def load_data(self):
-        # Data from the image
-        config_maps_data = [
-            ["cluster-info", "kube-public", "kubeconfig", "71d"],
-            ["coredns", "kube-system", "Corefile", "71d"],
-            ["extension-apiserver-authentication", "kube-system", "client-ca-file, requestheader-allowed-names, requestheader", "71d"],
-            ["kube-apiserver-legacy-service-account-token-tra", "kube-system", "since", "71d"],
-            ["kube-proxy", "kube-system", "config.conf, kubeconfig.conf", "71d"],
-            ["kube-root-ca.crt", "default", "ca.crt", "71d"],
-            ["kube-root-ca.crt", "kube-node-lease", "ca.crt", "71d"],
-            ["kube-root-ca.crt", "kube-public", "ca.crt", "71d"],
-            ["kube-root-ca.crt", "kube-system", "ca.crt", "71d"],
-            ["kubeadm-config", "kube-system", "ClusterConfiguration", "71d"],
-            ["kubelet-config", "kube-system", "kubelet", "71d"]
+        # Sample data for limit ranges
+        limit_ranges_data = [
+            ["default-quota", "default", "71d"],
+            ["dev-quota", "dev", "45d"],
+            ["system-quota", "kube-system", "71d"],
+            ["test-quota", "test", "30d"],
+            ["production-quota", "production", "71d"]
         ]
 
-        self.table.setRowCount(len(config_maps_data))
+        self.table.setRowCount(len(limit_ranges_data))
 
-        for row, config_map in enumerate(config_maps_data):
+        for row, quota in enumerate(limit_ranges_data):
             # Set row height
             self.table.setRowHeight(row, 40)
 
             # Add checkbox in a container to prevent selection issues
-            checkbox_container = self.create_checkbox_container(row, config_map[0])
+            checkbox_container = self.create_checkbox_container(row, quota[0])
             self.table.setCellWidget(row, 0, checkbox_container)
 
-            # Add rest of the data
-            for col, value in enumerate(config_map):
-                # Skip value extraction for the checkbox already handled
-                cell_col = col + 1
+            # Name column
+            item_name = QTableWidgetItem(quota[0])
+            item_name.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            item_name.setForeground(QColor("#e2e8f0"))
+            item_name.setFlags(item_name.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 1, item_name)
 
-                # Use SortableTableWidgetItem for columns that need sorting
-                if col == 3:  # Age column
-                    # Extract number for proper sorting (e.g., "71d" -> 71)
-                    days = int(value.replace('d', ''))
-                    item = SortableTableWidgetItem(value, days)
-                else:
-                    item = QTableWidgetItem(value)
+            # Namespace column
+            item_namespace = QTableWidgetItem(quota[1])
+            item_namespace.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            item_namespace.setForeground(QColor("#e2e8f0"))
+            item_namespace.setFlags(item_namespace.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 2, item_namespace)
 
-                # Set alignment based on column
-                if col == 3:  # Age column
-                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                else:
-                    item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            # Age column
+            days = int(quota[2].replace('d', ''))
+            item_age = SortableTableWidgetItem(quota[2], days)
+            item_age.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            item_age.setForeground(QColor("#e2e8f0"))
+            item_age.setFlags(item_age.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 3, item_age)
 
-                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                item.setForeground(QColor("#e2e8f0"))
-
-                self.table.setItem(row, cell_col, item)
-
-            # Add action button
+            # Action button column
             action_button = self.create_action_button(row)
-            self.table.setCellWidget(row, 5, action_button)
+            self.table.setCellWidget(row, 4, action_button)
 
         # Update items count label
-        self.items_count.setText(f"{len(config_maps_data)} items")
+        self.items_count.setText(f"{len(limit_ranges_data)} items")
 
         # Re-enable sorting after data is loaded
         self.table.setSortingEnabled(True)

@@ -2,13 +2,16 @@ import sys
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QLabel, QFrame, QTabWidget, QGridLayout, QSizePolicy,
                              QGraphicsDropShadowEffect, QMenu, QToolButton, QToolTip, QLineEdit,
-                             QStackedWidget)
+                             QStackedWidget, QProgressBar)
 from PyQt6.QtCore import Qt, QSize, QPropertyAnimation, QEasingCurve, QEvent, QTimer, QPoint, QRect
 from PyQt6.QtGui import (QIcon, QFont, QColor, QPalette, QPixmap, QPainter, QLinearGradient,
                          QGradient, QShortcut, QAction, QGuiApplication)
-from NodesPage import NodesPage
-from OverviewPage import OverviewPage
-from ConfigMapsPage import ConfigMapsPage  # Import the new ConfigMapsPage
+from NodesPage import NodesPage            # Import the NodesPage
+from OverviewPage import OverviewPage      # Import the OverviewPage
+from ConfigMapsPage import ConfigMapsPage  # Import the ConfigMapsPage
+from SecretsPage import SecretsPage        # Import the SecretsPage
+from ResourceQuotasPage import ResourceQuotasPage  # Import the ResourceQuotasPage
+from LimitRangesPage import LimitRangesPage        # Import the LimitRangespage
 
 class TitleBar(QWidget):
     def __init__(self, parent=None):
@@ -572,19 +575,30 @@ class DockerDesktopUI(QMainWindow):
         self.cluster_page = self.create_cluster_page()
         self.nodes_page = NodesPage()
         self.overview_page = OverviewPage()
-        self.configmaps_page = ConfigMapsPage()  # Add the new ConfigMapsPage
+        self.configmaps_page = ConfigMapsPage()
+        self.secrets_page = SecretsPage()
+        self.resource_quotas_page = ResourceQuotasPage()
+        self.limit_ranges_page = LimitRangesPage()
 
         # Add pages to stacked widget
         self.stacked_widget.addWidget(self.cluster_page)
         self.stacked_widget.addWidget(self.nodes_page)
         self.stacked_widget.addWidget(self.overview_page)
-        self.stacked_widget.addWidget(self.configmaps_page)  # Add the new ConfigMapsPage
+        self.stacked_widget.addWidget(self.configmaps_page)
+        self.stacked_widget.addWidget(self.secrets_page)
+        self.stacked_widget.addWidget(self.resource_quotas_page)
+        self.stacked_widget.addWidget(self.limit_ranges_page)
 
         # Register pages in dictionary for easy access
-        self.pages["Cluster"] = self.cluster_page
-        self.pages["Nodes"] = self.nodes_page
-        self.pages["Overview"] = self.overview_page
-        self.pages["Config Maps"] = self.configmaps_page  # Register the new page
+        self.pages = {
+            "Cluster": self.cluster_page,
+            "Nodes": self.nodes_page,
+            "Overview": self.overview_page,
+            "Config Maps": self.configmaps_page,
+            "Secrets": self.secrets_page,
+            "Resource Quotas": self.resource_quotas_page,
+            "Limit Ranges": self.limit_ranges_page,
+        }
 
         right_layout.addWidget(self.stacked_widget)
         container_layout.addWidget(right_container, 1)
@@ -649,6 +663,7 @@ class DockerDesktopUI(QMainWindow):
         header.setFixedHeight(40)
         header.setStyleSheet(f"""
             background-color: {self.bg_header};
+            border-top: 1px solid {self.border_color};
             border-bottom: 1px solid {self.border_color};
         """)
 
@@ -945,3 +960,6 @@ if __name__ == "__main__":
     window = DockerDesktopUI()
     window.show()
     sys.exit(app.exec())
+
+
+
