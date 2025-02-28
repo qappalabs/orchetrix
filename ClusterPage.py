@@ -1,14 +1,10 @@
 import sys
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                            QPushButton, QLabel, QFrame, QTabWidget, QGridLayout, QSizePolicy,
-                           QGraphicsDropShadowEffect, QMenu, QToolButton, QToolTip, QLineEdit, 
-                           QStackedWidget)
+                           QGraphicsDropShadowEffect, QMenu, QToolButton, QToolTip, QLineEdit)
 from PyQt6.QtCore import Qt, QSize, QPropertyAnimation, QEasingCurve, QEvent, QTimer, QPoint, QRect
 from PyQt6.QtGui import (QIcon, QFont, QColor, QPalette, QPixmap, QPainter, QLinearGradient, 
-                       QGradient, QShortcut, QAction, QGuiApplication, QActionGroup)
-
-from PodsPage import PodsPage
-from NodesPage import NodesPage
+                       QGradient, QShortcut, QAction, QGuiApplication)
 
 class NavMenuDropdown(QMenu):
     def __init__(self, parent=None):
@@ -47,7 +43,7 @@ class NavMenuDropdown(QMenu):
                 margin: 5px 10px;
             }
         """)
-        
+
         shadow = QGraphicsDropShadowEffect(self)
         shadow.setColor(QColor(0, 0, 0, 100))
         shadow.setBlurRadius(15)
@@ -64,8 +60,6 @@ class NavIconButton(QToolButton):
         self.has_dropdown = has_dropdown
         self.dropdown_open = False
         self.dropdown_menu = None
-        self.selected_item = None
-        self.active_by_child = False  # Add this new property
         
         # Colors
         self.bg_dark = "#1a1a1a"
@@ -73,11 +67,11 @@ class NavIconButton(QToolButton):
         self.accent_light_blue = "#64B5F6"
         self.text_light = "#f0f0f0"
         self.text_secondary = "#888888"
-        
+
         self.setup_ui()
         if self.has_dropdown:
             self.setup_dropdown()
-            
+
     def setup_ui(self):
         self.setFixedSize(40, 40)
         self.setText(self.icon_text)
@@ -91,7 +85,7 @@ class NavIconButton(QToolButton):
         if self.has_dropdown:
             self.clicked.connect(self.show_dropdown)
         self.installEventFilter(self)
-            
+
     def setup_dropdown(self):
         self.dropdown_menu = NavMenuDropdown(self.parent_window)
         title_action = QAction(f"{self.icon_text} {self.item_text}", self)
@@ -99,60 +93,33 @@ class NavIconButton(QToolButton):
         self.dropdown_menu.addAction(title_action)
         self.dropdown_menu.addSeparator()
         
-        menu_items = []
         if self.item_text == "Workloads":
             menu_items = ["Overview", "Pods", "Deployments", "Daemon Sets", 
-                        "Stateful Sets", "Replica Sets", "Replication Controllers",
-                        "Jobs", "Cron Jobs"]
+                         "Stateful Sets", "Replica Sets", "Replication Controllers",
+                         "Jobs", "Cron Jobs"]
         elif self.item_text == "Config":
             menu_items = ["Config Maps", "Secrets", "Resource Quotas", "Limit Ranges",
-                        "Horizontal Pod Autoscalers", "Pod Disruption Budgets",
-                        "Priority Classes", "Runtime Classes", "Leases"]
+                         "Horizontal Pod Autoscalers", "Pod Disruption Budgets",
+                         "Priority Classes", "Runtime Classes", "Leases"]
         elif self.item_text == "Network":
             menu_items = ["Services", "Endpoints", "Ingresses", "Ingress Classes",
-                        "Network Policies"]
+                         "Network Policies"]
         elif self.item_text == "Storage":
             menu_items = ["Persistent Volume Claims", "Persistent Volumes", 
-                        "Storage Classes"]
+                         "Storage Classes"]
         elif self.item_text == "Helm":
             menu_items = ["Charts", "Releases"]
         elif self.item_text == "Access Control":
             menu_items = ["Service Accounts", "Cluster Roles", "Roles",
-                        "Cluster Role Bindings", "Role Bindings"]
+                         "Cluster Role Bindings", "Role Bindings"]
         elif self.item_text == "Custom Resources":
             menu_items = ["Definitions"]
-
-        # Add actions for all menu items
+        else:
+            menu_items = []
+            
         for item in menu_items:
-            action = QAction(item, self.dropdown_menu)
-            action.setData(item)
-            self.dropdown_menu.addAction(action)
-            action.triggered.connect(lambda checked, i=item: self.handle_menu_action(i))
-    
-    def handle_menu_action(self, item):
-        # Reset all buttons and their dropdowns first
-        if hasattr(self.parent_window, "reset_all_buttons_and_dropdowns"):
-            self.parent_window.reset_all_buttons_and_dropdowns()
-        
-        # Update selected item
-        self.selected_item = item
-        self.active_by_child = True
-        self.is_active = True
-        
-        # Update menu item states
-        for action in self.dropdown_menu.actions():
-            if isinstance(action, QAction) and action.data() is not None:
-                action.setProperty("selected", "true" if action.data() == item else "false")
-        
-        # Force style update
-        self.dropdown_menu.style().unpolish(self.dropdown_menu)
-        self.dropdown_menu.style().polish(self.dropdown_menu)
-        self.update_style()
-        
-        # Handle specific actions
-        if item == "Pods":
-            self.parent_window.show_pods_page()
-    
+            self.dropdown_menu.addAction(item)
+            
     def show_dropdown(self):
         if self.has_dropdown:
             self.dropdown_open = True
@@ -161,15 +128,15 @@ class NavIconButton(QToolButton):
             self.dropdown_menu.popup(pos)
             self.dropdown_menu.aboutToHide.connect(self.dropdown_closed)
             QTimer.singleShot(50, lambda: self.setDown(False))
-    
+
     def dropdown_closed(self):
         self.dropdown_open = False
         self.update_style()
-    
+
     def activate(self):
         if hasattr(self.parent_window, "set_active_nav_button"):
             self.parent_window.set_active_nav_button(self)
-    
+
     def update_style(self):
         if self.is_active or self.active_by_child:
             self.setStyleSheet(f"""
@@ -196,7 +163,7 @@ class NavIconButton(QToolButton):
                     color: {self.text_light};
                 }}
             """)
-    
+
     def eventFilter(self, obj, event):
         if event.type() == QEvent.Type.Enter:
             QToolTip.showText(
@@ -212,16 +179,16 @@ class SearchBar(QLineEdit):
     def __init__(self, placeholder_text, parent=None):
         super().__init__(parent)
         self.setPlaceholderText(placeholder_text)
-        self.setFixedHeight(28)  # Reduced from 30 to 28
-        self.setMinimumWidth(300)  # Slightly reduced width
+        self.setFixedHeight(28)
+        self.setMinimumWidth(300)
         self.setStyleSheet("""
             QLineEdit {
                 background-color: #333333;
                 border: none;
-                border-radius: 3px;  /* Reduced radius */
+                border-radius: 3px;
                 color: #ffffff;
-                padding: 4px 10px;  /* Reduced padding */
-                font-size: 12px;  /* Reduced font size */
+                padding: 4px 10px;
+                font-size: 12px;
             }
             QLineEdit:focus {
                 background-color: #404040;
@@ -233,7 +200,16 @@ class DockerDesktopUI(QMainWindow):
         super().__init__()
         self.setWindowTitle("Docker Desktop")
         self.setMinimumSize(1000, 700)
-        
+
+        # Remove default window frame
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
+
+        # Create stacked widget for managing pages
+        self.stacked_widget = QStackedWidget()
+
+        # Dictionary to store pages for easy navigation
+        self.pages = {}
+
         # Set up custom tooltip style for the entire application
         app = QApplication.instance()
         if app:
@@ -247,7 +223,7 @@ class DockerDesktopUI(QMainWindow):
                     font-size: 12px;
                 }
             """)
-        
+
         # Colors
         self.bg_dark = "#1a1a1a"
         self.bg_sidebar = "#1e1e1e"
@@ -260,11 +236,24 @@ class DockerDesktopUI(QMainWindow):
         self.tab_inactive = "#2d2d2d"
         self.card_bg = "#1e1e1e"
         
-        self.current_page = None
-        self.content_stack = QStackedWidget()
-
         self.setup_ui()
-        
+
+    def create_cluster_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # Add tab container
+        tab_container = self.create_tab_container()
+        layout.addWidget(tab_container)
+
+        # Add content area
+        content_area = self.create_content_area()
+        layout.addWidget(content_area)
+
+        return page
+
     def setup_ui(self):
         self.setStyleSheet(f"""
             QMainWindow, QWidget {{
@@ -291,29 +280,45 @@ class DockerDesktopUI(QMainWindow):
                 color: {self.text_light};
             }}
         """)
-        
+
         main_widget = QWidget()
-        main_layout = QHBoxLayout(main_widget)
+        main_layout = QVBoxLayout(main_widget)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
-        
+
+        # Add title bar
+        self.title_bar = TitleBar(self)
+        main_layout.addWidget(self.title_bar)
+
+        # Container for sidebar and content
+        container = QWidget()
+        container_layout = QHBoxLayout(container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(0)
+
         sidebar = self.create_sidebar()
-        main_layout.addWidget(sidebar)
-        
+        container_layout.addWidget(sidebar)
+
         right_container = QWidget()
         right_layout = QVBoxLayout(right_container)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(0)
-        
+
         header = self.create_header()
         right_layout.addWidget(header)
+        
+        tab_container = self.create_tab_container()
+        right_layout.addWidget(tab_container)
         
         content_area = self.create_content_area()
         right_layout.addWidget(content_area, 1)
         
         main_layout.addWidget(right_container, 1)
         self.setCentralWidget(main_widget)
-    
+
+        # Set initial page
+        self.stacked_widget.setCurrentWidget(self.cluster_page)
+
     def create_sidebar(self):
         sidebar = QWidget()
         sidebar.setFixedWidth(40)
@@ -321,11 +326,11 @@ class DockerDesktopUI(QMainWindow):
             background-color: {self.bg_sidebar};
             border-right: 1px solid {self.border_color};
         """)
-        
+
         layout = QVBoxLayout(sidebar)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        
+
         # Create nav buttons
         self.nav_buttons = []
         nav_items = [
@@ -341,27 +346,15 @@ class DockerDesktopUI(QMainWindow):
             ("🔐", "Access Control", False, True),
             ("🧩", "Custom Resources", False, True)
         ]
-        
+
         for item in nav_items:
             nav_btn = NavIconButton(item[0], item[1], item[2], item[3] if len(item) > 3 else False, self)
             self.nav_buttons.append(nav_btn)
             layout.addWidget(nav_btn)
-        
-        layout.addStretch(1)
 
-        compare_btn = NavIconButton("🖱️", "Compare", False, False, self)
-        terminal_btn = NavIconButton("⌨️", "Terminal", False, False, self)
-        download_btn = NavIconButton("🛠️", "Download", False, False, self)
-        
-        self.nav_buttons.append(compare_btn)
-        self.nav_buttons.append(terminal_btn)
-        self.nav_buttons.append(download_btn)
-        
-        layout.addWidget(compare_btn)
-        layout.addWidget(terminal_btn)
-        layout.addWidget(download_btn)
+        layout.addStretch(1)
         return sidebar
-    
+
     def create_header(self):
         header = QWidget()
         header.setFixedHeight(40)
@@ -369,11 +362,11 @@ class DockerDesktopUI(QMainWindow):
             background-color: {self.bg_header};
             border-bottom: 1px solid {self.border_color};
         """)
-        
+
         layout = QHBoxLayout(header)
         layout.setContentsMargins(16, 0, 16, 0)
         layout.setSpacing(16)
-        
+
         # Create cluster dropdown menu first
         cluster_menu = QMenu()
         cluster_menu.setStyleSheet(f"""
@@ -392,38 +385,38 @@ class DockerDesktopUI(QMainWindow):
                 background-color: rgba(255, 255, 255, 0.1);
             }}
         """)
-        
+
         # Add menu items
         cluster_menu.addAction("docker-desktop")
         cluster_menu.addSeparator()
         cluster_menu.addAction("dev-cluster")
         cluster_menu.addAction("staging-cluster")
         cluster_menu.addAction("production-cluster")
-        
+
         # Updated cluster dropdown button
         cluster_dropdown = QToolButton()
         cluster_dropdown.setFixedSize(160, 28)
         cluster_dropdown.setMinimumWidth(200)
-        
+
         # Create horizontal layout for text and arrow
         button_layout = QHBoxLayout(cluster_dropdown)
         button_layout.setContentsMargins(12, 0, 32, 0)
         button_layout.setSpacing(8)
-        
+
         # Text label
         text_label = QLabel("docker-desktop")
         text_label.setStyleSheet(f"color: #55c732; background: transparent;")
-        
+
         # Arrow label
         arrow_label = QLabel("▼")
         arrow_label.setFixedWidth(20)  # Fixed width for arrow
         arrow_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight)
         arrow_label.setStyleSheet(f"color: {self.text_secondary}; background: transparent; padding-right: 8px;")
-        
+
         button_layout.addWidget(text_label)
         button_layout.addStretch()
         button_layout.addWidget(arrow_label)
-        
+
         cluster_dropdown.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         cluster_dropdown.setMenu(cluster_menu)
         cluster_dropdown.setStyleSheet(f"""
@@ -445,92 +438,42 @@ class DockerDesktopUI(QMainWindow):
                 border-radius: 4px;
             }}
         """)
-        
+
         search_bar = SearchBar("Search...", self)
         search_bar.setFixedHeight(28)
         namespace_search = SearchBar("Search namespace...", self)
         namespace_search.setFixedHeight(28)
-        
+
         layout.addWidget(cluster_dropdown)
         layout.addStretch(1)
         layout.addWidget(search_bar)
         layout.addWidget(namespace_search)
-        
+
         return header
 
+    def create_tab_container(self):
+        tab_widget = QTabWidget()
+        tab_widget.setFixedHeight(44)
+        tab_widget.addTab(QWidget(), "Master")
+        tab_widget.addTab(QWidget(), "Worker")
+        tab_widget.setCurrentIndex(0)
+        return tab_widget
+    
     def create_content_area(self):
         content_widget = QWidget()
         content_layout = QGridLayout(content_widget)
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(0)
-
-        # Add stacked widget for different pages
-        content_layout.addWidget(self.content_stack)
-
-        # Create pages
-        self.cluster_page = self.create_cluster_page()
-        self.nodes_page = NodesPage()
-        self.pods_page = PodsPage()
-
-        # Add pages to stack
-        self.content_stack.addWidget(self.cluster_page)
-        self.content_stack.addWidget(self.nodes_page)
-        self.content_stack.addWidget(self.pods_page)
-        
-        return content_widget
-    
-    def create_cluster_page(self):
-        page = QWidget()
-        layout = QVBoxLayout(page)  # Changed from QGridLayout to QVBoxLayout
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(16)
-        
-        # Add tab widget only for cluster page
-        tab_widget = QTabWidget()
-        tab_widget.setStyleSheet("""
-            QTabWidget::pane {
-                border: none;
-            }
-            QTabBar::tab {
-                background-color: transparent;
-                color: #888888;
-                padding: 8px 24px;
-                border: none;
-                margin-right: 2px;
-                font-size: 13px;
-            }
-            QTabBar::tab:selected {
-                color: #ffffff;
-                border-bottom: 2px solid #0095ff;
-            }
-            QTabBar::tab:hover:!selected {
-                color: #ffffff;
-            }
-        """)
-        
-        # Create master tab content
-        master_tab = QWidget()
-        master_layout = QGridLayout(master_tab)
-        master_layout.setContentsMargins(0, 16, 0, 0)
-        master_layout.setSpacing(16)
+        content_layout.setContentsMargins(16, 16, 16, 16)
+        content_layout.setSpacing(16)
         
         metric_panel1 = self.create_metric_panel()
         metric_panel2 = self.create_metric_panel()
         status_panel = self.create_status_panel()
         
-        master_layout.addWidget(metric_panel1, 0, 0)
-        master_layout.addWidget(metric_panel2, 0, 1)
-        master_layout.addWidget(status_panel, 1, 0, 1, 2)
+        content_layout.addWidget(metric_panel1, 0, 0)
+        content_layout.addWidget(metric_panel2, 0, 1)
+        content_layout.addWidget(status_panel, 1, 0, 1, 2)
         
-        # Create worker tab (empty for now)
-        worker_tab = QWidget()
-        
-        # Add tabs
-        tab_widget.addTab(master_tab, "Master")
-        tab_widget.addTab(worker_tab, "Worker")
-        
-        layout.addWidget(tab_widget)
-        return page
+        return content_widget
     
     def create_metric_panel(self):
         panel = QWidget()
@@ -540,17 +483,17 @@ class DockerDesktopUI(QMainWindow):
                 border-radius: 4px;
             }}
         """)
-        
+
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(16)
-        
+
         # Tab-like buttons
         tabs = QWidget()
         tabs_layout = QHBoxLayout(tabs)
         tabs_layout.setContentsMargins(0, 0, 0, 0)
         tabs_layout.setSpacing(4)
-        
+
         cpu_btn = QPushButton("CPU")
         cpu_btn.setStyleSheet("""
             QPushButton {
@@ -562,7 +505,7 @@ class DockerDesktopUI(QMainWindow):
                 border-radius: 4px;
             }
         """)
-        
+
         memory_btn = QPushButton("Memory")
         memory_btn.setStyleSheet("""
             QPushButton {
@@ -576,20 +519,20 @@ class DockerDesktopUI(QMainWindow):
                 color: #ffffff;
             }
         """)
-        
+
         tabs_layout.addWidget(cpu_btn)
         tabs_layout.addWidget(memory_btn)
         tabs_layout.addStretch()
-        
+
         # Info message
         info_container = QWidget()
         info_layout = QVBoxLayout(info_container)
         info_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
+
         info_msg = QLabel("Metrics are not available due to missing or invalid Prometheus")
         info_msg.setStyleSheet("color: #888888; font-size: 13px;")
         info_msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
+
         settings_link = QLabel("Open cluster settings")
         settings_link.setStyleSheet("""
             color: #0095ff;
@@ -598,27 +541,27 @@ class DockerDesktopUI(QMainWindow):
         """)
         settings_link.setAlignment(Qt.AlignmentFlag.AlignCenter)
         settings_link.setCursor(Qt.CursorShape.PointingHandCursor)
-        
+
         info_layout.addWidget(info_msg)
         info_layout.addWidget(settings_link)
-        
+
         layout.addWidget(tabs)
         layout.addWidget(info_container, 1, Qt.AlignmentFlag.AlignCenter)
-        
+
         return panel
-    
+
     def create_status_panel(self):
         panel = QWidget()
         panel.setStyleSheet(f"""
             background-color: {self.card_bg};
             border-radius: 4px;
         """)
-        
+
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(32, 48, 32, 48)
         layout.setSpacing(8)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
+
         # Success icon
         success_icon = QLabel("✓")
         success_icon.setFixedSize(80, 80)
@@ -629,7 +572,7 @@ class DockerDesktopUI(QMainWindow):
             border-radius: 40px;
             qproperty-alignment: AlignCenter;
         """)
-        
+
         # Status text
         status_title = QLabel("No issues found")
         status_title.setStyleSheet("""
@@ -639,7 +582,7 @@ class DockerDesktopUI(QMainWindow):
             margin-top: 16px;
         """)
         status_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
+
         status_subtitle = QLabel("Everything is fine in the Cluster")
         status_subtitle.setStyleSheet("""
             color: #888888;
@@ -647,15 +590,14 @@ class DockerDesktopUI(QMainWindow):
             margin-top: 4px;
         """)
         status_subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
+
         layout.addWidget(success_icon, 0, Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(status_title)
         layout.addWidget(status_subtitle)
-        
+
         return panel
     
-    def reset_all_buttons_and_dropdowns(self):
-        """Reset all navigation buttons and their dropdowns to default state"""
+    def set_active_nav_button(self, active_button):
         for btn in self.nav_buttons:
             btn.is_active = False
             btn.active_by_child = False
@@ -677,38 +619,6 @@ class DockerDesktopUI(QMainWindow):
         # Set the clicked button as active
         active_button.is_active = True
         active_button.update_style()
-
-        # Switch pages based on button
-        if active_button.item_text == "Nodes":
-            self.content_stack.setCurrentWidget(self.nodes_page)
-        elif active_button.item_text == "Cluster":
-            self.content_stack.setCurrentWidget(self.cluster_page)
-        # Other cases will be handled by dropdown menu items
-
-    def show_pods_page(self):
-        """Show the pods page and update navigation state"""
-        # Find workload button
-        workload_button = None
-        for btn in self.nav_buttons:
-            if btn.item_text == "Workloads":
-                workload_button = btn
-                break
-        
-        if workload_button:
-            # Update workload button state
-            workload_button.is_active = True
-            workload_button.active_by_child = True
-            workload_button.update_style()
-            
-            # Update other buttons
-            for btn in self.nav_buttons:
-                if btn != workload_button:
-                    btn.is_active = False
-                    btn.active_by_child = False
-                    btn.update_style()
-        
-        # Switch to pods page
-        self.content_stack.setCurrentWidget(self.pods_page)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

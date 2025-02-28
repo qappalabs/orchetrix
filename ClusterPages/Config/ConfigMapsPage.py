@@ -1,11 +1,8 @@
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem, 
-    QLabel, QHeaderView, QPushButton, QMenu, QToolButton, QCheckBox, QComboBox, QApplication, 
-    QStyle, QStyleOptionHeader
-)
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, 
+                           QTableWidgetItem, QLabel, QHeaderView, QPushButton,
+                           QMenu, QToolButton, QCheckBox, QComboBox)
 from PyQt6.QtCore import Qt, QSize, QPoint
-from PyQt6.QtGui import QColor, QFont, QIcon, QCursor
-import random, datetime
+from PyQt6.QtGui import QColor, QFont, QIcon
 
 class SortableTableWidgetItem(QTableWidgetItem):
     """Custom QTableWidgetItem that can be sorted with values"""
@@ -18,59 +15,10 @@ class SortableTableWidgetItem(QTableWidgetItem):
             return self.value < other.value
         return super().__lt__(other)
 
-class PodsHeader(QHeaderView):
-    """
-    Custom header that enables sorting only for specific columns (by header click)
-    and shows a hover sort indicator arrow.
-    
-    In this example, the following columns are sortable:
-      - Column 1: Name
-      - Column 2: Namespace
-      - Column 3: Containers
-      - Column 4: Restarts
-      - Column 5: Age
-      - Column 7: Node
-      - Column 9: Status
-    """
-    def __init__(self, orientation, parent=None):
-        super().__init__(orientation, parent)
-        self.sortable_columns = {1, 2, 3, 4, 5, 7, 9}
-        self.setSectionsClickable(True)
-        self.setHighlightSections(True)
-        
-    def mousePressEvent(self, event):
-        logicalIndex = self.logicalIndexAt(event.pos())
-        if logicalIndex in self.sortable_columns:
-            super().mousePressEvent(event)
-        else:
-            event.ignore()
-    
-    def paintSection(self, painter, rect, logicalIndex):
-        option = QStyleOptionHeader()
-        self.initStyleOption(option)
-        option.rect = rect
-        option.section = logicalIndex
-        header_text = self.model().headerData(logicalIndex, self.orientation(), Qt.ItemDataRole.DisplayRole)
-        option.text = str(header_text) if header_text is not None else ""
-        
-        if logicalIndex in self.sortable_columns:
-            mouse_pos = QCursor.pos()
-            local_mouse = self.mapFromGlobal(mouse_pos)
-            if rect.contains(local_mouse):
-                option.state |= QStyle.StateFlag.State_MouseOver
-                option.sortIndicator = QStyleOptionHeader.SortIndicator.SortDown
-                option.state |= QStyle.StateFlag.State_Sunken
-            else:
-                option.state &= ~QStyle.StateFlag.State_MouseOver
-        else:
-            option.state &= ~QStyle.StateFlag.State_MouseOver
-        
-        self.style().drawControl(QStyle.ControlElement.CE_Header, option, painter, self)
-
-class PodsPage(QWidget):
+class ConfigMapsPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.selected_pods = set()  # Track selected pods
+        self.selected_config_maps = set()  # Track selected config maps
         self.setup_ui()
         self.load_data()
 
@@ -81,13 +29,14 @@ class PodsPage(QWidget):
 
         # Header section with sorting dropdown
         header = QHBoxLayout()
-        title = QLabel("Pods")
+        title = QLabel("Config Maps")
         title.setStyleSheet("""
             font-size: 20px;
             font-weight: bold;
             color: #ffffff;
         """)
-        self.items_count = QLabel("9 items")
+        
+        self.items_count = QLabel("11 items")
         self.items_count.setStyleSheet("""
             color: #9ca3af;
             font-size: 12px;
@@ -95,6 +44,7 @@ class PodsPage(QWidget):
             font-family: 'Segoe UI';
         """)
         self.items_count.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        
         header.addWidget(title)
         header.addWidget(self.items_count)
         header.addStretch()
@@ -106,11 +56,10 @@ class PodsPage(QWidget):
             font-size: 13px;
             margin-right: 8px;
         """)
+        
         self.sort_combo = QComboBox()
         self.sort_combo.addItem("Name")
         self.sort_combo.addItem("Namespace")
-        self.sort_combo.addItem("Containers (Highest)")
-        self.sort_combo.addItem("Restarts (Highest)")
         self.sort_combo.addItem("Age (Newest)")
         self.sort_combo.setStyleSheet("""
             QComboBox {
@@ -138,21 +87,19 @@ class PodsPage(QWidget):
                 selection-background-color: #2196F3;
             }
         """)
+        
         self.sort_combo.currentTextChanged.connect(self.sort_table)
+        
         header.addWidget(sort_label)
         header.addWidget(self.sort_combo)
 
         # Create table
         self.table = QTableWidget()
-        self.table.setColumnCount(11)  # Added column for checkboxes
-        headers = ["", "Name", "Namespace", "Containers", "Restarts", "Age", "By", "Node", "QoS", "Status", ""]
+        self.table.setColumnCount(6)  # Checkbox, Name, Namespace, Keys, Age, Actions
+        headers = ["", "Name", "Namespace", "Keys", "Age", ""]
         self.table.setHorizontalHeaderLabels(headers)
         
-        # Use custom header for sorting (header clicks)
-        pods_header = PodsHeader(Qt.Orientation.Horizontal, self.table)
-        self.table.setHorizontalHeader(pods_header)
-        self.table.setSortingEnabled(True)
-        
+        # Style the table
         self.table.setStyleSheet("""
             QTableWidget {
                 background-color: #1e1e1e;
@@ -166,6 +113,7 @@ class PodsPage(QWidget):
                 outline: none;
             }
             QTableWidget::item:hover {
+                /* Remove hover highlighting */
                 background-color: transparent;
                 border-radius: 4px;
             }
@@ -173,83 +121,108 @@ class PodsPage(QWidget):
                 background-color: rgba(33, 150, 243, 0.2);
                 border: none;
             }
+            QTableWidget::item:focus {
+                border: none;
+                outline: none;
+                background-color: transparent;
+            }
             QHeaderView::section {
                 background-color: #252525;
                 color: #888888;
                 padding: 8px;
                 border: none;
                 border-bottom: 1px solid #2d2d2d;
-                font-size: 12px;
+                font-size: 14px;
             }
         """)
+        
+        # Configure selection behavior
         self.table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         
-        # Configure column widths:
-        # Column 0: Checkbox (fixed)
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(0, 40)
-        # Column 1: Name (stretch)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        # Fixed widths for remaining columns.
-        fixed_widths = {2:120, 3:100, 4:80, 5:80, 6:100, 7:120, 8:100, 9:100, 10:40}
-        for col, width in fixed_widths.items():
-            self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
-            self.table.setColumnWidth(col, width)
-        
+        # Configure table properties
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # Name column
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)  # NameSpace column
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)  # Keys column
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)  # Age column
+        self.table.horizontalHeader().setStretchLastSection(False)
+        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
+        self.table.setColumnWidth(5, 40)  # Width for action column
         self.table.setShowGrid(True)
         self.table.setAlternatingRowColors(False)
         self.table.verticalHeader().setVisible(False)
         
-        # Set up select-all checkbox in header column 0.
+        # Fixed widths for columns
+        column_widths = [40, None, None   , None, None, 40]
+        for i, width in enumerate(column_widths):
+            if i != 1 or i !=2 or i !=3 or i !=4:  # Skip the Name column which is set to stretch
+                if width is not None:
+                    self.table.horizontalHeader().setSectionResizeMode(i, QHeaderView.ResizeMode.Fixed)
+                    self.table.setColumnWidth(i, width)
+        
+        # Disable the built-in sorting
+        self.table.setSortingEnabled(False)
+        
+        # Set up select all checkbox
         select_all_checkbox = self.create_select_all_checkbox()
         self.set_header_widget(0, select_all_checkbox)
-        
+
+        # Install event filter to handle clicks outside the table
         self.installEventFilter(self)
+        
+        # Override mousePressEvent to handle selections properly
         self.table.mousePressEvent = self.custom_table_mousePressEvent
 
-        # Add header and table to layout
-        main_layout = QVBoxLayout()
-        main_layout.addLayout(header)
-        main_layout.addWidget(self.table)
-        layout.addLayout(main_layout)
+        layout.addLayout(header)
+        layout.addWidget(self.table)
 
     def custom_table_mousePressEvent(self, event):
+        """
+        Custom handler for table mouse press events to control selection behavior
+        """
+        # Get the item at the click position
         item = self.table.itemAt(event.pos())
         index = self.table.indexAt(event.pos())
-        if index.isValid() and (index.column() == 0 or index.column() == 10):
+        
+        # Check if we're clicking on a cell that has a widget (checkbox or action button)
+        if index.isValid() and (index.column() == 0 or index.column() == 5):
+            # Let the event pass through to the widget without selecting the row
             QTableWidget.mousePressEvent(self.table, event)
         elif item:
+            # Clicking on a regular table cell - allow selection
             QTableWidget.mousePressEvent(self.table, event)
         else:
+            # Clicking on empty space in table - clear selection
             self.table.clearSelection()
             QTableWidget.mousePressEvent(self.table, event)
 
     def eventFilter(self, obj, event):
+        """
+        Handle clicks outside the table to clear row selection
+        """
         if event.type() == event.Type.MouseButtonPress:
+            # Get the position of the mouse click
             pos = event.pos()
             if not self.table.geometry().contains(pos):
+                # If click is outside the table, clear the selection (but keep checkboxes)
                 self.table.clearSelection()
         return super().eventFilter(obj, event)
 
     def sort_table(self, sort_by):
-        """Sort the table based on the selected criteria from the dropdown."""
+        """Sort the table based on the selected criteria"""
         if sort_by == "Name":
             self.table.sortItems(1, Qt.SortOrder.AscendingOrder)
         elif sort_by == "Namespace":
             self.table.sortItems(2, Qt.SortOrder.AscendingOrder)
-        elif sort_by == "Containers (Highest)":
-            self.table.sortItems(3, Qt.SortOrder.DescendingOrder)
-        elif sort_by == "Restarts (Highest)":
-            self.table.sortItems(4, Qt.SortOrder.DescendingOrder)
         elif sort_by == "Age (Newest)":
-            self.table.sortItems(5, Qt.SortOrder.AscendingOrder)
+            self.table.sortItems(4, Qt.SortOrder.AscendingOrder)
 
     def create_action_button(self, row):
         button = QToolButton()
-        button.setText("⋮")
+        button.setText("⋮")  # Three dots
         button.setFixedWidth(30)
+        # Set alignment programmatically instead of through stylesheet
         button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         button.setStyleSheet("""
             QToolButton {
@@ -270,8 +243,13 @@ class PodsPage(QWidget):
                 image: none;
             }
         """)
+        
+        # Center align the text
+        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         button.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        # Create menu with actions
         menu = QMenu(button)
         menu.setStyleSheet("""
             QMenu {
@@ -282,7 +260,7 @@ class PodsPage(QWidget):
             }
             QMenu::item {
                 color: #ffffff;
-                padding: 8px 24px 8px 36px;
+                padding: 8px 24px 8px 36px;  /* Added left padding for icons */
                 border-radius: 4px;
                 font-size: 13px;
             }
@@ -297,24 +275,40 @@ class PodsPage(QWidget):
                 background-color: rgba(255, 68, 68, 0.1);
             }
         """)
+        
+        # Create Edit action with pencil icon
         edit_action = menu.addAction("Edit")
         edit_action.setIcon(QIcon("icons/edit.png"))
         edit_action.triggered.connect(lambda: self.handle_action("Edit", row))
+
+        # Create Delete action with trash icon
         delete_action = menu.addAction("Delete")
         delete_action.setIcon(QIcon("icons/delete.png"))
         delete_action.setProperty("dangerous", True)
         delete_action.triggered.connect(lambda: self.handle_action("Delete", row))
+
         button.setMenu(menu)
-        return button
+        
+        # Create a container for the action button to prevent selection
+        action_container = QWidget()
+        action_layout = QHBoxLayout(action_container)
+        action_layout.setContentsMargins(0, 0, 0, 0)
+        action_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        action_layout.addWidget(button)
+        action_container.setStyleSheet("background-color: transparent;")
+        
+        return action_container
 
     def handle_action(self, action, row):
-        pod_name = self.table.item(row, 1).text()
+        config_map_name = self.table.item(row, 1).text()
         if action == "Edit":
-            print(f"Editing pod: {pod_name}")
+            print(f"Editing config map: {config_map_name}")
+            # Add edit logic here
         elif action == "Delete":
-            print(f"Deleting pod: {pod_name}")
+            print(f"Deleting config map: {config_map_name}")
+            # Add delete logic here
 
-    def create_checkbox(self, row, pod_name):
+    def create_checkbox(self, row, config_map_name):
         checkbox = QCheckBox()
         checkbox.setStyleSheet("""
             QCheckBox {
@@ -336,25 +330,30 @@ class PodsPage(QWidget):
                 border-color: #888888;
             }
         """)
-        checkbox.stateChanged.connect(lambda state: self.handle_checkbox_change(state, pod_name))
+        
+        checkbox.stateChanged.connect(lambda state: self.handle_checkbox_change(state, config_map_name))
         return checkbox
 
-    def create_checkbox_container(self, row, pod_name):
+    def create_checkbox_container(self, row, config_map_name):
+        """Create a container widget for the checkbox to prevent row selection"""
         container = QWidget()
         container.setStyleSheet("background-color: transparent;")
+        
         layout = QHBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        checkbox = self.create_checkbox(row, pod_name)
+        
+        checkbox = self.create_checkbox(row, config_map_name)
         layout.addWidget(checkbox)
+        
         return container
 
-    def handle_checkbox_change(self, state, pod_name):
+    def handle_checkbox_change(self, state, config_map_name):
         if state == Qt.CheckState.Checked.value:
-            self.selected_pods.add(pod_name)
+            self.selected_config_maps.add(config_map_name)
         else:
-            self.selected_pods.discard(pod_name)
-        print(f"Selected pods: {self.selected_pods}")
+            self.selected_config_maps.discard(config_map_name)
+        print(f"Selected config maps: {self.selected_config_maps}")
 
     def create_select_all_checkbox(self):
         checkbox = QCheckBox()
@@ -382,95 +381,94 @@ class PodsPage(QWidget):
         return checkbox
 
     def handle_select_all(self, state):
+        # Check/uncheck all row checkboxes
         for row in range(self.table.rowCount()):
             checkbox_container = self.table.cellWidget(row, 0)
             if checkbox_container:
+                # Find the checkbox within the container
                 for child in checkbox_container.children():
                     if isinstance(child, QCheckBox):
                         child.setChecked(state == Qt.CheckState.Checked.value)
                         break
 
     def load_data(self):
-        pods_data = [
-            ["kube-proxy-crs/r4w", "kube-system", "5", "6", "69d", "DaemonSet", "docker-desktop", "BestEffort", "Running"],
-            ["coredns-7db6lf44-d7nwq", "kube-system", "1", "0", "69d", "ReplicaSet", "docker-desktop", "Burstable", "Running"],
-            ["coredns-7db6lf44-dj8lp", "kube-system", "1", "0", "69d", "ReplicaSet", "docker-desktop", "Burstable", "Running"],
-            ["vpnkit-controller", "kube-system", "1", "0", "69d", "Node", "docker-desktop", "Burstable", "Running"],
-            ["etcd-docker-desktop", "kube-system", "1", "0", "69d", "Node", "docker-desktop", "Burstable", "Running"],
-            ["kube-apiserver-docker-desktop", "kube-system", "1", "0", "69d", "Node", "docker-desktop", "Burstable", "Running"],
-            ["kube-controller-manager-docker-desktop", "kube-system", "1", "0", "69d", "Node", "docker-desktop", "Burstable", "Running"],
-            ["storage-provisioner", "kube-system", "1", "0", "69d", "Node", "docker-desktop", "Burstable", "Running"],
-            ["kube-scheduler-docker-desktop", "kube-system", "1", "0", "69d", "Node", "docker-desktop", "Burstable", "Running"]
+        # Data from the image
+        config_maps_data = [
+            ["cluster-info", "kube-public", "kubeconfig", "71d"],
+            ["coredns", "kube-system", "Corefile", "71d"],
+            ["extension-apiserver-authentication", "kube-system", "client-ca-file, requestheader-allowed-names, requestheader", "71d"],
+            ["kube-apiserver-legacy-service-account-token-tra", "kube-system", "since", "71d"],
+            ["kube-proxy", "kube-system", "config.conf, kubeconfig.conf", "71d"],
+            ["kube-root-ca.crt", "default", "ca.crt", "71d"],
+            ["kube-root-ca.crt", "kube-node-lease", "ca.crt", "71d"],
+            ["kube-root-ca.crt", "kube-public", "ca.crt", "71d"],
+            ["kube-root-ca.crt", "kube-system", "ca.crt", "71d"],
+            ["kubeadm-config", "kube-system", "ClusterConfiguration", "71d"],
+            ["kubelet-config", "kube-system", "kubelet", "71d"]
         ]
 
-        self.table.setRowCount(len(pods_data))
+        self.table.setRowCount(len(config_maps_data))
         
-        for row, pod in enumerate(pods_data):
+        for row, config_map in enumerate(config_maps_data):
+            # Set row height
             self.table.setRowHeight(row, 40)
-            # Column 0: Checkbox
-            checkbox_container = self.create_checkbox_container(row, pod[0])
+            
+            # Add checkbox in a container to prevent selection issues
+            checkbox_container = self.create_checkbox_container(row, config_map[0])
             self.table.setCellWidget(row, 0, checkbox_container)
             
-            for col, value in enumerate(pod):
+            # Add rest of the data
+            for col, value in enumerate(config_map):
+                # Skip value extraction for the checkbox already handled
                 cell_col = col + 1
-                if col == 2:  # Containers column
-                    try:
-                        num = int(value)
-                    except:
-                        num = 0
-                    item = SortableTableWidgetItem(value, num)
-                elif col == 3:  # Restarts column
-                    try:
-                        num = int(value)
-                    except:
-                        num = 0
-                    item = SortableTableWidgetItem(value, num)
-                elif col == 4:  # Age column
-                    try:
-                        num = int(value.replace('d', ''))
-                    except:
-                        num = 0
-                    item = SortableTableWidgetItem(value, num)
+                
+                # Use SortableTableWidgetItem for columns that need sorting
+                if col == 3:  # Age column
+                    # Extract number for proper sorting (e.g., "71d" -> 71)
+                    days = int(value.replace('d', ''))
+                    item = SortableTableWidgetItem(value, days)
                 else:
                     item = QTableWidgetItem(value)
                 
-                if col in [2, 3, 4, 8]:
+                # Set alignment based on column
+                if col == 3:  # Age column
                     item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 else:
                     item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
                 
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                
-                if col == 8 and value == "Running":
-                    item.setForeground(QColor("#4CAF50"))
-                else:
-                    item.setForeground(QColor("#e2e8f0"))
+                item.setForeground(QColor("#e2e8f0"))
                 
                 self.table.setItem(row, cell_col, item)
             
+            # Add action button
             action_button = self.create_action_button(row)
-            self.table.setCellWidget(row, 10, action_button)
+            self.table.setCellWidget(row, 5, action_button)
 
-        self.table.cellClicked.connect(self.handle_row_click)
-        self.items_count.setText(f"{len(pods_data)} items")
+        # Update items count label
+        self.items_count.setText(f"{len(config_maps_data)} items")
 
     def set_header_widget(self, col, widget):
+        """
+        Place a custom widget (like a 'select all' checkbox) into the horizontal header.
+        """
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
         header.resizeSection(col, 40)
+
+        # Replace default header text with an empty string
         self.table.setHorizontalHeaderItem(col, QTableWidgetItem(""))
+
+        # Position the widget
+        # (We embed it in a container so we can manage layout easily)
         container = QWidget()
-        container.setStyleSheet("background-color: #252525;")
+        container.setStyleSheet("background-color: #252525;") # Match header background
         container_layout = QHBoxLayout(container)
         container_layout.setContentsMargins(0, 0, 0, 0)
         container_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         container_layout.addWidget(widget)
         container.setFixedHeight(header.height())
+
         container.setParent(header)
         container.setGeometry(header.sectionPosition(col), 0, header.sectionSize(col), header.height())
         container.show()
-
-    def handle_row_click(self, row, column):
-        if column != 10:
-            self.table.selectRow(row)
-            print(f"Selected pod: {self.table.item(row, 1).text()}")
