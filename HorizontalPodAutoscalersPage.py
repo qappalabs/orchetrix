@@ -15,7 +15,7 @@ class CustomHeader(QHeaderView):
     def __init__(self, orientation, parent=None):
         super().__init__(orientation, parent)
         # Define which columns will be sortable
-        self.sortable_columns = {1, 2, 3}  # Name, Namespace, Age
+        self.sortable_columns = {1, 2, 3, 4, 5, 6, 7, 8}  # Name, Namespace, Metrics, Min Pods, Max Pods, Replicas, Age, Status
         self.setSectionsClickable(True)
         self.setHighlightSections(True)
 
@@ -61,10 +61,10 @@ class SortableTableWidgetItem(QTableWidgetItem):
             return self.value < other.value
         return super().__lt__(other)
 
-class LimitRangesPage(QWidget):
+class HorizontalPodAutoscalersPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.selected_limit_ranges = set()  # Track selected limit ranges
+        self.selected_horizontal_pod_autoscalers = set()  # Track selected horizontal pod autoscalers
         self.setup_ui()
         self.load_data()
 
@@ -75,7 +75,7 @@ class LimitRangesPage(QWidget):
 
         # Header section
         header = QHBoxLayout()
-        title = QLabel("Limit Ranges")
+        title = QLabel("Horizontal Pod Autoscalers")
         title.setStyleSheet("""
             font-size: 20px;
             font-weight: bold;
@@ -97,8 +97,8 @@ class LimitRangesPage(QWidget):
 
         # Create table
         self.table = QTableWidget()
-        self.table.setColumnCount(5)  # Checkbox, Name, Namespace, Age, Actions
-        headers = ["", "Name", "Namespace", "Age", ""]
+        self.table.setColumnCount(10)  # Checkbox, Name, Namespace, Age, Actions
+        headers = ["", "Name", "Namespace", "Metrics", "Min Pods", "Max Pods", "Replicas", "Age", "Status", ""]
         self.table.setHorizontalHeaderLabels(headers)
 
         # Use the custom header to control sorting
@@ -163,7 +163,7 @@ class LimitRangesPage(QWidget):
         self.table.horizontalHeader().setStretchLastSection(False)
 
         # Set fixed width for specific columns
-        column_widths = [40, None, 120, 80, 40]  # Adjusted for 5 columns
+        column_widths = [40, None, 120, 100, 80, 80, 80, 80, 100, 40]  # Adjusted for 10 columns
         for i, width in enumerate(column_widths):
             if width is not None:  # Apply fixed width to all columns except Name (which stretches)
                 if i != 1:  # Skip Name column which is set to stretch
@@ -202,7 +202,7 @@ class LimitRangesPage(QWidget):
         index = self.table.indexAt(event.pos())
 
         # Check if we're clicking on a cell that has a widget (checkbox or action button)
-        if index.isValid() and (index.column() == 0 or index.column() == 4):
+        if index.isValid() and (index.column() == 0 or index.column() == 9):
             # Let the event pass through to the widget without selecting the row
             QTableWidget.mousePressEvent(self.table, event)
         elif item:
@@ -226,10 +226,10 @@ class LimitRangesPage(QWidget):
         return super().eventFilter(obj, event)
 
     def handle_row_click(self, row, column):
-        if column != 4:  # Don't trigger for action button column
-            limit_ranges_name = self.table.item(row, 1).text()
-            print(f"Clicked limit ranges: {limit_ranges_name}")
-            # Add your limit ranges click handling logic here
+        if column != 9:  # Don't trigger for action button column
+            horizontal_pod_autoscalers_name = self.table.item(row, 1).text()
+            print(f"Clicked horizontal pod autoscalers: {horizontal_pod_autoscalers_name}")
+            # Add your horizontal pod autoscalers click handling logic here
 
     def create_action_button(self, row):
         button = QToolButton()
@@ -318,18 +318,18 @@ class LimitRangesPage(QWidget):
         return action_container
 
     def handle_action(self, action, row):
-        limit_ranges_name = self.table.item(row, 1).text()
+        horizontal_pod_autoscalers_name = self.table.item(row, 1).text()
         if action == "View":
-            print(f"Viewing limit ranges: {limit_ranges_name}")
+            print(f"Viewing horizontal pod autoscalers: {horizontal_pod_autoscalers_name}")
             # Add view logic here
         elif action == "Edit":
-            print(f"Editing limit ranges: {limit_ranges_name}")
+            print(f"Editing horizontal pod autoscalers: {horizontal_pod_autoscalers_name}")
             # Add edit logic here
         elif action == "Delete":
-            print(f"Deleting limit ranges: {limit_ranges_name}")
+            print(f"Deleting horizontal pod autoscalers: {horizontal_pod_autoscalers_name}")
             # Add delete logic here
 
-    def create_checkbox(self, row, limit_ranges_name):
+    def create_checkbox(self, row, horizontal_pod_autoscalers_name):
         checkbox = QCheckBox()
         checkbox.setStyleSheet("""
             QCheckBox {
@@ -352,10 +352,10 @@ class LimitRangesPage(QWidget):
             }
         """)
 
-        checkbox.stateChanged.connect(lambda state: self.handle_checkbox_change(state, limit_ranges_name))
+        checkbox.stateChanged.connect(lambda state: self.handle_checkbox_change(state, horizontal_pod_autoscalers_name))
         return checkbox
 
-    def create_checkbox_container(self, row, limit_ranges_name):
+    def create_checkbox_container(self, row, horizontal_pod_autoscalers_name):
         """Create a container widget for the checkbox to prevent row selection"""
         container = QWidget()
         container.setStyleSheet("background-color: transparent;")
@@ -364,17 +364,17 @@ class LimitRangesPage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        checkbox = self.create_checkbox(row, limit_ranges_name)
+        checkbox = self.create_checkbox(row, horizontal_pod_autoscalers_name)
         layout.addWidget(checkbox)
 
         return container
 
-    def handle_checkbox_change(self, state, limit_ranges_name):
+    def handle_checkbox_change(self, state, horizontal_pod_autoscalers_name):
         if state == Qt.CheckState.Checked.value:
-            self.selected_limit_ranges.add(limit_ranges_name)
+            self.selected_horizontal_pod_autoscalers.add(horizontal_pod_autoscalers_name)
         else:
-            self.selected_limit_ranges.discard(limit_ranges_name)
-        print(f"Selected limit ranges: {self.selected_limit_ranges}")
+            self.selected_horizontal_pod_autoscalers.discard(horizontal_pod_autoscalers_name)
+        print(f"Selected horizontal pod autoscalers: {self.selected_horizontal_pod_autoscalers}")
 
     def create_select_all_checkbox(self):
         checkbox = QCheckBox()
@@ -413,58 +413,98 @@ class LimitRangesPage(QWidget):
                         break
 
     def load_data(self):
-        # Sample data for limit ranges (name, namespace, age)
-        limit_ranges_data = [
-            ["default-limits", "default", "71d"],
-            ["dev-limits", "dev", "45d"],
-            ["system-limits", "kube-system", "71d"],
-            ["test-limits", "test", "30d"],
-            ["production-limits", "production", "71d"],
-            ["frontend-limits", "frontend", "14d"],
-            ["backend-limits", "backend", "21d"],
-            ["database-limits", "database", "60d"],
-            ["monitoring-limits", "monitoring", "90d"],
-            ["logging-limits", "logging", "55d"]
+        # Sample data for horizontal pod autoscalers
+        horizontal_pod_autoscalers_data = [
+            ["default-quota", "default", "CPU/80%", "1", "10", "3", "71d", "Healthy"],
+            ["dev-quota", "dev", "Memory/70%", "2", "8", "5", "45d", "Healthy"],
+            ["system-quota", "kube-system", "CPU/60%", "3", "12", "6", "71d", "Scaling"],
+            ["test-quota", "test", "CPU/90%", "1", "5", "4", "30d", "Healthy"],
+            ["production-quota", "production", "Memory/85%", "5", "20", "10", "71d", "Warning"]
         ]
 
-        self.table.setRowCount(len(limit_ranges_data))
+        self.table.setRowCount(len(horizontal_pod_autoscalers_data))
 
-        for row, limit_range in enumerate(limit_ranges_data):
+        for row, hpa in enumerate(horizontal_pod_autoscalers_data):
             # Set row height
             self.table.setRowHeight(row, 40)
 
             # Add checkbox in a container to prevent selection issues
-            checkbox_container = self.create_checkbox_container(row, limit_range[0])
+            checkbox_container = self.create_checkbox_container(row, hpa[0])
             self.table.setCellWidget(row, 0, checkbox_container)
 
-            # Name column
-            item_name = QTableWidgetItem(limit_range[0])
+            # Name column (column 1)
+            item_name = QTableWidgetItem(hpa[0])
             item_name.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             item_name.setForeground(QColor("#e2e8f0"))
             item_name.setFlags(item_name.flags() & ~Qt.ItemFlag.ItemIsEditable)
             self.table.setItem(row, 1, item_name)
 
-            # Namespace column
-            item_namespace = QTableWidgetItem(limit_range[1])
+            # Namespace column (column 2)
+            item_namespace = QTableWidgetItem(hpa[1])
             item_namespace.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             item_namespace.setForeground(QColor("#e2e8f0"))
             item_namespace.setFlags(item_namespace.flags() & ~Qt.ItemFlag.ItemIsEditable)
             self.table.setItem(row, 2, item_namespace)
 
-            # Age column
-            days = int(limit_range[2].replace('d', ''))
-            item_age = SortableTableWidgetItem(limit_range[2], days)
+            # Metrics column (column 3)
+            item_metrics = QTableWidgetItem(hpa[2])
+            item_metrics.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            item_metrics.setForeground(QColor("#e2e8f0"))
+            item_metrics.setFlags(item_metrics.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 3, item_metrics)
+
+            # Min Pods column (column 4)
+            item_min_pods = QTableWidgetItem(hpa[3])
+            item_min_pods.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            item_min_pods.setForeground(QColor("#e2e8f0"))
+            item_min_pods.setFlags(item_min_pods.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 4, item_min_pods)
+
+            # Max Pods column (column 5)
+            item_max_pods = QTableWidgetItem(hpa[4])
+            item_max_pods.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            item_max_pods.setForeground(QColor("#e2e8f0"))
+            item_max_pods.setFlags(item_max_pods.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 5, item_max_pods)
+
+            # Replicas column (column 6)
+            item_replicas = QTableWidgetItem(hpa[5])
+            item_replicas.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            item_replicas.setForeground(QColor("#e2e8f0"))
+            item_replicas.setFlags(item_replicas.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 6, item_replicas)
+
+            # Age column (column 7)
+            days = int(hpa[6].replace('d', ''))
+            item_age = SortableTableWidgetItem(hpa[6], days)
             item_age.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             item_age.setForeground(QColor("#e2e8f0"))
             item_age.setFlags(item_age.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            self.table.setItem(row, 3, item_age)
+            self.table.setItem(row, 7, item_age)
 
-            # Action button column
+            # Status column (column 8)
+            item_status = QTableWidgetItem(hpa[7])
+            item_status.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+
+            # Set status color based on value
+            if hpa[7] == "Healthy":
+                item_status.setForeground(QColor("#399704"))  # Green
+            elif hpa[7] == "Warning":
+                item_status.setForeground(QColor("#d32e1a"))  # Yellow
+            elif hpa[7] == "Scaling":
+                item_status.setForeground(QColor("#0d91b1"))  # Blue
+            else:
+                item_status.setForeground(QColor("#e2e8f0"))  # Default
+
+            item_status.setFlags(item_status.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 8, item_status)
+
+            # Action button column (column 9)
             action_button = self.create_action_button(row)
-            self.table.setCellWidget(row, 4, action_button)
+            self.table.setCellWidget(row, 9, action_button)
 
         # Update items count label
-        self.items_count.setText(f"{len(limit_ranges_data)} items")
+        self.items_count.setText(f"{len(horizontal_pod_autoscalers_data)} items")
 
         # Re-enable sorting after data is loaded
         self.table.setSortingEnabled(True)

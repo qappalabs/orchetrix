@@ -15,7 +15,7 @@ class CustomHeader(QHeaderView):
     def __init__(self, orientation, parent=None):
         super().__init__(orientation, parent)
         # Define which columns will be sortable
-        self.sortable_columns = {1, 2, 3}  # Name, Namespace, Age
+        self.sortable_columns = {1, 2, 3, 4, 5, 6, 7}  # Name, Namespace, Min Available, Max Unavailable, Current Healthy, Desired Healthy, Age,
         self.setSectionsClickable(True)
         self.setHighlightSections(True)
 
@@ -61,10 +61,10 @@ class SortableTableWidgetItem(QTableWidgetItem):
             return self.value < other.value
         return super().__lt__(other)
 
-class LimitRangesPage(QWidget):
+class PodDisruptionBudgetsPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.selected_limit_ranges = set()  # Track selected limit ranges
+        self.selected_pod_disruption_budgets = set()  # Track selected pod Disruption Budgets
         self.setup_ui()
         self.load_data()
 
@@ -75,7 +75,7 @@ class LimitRangesPage(QWidget):
 
         # Header section
         header = QHBoxLayout()
-        title = QLabel("Limit Ranges")
+        title = QLabel("Pod Disruption Budgets")
         title.setStyleSheet("""
             font-size: 20px;
             font-weight: bold;
@@ -97,8 +97,8 @@ class LimitRangesPage(QWidget):
 
         # Create table
         self.table = QTableWidget()
-        self.table.setColumnCount(5)  # Checkbox, Name, Namespace, Age, Actions
-        headers = ["", "Name", "Namespace", "Age", ""]
+        self.table.setColumnCount(9)  # Checkbox, Name, Namespace, Age, Actions
+        headers = ["", "Name", "Namespace","Min Available", "max Unavailable", "Current Healthy", "Desired Healthy", "Age", ""]
         self.table.setHorizontalHeaderLabels(headers)
 
         # Use the custom header to control sorting
@@ -163,7 +163,7 @@ class LimitRangesPage(QWidget):
         self.table.horizontalHeader().setStretchLastSection(False)
 
         # Set fixed width for specific columns
-        column_widths = [40, None, 120, 80, 40]  # Adjusted for 5 columns
+        column_widths = [40, None, 120, 120, 120, 120, 120, 80, 40]  # Adjusted for 9 columns
         for i, width in enumerate(column_widths):
             if width is not None:  # Apply fixed width to all columns except Name (which stretches)
                 if i != 1:  # Skip Name column which is set to stretch
@@ -202,7 +202,7 @@ class LimitRangesPage(QWidget):
         index = self.table.indexAt(event.pos())
 
         # Check if we're clicking on a cell that has a widget (checkbox or action button)
-        if index.isValid() and (index.column() == 0 or index.column() == 4):
+        if index.isValid() and (index.column() == 0 or index.column() == 9):
             # Let the event pass through to the widget without selecting the row
             QTableWidget.mousePressEvent(self.table, event)
         elif item:
@@ -226,10 +226,10 @@ class LimitRangesPage(QWidget):
         return super().eventFilter(obj, event)
 
     def handle_row_click(self, row, column):
-        if column != 4:  # Don't trigger for action button column
-            limit_ranges_name = self.table.item(row, 1).text()
-            print(f"Clicked limit ranges: {limit_ranges_name}")
-            # Add your limit ranges click handling logic here
+        if column != 9:  # Don't trigger for action button column
+            pod_disruption_budgets_name = self.table.item(row, 1).text()
+            print(f"Clicked pod disruption budgets: {pod_disruption_budgets_name}")
+            # Add your pod disruption budgets click handling logic here
 
     def create_action_button(self, row):
         button = QToolButton()
@@ -318,18 +318,18 @@ class LimitRangesPage(QWidget):
         return action_container
 
     def handle_action(self, action, row):
-        limit_ranges_name = self.table.item(row, 1).text()
+        pod_disruption_budgets_name = self.table.item(row, 1).text()
         if action == "View":
-            print(f"Viewing limit ranges: {limit_ranges_name}")
+            print(f"Viewing pod disruption budgets: {pod_disruption_budgets_name}")
             # Add view logic here
         elif action == "Edit":
-            print(f"Editing limit ranges: {limit_ranges_name}")
+            print(f"Editing pod disruption budgets: {pod_disruption_budgets_name}")
             # Add edit logic here
         elif action == "Delete":
-            print(f"Deleting limit ranges: {limit_ranges_name}")
+            print(f"Deleting pod disruption budgets: {pod_disruption_budgets_name}")
             # Add delete logic here
 
-    def create_checkbox(self, row, limit_ranges_name):
+    def create_checkbox(self, row, pod_disruption_budgets_name):
         checkbox = QCheckBox()
         checkbox.setStyleSheet("""
             QCheckBox {
@@ -352,10 +352,10 @@ class LimitRangesPage(QWidget):
             }
         """)
 
-        checkbox.stateChanged.connect(lambda state: self.handle_checkbox_change(state, limit_ranges_name))
+        checkbox.stateChanged.connect(lambda state: self.handle_checkbox_change(state, pod_disruption_budgets_name))
         return checkbox
 
-    def create_checkbox_container(self, row, limit_ranges_name):
+    def create_checkbox_container(self, row, pod_disruption_budgets_name):
         """Create a container widget for the checkbox to prevent row selection"""
         container = QWidget()
         container.setStyleSheet("background-color: transparent;")
@@ -364,17 +364,17 @@ class LimitRangesPage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        checkbox = self.create_checkbox(row, limit_ranges_name)
+        checkbox = self.create_checkbox(row, pod_disruption_budgets_name)
         layout.addWidget(checkbox)
 
         return container
 
-    def handle_checkbox_change(self, state, limit_ranges_name):
+    def handle_checkbox_change(self, state, pod_disruption_budgets_name):
         if state == Qt.CheckState.Checked.value:
-            self.selected_limit_ranges.add(limit_ranges_name)
+            self.selected_pod_disruption_budgets.add(pod_disruption_budgets_name)
         else:
-            self.selected_limit_ranges.discard(limit_ranges_name)
-        print(f"Selected limit ranges: {self.selected_limit_ranges}")
+            self.selected_pod_disruption_budgets.discard(pod_disruption_budgets_name)
+        print(f"Selected pod disruption budgets: {self.selected_pod_disruption_budgets}")
 
     def create_select_all_checkbox(self):
         checkbox = QCheckBox()
@@ -413,58 +413,86 @@ class LimitRangesPage(QWidget):
                         break
 
     def load_data(self):
-        # Sample data for limit ranges (name, namespace, age)
-        limit_ranges_data = [
-            ["default-limits", "default", "71d"],
-            ["dev-limits", "dev", "45d"],
-            ["system-limits", "kube-system", "71d"],
-            ["test-limits", "test", "30d"],
-            ["production-limits", "production", "71d"],
-            ["frontend-limits", "frontend", "14d"],
-            ["backend-limits", "backend", "21d"],
-            ["database-limits", "database", "60d"],
-            ["monitoring-limits", "monitoring", "90d"],
-            ["logging-limits", "logging", "55d"]
+        # Sample data for pod disruption budgets
+        pod_disruption_budgets_data = [
+            ["frontend-pdb", "default", "80%", "N/A", "5", "5", "15d"],
+            ["backend-pdb", "backend", "2", "N/A", "3", "3", "30d"],
+            ["database-pdb", "database", "N/A", "1", "4", "5", "45d"],
+            ["redis-pdb", "cache", "2", "N/A", "3", "3", "10d"],
+            ["elasticsearch-pdb", "logging", "N/A", "25%", "7", "8", "60d"],
+            ["kafka-pdb", "messaging", "50%", "N/A", "6", "6", "90d"],
+            ["nginx-pdb", "ingress", "1", "N/A", "2", "2", "14d"],
+            ["monitoring-pdb", "monitoring", "N/A", "1", "3", "3", "120d"],
+            ["auth-service-pdb", "auth", "2", "N/A", "2", "2", "7d"],
+            ["api-gateway-pdb", "gateway", "N/A", "33%", "6", "6", "25d"]
         ]
 
-        self.table.setRowCount(len(limit_ranges_data))
+        self.table.setRowCount(len(pod_disruption_budgets_data))
 
-        for row, limit_range in enumerate(limit_ranges_data):
+        for row, pdb in enumerate(pod_disruption_budgets_data):
             # Set row height
             self.table.setRowHeight(row, 40)
 
             # Add checkbox in a container to prevent selection issues
-            checkbox_container = self.create_checkbox_container(row, limit_range[0])
+            checkbox_container = self.create_checkbox_container(row, pdb[0])
             self.table.setCellWidget(row, 0, checkbox_container)
 
-            # Name column
-            item_name = QTableWidgetItem(limit_range[0])
+            # Name column (column 1)
+            item_name = QTableWidgetItem(pdb[0])
             item_name.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             item_name.setForeground(QColor("#e2e8f0"))
             item_name.setFlags(item_name.flags() & ~Qt.ItemFlag.ItemIsEditable)
             self.table.setItem(row, 1, item_name)
 
-            # Namespace column
-            item_namespace = QTableWidgetItem(limit_range[1])
+            # Namespace column (column 2)
+            item_namespace = QTableWidgetItem(pdb[1])
             item_namespace.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             item_namespace.setForeground(QColor("#e2e8f0"))
             item_namespace.setFlags(item_namespace.flags() & ~Qt.ItemFlag.ItemIsEditable)
             self.table.setItem(row, 2, item_namespace)
 
-            # Age column
-            days = int(limit_range[2].replace('d', ''))
-            item_age = SortableTableWidgetItem(limit_range[2], days)
+            # Min Available column (column 3)
+            item_min_available = QTableWidgetItem(pdb[2])
+            item_min_available.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            item_min_available.setForeground(QColor("#e2e8f0"))
+            item_min_available.setFlags(item_min_available.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 3, item_min_available)
+
+            # Max Unavailable column (column 4)
+            item_max_unavailable = QTableWidgetItem(pdb[3])
+            item_max_unavailable.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            item_max_unavailable.setForeground(QColor("#e2e8f0"))
+            item_max_unavailable.setFlags(item_max_unavailable.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 4, item_max_unavailable)
+
+            # Current Healthy column (column 5)
+            item_current_healthy = QTableWidgetItem(pdb[4])
+            item_current_healthy.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            item_current_healthy.setForeground(QColor("#e2e8f0"))
+            item_current_healthy.setFlags(item_current_healthy.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 5, item_current_healthy)
+
+            # Desired Healthy column (column 6)
+            item_desired_healthy = QTableWidgetItem(pdb[5])
+            item_desired_healthy.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            item_desired_healthy.setForeground(QColor("#e2e8f0"))
+            item_desired_healthy.setFlags(item_desired_healthy.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 6, item_desired_healthy)
+
+            # Age column (column 7)
+            days = int(pdb[6].replace('d', ''))
+            item_age = SortableTableWidgetItem(pdb[6], days)
             item_age.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             item_age.setForeground(QColor("#e2e8f0"))
             item_age.setFlags(item_age.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            self.table.setItem(row, 3, item_age)
+            self.table.setItem(row, 7, item_age)
 
-            # Action button column
+            # Action button column (column 8)
             action_button = self.create_action_button(row)
-            self.table.setCellWidget(row, 4, action_button)
+            self.table.setCellWidget(row, 8, action_button)
 
         # Update items count label
-        self.items_count.setText(f"{len(limit_ranges_data)} items")
+        self.items_count.setText(f"{len(pod_disruption_budgets_data)} items")
 
         # Re-enable sorting after data is loaded
         self.table.setSortingEnabled(True)

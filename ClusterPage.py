@@ -12,6 +12,8 @@ from ConfigMapsPage import ConfigMapsPage  # Import the ConfigMapsPage
 from SecretsPage import SecretsPage        # Import the SecretsPage
 from ResourceQuotasPage import ResourceQuotasPage  # Import the ResourceQuotasPage
 from LimitRangesPage import LimitRangesPage        # Import the LimitRangespage
+from HorizontalPodAutoscalersPage import HorizontalPodAutoscalersPage    #Import the HorizontalPodsAutoscalersPage
+from PodDisruptionBudgetsPage import PodDisruptionBudgetsPage    #Import the PodDisruptionBudgetsPage
 
 class TitleBar(QWidget):
     def __init__(self, parent=None):
@@ -579,6 +581,8 @@ class DockerDesktopUI(QMainWindow):
         self.secrets_page = SecretsPage()
         self.resource_quotas_page = ResourceQuotasPage()
         self.limit_ranges_page = LimitRangesPage()
+        self.horizontal_pod_autoscalers = HorizontalPodAutoscalersPage()
+        self.pod_disruption_budgets = PodDisruptionBudgetsPage()
 
         # Add pages to stacked widget
         self.stacked_widget.addWidget(self.cluster_page)
@@ -588,6 +592,8 @@ class DockerDesktopUI(QMainWindow):
         self.stacked_widget.addWidget(self.secrets_page)
         self.stacked_widget.addWidget(self.resource_quotas_page)
         self.stacked_widget.addWidget(self.limit_ranges_page)
+        self.stacked_widget.addWidget(self.horizontal_pod_autoscalers)
+        self.stacked_widget.addWidget(self.pod_disruption_budgets)
 
         # Register pages in dictionary for easy access
         self.pages = {
@@ -598,6 +604,8 @@ class DockerDesktopUI(QMainWindow):
             "Secrets": self.secrets_page,
             "Resource Quotas": self.resource_quotas_page,
             "Limit Ranges": self.limit_ranges_page,
+            "Horizontal Pod Autoscalers": self.horizontal_pod_autoscalers,
+            "Pod Disruption Budgets": self.pod_disruption_budgets,
         }
 
         right_layout.addWidget(self.stacked_widget)
@@ -616,6 +624,7 @@ class DockerDesktopUI(QMainWindow):
         sidebar.setStyleSheet(f"""
             background-color: {self.bg_sidebar};
             border-right: 1px solid {self.border_color};
+            border-top: 1px solid {self.border_color};
         """)
 
         layout = QVBoxLayout(sidebar)
@@ -960,6 +969,5 @@ if __name__ == "__main__":
     window = DockerDesktopUI()
     window.show()
     sys.exit(app.exec())
-
 
 
