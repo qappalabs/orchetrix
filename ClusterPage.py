@@ -314,8 +314,40 @@ class NavMenuDropdown(QMenu):
         shadow.setOffset(0, 5)
         self.setGraphicsEffect(shadow)
 
+class SidebarToggleButton(QToolButton):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(20, 20)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip("Toggle Sidebar")
+        self.setStyleSheet("""
+            QToolButton {
+                background-color: transparent;
+                border: none;
+            }
+            QToolButton:hover {
+                background-color: rgba(255, 255, 255, 0.1);
+            }
+        """)
+        self.expanded = True
+
+        # Create icons for collapsed and expanded states
+        self.expanded_icon = QIcon("logos/collapse icon.png")  # Icon showing collapse action
+        self.collapsed_icon = QIcon("logos/expand icon.png")   # Icon showing expand action
+
+        # Set the initial icon
+        self.setIcon(self.expanded_icon)
+        self.setIconSize(QSize(30, 30))  # Set appropriate size for your icon
+
+    def toggle_expanded(self):
+        self.expanded = not self.expanded
+        if self.expanded:
+            self.setIcon(self.expanded_icon)
+        else:
+            self.setIcon(self.collapsed_icon)
+
 class NavIconButton(QToolButton):
-    def __init__(self, icon, text, active=False, has_dropdown=False, parent=None):
+    def __init__(self, icon, text, active=False, has_dropdown=False, parent=None, expanded=True):
         super().__init__(parent)
         self.parent_window = parent
         self.icon_text = icon
@@ -324,6 +356,7 @@ class NavIconButton(QToolButton):
         self.has_dropdown = has_dropdown
         self.dropdown_open = False
         self.dropdown_menu = None
+        self.expanded = expanded  # Track if sidebar is expanded
 
         # Colors
         self.bg_dark = "#1a1a1a"
@@ -337,18 +370,32 @@ class NavIconButton(QToolButton):
             self.setup_dropdown()
 
     def setup_ui(self):
-        self.setFixedSize(40, 40)
-        self.setText(self.icon_text)
+        self.setFixedHeight(40)
+        if self.expanded:
+            # Expanded state with text
+            self.setFixedWidth(180)
+            self.setText(f"{self.icon_text} {self.item_text}")
+            self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        else:
+            # Collapsed state with icon only
+            self.setFixedWidth(40)
+            self.setText(self.icon_text)
+            self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+
         self.setToolTip(self.item_text)
-        self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFont(QFont("Segoe UI", 16))
+        self.setFont(QFont("Segoe UI", 12))
         self.setAutoRaise(True)
         self.update_style()
         self.clicked.connect(self.activate)
         if self.has_dropdown:
             self.clicked.connect(self.show_dropdown)
         self.installEventFilter(self)
+
+    def set_expanded(self, expanded):
+        self.expanded = expanded
+        self.setup_ui()
+        self.update_style()
 
     def setup_dropdown(self):
         self.dropdown_menu = NavMenuDropdown(self.parent_window)
@@ -390,7 +437,10 @@ class NavIconButton(QToolButton):
         if self.has_dropdown:
             self.dropdown_open = True
             self.update_style()
-            pos = self.mapToGlobal(QPoint(self.width(), 0))
+            if self.expanded:
+                pos = self.mapToGlobal(QPoint(self.width(), 0))
+            else:
+                pos = self.mapToGlobal(QPoint(40, 0))
             self.dropdown_menu.popup(pos)
             self.dropdown_menu.aboutToHide.connect(self.dropdown_closed)
             QTimer.singleShot(50, lambda: self.setDown(False))
@@ -404,31 +454,28 @@ class NavIconButton(QToolButton):
             self.parent_window.set_active_nav_button(self)
 
     def update_style(self):
+        sidebar_style = """
+            QToolButton {
+                background-color: %s;
+                color: %s;
+                border: none;
+                border-radius: 0;
+                padding-left: 10px;
+                text-align: left;
+            }
+            QToolButton:hover {
+                background-color: rgba(255, 255, 255, 0.15);
+            }
+        """
+
         if self.is_active:
-            self.setStyleSheet(f"""
-                QToolButton {{
-                    background-color: rgba(255, 255, 255, 0.1);
-                    color: {self.text_light};
-                    border: none;
-                    border-radius: 0;
-                }}
-                QToolButton:hover {{
-                    background-color: rgba(255, 255, 255, 0.15);
-                }}
-            """)
+            bg_color = "rgba(255, 255, 255, 0.1)"
+            text_color = self.text_light
         else:
-            self.setStyleSheet(f"""
-                QToolButton {{
-                    background-color: transparent;
-                    color: {self.text_secondary};
-                    border: none;
-                    border-radius: 0;
-                }}
-                QToolButton:hover {{
-                    background-color: rgba(255, 255, 255, 0.1);
-                    color: {self.text_light};
-                }}
-            """)
+            bg_color = "transparent"
+            text_color = self.text_secondary
+
+        self.setStyleSheet(sidebar_style % (bg_color, text_color))
 
     def eventFilter(self, obj, event):
         if event.type() == QEvent.Type.Enter:
@@ -475,6 +522,9 @@ class DockerDesktopUI(QMainWindow):
 
         # Dictionary to store pages for easy navigation
         self.pages = {}
+
+        # States for the sidebar
+        self.sidebar_expanded = True
 
         # Set up custom tooltip style for the entire application
         app = QApplication.instance()
@@ -620,16 +670,46 @@ class DockerDesktopUI(QMainWindow):
 
     def create_sidebar(self):
         sidebar = QWidget()
-        sidebar.setFixedWidth(40)
+        sidebar.setObjectName("sidebar")
+        self.sidebar_width_expanded = 180
+        self.sidebar_width_collapsed = 40
+
+        if self.sidebar_expanded:
+            sidebar.setFixedWidth(self.sidebar_width_expanded)
+        else:
+            sidebar.setFixedWidth(self.sidebar_width_collapsed)
+
         sidebar.setStyleSheet(f"""
-            background-color: {self.bg_sidebar};
-            border-right: 1px solid {self.border_color};
-            border-top: 1px solid {self.border_color};
+            #sidebar {{
+                background-color: {self.bg_sidebar};
+                border-right: 1px solid {self.border_color};
+                border-top: 1px solid {self.border_color};
+            }}
         """)
 
-        layout = QVBoxLayout(sidebar)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        self.sidebar_layout = QVBoxLayout(sidebar)
+        self.sidebar_layout.setContentsMargins(0, 0, 0, 0)
+        self.sidebar_layout.setSpacing(0)
+
+        # Create toggle button layout
+        sidebar_controls = QWidget()
+        sidebar_controls.setObjectName("sidebar_controls")
+        sidebar_controls.setFixedHeight(30)
+        controls_layout = QHBoxLayout(sidebar_controls)
+
+        # Set margins to position the toggle button correctly
+        if self.sidebar_expanded:
+            controls_layout.setContentsMargins(self.sidebar_width_expanded - 35, 5, 5, 5)
+        else:
+            controls_layout.setContentsMargins(5, 5, 5, 5)
+
+        # Add toggle button
+        self.toggle_btn = SidebarToggleButton()
+        self.toggle_btn.clicked.connect(self.toggle_sidebar)
+
+        controls_layout.addWidget(self.toggle_btn)
+
+        self.sidebar_layout.addWidget(sidebar_controls)
 
         # Create nav buttons
         self.nav_buttons = []
@@ -648,24 +728,62 @@ class DockerDesktopUI(QMainWindow):
         ]
 
         for item in nav_items:
-            nav_btn = NavIconButton(item[0], item[1], item[2], item[3] if len(item) > 3 else False, self)
+            nav_btn = NavIconButton(
+                item[0], item[1], item[2],
+                item[3] if len(item) > 3 else False,
+                self, self.sidebar_expanded
+            )
             self.nav_buttons.append(nav_btn)
-            layout.addWidget(nav_btn)
+            self.sidebar_layout.addWidget(nav_btn)
 
-        layout.addStretch(1)
-        Compare_btn = NavIconButton("🖱️", "Compare", False, False, self)
-        Terminal_btn = NavIconButton("⌨️", "Terminal", False, False, self)
-        Download_btn = NavIconButton("🛠️", "Download", False, False, self)
+        self.sidebar_layout.addStretch(1)
+
+        # Add utility buttons at the bottom
+        Compare_btn = NavIconButton("🖱️", "Compare", False, False, self, self.sidebar_expanded)
+        Terminal_btn = NavIconButton("⌨️", "Terminal", False, False, self, self.sidebar_expanded)
+        Download_btn = NavIconButton("🛠️", "Download", False, False, self, self.sidebar_expanded)
 
         self.nav_buttons.append(Compare_btn)
         self.nav_buttons.append(Terminal_btn)
         self.nav_buttons.append(Download_btn)
 
-        layout.addWidget(Compare_btn)
-        layout.addWidget(Terminal_btn)
-        layout.addWidget(Download_btn)
+        self.sidebar_layout.addWidget(Compare_btn)
+        self.sidebar_layout.addWidget(Terminal_btn)
+        self.sidebar_layout.addWidget(Download_btn)
+
+        self.sidebar = sidebar
 
         return sidebar
+
+    def toggle_sidebar(self):
+        self.sidebar_expanded = not self.sidebar_expanded
+        self.toggle_btn.toggle_expanded()
+        self.update_sidebar_state()
+
+    def update_sidebar_state(self):
+        # Create animation for smooth transition
+        self.sidebar_animation = QPropertyAnimation(self.sidebar, b"minimumWidth")
+        self.sidebar_animation.setDuration(200)
+        self.sidebar_animation.setEasingCurve(QEasingCurve.Type.InOutQuad)
+
+        if self.sidebar_expanded:
+            self.sidebar_animation.setStartValue(self.sidebar_width_collapsed)
+            self.sidebar_animation.setEndValue(self.sidebar_width_expanded)
+            # Update toggle button position for expanded state
+            controls_layout = self.sidebar.findChild(QWidget, "sidebar_controls").layout()
+            controls_layout.setContentsMargins(self.sidebar_width_expanded - 35, 5, 5, 5)
+        else:
+            self.sidebar_animation.setStartValue(self.sidebar_width_expanded)
+            self.sidebar_animation.setEndValue(self.sidebar_width_collapsed)
+            # Update toggle button position for collapsed state
+            controls_layout = self.sidebar.findChild(QWidget, "sidebar_controls").layout()
+            controls_layout.setContentsMargins(5, 5, 5, 5)
+
+        self.sidebar_animation.start()
+
+        # Update all nav buttons
+        for btn in self.nav_buttons:
+            btn.set_expanded(self.sidebar_expanded)
 
     def create_header(self):
         header = QWidget()
@@ -969,5 +1087,3 @@ if __name__ == "__main__":
     window = DockerDesktopUI()
     window.show()
     sys.exit(app.exec())
-
-
