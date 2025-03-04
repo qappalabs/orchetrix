@@ -15,7 +15,7 @@ class CustomHeader(QHeaderView):
     def __init__(self, orientation, parent=None):
         super().__init__(orientation, parent)
         # Define which columns will be sortable
-        self.sortable_columns = {1, 2, 3, 4}  # Name, Namespace, Keys, Age
+        self.sortable_columns = {1, 2, 3, 4, 5, 6, 7}  # Name, Namespace, Min Available, Max Unavailable, Current Healthy, Desired Healthy, Age,
         self.setSectionsClickable(True)
         self.setHighlightSections(True)
 
@@ -61,10 +61,10 @@ class SortableTableWidgetItem(QTableWidgetItem):
             return self.value < other.value
         return super().__lt__(other)
 
-class ConfigMapsPage(QWidget):
+class PodDisruptionBudgetsPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.selected_config_maps = set()  # Track selected config maps
+        self.selected_pod_disruption_budgets = set()  # Track selected pod Disruption Budgets
         self.setup_ui()
         self.load_data()
 
@@ -75,14 +75,14 @@ class ConfigMapsPage(QWidget):
 
         # Header section
         header = QHBoxLayout()
-        title = QLabel("Config Maps")
+        title = QLabel("Pod Disruption Budgets")
         title.setStyleSheet("""
             font-size: 20px;
             font-weight: bold;
             color: #ffffff;
         """)
 
-        self.items_count = QLabel("11 items")
+        self.items_count = QLabel("0 items")
         self.items_count.setStyleSheet("""
             color: #9ca3af;
             font-size: 12px;
@@ -97,8 +97,8 @@ class ConfigMapsPage(QWidget):
 
         # Create table
         self.table = QTableWidget()
-        self.table.setColumnCount(6)  # Checkbox, Name, Namespace, Keys, Age, Actions
-        headers = ["", "Name", "Namespace", "Keys", "Age", ""]
+        self.table.setColumnCount(9)  # Checkbox, Name, Namespace, Age, Actions
+        headers = ["", "Name", "Namespace","Min Available", "max Unavailable", "Current Healthy", "Desired Healthy", "Age", ""]
         self.table.setHorizontalHeaderLabels(headers)
 
         # Use the custom header to control sorting
@@ -161,19 +161,18 @@ class ConfigMapsPage(QWidget):
         # Configure table properties
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # Name column
         self.table.horizontalHeader().setStretchLastSection(False)
-        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(5, 40)  # Width for action column
+
+        # Set fixed width for specific columns
+        column_widths = [40, None, 120, 120, 120, 120, 120, 80, 40]  # Adjusted for 9 columns
+        for i, width in enumerate(column_widths):
+            if width is not None:  # Apply fixed width to all columns except Name (which stretches)
+                if i != 1:  # Skip Name column which is set to stretch
+                    self.table.horizontalHeader().setSectionResizeMode(i, QHeaderView.ResizeMode.Fixed)
+                    self.table.setColumnWidth(i, width)
+
         self.table.setShowGrid(True)
         self.table.setAlternatingRowColors(False)
         self.table.verticalHeader().setVisible(False)
-
-        # Fixed widths for columns
-        column_widths = [40, None, 120, 200, 80, 40]
-        for i, width in enumerate(column_widths):
-            if i != 1:  # Skip the Name column which is set to stretch
-                if width is not None:
-                    self.table.horizontalHeader().setSectionResizeMode(i, QHeaderView.ResizeMode.Fixed)
-                    self.table.setColumnWidth(i, width)
 
         # Temporarily disable sorting during data loading
         self.table.setSortingEnabled(False)
@@ -188,11 +187,11 @@ class ConfigMapsPage(QWidget):
         # Override mousePressEvent to handle selections properly
         self.table.mousePressEvent = self.custom_table_mousePressEvent
 
-        # Add click handler for rows
-        self.table.cellClicked.connect(self.handle_row_click)
-
         layout.addLayout(header)
         layout.addWidget(self.table)
+
+        # Add click handler for rows
+        self.table.cellClicked.connect(self.handle_row_click)
 
     def custom_table_mousePressEvent(self, event):
         """
@@ -203,7 +202,7 @@ class ConfigMapsPage(QWidget):
         index = self.table.indexAt(event.pos())
 
         # Check if we're clicking on a cell that has a widget (checkbox or action button)
-        if index.isValid() and (index.column() == 0 or index.column() == 5):
+        if index.isValid() and (index.column() == 0 or index.column() == 9):
             # Let the event pass through to the widget without selecting the row
             QTableWidget.mousePressEvent(self.table, event)
         elif item:
@@ -227,10 +226,10 @@ class ConfigMapsPage(QWidget):
         return super().eventFilter(obj, event)
 
     def handle_row_click(self, row, column):
-        if column != 5:  # Don't trigger for action button column
-            config_map_name = self.table.item(row, 1).text()
-            print(f"Clicked config map: {config_map_name}")
-            # Add your config map click handling logic here
+        if column != 9:  # Don't trigger for action button column
+            pod_disruption_budgets_name = self.table.item(row, 1).text()
+            print(f"Clicked pod disruption budgets: {pod_disruption_budgets_name}")
+            # Add your pod disruption budgets click handling logic here
 
     def create_action_button(self, row):
         button = QToolButton()
@@ -290,6 +289,11 @@ class ConfigMapsPage(QWidget):
             }
         """)
 
+        # Create View action with eye icon
+        view_action = menu.addAction("View")
+        view_action.setIcon(QIcon("icons/view.png"))
+        view_action.triggered.connect(lambda: self.handle_action("View", row))
+
         # Create Edit action with pencil icon
         edit_action = menu.addAction("Edit")
         edit_action.setIcon(QIcon("icons/edit.png"))
@@ -314,15 +318,18 @@ class ConfigMapsPage(QWidget):
         return action_container
 
     def handle_action(self, action, row):
-        config_map_name = self.table.item(row, 1).text()
-        if action == "Edit":
-            print(f"Editing config map: {config_map_name}")
+        pod_disruption_budgets_name = self.table.item(row, 1).text()
+        if action == "View":
+            print(f"Viewing pod disruption budgets: {pod_disruption_budgets_name}")
+            # Add view logic here
+        elif action == "Edit":
+            print(f"Editing pod disruption budgets: {pod_disruption_budgets_name}")
             # Add edit logic here
         elif action == "Delete":
-            print(f"Deleting config map: {config_map_name}")
+            print(f"Deleting pod disruption budgets: {pod_disruption_budgets_name}")
             # Add delete logic here
 
-    def create_checkbox(self, row, config_map_name):
+    def create_checkbox(self, row, pod_disruption_budgets_name):
         checkbox = QCheckBox()
         checkbox.setStyleSheet("""
             QCheckBox {
@@ -345,10 +352,10 @@ class ConfigMapsPage(QWidget):
             }
         """)
 
-        checkbox.stateChanged.connect(lambda state: self.handle_checkbox_change(state, config_map_name))
+        checkbox.stateChanged.connect(lambda state: self.handle_checkbox_change(state, pod_disruption_budgets_name))
         return checkbox
 
-    def create_checkbox_container(self, row, config_map_name):
+    def create_checkbox_container(self, row, pod_disruption_budgets_name):
         """Create a container widget for the checkbox to prevent row selection"""
         container = QWidget()
         container.setStyleSheet("background-color: transparent;")
@@ -357,17 +364,17 @@ class ConfigMapsPage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        checkbox = self.create_checkbox(row, config_map_name)
+        checkbox = self.create_checkbox(row, pod_disruption_budgets_name)
         layout.addWidget(checkbox)
 
         return container
 
-    def handle_checkbox_change(self, state, config_map_name):
+    def handle_checkbox_change(self, state, pod_disruption_budgets_name):
         if state == Qt.CheckState.Checked.value:
-            self.selected_config_maps.add(config_map_name)
+            self.selected_pod_disruption_budgets.add(pod_disruption_budgets_name)
         else:
-            self.selected_config_maps.discard(config_map_name)
-        print(f"Selected config maps: {self.selected_config_maps}")
+            self.selected_pod_disruption_budgets.discard(pod_disruption_budgets_name)
+        print(f"Selected pod disruption budgets: {self.selected_pod_disruption_budgets}")
 
     def create_select_all_checkbox(self):
         checkbox = QCheckBox()
@@ -406,61 +413,86 @@ class ConfigMapsPage(QWidget):
                         break
 
     def load_data(self):
-        # Data from the image
-        config_maps_data = [
-            ["cluster-info", "kube-public", "kubeconfig", "71d"],
-            ["coredns", "kube-system", "Corefile", "71d"],
-            ["extension-apiserver-authentication", "kube-system", "client-ca-file, requestheader-allowed-names, requestheader", "71d"],
-            ["kube-apiserver-legacy-service-account-token-tra", "kube-system", "since", "71d"],
-            ["kube-proxy", "kube-system", "config.conf, kubeconfig.conf", "71d"],
-            ["kube-root-ca.crt", "default", "ca.crt", "71d"],
-            ["kube-root-ca.crt", "kube-node-lease", "ca.crt", "71d"],
-            ["kube-root-ca.crt", "kube-public", "ca.crt", "71d"],
-            ["kube-root-ca.crt", "kube-system", "ca.crt", "71d"],
-            ["kubeadm-config", "kube-system", "ClusterConfiguration", "71d"],
-            ["kubelet-config", "kube-system", "kubelet", "71d"]
+        # Sample data for pod disruption budgets
+        pod_disruption_budgets_data = [
+            ["frontend-pdb", "default", "80%", "N/A", "5", "5", "15d"],
+            ["backend-pdb", "backend", "2", "N/A", "3", "3", "30d"],
+            ["database-pdb", "database", "N/A", "1", "4", "5", "45d"],
+            ["redis-pdb", "cache", "2", "N/A", "3", "3", "10d"],
+            ["elasticsearch-pdb", "logging", "N/A", "25%", "7", "8", "60d"],
+            ["kafka-pdb", "messaging", "50%", "N/A", "6", "6", "90d"],
+            ["nginx-pdb", "ingress", "1", "N/A", "2", "2", "14d"],
+            ["monitoring-pdb", "monitoring", "N/A", "1", "3", "3", "120d"],
+            ["auth-service-pdb", "auth", "2", "N/A", "2", "2", "7d"],
+            ["api-gateway-pdb", "gateway", "N/A", "33%", "6", "6", "25d"]
         ]
 
-        self.table.setRowCount(len(config_maps_data))
+        self.table.setRowCount(len(pod_disruption_budgets_data))
 
-        for row, config_map in enumerate(config_maps_data):
+        for row, pdb in enumerate(pod_disruption_budgets_data):
             # Set row height
             self.table.setRowHeight(row, 40)
 
             # Add checkbox in a container to prevent selection issues
-            checkbox_container = self.create_checkbox_container(row, config_map[0])
+            checkbox_container = self.create_checkbox_container(row, pdb[0])
             self.table.setCellWidget(row, 0, checkbox_container)
 
-            # Add rest of the data
-            for col, value in enumerate(config_map):
-                # Skip value extraction for the checkbox already handled
-                cell_col = col + 1
+            # Name column (column 1)
+            item_name = QTableWidgetItem(pdb[0])
+            item_name.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            item_name.setForeground(QColor("#e2e8f0"))
+            item_name.setFlags(item_name.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 1, item_name)
 
-                # Use SortableTableWidgetItem for columns that need sorting
-                if col == 3:  # Age column
-                    # Extract number for proper sorting (e.g., "71d" -> 71)
-                    days = int(value.replace('d', ''))
-                    item = SortableTableWidgetItem(value, days)
-                else:
-                    item = QTableWidgetItem(value)
+            # Namespace column (column 2)
+            item_namespace = QTableWidgetItem(pdb[1])
+            item_namespace.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            item_namespace.setForeground(QColor("#e2e8f0"))
+            item_namespace.setFlags(item_namespace.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 2, item_namespace)
 
-                # Set alignment based on column
-                if col == 3:  # Age column
-                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                else:
-                    item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            # Min Available column (column 3)
+            item_min_available = QTableWidgetItem(pdb[2])
+            item_min_available.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            item_min_available.setForeground(QColor("#e2e8f0"))
+            item_min_available.setFlags(item_min_available.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 3, item_min_available)
 
-                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                item.setForeground(QColor("#e2e8f0"))
+            # Max Unavailable column (column 4)
+            item_max_unavailable = QTableWidgetItem(pdb[3])
+            item_max_unavailable.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            item_max_unavailable.setForeground(QColor("#e2e8f0"))
+            item_max_unavailable.setFlags(item_max_unavailable.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 4, item_max_unavailable)
 
-                self.table.setItem(row, cell_col, item)
+            # Current Healthy column (column 5)
+            item_current_healthy = QTableWidgetItem(pdb[4])
+            item_current_healthy.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            item_current_healthy.setForeground(QColor("#e2e8f0"))
+            item_current_healthy.setFlags(item_current_healthy.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 5, item_current_healthy)
 
-            # Add action button
+            # Desired Healthy column (column 6)
+            item_desired_healthy = QTableWidgetItem(pdb[5])
+            item_desired_healthy.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            item_desired_healthy.setForeground(QColor("#e2e8f0"))
+            item_desired_healthy.setFlags(item_desired_healthy.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 6, item_desired_healthy)
+
+            # Age column (column 7)
+            days = int(pdb[6].replace('d', ''))
+            item_age = SortableTableWidgetItem(pdb[6], days)
+            item_age.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            item_age.setForeground(QColor("#e2e8f0"))
+            item_age.setFlags(item_age.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 7, item_age)
+
+            # Action button column (column 8)
             action_button = self.create_action_button(row)
-            self.table.setCellWidget(row, 5, action_button)
+            self.table.setCellWidget(row, 8, action_button)
 
         # Update items count label
-        self.items_count.setText(f"{len(config_maps_data)} items")
+        self.items_count.setText(f"{len(pod_disruption_budgets_data)} items")
 
         # Re-enable sorting after data is loaded
         self.table.setSortingEnabled(True)

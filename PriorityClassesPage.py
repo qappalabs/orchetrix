@@ -15,7 +15,7 @@ class CustomHeader(QHeaderView):
     def __init__(self, orientation, parent=None):
         super().__init__(orientation, parent)
         # Define which columns will be sortable
-        self.sortable_columns = {1, 2, 3, 4}  # Name, Namespace, Keys, Age
+        self.sortable_columns = {1, 2, 3, 4}  # Name, Value, Global Default, Age
         self.setSectionsClickable(True)
         self.setHighlightSections(True)
 

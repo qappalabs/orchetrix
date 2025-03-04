@@ -1,13 +1,15 @@
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, 
-                           QTableWidgetItem, QLabel, QHeaderView, QPushButton,
-                           QMenu, QToolButton, QFrame, QGraphicsDropShadowEffect,
-                           QSizePolicy, QComboBox)
-from PyQt6.QtCore import Qt, QSize, QPoint, QTimer, QRectF
-from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QLinearGradient, QPainterPath, QBrush
-import random
-import datetime
-import re
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
+    QLabel, QHeaderView, QToolButton, QMenu, QCheckBox, QFrame, 
+    QGraphicsDropShadowEffect, QSizePolicy, QStyleOptionButton, QStyle, QStyleOptionHeader, QApplication
+)
+from PyQt6.QtCore import Qt, QTimer, QRect, QRectF, pyqtSignal
+from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QLinearGradient, QPainterPath, QBrush, QCursor
+import random, datetime, re
 
+#------------------------------------------------------------------
+# GraphWidget (unchanged)
+#------------------------------------------------------------------
 class GraphWidget(QFrame):
     """Custom widget for displaying resource utilization graphs"""
     def __init__(self, title, unit, color, parent=None):
@@ -20,13 +22,11 @@ class GraphWidget(QFrame):
         self.selected_node = None  # Will store the selected node data
         self.node_name = "None"
         self.utilization_data = {}  # Store utilization data for all nodes
-        
-        # Visual properties
+
         self.setMinimumHeight(120)
         self.setMaximumHeight(120)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        
-        # Styling
+
         self.setStyleSheet(f"""
             QFrame {{
                 background-color: #1e1e1e;
@@ -34,324 +34,251 @@ class GraphWidget(QFrame):
                 border: 1px solid #2d2d2d;
             }}
         """)
-        
-        # Add shadow
+
         shadow = QGraphicsDropShadowEffect(self)
         shadow.setBlurRadius(15)
         shadow.setOffset(0, 2)
         shadow.setColor(QColor(0, 0, 0, 80))
         self.setGraphicsEffect(shadow)
-        
-        # Layout
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 12, 16, 12)
-        
-        # Title and value layout
+
         header_layout = QHBoxLayout()
-        
-        # Title with node name
         self.title_label = QLabel(f"{title} (No node selected)")
         self.title_label.setStyleSheet("""
             color: #ffffff;
             font-size: 14px;
             font-weight: bold;
         """)
-        
-        # Current value
         self.value_label = QLabel(f"0{unit}")
         self.value_label.setStyleSheet(f"""
             color: {color};
             font-size: 16px;
             font-weight: bold;
         """)
-        
         header_layout.addWidget(self.title_label)
         header_layout.addStretch()
         header_layout.addWidget(self.value_label)
-        
         layout.addLayout(header_layout)
         layout.addStretch()
-        
-        # Start update timer - update every 3 seconds
+
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_data)
         self.timer.start(3000)
-    
+
     def generate_utilization_data(self, nodes_data):
-        """Generate utilization data for all nodes"""
         self.utilization_data = {}
-        
         for node in nodes_data:
             node_name = node[0]
-            
             if self.title == "CPU Usage":
-                # CPU utilization between 10-70% for each node
-                cpu_cores = float(node[1])
                 utilization = random.uniform(10, 70)
                 self.utilization_data[node_name] = utilization
-                
             elif self.title == "Memory Usage":
-                # Memory utilization between 30-80% for each node
-                memory_value = float(re.search(r'(\d+)', node[2]).group(1))
                 utilization = random.uniform(30, 80)
                 self.utilization_data[node_name] = utilization
-                
             else:  # Disk Usage
-                # Disk utilization between 40-90% for each node
-                disk_value = float(re.search(r'(\d+)', node[3]).group(1))
                 utilization = random.uniform(40, 90)
                 self.utilization_data[node_name] = utilization
-        
+
     def get_node_utilization(self, node_name):
-        """Get the utilization percentage for a specific node"""
-        if node_name in self.utilization_data:
-            return self.utilization_data[node_name]
-        return 0
+        return self.utilization_data.get(node_name, 0)
 
     def set_selected_node(self, node_data, node_name):
-        """Set the selected node data"""
         self.selected_node = node_data
         self.node_name = node_name
         self.title_label.setText(f"{self.title} ({node_name})")
-        
-        # If we already have utilization data for this node, use it
         if node_name in self.utilization_data:
             self.current_value = round(self.utilization_data[node_name], 1)
             self.value_label.setText(f"{self.current_value}{self.unit}")
-            
-        self.update_data()  # Initial update
+        self.update_data()
 
     def update_data(self):
-        """Update graph data based on selected node information"""
         if not self.selected_node or self.node_name not in self.utilization_data:
             return
-        
-        # Get the current utilization value for this node
         current_utilization = self.utilization_data[self.node_name]
-        
-        # Add small variation for visual effect
         variation = random.uniform(-2, 2)
         new_value = current_utilization + variation
-        
-        # Keep within reasonable bounds for the resource type
         if self.title == "CPU Usage":
             new_value = max(min(new_value, 95), 5)
         elif self.title == "Memory Usage":
             new_value = max(min(new_value, 95), 10)
-        else:  # Disk
+        else:
             new_value = max(min(new_value, 98), 20)
-        
-        # Update the stored utilization for this node
         self.utilization_data[self.node_name] = new_value
-        
-        # Update data series
         self.data.append(new_value)
-        self.data.pop(0)  # Remove oldest data point
+        self.data.pop(0)
         self.current_value = round(new_value, 1)
         self.value_label.setText(f"{self.current_value}{self.unit}")
-        self.update()  # Trigger repaint
+        self.update()
 
     def paintEvent(self, event):
         super().paintEvent(event)
-        
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        # Set up drawing area
-        width = self.width() - 32  # Account for margins
-        height = 60  # Fixed height for the graph
-        bottom = self.height() - 12  # Bottom of the graph
-        top = bottom - height  # Top of the graph
-        
-        # Create gradient for the area under the line
+        width = self.width() - 32
+        height = 60
+        bottom = self.height() - 12
+        top = bottom - height
         gradient = QLinearGradient(0, top, 0, bottom)
         base_color = QColor(self.color)
         gradient.setColorAt(0, QColor(base_color.red(), base_color.green(), base_color.blue(), 100))
         gradient.setColorAt(1, QColor(base_color.red(), base_color.green(), base_color.blue(), 5))
-        
-        # Find min and max values for scaling
         min_value = min(self.data)
         max_value = max(self.data)
-        value_range = max(max_value - min_value, 10)  # Ensure a minimum range
-        
-        # Create path for the line and area
+        value_range = max(max_value - min_value, 10)
         path = QPainterPath()
         line_path = QPainterPath()
-        
         x_step = width / (len(self.data) - 1)
-        
-        # Start at the first point
-        x = 16  # Start with left margin
+        x = 16
         y = bottom - ((self.data[0] - min_value) / value_range) * height
         path.moveTo(x, y)
         line_path.moveTo(x, y)
-        
-        # Add points to the path
         for i in range(1, len(self.data)):
             x = 16 + i * x_step
             y = bottom - ((self.data[i] - min_value) / value_range) * height
             path.lineTo(x, y)
             line_path.lineTo(x, y)
-        
-        # Complete the fill path
         path.lineTo(x, bottom)
         path.lineTo(16, bottom)
         path.closeSubpath()
-        
-        # Draw the fill
         painter.setBrush(QBrush(gradient))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawPath(path)
-        
-        # Draw the line
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setPen(QPen(QColor(self.color), 2))
         painter.drawPath(line_path)
-        
-        # Draw time indicators
         painter.setPen(QPen(QColor("#6b7280"), 1))
         now = datetime.datetime.now()
-        
-        # Draw 3 time markers
-        times = [
-            now - datetime.timedelta(minutes=20),
-            now - datetime.timedelta(minutes=10),
-            now
-        ]
-        
+        times = [now - datetime.timedelta(minutes=20),
+                 now - datetime.timedelta(minutes=10),
+                 now]
         x_positions = [16, 16 + width/2, 16 + width]
-        
         for i, t in enumerate(times):
             time_str = t.strftime("%H:%M")
             x = x_positions[i]
-            painter.drawText(QRectF(x - 20, bottom + 2, 40, 10), 
+            painter.drawText(QRectF(x - 20, bottom + 2, 40, 10),
                              Qt.AlignmentFlag.AlignCenter, time_str)
-            
-        # If no node is selected, show a message
         if not self.selected_node:
             painter.setPen(QPen(QColor("#9ca3af")))
             painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "Select a node to view metrics")
 
+#------------------------------------------------------------------
+# Custom table item for numeric sorting
+#------------------------------------------------------------------
 class SortableTableWidgetItem(QTableWidgetItem):
-    """Custom QTableWidgetItem that can be sorted with utilization percentages"""
-    def __init__(self, text, value=0, percentage=None):
+    def __init__(self, text, value=None):
         super().__init__(text)
         self.value = value
-        self.percentage = percentage
-        
+
     def __lt__(self, other):
-        if hasattr(other, 'value'):
+        if isinstance(other, SortableTableWidgetItem) and self.value is not None and other.value is not None:
             return self.value < other.value
         return super().__lt__(other)
 
+#------------------------------------------------------------------
+# CustomHeader: Only columns 1-4 are sortable; shows a hover sort indicator arrow.
+#------------------------------------------------------------------
+class CustomHeader(QHeaderView):
+    """
+    A custom header that only enables sorting for a subset of columns (defined in self.sortable_columns)
+    and shows a hover sort indicator arrow on those columns.
+    """
+    def __init__(self, orientation, parent=None):
+        super().__init__(orientation, parent)
+        # Only these columns will be sortable (for example: columns 1-4)
+        self.sortable_columns = {1, 2, 3, 4}
+        self.setSectionsClickable(True)
+        self.setHighlightSections(True)
+
+    def mousePressEvent(self, event):
+        logicalIndex = self.logicalIndexAt(event.pos())
+        if logicalIndex in self.sortable_columns:
+            super().mousePressEvent(event)
+        else:
+            event.ignore()
+
+    def paintSection(self, painter, rect, logicalIndex):
+        option = QStyleOptionHeader()
+        self.initStyleOption(option)
+        option.rect = rect
+        option.section = logicalIndex
+        # Retrieve header text from the model and set it in the option.
+        header_text = self.model().headerData(logicalIndex, self.orientation(), Qt.ItemDataRole.DisplayRole)
+        option.text = str(header_text) if header_text is not None else ""
+
+        if logicalIndex in self.sortable_columns:
+            mouse_pos = QCursor.pos()
+            local_mouse = self.mapFromGlobal(mouse_pos)
+            if rect.contains(local_mouse):
+                option.state |= QStyle.StateFlag.State_MouseOver
+                # Use the Qt6 enum value for sort indicator (SortDown for descending)
+                option.sortIndicator = QStyleOptionHeader.SortIndicator.SortDown
+                option.state |= QStyle.StateFlag.State_Sunken
+            else:
+                option.state &= ~QStyle.StateFlag.State_MouseOver
+        else:
+            option.state &= ~QStyle.StateFlag.State_MouseOver
+
+        self.style().drawControl(QStyle.ControlElement.CE_Header, option, painter, self)
+
+#------------------------------------------------------------------
+# NodesPage with fixed row height, responsive columns, header-based sorting,
+# and header-based sort only on specific columns (via CustomHeader)
+#------------------------------------------------------------------
 class NodesPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.selected_row = -1  # No row selected initially
-        self.cpu_utilization = {}  # Store CPU utilization for each node
-        self.memory_utilization = {}  # Store memory utilization for each node
-        self.disk_utilization = {}  # Store disk utilization for each node
+        self.selected_row = -1
+        self.selected_nodes = set()  # Track checked nodes
         self.setup_ui()
         self.load_data()
+        self.installEventFilter(self)
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(16)
 
-        # Add graphs at the top
+        # Graphs (CPU, Memory, Disk)
         graphs_layout = QHBoxLayout()
-        
-        # CPU usage graph
         self.cpu_graph = GraphWidget("CPU Usage", "%", "#FF5733")
-        
-        # Memory usage graph
         self.mem_graph = GraphWidget("Memory Usage", "%", "#33A8FF")
-        
-        # Disk usage graph
         self.disk_graph = GraphWidget("Disk Usage", "%", "#8C33FF")
-        
         graphs_layout.addWidget(self.cpu_graph)
         graphs_layout.addWidget(self.mem_graph)
         graphs_layout.addWidget(self.disk_graph)
-        
         layout.addLayout(graphs_layout)
 
-        # Header section with sorting dropdown
-        header = QHBoxLayout()
+        # Header: Title and item count (sorting handled via header clicks)
+        header_layout = QHBoxLayout()
         title = QLabel("Nodes")
         title.setStyleSheet("""
             font-size: 20px;
             font-weight: bold;
             color: #ffffff;
         """)
-        
-        items_count = QLabel("4 items")
-        items_count.setStyleSheet("""
+        self.items_count = QLabel("0 items")
+        self.items_count.setStyleSheet("""
             color: #9ca3af;
             font-size: 12px;
             margin-left: 8px;
             font-family: 'Segoe UI';
         """)
-        items_count.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-        
-        header.addWidget(title)
-        header.addWidget(items_count)
-        header.addStretch()
-        
-        # Add sorting dropdown
-        sort_label = QLabel("Sort by:")
-        sort_label.setStyleSheet("""
-            color: #e2e8f0;
-            font-size: 13px;
-            margin-right: 8px;
-        """)
-        
-        self.sort_combo = QComboBox()
-        self.sort_combo.addItem("Name")
-        self.sort_combo.addItem("CPU (Highest)")
-        self.sort_combo.addItem("Memory (Highest)")
-        self.sort_combo.addItem("Disk (Highest)")
-        self.sort_combo.setStyleSheet("""
-            QComboBox {
-                background-color: #2d2d2d;
-                color: #e2e8f0;
-                border: 1px solid #444444;
-                border-radius: 4px;
-                padding: 4px 12px;
-                min-width: 150px;
-            }
-            QComboBox::drop-down {
-                subcontrol-origin: padding;
-                subcontrol-position: center right;
-                width: 20px;
-                border-left: none;
-            }
-            QComboBox::down-arrow {
-                image: none;
-                width: 0;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #2d2d2d;
-                color: #e2e8f0;
-                border: 1px solid #444444;
-                selection-background-color: #2196F3;
-            }
-        """)
-        
-        self.sort_combo.currentTextChanged.connect(self.sort_table)
-        
-        header.addWidget(sort_label)
-        header.addWidget(self.sort_combo)
+        self.items_count.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        header_layout.addWidget(title)
+        header_layout.addWidget(self.items_count)
+        header_layout.addStretch()
+        layout.addLayout(header_layout)
 
-        # Create table
+        # Table setup: 11 columns
         self.table = QTableWidget()
-        self.table.setColumnCount(10)  # Removed checkbox column
-        headers = ["Name", "CPU", "Memory", "Disk", "Taints", "Roles", 
-                  "Version", "Age", "Conditions", ""]
+        self.table.setColumnCount(11)
+        headers = ["", "Name", "CPU", "Memory", "Disk", "Taints", "Roles", "Version", "Age", "Conditions", ""]
         self.table.setHorizontalHeaderLabels(headers)
-        
-        # Style the table
+        custom_header = CustomHeader(Qt.Orientation.Horizontal, self.table)
+        self.table.setHorizontalHeader(custom_header)
+        self.table.setSortingEnabled(True)
         self.table.setStyleSheet("""
             QTableWidget {
                 background-color: #1e1e1e;
@@ -364,18 +291,9 @@ class NodesPage(QWidget):
                 border: none;
                 outline: none;
             }
-            QTableWidget::item:hover {
-                background-color: rgba(255, 255, 255, 0.05);
-                border-radius: 4px;
-            }
             QTableWidget::item:selected {
                 background-color: rgba(33, 150, 243, 0.2);
                 border: none;
-            }
-            QTableWidget::item:focus {
-                border: none;
-                outline: none;
-                background-color: transparent;
             }
             QHeaderView::section {
                 background-color: #252525;
@@ -385,44 +303,148 @@ class NodesPage(QWidget):
                 border-bottom: 1px solid #2d2d2d;
                 font-size: 12px;
             }
-            QToolButton {
-                border: none;
-                border-radius: 4px;
-                padding: 4px;
-            }
-            QToolButton:hover {
-                background-color: rgba(255, 255, 255, 0.1);
+            QHeaderView::section:hover {
+                background-color: #2d2d2d;
             }
         """)
-        
-        # Additional table properties
-        self.table.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # Disable focus highlighting
-        self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)  # Allow single row selection
-        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)  # Select entire rows
-        
-        # Configure table properties
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # Name column
-        self.table.horizontalHeader().setStretchLastSection(False)
-        self.table.horizontalHeader().setSectionResizeMode(9, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(9, 30)  # Width for action column
-        self.table.setShowGrid(True)
-        self.table.setAlternatingRowColors(False)
-        self.table.verticalHeader().setVisible(False)
-        
-        # Fixed widths for columns
-        column_widths = [None, 120, 140, 140, 80, 120, 100, 80, 120, 40]  # Increased width for CPU/Memory/Disk
-        for i, width in enumerate(column_widths):
-            if i != 0:  # Skip the Name column which is set to stretch
-                if width is not None:
-                    self.table.horizontalHeader().setSectionResizeMode(i, QHeaderView.ResizeMode.Fixed)
-                    self.table.setColumnWidth(i, width)
+        self.table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
 
-        layout.addLayout(header)
+        # Fixed row height and disable vertical resizing
+        self.table.verticalHeader().setVisible(False)
+        self.table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
+        self.table.verticalHeader().setDefaultSectionSize(40)
+
+        # Set the checkbox column fixed and let other columns stretch responsively
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        self.table.setColumnWidth(0, 40)
+        for col in range(1, self.table.columnCount()):
+            self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
+
+        # Remove the horizontal scroll bar
+        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        # "Select all" checkbox in header column 0
+        select_all_checkbox = self.create_select_all_checkbox()
+        self.set_header_widget(0, select_all_checkbox)
+
+        # Override mouse press to handle selection
+        self.table.mousePressEvent = self.custom_table_mousePressEvent
+
         layout.addWidget(self.table)
 
+    def custom_table_mousePressEvent(self, event):
+        item = self.table.itemAt(event.pos())
+        if item:
+            QTableWidget.mousePressEvent(self.table, event)
+        else:
+            self.table.clearSelection()
+            QTableWidget.mousePressEvent(self.table, event)
+
+    def eventFilter(self, obj, event):
+        if event.type() == event.Type.MouseButtonPress:
+            if not self.table.geometry().contains(event.pos()):
+                self.table.clearSelection()
+        return super().eventFilter(obj, event)
+
+    #------- Checkbox Helpers -------
+    def create_checkbox(self, row, node_name):
+        checkbox = QCheckBox()
+        checkbox.setStyleSheet("""
+            QCheckBox {
+                spacing: 5px;
+                background: transparent;
+            }
+            QCheckBox::indicator {
+                width: 16px;
+                height: 16px;
+                border: 2px solid #666666;
+                border-radius: 3px;
+                background: transparent;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #0095ff;
+                border-color: #0095ff;
+            }
+            QCheckBox::indicator:hover {
+                border-color: #888888;
+            }
+        """)
+        checkbox.stateChanged.connect(lambda s: self.handle_checkbox_change(s, node_name))
+        return checkbox
+
+    def create_checkbox_container(self, row, node_name):
+        container = QWidget()
+        container.setStyleSheet("background-color: transparent;")
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        checkbox = self.create_checkbox(row, node_name)
+        layout.addWidget(checkbox)
+        return container
+
+    def handle_checkbox_change(self, state, node_name):
+        if state == Qt.CheckState.Checked.value:
+            self.selected_nodes.add(node_name)
+        else:
+            self.selected_nodes.discard(node_name)
+        print("Selected nodes:", self.selected_nodes)
+
+    def create_select_all_checkbox(self):
+        checkbox = QCheckBox()
+        checkbox.setStyleSheet("""
+            QCheckBox {
+                spacing: 5px;
+                background-color: #252525;
+            }
+            QCheckBox::indicator {
+                width: 16px;
+                height: 16px;
+                border: 2px solid #666666;
+                border-radius: 3px;
+                background: transparent;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #0095ff;
+                border-color: #0095ff;
+            }
+            QCheckBox::indicator:hover {
+                border-color: #888888;
+            }
+        """)
+        checkbox.stateChanged.connect(self.handle_select_all)
+        return checkbox
+
+    def handle_select_all(self, state):
+        for row in range(self.table.rowCount()):
+            checkbox_container = self.table.cellWidget(row, 0)
+            if checkbox_container:
+                for child in checkbox_container.children():
+                    if isinstance(child, QCheckBox):
+                        child.setChecked(state == Qt.CheckState.Checked.value)
+                        break
+
+    def set_header_widget(self, col, widget):
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+        header.resizeSection(col, 40)
+        self.table.setHorizontalHeaderItem(col, QTableWidgetItem(""))
+        container = QWidget()
+        container.setStyleSheet("background-color: #252525;")
+        container_layout = QHBoxLayout(container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        container_layout.addWidget(widget)
+        container.setFixedHeight(header.height())
+        container.setParent(header)
+        container.setGeometry(header.sectionPosition(col), 0, header.sectionSize(col), header.height())
+        container.show()
+
+    #------- Action Menu -------
     def create_action_button(self, row):
         button = QToolButton()
-        button.setText("⋮")  # Three dots
+        button.setText("⋮")
         button.setFixedWidth(30)
         button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         button.setStyleSheet("""
@@ -444,11 +466,8 @@ class NodesPage(QWidget):
                 image: none;
             }
         """)
-        
         button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         button.setCursor(Qt.CursorShape.PointingHandCursor)
-
-        # Create menu with actions
         menu = QMenu(button)
         menu.setStyleSheet("""
             QMenu {
@@ -474,134 +493,138 @@ class NodesPage(QWidget):
                 background-color: rgba(255, 68, 68, 0.1);
             }
         """)
-        
-        # Create actions
         edit_action = menu.addAction("Edit")
         edit_action.setIcon(QIcon("icons/edit.png"))
         edit_action.triggered.connect(lambda: self.handle_action("Edit", row))
-
         delete_action = menu.addAction("Delete")
         delete_action.setIcon(QIcon("icons/delete.png"))
         delete_action.setProperty("dangerous", True)
         delete_action.triggered.connect(lambda: self.handle_action("Delete", row))
-
-        # View metrics action
         view_metrics = menu.addAction("View Metrics")
         view_metrics.setIcon(QIcon("icons/chart.png"))
         view_metrics.triggered.connect(lambda: self.select_node_for_graphs(row))
-
         button.setMenu(menu)
         return button
 
     def handle_action(self, action, row):
-        node_name = self.table.item(row, 0).text()
+        node_name = self.table.item(row, 1).text()
         if action == "Edit":
             print(f"Editing node: {node_name}")
         elif action == "Delete":
             print(f"Deleting node: {node_name}")
-    
-    def sort_table(self, sort_by):
-        """Sort the table based on the selected criteria"""
-        if sort_by == "Name":
-            self.table.sortItems(0, Qt.SortOrder.AscendingOrder)
-        elif sort_by == "CPU (Highest)":
-            self.table.sortItems(1, Qt.SortOrder.DescendingOrder)
-        elif sort_by == "Memory (Highest)":
-            self.table.sortItems(2, Qt.SortOrder.DescendingOrder)
-        elif sort_by == "Disk (Highest)":
-            self.table.sortItems(3, Qt.SortOrder.DescendingOrder)
-           
+
+    #------- Data Loading -------
     def load_data(self):
         self.nodes_data = [
-            ["docker-desktop", "2.0", "4 GiB", "20 GB", "0", "control-plane",
-             "v1.30.2", "69d", "Running"],
-            ["worker-node-1", "4.0", "8 GiB", "50 GB", "1", "worker",
-             "v1.30.2", "45d", "Running"],
-            ["worker-node-2", "4.0", "8 GiB", "50 GB", "0", "worker",
-             "v1.30.2", "45d", "Running"],
-            ["storage-node-1", "8.0", "16 GiB", "500 GB", "1", "storage",
-             "v1.30.2", "30d", "Running"]
+            ["docker-desktop", "2.0", "4 GiB", "20 GB", "0", "control-plane", "v1.30.2", "69d", "Running"],
+            ["worker-node-1", "4.0", "8 GiB", "50 GB", "1", "worker", "v1.30.2", "45d", "Running"],
+            ["worker-node-2", "4.0", "8 GiB", "50 GB", "0", "worker", "v1.30.2", "45d", "Running"],
+            ["storage-node-1", "8.0", "16 GiB", "500 GB", "1", "storage", "v1.30.2", "30d", "Running"]
         ]
-
-        # Generate utilization data for all nodes
+        self.table.setRowCount(len(self.nodes_data))
+        # Generate utilization data for graphs
         self.cpu_graph.generate_utilization_data(self.nodes_data)
         self.mem_graph.generate_utilization_data(self.nodes_data)
         self.disk_graph.generate_utilization_data(self.nodes_data)
+        self.selected_nodes = set()
 
-        self.table.setRowCount(len(self.nodes_data))
-        
         for row, node in enumerate(self.nodes_data):
-            node_name = node[0]
-            
-            # Add node data columns
-            for col, value in enumerate(node):
-                # For resource columns, add the utilization percentage
-                if col == 1:  # CPU column
-                    cpu_utilization = self.cpu_graph.get_node_utilization(node_name)
-                    display_text = f"{value} ({cpu_utilization:.1f}%)"
-                    item = SortableTableWidgetItem(display_text, cpu_utilization)
-                elif col == 2:  # Memory column
-                    mem_utilization = self.mem_graph.get_node_utilization(node_name)
-                    display_text = f"{value} ({mem_utilization:.1f}%)"
-                    item = SortableTableWidgetItem(display_text, mem_utilization)
-                elif col == 3:  # Disk column
-                    disk_utilization = self.disk_graph.get_node_utilization(node_name)
-                    display_text = f"{value} ({disk_utilization:.1f}%)"
-                    item = SortableTableWidgetItem(display_text, disk_utilization)
-                else:
-                    item = QTableWidgetItem(value)
-                
-                # Set alignment based on column
-                if col in [1, 2, 3, 4, 7]:  # CPU, Memory, Disk, Taints, Age columns
-                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                else:
-                    item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-                
-                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                
-                # Apply styling - all text same color except conditions
-                if col == 8 and value == "Running":
-                    item.setForeground(QColor("#4CAF50"))
-                else:
-                    item.setForeground(QColor("#e2e8f0"))
-                
-                self.table.setItem(row, col, item)
-            
-            # Add action button
+            # Column 0: Checkbox
+            checkbox_container = self.create_checkbox_container(row, node[0])
+            self.table.setCellWidget(row, 0, checkbox_container)
+            # Column 1: Name
+            item_name = QTableWidgetItem(node[0])
+            item_name.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            item_name.setForeground(QColor("#e2e8f0"))
+            item_name.setFlags(item_name.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 1, item_name)
+            # Column 2: CPU with utilization from graph
+            cpu_util = self.cpu_graph.get_node_utilization(node[0])
+            display_cpu = f"{node[1]} ({cpu_util:.1f}%)"
+            item_cpu = SortableTableWidgetItem(display_cpu, cpu_util)
+            item_cpu.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            item_cpu.setForeground(QColor("#e2e8f0"))
+            item_cpu.setFlags(item_cpu.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 2, item_cpu)
+            # Column 3: Memory with utilization from graph
+            mem_util = self.mem_graph.get_node_utilization(node[0])
+            display_mem = f"{node[2]} ({mem_util:.1f}%)"
+            item_mem = SortableTableWidgetItem(display_mem, mem_util)
+            item_mem.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            item_mem.setForeground(QColor("#e2e8f0"))
+            item_mem.setFlags(item_mem.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 3, item_mem)
+            # Column 4: Disk with utilization from graph
+            disk_util = self.disk_graph.get_node_utilization(node[0])
+            display_disk = f"{node[3]} ({disk_util:.1f}%)"
+            item_disk = SortableTableWidgetItem(display_disk, disk_util)
+            item_disk.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            item_disk.setForeground(QColor("#e2e8f0"))
+            item_disk.setFlags(item_disk.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 4, item_disk)
+            # Column 5: Taints
+            item_taints = QTableWidgetItem(node[4])
+            item_taints.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            item_taints.setForeground(QColor("#e2e8f0"))
+            item_taints.setFlags(item_taints.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 5, item_taints)
+            # Column 6: Roles
+            item_roles = QTableWidgetItem(node[5])
+            item_roles.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            item_roles.setForeground(QColor("#e2e8f0"))
+            item_roles.setFlags(item_roles.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 6, item_roles)
+            # Column 7: Version
+            item_version = QTableWidgetItem(node[6])
+            item_version.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            item_version.setForeground(QColor("#e2e8f0"))
+            item_version.setFlags(item_version.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 7, item_version)
+            # Column 8: Age
+            item_age = QTableWidgetItem(node[7])
+            item_age.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            item_age.setForeground(QColor("#e2e8f0"))
+            item_age.setFlags(item_age.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 8, item_age)
+            # Column 9: Conditions
+            item_conditions = QTableWidgetItem(node[8])
+            item_conditions.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            if node[8] == "Running":
+                item_conditions.setForeground(QColor("#4CAF50"))
+            else:
+                item_conditions.setForeground(QColor("#e2e8f0"))
+            item_conditions.setFlags(item_conditions.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 9, item_conditions)
+            # Column 10: Action button
             action_button = self.create_action_button(row)
-            self.table.setCellWidget(row, 9, action_button)
-            
-        # Add click handler for rows
+            action_container = QWidget()
+            action_layout = QHBoxLayout(action_container)
+            action_layout.setContentsMargins(0, 0, 0, 0)
+            action_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            action_layout.addWidget(action_button)
+            action_container.setStyleSheet("background-color: transparent;")
+            self.table.setCellWidget(row, 10, action_container)
+
         self.table.cellClicked.connect(self.handle_row_click)
-        
+        self.items_count.setText(f"{len(self.nodes_data)} items")
+
     def select_node_for_graphs(self, row):
-        """Select a node and update graphs to show its metrics"""
         self.selected_row = row
-        
-        # Get the node name from the current table (might be reordered due to sorting)
-        node_name = self.table.item(row, 0).text()
-        
-        # Find the original node data
+        node_name = self.table.item(row, 1).text()
         node_data = None
         for node in self.nodes_data:
             if node[0] == node_name:
                 node_data = node
                 break
-        
         if not node_data:
             return
-        
-        # Highlight the selected row
         self.table.selectRow(row)
-        
-        # Update graphs with the selected node data
         self.cpu_graph.set_selected_node(node_data, node_name)
         self.mem_graph.set_selected_node(node_data, node_name)
         self.disk_graph.set_selected_node(node_data, node_name)
-        
         print(f"Selected node for metrics: {node_name}")
-        
+
     def handle_row_click(self, row, column):
-        if column != 9:  # Don't trigger for action button column
-            # Select the node for graphs when row is clicked
+        if column != 10:
             self.select_node_for_graphs(row)
+

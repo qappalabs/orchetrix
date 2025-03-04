@@ -17,7 +17,12 @@ from WorkLoad.ReplicationControllersPage import ReplicaControllersPage
 from WorkLoad.JobsPage import JobsPage
 from WorkLoad.CronJobsPage import CronJobsPage
 from Config.ConfigMapsPage import ConfigMapsPage
-
+from NetWork.ServicesPage import ServicesPage
+from NetWork.EndpointesPage import EndpointsPage
+from NetWork.IngressesPage import IngressesPage
+from NetWork.IngressClassesPage import IngressClassesPage
+from NetWork.NetworkPoliciesPage import NetworkPoliciesPage
+from NetWork.PortForwardingPage import PortForwardingPage
 
 class DockerDesktopUI(QMainWindow):
     def __init__(self):
@@ -131,7 +136,12 @@ class DockerDesktopUI(QMainWindow):
         self.jobs_page = JobsPage()
         self.cronjobs_page = CronJobsPage()
         self.configmaps_page = ConfigMapsPage()
-        
+        self.services_page = ServicesPage()
+        self.endpoints_page = EndpointsPage()
+        self.ingresses_page = IngressesPage()
+        self.ingressclasses_page = IngressClassesPage()
+        self.networkpolicies_page = NetworkPoliciesPage()
+        self.portforwarding_page = PortForwardingPage()
 
 
         # Add pages to stacked widget
@@ -147,7 +157,12 @@ class DockerDesktopUI(QMainWindow):
         self.stacked_widget.addWidget(self.jobs_page)
         self.stacked_widget.addWidget(self.cronjobs_page)
         self.stacked_widget.addWidget(self.configmaps_page)
-        
+        self.stacked_widget.addWidget(self.services_page)
+        self.stacked_widget.addWidget(self.endpoints_page)
+        self.stacked_widget.addWidget(self.ingresses_page)
+        self.stacked_widget.addWidget(self.ingressclasses_page)
+        self.stacked_widget.addWidget(self.networkpolicies_page)
+        self.stacked_widget.addWidget(self.portforwarding_page)
 
         # Register pages in dictionary for easy access
         self.pages["Cluster"] = self.cluster_page
@@ -162,7 +177,14 @@ class DockerDesktopUI(QMainWindow):
         self.pages["Jobs"] = self.jobs_page
         self.pages["Cron Jobs"] = self.cronjobs_page
         self.pages["Config Maps"] = self.configmaps_page
+        self.pages["Services"] = self.services_page
+        self.pages["Endpoints"] = self.endpoints_page
+        self.pages["Ingresses"] = self.ingresses_page
+        self.pages["Ingress Classes"] = self.ingressclasses_page
+        self.pages["Network Policies"] = self.networkpolicies_page
+        self.pages["Port Forwarding"] = self.portforwarding_page
 
+        
         right_layout.addWidget(self.stacked_widget)
         container_layout.addWidget(right_container, 1)
 
