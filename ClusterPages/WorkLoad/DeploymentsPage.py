@@ -186,12 +186,31 @@ class DeploymentsPage(QWidget):
         # Override mousePressEvent to handle selection properly.
         self.table.mousePressEvent = self.custom_table_mousePressEvent
 
+    # def custom_table_mousePressEvent(self, event):
+    #     item = self.table.itemAt(event.pos())
+    #     index = self.table.indexAt(event.pos())
+    #     if index.isValid() and (index.column() == 0 or index.column() == 7):
+    #         QTableWidget.mousePressEvent(self.table, event)
+    #     elif item:
+    #         QTableWidget.mousePressEvent(self.table, event)
+    #     else:
+    #         self.table.clearSelection()
+    #         QTableWidget.mousePressEvent(self.table, event)
+
     def custom_table_mousePressEvent(self, event):
-        item = self.table.itemAt(event.pos())
         index = self.table.indexAt(event.pos())
-        if index.isValid() and (index.column() == 0 or index.column() == 7):
-            QTableWidget.mousePressEvent(self.table, event)
-        elif item:
+        if index.isValid():
+            row = index.row()
+            if index.column() != 7:  # Skip action column
+                # Toggle checkbox when clicking anywhere in the row
+                checkbox_container = self.table.cellWidget(row, 0)
+                if checkbox_container:
+                    for child in checkbox_container.children():
+                        if isinstance(child, QCheckBox):
+                            child.setChecked(not child.isChecked())
+                            break
+                # Select the row
+                self.table.selectRow(row)
             QTableWidget.mousePressEvent(self.table, event)
         else:
             self.table.clearSelection()
@@ -480,4 +499,5 @@ class DeploymentsPage(QWidget):
 
     def handle_row_click(self, row, column):
         if column != 7:
-            self.select_deployment(row)
+            # self.select_deployment(row)
+            pass

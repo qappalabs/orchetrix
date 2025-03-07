@@ -1,127 +1,242 @@
-from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton, QToolButton
-from PyQt6.QtCore import Qt, QPoint,QEvent
-from PyQt6.QtGui import QPixmap, QPainter, QLinearGradient, QColor, QFont
+from PyQt6.QtCore import Qt, QPoint, QEvent
+from PyQt6.QtGui import QFont, QLinearGradient, QPainter, QColor, QPixmap
+from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel, QToolButton, QPushButton
 
-DARK_BG = "#1E1E1E"
-DARKER_BG = "#151515"
-SIDEBAR_BG = "#1A1A1A"
-TEXT_COLOR = "#FFFFFF"
-ACCENT_COLOR = "#00AAAA"
-SECONDARY_ACCENT = "#FF00FF"
-THIRD_ACCENT = "#00FF88"
-CHART_BG = "#2A2A2A"
 class TitleBar(QWidget):
-    def __init__(self, parent):
+    def __init__(self, parent=None):
         super().__init__(parent)
         self.parent = parent
         self.setFixedHeight(40)
-        self.setStyleSheet(f"background-color: {DARK_BG};")
-        
+        self.setup_ui()
+        self.old_pos = None
+
+    def setup_ui(self):
+        self.setStyleSheet("""
+            QWidget {
+                background-color: #0D1117;
+                color: #ffffff;
+            }
+        """)
+
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(5, 0, 5, 0)
-        
-        # Logo and title
-        logo_label = QLabel()
-        pixmap = QPixmap(32, 32)
-        pixmap.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(pixmap)
-        painter.setPen(QColor(ACCENT_COLOR))
-        painter.setBrush(QColor(ACCENT_COLOR))
-        painter.drawEllipse(8, 8, 16, 16)
-        painter.setPen(QColor(TEXT_COLOR))
-        painter.drawText(10, 20, "O")
-        painter.end()
-        logo_label.setPixmap(pixmap)
-        logo_label.setCursor(Qt.CursorShape.PointingHandCursor)
-        
-        title_label = QLabel("Orchetrix")
-        title_label.setStyleSheet(f"color: {TEXT_COLOR}; font-weight: bold;")
-        
-        # Window controls
-        btn_minimize = QPushButton("−")
-        btn_maximize = QPushButton("□")
-        btn_close = QPushButton("×")
-        
-        for btn in [btn_minimize, btn_maximize, btn_close]:
-            btn.setFixedSize(30, 30)
-            btn.setStyleSheet("""
-                QPushButton {
-                    background-color: transparent;
-                    color: white;
-                    border: none;
-                    font-size: 16px;
-                }
-                QPushButton:hover {
-                    background-color: #555555;
-                }
-            """)
-        
-        btn_close.setStyleSheet("""
-            QPushButton {
+        layout.setContentsMargins(10, 0, 10, 0)
+        layout.setSpacing(14)
+
+        # Orchestrix logo on the left using the provided image
+        self.logo_label = QLabel()
+        self.logo_label.setFixedSize(24, 24)
+
+        # Use the image URL for the logo
+        logo_url = "logos/Group 31.png"  # Replace with actual URL
+
+        # For demonstration, let's load a local resource or use a fallback
+        try:
+            pixmap = QPixmap(logo_url)
+            if pixmap.isNull():
+                # Fallback to creating our own logo if URL loading fails
+                pixmap = QPixmap(24, 24)
+                pixmap.fill(Qt.GlobalColor.transparent)
+                painter = QPainter(pixmap)
+                # Create a gradient background similar to the OX logo
+                gradient = QLinearGradient(0, 0, 24, 24)
+                gradient.setColorAt(0, QColor("#FF8A00"))  # Top light orange
+                gradient.setColorAt(1, QColor("#FF5722"))  # Bottom darker orange
+                painter.setBrush(gradient)
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.drawRoundedRect(0, 0, 24, 24, 6, 6)  # Rounded rectangle for the logo background
+
+                # Add the "Ox" text
+                painter.setPen(QColor("black"))
+                painter.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+                painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "Ox")
+                painter.end()
+        except:
+            # Fallback if any error occurs
+            pixmap = QPixmap(24, 24)
+            pixmap.fill(QColor("#FF5722"))
+
+        # Scale the pixmap to fit our label size while preserving aspect ratio
+        pixmap = pixmap.scaled(24, 24, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        self.logo_label.setPixmap(pixmap)
+
+        # Home icon
+        self.home_btn = QToolButton()
+        self.home_btn.setText("🏠")
+        self.home_btn.setFixedSize(30, 30)
+        self.home_btn.setStyleSheet("""
+            QToolButton {
                 background-color: transparent;
-                color: white;
+                color: #ffffff;
                 border: none;
                 font-size: 16px;
             }
-            QPushButton:hover {
-                background-color: #E81123;
+            QToolButton:hover {
+                background-color: rgba(255, 255, 255, 0.1);
+                border-radius: 4px;
             }
         """)
-        
-        # Profile button
-        profile_btn = QPushButton()
-        profile_btn.setFixedSize(30, 30)
-        profile_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {ACCENT_COLOR};
-                color: {TEXT_COLOR};
-                border-radius: 15px;
+
+        # Navigation arrows
+        self.back_btn = QToolButton()
+        self.back_btn.setText("←")
+        self.back_btn.setFixedSize(30, 30)
+        self.back_btn.setStyleSheet("""
+            QToolButton {
+                background-color: transparent;
+                color: #ffffff;
                 border: none;
-                font-size: 12px;
-                font-weight: bold;
-            }}
+                font-size: 16px;
+            }
+            QToolButton:hover {
+                background-color: rgba(255, 255, 255, 0.1);
+                border-radius: 4px;
+            }
         """)
-        profile_btn.setText("DP")
-        
-        # Add spacer to push controls to the right
-        layout.addWidget(logo_label)
-        layout.addWidget(title_label)
-        layout.addStretch()
-        
-        # Add notification and home icons
-        home_btn = QPushButton("🏠")
-        notif_btn = QPushButton("🔔")
-        user_btn = QPushButton("👤")
-        
-        for btn in [home_btn, notif_btn, user_btn]:
-            btn.setFixedSize(30, 30)
-            btn.setStyleSheet("""
-                QPushButton {
-                    background-color: transparent;
-                    color: white;
-                    border: none;
-                    font-size: 16px;
-                }
-                QPushButton:hover {
-                    background-color: #555555;
-                }
-            """)
-        
-        layout.addWidget(home_btn)
-        layout.addWidget(notif_btn)
-        layout.addWidget(user_btn)
-        layout.addWidget(profile_btn)
-        layout.addWidget(btn_minimize)
-        layout.addWidget(btn_maximize)
-        layout.addWidget(btn_close)
-        
-        btn_minimize.clicked.connect(self.parent.showMinimized)
-        btn_maximize.clicked.connect(self.toggleMaximize)
-        btn_close.clicked.connect(self.parent.close)
-        
-        # For window dragging
-        self.dragging = False
-        self.drag_position = None
+
+        self.forward_btn = QToolButton()
+        self.forward_btn.setText("→")
+        self.forward_btn.setFixedSize(30, 30)
+        self.forward_btn.setStyleSheet("""
+            QToolButton {
+                background-color: transparent;
+                color: #ffffff;
+                border: none;
+                font-size: 16px;
+            }
+            QToolButton:hover {
+                background-color: rgba(255, 255, 255, 0.1);
+                border-radius: 4px;
+            }
+        """)
+
+        # Settings and other icons on the right
+        self.troubleshoot_btn = QToolButton()
+        self.troubleshoot_btn.setText("❓")
+        self.troubleshoot_btn.setFixedSize(30, 30)
+        self.troubleshoot_btn.setStyleSheet("""
+            QToolButton {
+                background-color: transparent;
+                color: #ffffff;
+                border: none;
+                font-size: 16px;
+            }
+            QToolButton:hover {
+                background-color: rgba(255, 255, 255, 0.1);
+                border-radius: 4px;
+            }
+        """)
+
+        self.notifications_btn = QToolButton()
+        self.notifications_btn.setText("🔔")
+        self.notifications_btn.setFixedSize(30, 30)
+        self.notifications_btn.setStyleSheet("""
+            QToolButton {
+                background-color: transparent;
+                color: #ffffff;
+                border: none;
+                font-size: 16px;
+            }
+            QToolButton:hover {
+                background-color: rgba(255, 255, 255, 0.1);
+                border-radius: 4px;
+            }
+        """)
+
+        self.profile_btn = QToolButton()
+        self.profile_btn.setText("👤")
+        self.profile_btn.setFixedSize(30, 30)
+        self.profile_btn.setStyleSheet("""
+            QToolButton {
+                background-color: transparent;
+                color: #ffffff;
+                border: none;
+                font-size: 16px;
+            }
+            QToolButton:hover {
+                background-color: rgba(255, 255, 255, 0.1);
+                border-radius: 4px;
+            }
+        """)
+
+        self.settings_btn = QToolButton()
+        self.settings_btn.setText("⚙️")
+        self.settings_btn.setFixedSize(30, 30)
+        self.settings_btn.setStyleSheet("""
+            QToolButton {
+                background-color: transparent;
+                color: #ffffff;
+                border: none;
+                font-size: 16px;
+            }
+            QToolButton:hover {
+                background-color: rgba(255, 255, 255, 0.1);
+                border-radius: 4px;
+            }
+        """)
+
+        # Window control buttons
+        self.minimize_btn = QPushButton("─")
+        self.minimize_btn.setFixedSize(30, 30)
+        self.minimize_btn.clicked.connect(self.parent.showMinimized)
+        self.minimize_btn.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                color: #ffffff;
+                border: none;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: rgba(255, 255, 255, 0.1);
+                border-radius: 4px;
+            }
+        """)
+
+        self.maximize_btn = QPushButton("□")
+        self.maximize_btn.setFixedSize(30, 30)
+        self.maximize_btn.clicked.connect(self.toggle_maximize)
+        self.maximize_btn.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                color: #ffffff;
+                border: none;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: rgba(255, 255, 255, 0.1);
+                border-radius: 4px;
+            }
+        """)
+
+        self.close_btn = QPushButton("✕")
+        self.close_btn.setFixedSize(30, 30)
+        self.close_btn.clicked.connect(self.parent.close)
+        self.close_btn.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                color: #ffffff;
+                border: none;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: #E81123;
+                border-radius: 4px;
+            }
+        """)
+
+        # Add widgets to layout
+        layout.addWidget(self.logo_label)
+        layout.addWidget(self.home_btn)
+        layout.addWidget(self.back_btn)
+        layout.addWidget(self.forward_btn)
+        layout.addStretch(1)
+        layout.addStretch(1)
+        layout.addWidget(self.troubleshoot_btn)
+        layout.addWidget(self.notifications_btn)
+        layout.addWidget(self.profile_btn)
+        layout.addWidget(self.settings_btn)
+        layout.addWidget(self.minimize_btn)
+        layout.addWidget(self.maximize_btn)
+        layout.addWidget(self.close_btn)
         
         # Install event filter for double-click
         self.installEventFilter(self)
@@ -129,25 +244,28 @@ class TitleBar(QWidget):
     def eventFilter(self, obj, event):
         # Handle double-click on titlebar to maximize
         if event.type() == QEvent.Type.MouseButtonDblClick:
-            self.toggleMaximize()
+            self.toggle_maximize()
             return True
         return super().eventFilter(obj, event)
     
-    def toggleMaximize(self):
+
+    def toggle_maximize(self):
         if self.parent.isMaximized():
             self.parent.showNormal()
+            self.maximize_btn.setText("□")
         else:
             self.parent.showMaximized()
-    
+            self.maximize_btn.setText("❐")
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            self.dragging = True
-            self.drag_position = event.position().toPoint()
-    
+            self.old_pos = event.globalPosition().toPoint()
+
     def mouseMoveEvent(self, event):
-        if self.dragging and self.drag_position is not None:
-            self.parent.move(self.parent.pos() + event.position().toPoint() - self.drag_position)
-    
+        if self.old_pos:
+            delta = event.globalPosition().toPoint() - self.old_pos
+            self.parent.move(self.parent.pos() + delta)
+            self.old_pos = event.globalPosition().toPoint()
+
     def mouseReleaseEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.dragging = False
+        self.old_pos = None
