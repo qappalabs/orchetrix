@@ -1,12 +1,16 @@
 import sys
 from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget
-from PyQt6.QtCore import Qt, QPoint
+from PyQt6.QtCore import Qt
 
 from Main.TitleBar import TitleBar
 from Main.Sidebar import Sidebar
 from Main.Header import Header
+
+
 from Main.ClusterPage import ClusterPage
 from Main.NodesPage import NodesPage
+
+
 from WorkLoad.OverviewPage import OverviewPage
 from WorkLoad.PodsPage import PodsPage
 from WorkLoad.DeploymentsPage import DeploymentsPage
@@ -16,13 +20,20 @@ from WorkLoad.ReplicaSetsPage import ReplicaSetsPage
 from WorkLoad.ReplicationControllersPage import ReplicaControllersPage
 from WorkLoad.JobsPage import JobsPage
 from WorkLoad.CronJobsPage import CronJobsPage
+
+
 from Config.ConfigMapsPage import ConfigMapsPage
+
+
 from NetWork.ServicesPage import ServicesPage
 from NetWork.EndpointesPage import EndpointsPage
 from NetWork.IngressesPage import IngressesPage
 from NetWork.IngressClassesPage import IngressClassesPage
 from NetWork.NetworkPoliciesPage import NetworkPoliciesPage
 from NetWork.PortForwardingPage import PortForwardingPage
+
+
+
 
 class DockerDesktopUI(QMainWindow):
     def __init__(self):
