@@ -68,6 +68,7 @@ class EndpointsPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.selected_endpoints = set()  # Track which deployments are checked
+        self.select_all_checkbox = None  # Store reference to select-all checkbox
         self.setup_ui()
         self.load_data()
 
@@ -184,11 +185,19 @@ class EndpointsPage(QWidget):
         self.table.mousePressEvent = self.custom_table_mousePressEvent
 
     def custom_table_mousePressEvent(self, event):
-        item = self.table.itemAt(event.pos())
         index = self.table.indexAt(event.pos())
-        if index.isValid() and (index.column() == 0 or index.column() == 5):
-            QTableWidget.mousePressEvent(self.table, event)
-        elif item:
+        if index.isValid():
+            row = index.row()
+            if index.column() != 7:  # Skip action column
+                # Toggle checkbox when clicking anywhere in the row
+                checkbox_container = self.table.cellWidget(row, 0)
+                if checkbox_container:
+                    for child in checkbox_container.children():
+                        if isinstance(child, QCheckBox):
+                            child.setChecked(not child.isChecked())
+                            break
+                # Select the row
+                self.table.selectRow(row)
             QTableWidget.mousePressEvent(self.table, event)
         else:
             self.table.clearSelection()
@@ -313,6 +322,13 @@ class EndpointsPage(QWidget):
             self.selected_endpoints.add(endpoint_name)
         else:
             self.selected_endpoints.discard(endpoint_name)
+
+            if self.select_all_checkbox is not None and self.select_all_checkbox.isChecked():
+                # Block signals to prevent infinite recursion
+                self.select_all_checkbox.blockSignals(True)
+                self.select_all_checkbox.setChecked(False)
+                self.select_all_checkbox.blockSignals(False)
+
         print("Selected deployments:", self.selected_endpoints)
 
     def create_select_all_checkbox(self):
@@ -338,6 +354,7 @@ class EndpointsPage(QWidget):
             }
         """)
         checkbox.stateChanged.connect(self.handle_select_all)
+        self.select_all_checkbox = checkbox
         return checkbox
 
     def handle_select_all(self, state):
