@@ -68,6 +68,7 @@ class DeploymentsPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.selected_deployments = set()  # Track which deployments are checked
+        self.select_all_checkbox = None  # Store reference to select-all checkbox
         self.setup_ui()
         self.load_data()
 
@@ -186,17 +187,7 @@ class DeploymentsPage(QWidget):
         # Override mousePressEvent to handle selection properly.
         self.table.mousePressEvent = self.custom_table_mousePressEvent
 
-    # def custom_table_mousePressEvent(self, event):
-    #     item = self.table.itemAt(event.pos())
-    #     index = self.table.indexAt(event.pos())
-    #     if index.isValid() and (index.column() == 0 or index.column() == 7):
-    #         QTableWidget.mousePressEvent(self.table, event)
-    #     elif item:
-    #         QTableWidget.mousePressEvent(self.table, event)
-    #     else:
-    #         self.table.clearSelection()
-    #         QTableWidget.mousePressEvent(self.table, event)
-
+   
     def custom_table_mousePressEvent(self, event):
         index = self.table.indexAt(event.pos())
         if index.isValid():
@@ -370,6 +361,14 @@ class DeploymentsPage(QWidget):
             self.selected_deployments.add(deployment_name)
         else:
             self.selected_deployments.discard(deployment_name)
+            
+            # If any checkbox is unchecked, uncheck the select-all checkbox
+            if self.select_all_checkbox is not None and self.select_all_checkbox.isChecked():
+                # Block signals to prevent infinite recursion
+                self.select_all_checkbox.blockSignals(True)
+                self.select_all_checkbox.setChecked(False)
+                self.select_all_checkbox.blockSignals(False)
+                
         print("Selected deployments:", self.selected_deployments)
 
     def create_select_all_checkbox(self):
@@ -395,8 +394,9 @@ class DeploymentsPage(QWidget):
             }
         """)
         checkbox.stateChanged.connect(self.handle_select_all)
+        self.select_all_checkbox = checkbox  # Store reference to the checkbox
         return checkbox
-
+ 
     def handle_select_all(self, state):
         for row in range(self.table.rowCount()):
             checkbox_container = self.table.cellWidget(row, 0)

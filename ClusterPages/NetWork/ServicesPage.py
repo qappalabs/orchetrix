@@ -72,6 +72,7 @@ class ServicesPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.selected_service = set()  # Track selected pods
+        self.select_all_checkbox =None
         self.setup_ui()
         self.load_data()
 
@@ -180,11 +181,19 @@ class ServicesPage(QWidget):
         layout.addLayout(main_layout)
 
     def custom_table_mousePressEvent(self, event):
-        item = self.table.itemAt(event.pos())
         index = self.table.indexAt(event.pos())
-        if index.isValid() and (index.column() == 0 or index.column() == 10):
-            QTableWidget.mousePressEvent(self.table, event)
-        elif item:
+        if index.isValid():
+            row = index.row()
+            if index.column() != 7:  # Skip action column
+                # Toggle checkbox when clicking anywhere in the row
+                checkbox_container = self.table.cellWidget(row, 0)
+                if checkbox_container:
+                    for child in checkbox_container.children():
+                        if isinstance(child, QCheckBox):
+                            child.setChecked(not child.isChecked())
+                            break
+                # Select the row
+                self.table.selectRow(row)
             QTableWidget.mousePressEvent(self.table, event)
         else:
             self.table.clearSelection()
@@ -305,6 +314,14 @@ class ServicesPage(QWidget):
             self.selected_service.add(service_name)
         else:
             self.selected_service.discard(service_name)
+
+            # If any checkbox is unchecked, uncheck the select-all checkbox
+            if self.select_all_checkbox is not None and self.select_all_checkbox.isChecked():
+                # Block signals to prevent infinite recursion
+                self.select_all_checkbox.blockSignals(True)
+                self.select_all_checkbox.setChecked(False)
+                self.select_all_checkbox.blockSignals(False)
+
         print(f"Selected service: {self.selected_service}")
 
     def create_select_all_checkbox(self):
@@ -330,6 +347,7 @@ class ServicesPage(QWidget):
             }
         """)
         checkbox.stateChanged.connect(self.handle_select_all)
+        self.select_all_checkbox = checkbox
         return checkbox
 
     def handle_select_all(self, state):

@@ -71,6 +71,7 @@ class PodsPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.selected_pods = set()  # Track selected pods
+        self.select_all_checkbox = None
         self.setup_ui()
         self.load_data()
 
@@ -98,49 +99,6 @@ class PodsPage(QWidget):
         header.addWidget(title)
         header.addWidget(self.items_count)
         header.addStretch()
-        
-        # Add sorting dropdown
-        sort_label = QLabel("Sort by:")
-        sort_label.setStyleSheet("""
-            color: #e2e8f0;
-            font-size: 13px;
-            margin-right: 8px;
-        """)
-        self.sort_combo = QComboBox()
-        self.sort_combo.addItem("Name")
-        self.sort_combo.addItem("Namespace")
-        self.sort_combo.addItem("Containers (Highest)")
-        self.sort_combo.addItem("Restarts (Highest)")
-        self.sort_combo.addItem("Age (Newest)")
-        self.sort_combo.setStyleSheet("""
-            QComboBox {
-                background-color: #2d2d2d;
-                color: #e2e8f0;
-                border: 1px solid #444444;
-                border-radius: 4px;
-                padding: 4px 12px;
-                min-width: 150px;
-            }
-            QComboBox::drop-down {
-                subcontrol-origin: padding;
-                subcontrol-position: center right;
-                width: 20px;
-                border-left: none;
-            }
-            QComboBox::down-arrow {
-                image: none;
-                width: 0;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #2d2d2d;
-                color: #e2e8f0;
-                border: 1px solid #444444;
-                selection-background-color: #2196F3;
-            }
-        """)
-        self.sort_combo.currentTextChanged.connect(self.sort_table)
-        header.addWidget(sort_label)
-        header.addWidget(self.sort_combo)
 
         # Create table
         self.table = QTableWidget()
@@ -222,16 +180,23 @@ class PodsPage(QWidget):
         layout.addLayout(main_layout)
 
     def custom_table_mousePressEvent(self, event):
-        item = self.table.itemAt(event.pos())
         index = self.table.indexAt(event.pos())
-        if index.isValid() and (index.column() == 0 or index.column() == 10):
-            QTableWidget.mousePressEvent(self.table, event)
-        elif item:
+        if index.isValid():
+            row = index.row()
+            if index.column() != 7:  # Skip action column
+                # Toggle checkbox when clicking anywhere in the row
+                checkbox_container = self.table.cellWidget(row, 0)
+                if checkbox_container:
+                    for child in checkbox_container.children():
+                        if isinstance(child, QCheckBox):
+                            child.setChecked(not child.isChecked())
+                            break
+                # Select the row
+                self.table.selectRow(row)
             QTableWidget.mousePressEvent(self.table, event)
         else:
             self.table.clearSelection()
             QTableWidget.mousePressEvent(self.table, event)
-
     def eventFilter(self, obj, event):
         if event.type() == event.Type.MouseButtonPress:
             pos = event.pos()
@@ -239,18 +204,6 @@ class PodsPage(QWidget):
                 self.table.clearSelection()
         return super().eventFilter(obj, event)
 
-    def sort_table(self, sort_by):
-        """Sort the table based on the selected criteria from the dropdown."""
-        if sort_by == "Name":
-            self.table.sortItems(1, Qt.SortOrder.AscendingOrder)
-        elif sort_by == "Namespace":
-            self.table.sortItems(2, Qt.SortOrder.AscendingOrder)
-        elif sort_by == "Containers (Highest)":
-            self.table.sortItems(3, Qt.SortOrder.DescendingOrder)
-        elif sort_by == "Restarts (Highest)":
-            self.table.sortItems(4, Qt.SortOrder.DescendingOrder)
-        elif sort_by == "Age (Newest)":
-            self.table.sortItems(5, Qt.SortOrder.AscendingOrder)
 
     def create_action_button(self, row):
         button = QToolButton()
@@ -360,6 +313,14 @@ class PodsPage(QWidget):
             self.selected_pods.add(pod_name)
         else:
             self.selected_pods.discard(pod_name)
+
+            # If any checkbox is unchecked, uncheck the select-all checkbox
+            if self.select_all_checkbox is not None and self.select_all_checkbox.isChecked():
+                # Block signals to prevent infinite recursion
+                self.select_all_checkbox.blockSignals(True)
+                self.select_all_checkbox.setChecked(False)
+                self.select_all_checkbox.blockSignals(False)
+
         print(f"Selected pods: {self.selected_pods}")
 
     def create_select_all_checkbox(self):
@@ -385,6 +346,7 @@ class PodsPage(QWidget):
             }
         """)
         checkbox.stateChanged.connect(self.handle_select_all)
+        self.select_all_checkbox = checkbox
         return checkbox
 
     def handle_select_all(self, state):
@@ -482,6 +444,9 @@ class PodsPage(QWidget):
             print(f"Selected pod: {self.table.item(row, 1).text()}")
 
 
+
+
+
 # from PyQt6.QtWidgets import (
 #     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
 #     QLabel, QHeaderView, QToolButton, QCheckBox, QComboBox, QApplication,
@@ -544,6 +509,7 @@ class PodsPage(QWidget):
 #     def __init__(self, parent=None):
 #         super().__init__(parent)
 #         self.selected_pods = set()  # Track selected pods
+#         self.select_all_checkbox = None
 #         self.setup_ui()
 #         self.load_data()
 
@@ -686,16 +652,24 @@ class PodsPage(QWidget):
 #         main_layout.addWidget(self.table)
 #         layout.addLayout(main_layout)
 
-#     def custom_table_mousePressEvent(self, event):
-#         item = self.table.itemAt(event.pos())
-#         index = self.table.indexAt(event.pos())
-#         if index.isValid() and (index.column() == 0 or index.column() == 10):
-#             QTableWidget.mousePressEvent(self.table, event)
-#         elif item:
-#             QTableWidget.mousePressEvent(self.table, event)
-#         else:
-#             self.table.clearSelection()
-#             QTableWidget.mousePressEvent(self.table, event)
+    # def custom_table_mousePressEvent(self, event):
+    #     index = self.table.indexAt(event.pos())
+    #     if index.isValid():
+    #         row = index.row()
+    #         if index.column() != 7:  # Skip action column
+    #             # Toggle checkbox when clicking anywhere in the row
+    #             checkbox_container = self.table.cellWidget(row, 0)
+    #             if checkbox_container:
+    #                 for child in checkbox_container.children():
+    #                     if isinstance(child, QCheckBox):
+    #                         child.setChecked(not child.isChecked())
+    #                         break
+    #             # Select the row
+    #             self.table.selectRow(row)
+    #         QTableWidget.mousePressEvent(self.table, event)
+    #     else:
+    #         self.table.clearSelection()
+    #         QTableWidget.mousePressEvent(self.table, event)
 
 #     def eventFilter(self, obj, event):
 #         if event.type() == event.Type.MouseButtonPress:
@@ -812,6 +786,12 @@ class PodsPage(QWidget):
 #             self.selected_pods.add(pod_name)
 #         else:
 #             self.selected_pods.discard(pod_name)
+#       # If any checkbox is unchecked, uncheck the select-all checkbox
+#         if self.select_all_checkbox is not None and self.select_all_checkbox.isChecked():
+#               # Block signals to prevent infinite recursion
+#             self.select_all_checkbox.blockSignals(True)
+#             self.select_all_checkbox.setChecked(False)
+#             self.select_all_checkbox.blockSignals(False)
 #         print(f"Selected pods: {self.selected_pods}")
 
 #     def create_select_all_checkbox(self):
@@ -837,6 +817,7 @@ class PodsPage(QWidget):
 #             }
 #         """)
 #         checkbox.stateChanged.connect(self.handle_select_all)
+#         self.select_all_checkbox = checkbox 
 #         return checkbox
 
 #     def handle_select_all(self, state):

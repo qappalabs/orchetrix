@@ -182,7 +182,7 @@ class NavIconButton(QToolButton):
                           "Priority Classes", "Runtime Classes", "Leases"]
         elif self.item_text == "Network":
             menu_items = ["Services", "Endpoints", "Ingresses", "Ingress Classes",
-                          "Network Policies"]
+                          "Network Policies", 'Port Forwarding']
         elif self.item_text == "Storage":
             menu_items = ["Persistent Volume Claims", "Persistent Volumes",
                           "Storage Classes"]

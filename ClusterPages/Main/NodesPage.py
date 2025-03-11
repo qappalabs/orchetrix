@@ -231,6 +231,7 @@ class NodesPage(QWidget):
         super().__init__(parent)
         self.selected_row = -1
         self.selected_nodes = set()  # Track checked nodes
+        self.select_all_checkbox = None  # Store reference to select-all checkbox
         self.setup_ui()
         self.load_data()
         self.installEventFilter(self)
@@ -335,8 +336,19 @@ class NodesPage(QWidget):
         layout.addWidget(self.table)
 
     def custom_table_mousePressEvent(self, event):
-        item = self.table.itemAt(event.pos())
-        if item:
+        index = self.table.indexAt(event.pos())
+        if index.isValid():
+            row = index.row()
+            if index.column() != 7:  # Skip action column
+                # Toggle checkbox when clicking anywhere in the row
+                checkbox_container = self.table.cellWidget(row, 0)
+                if checkbox_container:
+                    for child in checkbox_container.children():
+                        if isinstance(child, QCheckBox):
+                            child.setChecked(not child.isChecked())
+                            break
+                # Select the row
+                self.table.selectRow(row)
             QTableWidget.mousePressEvent(self.table, event)
         else:
             self.table.clearSelection()
@@ -389,6 +401,11 @@ class NodesPage(QWidget):
             self.selected_nodes.add(node_name)
         else:
             self.selected_nodes.discard(node_name)
+            if self.select_all_checkbox is not None and self.select_all_checkbox.isChecked():
+                # Block signals to prevent infinite recursion
+                self.select_all_checkbox.blockSignals(True)
+                self.select_all_checkbox.setChecked(False)
+                self.select_all_checkbox.blockSignals(False)
         print("Selected nodes:", self.selected_nodes)
 
     def create_select_all_checkbox(self):
@@ -414,6 +431,7 @@ class NodesPage(QWidget):
             }
         """)
         checkbox.stateChanged.connect(self.handle_select_all)
+        self.select_all_checkbox = checkbox  # Store reference to the checkbox
         return checkbox
 
     def handle_select_all(self, state):
@@ -626,5 +644,5 @@ class NodesPage(QWidget):
 
     def handle_row_click(self, row, column):
         if column != 10:
-            self.select_node_for_graphs(row)
-
+            # self.select_node_for_graphs(row)
+            pass

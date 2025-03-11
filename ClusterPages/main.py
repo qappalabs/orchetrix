@@ -10,7 +10,7 @@ from Main.Header import Header
 from Main.ClusterPage import ClusterPage
 from Main.NodesPage import NodesPage
 
-
+# Workload pages
 from WorkLoad.OverviewPage import OverviewPage
 from WorkLoad.PodsPage import PodsPage
 from WorkLoad.DeploymentsPage import DeploymentsPage
@@ -21,10 +21,10 @@ from WorkLoad.ReplicationControllersPage import ReplicaControllersPage
 from WorkLoad.JobsPage import JobsPage
 from WorkLoad.CronJobsPage import CronJobsPage
 
-
+# Config pages
 from Config.ConfigMapsPage import ConfigMapsPage
 
-
+# Network pages
 from NetWork.ServicesPage import ServicesPage
 from NetWork.EndpointesPage import EndpointsPage
 from NetWork.IngressesPage import IngressesPage
@@ -32,14 +32,30 @@ from NetWork.IngressClassesPage import IngressClassesPage
 from NetWork.NetworkPoliciesPage import NetworkPoliciesPage
 from NetWork.PortForwardingPage import PortForwardingPage
 
+# Storage pages
+from Storage.PersistentVolumeClaimsPage import PersistentVolumeClaimsPage
+from Storage.PersistentVolumesPage import PersistentVolumesPage
+from Storage.StorageClassesPage import StorageClassesPage
 
+# Access Control Pages
+from AccessControl.ServiceAccountsPage import ServiceAccountsPage
+from AccessControl.ClusterRolesPage import ClusterRolesPage
+from AccessControl.RolesPage import RolesPage
+from AccessControl.ClusterRoleBindingsPage import ClusterRoleBindingsPage
+from AccessControl.RoleBinidingsPage import RoleBindingsPage
+
+# Helm Pages
+from Helm.ReleasesPage import ReleasesPage
+
+# Custome Resource Pages
+from CustomResources.DefinitionsPage import DefinitionsPage
 
 
 class DockerDesktopUI(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Docker Desktop")
-        self.setMinimumSize(1000, 700)
+        self.setMinimumSize(1200, 700)
 
         # Remove default window frame
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
@@ -154,6 +170,24 @@ class DockerDesktopUI(QMainWindow):
         self.networkpolicies_page = NetworkPoliciesPage()
         self.portforwarding_page = PortForwardingPage()
 
+        self.persistentvolumeclaims_page = PersistentVolumeClaimsPage()
+        self.persistentvolumes_page = PersistentVolumesPage()
+        self.storageclasses_page = StorageClassesPage()
+
+        self.serviceaccounts_page = ServiceAccountsPage()
+        self.clusterroles_page = ClusterRolesPage()
+        self.roles_page = RolesPage()
+        self.clusterrolebindings_page = ClusterRoleBindingsPage()
+        self.rolebindings_page = RoleBindingsPage()
+
+        self.releases_page = ReleasesPage()
+
+        self.definitions_page = DefinitionsPage()
+
+
+
+
+
 
         # Add pages to stacked widget
         self.stacked_widget.addWidget(self.cluster_page)
@@ -175,6 +209,21 @@ class DockerDesktopUI(QMainWindow):
         self.stacked_widget.addWidget(self.networkpolicies_page)
         self.stacked_widget.addWidget(self.portforwarding_page)
 
+        self.stacked_widget.addWidget(self.persistentvolumeclaims_page)
+        self.stacked_widget.addWidget(self.persistentvolumes_page)
+        self.stacked_widget.addWidget(self.storageclasses_page)
+
+        self.stacked_widget.addWidget(self.serviceaccounts_page)
+        self.stacked_widget.addWidget(self.clusterroles_page)
+        self.stacked_widget.addWidget(self.roles_page)
+        self.stacked_widget.addWidget(self.clusterrolebindings_page)
+        self.stacked_widget.addWidget(self.rolebindings_page)
+
+        self.stacked_widget.addWidget(self.releases_page)
+
+        self.stacked_widget.addWidget(self.definitions_page)
+
+
         # Register pages in dictionary for easy access
         self.pages["Cluster"] = self.cluster_page
         self.pages["Nodes"] = self.nodes_page
@@ -194,6 +243,24 @@ class DockerDesktopUI(QMainWindow):
         self.pages["Ingress Classes"] = self.ingressclasses_page
         self.pages["Network Policies"] = self.networkpolicies_page
         self.pages["Port Forwarding"] = self.portforwarding_page
+
+
+        self.pages["Persistent Volume Claims"] = self.persistentvolumeclaims_page
+        self.pages["Persistent Volumes"] = self.persistentvolumes_page
+        self.pages["Storage Classes"] = self.storageclasses_page
+
+        self.pages["Service Accounts"] = self.serviceaccounts_page
+        self.pages["Cluster Roles"] = self.clusterroles_page
+        self.pages["Roles"] = self.roles_page
+        self.pages["Cluster Role Bindings"] = self.clusterrolebindings_page
+        self.pages["Role Bindings"] = self.rolebindings_page
+
+        self.pages["Releases"] = self.releases_page
+
+        self.pages["Definitions"] = self.definitions_page
+
+        
+
 
         
         right_layout.addWidget(self.stacked_widget)

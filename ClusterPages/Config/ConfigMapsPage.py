@@ -19,6 +19,7 @@ class ConfigMapsPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.selected_config_maps = set()  # Track selected config maps
+        self.select_all_checkbox = None  # Store reference to select-all checkbox
         self.setup_ui()
         self.load_data()
 
@@ -177,26 +178,26 @@ class ConfigMapsPage(QWidget):
         layout.addLayout(header)
         layout.addWidget(self.table)
 
+
     def custom_table_mousePressEvent(self, event):
-        """
-        Custom handler for table mouse press events to control selection behavior
-        """
-        # Get the item at the click position
-        item = self.table.itemAt(event.pos())
         index = self.table.indexAt(event.pos())
-        
-        # Check if we're clicking on a cell that has a widget (checkbox or action button)
-        if index.isValid() and (index.column() == 0 or index.column() == 5):
-            # Let the event pass through to the widget without selecting the row
-            QTableWidget.mousePressEvent(self.table, event)
-        elif item:
-            # Clicking on a regular table cell - allow selection
+        if index.isValid():
+            row = index.row()
+            if index.column() != 7:  # Skip action column
+                # Toggle checkbox when clicking anywhere in the row
+                checkbox_container = self.table.cellWidget(row, 0)
+                if checkbox_container:
+                    for child in checkbox_container.children():
+                        if isinstance(child, QCheckBox):
+                            child.setChecked(not child.isChecked())
+                            break
+                # Select the row
+                self.table.selectRow(row)
             QTableWidget.mousePressEvent(self.table, event)
         else:
-            # Clicking on empty space in table - clear selection
             self.table.clearSelection()
             QTableWidget.mousePressEvent(self.table, event)
-
+    
     def eventFilter(self, obj, event):
         """
         Handle clicks outside the table to clear row selection
@@ -353,6 +354,14 @@ class ConfigMapsPage(QWidget):
             self.selected_config_maps.add(config_map_name)
         else:
             self.selected_config_maps.discard(config_map_name)
+
+             # If any checkbox is unchecked, uncheck the select-all checkbox
+            if self.select_all_checkbox is not None and self.select_all_checkbox.isChecked():
+                # Block signals to prevent infinite recursion
+                self.select_all_checkbox.blockSignals(True)
+                self.select_all_checkbox.setChecked(False)
+                self.select_all_checkbox.blockSignals(False)
+                
         print(f"Selected config maps: {self.selected_config_maps}")
 
     def create_select_all_checkbox(self):
@@ -378,6 +387,7 @@ class ConfigMapsPage(QWidget):
             }
         """)
         checkbox.stateChanged.connect(self.handle_select_all)
+        self.select_all_checkbox = checkbox  # Store reference to the checkbox
         return checkbox
 
     def handle_select_all(self, state):

@@ -68,6 +68,7 @@ class PortForwardingPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.selected_port_forwarding = set()  # Track which deployments are checked
+        self.select_all_checkbox = None
         self.setup_ui()
         self.load_data()
 
@@ -198,11 +199,19 @@ class PortForwardingPage(QWidget):
         self.table.mousePressEvent = self.custom_table_mousePressEvent
 
     def custom_table_mousePressEvent(self, event):
-        item = self.table.itemAt(event.pos())
         index = self.table.indexAt(event.pos())
-        if index.isValid() and (index.column() == 0 or index.column() == 8):
-            QTableWidget.mousePressEvent(self.table, event)
-        elif item:
+        if index.isValid():
+            row = index.row()
+            if index.column() != 7:  # Skip action column
+                # Toggle checkbox when clicking anywhere in the row
+                checkbox_container = self.table.cellWidget(row, 0)
+                if checkbox_container:
+                    for child in checkbox_container.children():
+                        if isinstance(child, QCheckBox):
+                            child.setChecked(not child.isChecked())
+                            break
+                # Select the row
+                self.table.selectRow(row)
             QTableWidget.mousePressEvent(self.table, event)
         else:
             self.table.clearSelection()
@@ -353,6 +362,15 @@ class PortForwardingPage(QWidget):
             self.selected_port_forwarding.add(port_forwarding_name)
         else:
             self.selected_port_forwarding.discard(port_forwarding_name)
+
+            # If any checkbox is unchecked, uncheck the select-all checkbox
+            if self.select_all_checkbox is not None and self.select_all_checkbox.isChecked():
+                # Block signals to prevent infinite recursion
+                self.select_all_checkbox.blockSignals(True)
+                self.select_all_checkbox.setChecked(False)
+                self.select_all_checkbox.blockSignals(False)
+
+
         print("Selected port_frowarding:", self.selected_port_forwarding)
 
     def create_select_all_checkbox(self):
@@ -378,6 +396,7 @@ class PortForwardingPage(QWidget):
             }
         """)
         checkbox.stateChanged.connect(self.handle_select_all)
+        self.select_all_checkbox = checkbox
         return checkbox
 
     def handle_select_all(self, state):
