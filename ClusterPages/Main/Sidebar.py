@@ -179,7 +179,7 @@ class NavIconButton(QToolButton):
         elif self.item_text == "Config":
             menu_items = ["Config Maps", "Secrets", "Resource Quotas", "Limit Ranges",
                           "Horizontal Pod Autoscalers", "Pod Disruption Budgets",
-                          "Priority Classes", "Runtime Classes", "Leases"]
+                          "Priority Classes", "Runtime Classes", "Leases", "Mutating Webhook Configs","Validating Webhook Configs"]
         elif self.item_text == "Network":
             menu_items = ["Services", "Endpoints", "Ingresses", "Ingress Classes",
                           "Network Policies", 'Port Forwarding']

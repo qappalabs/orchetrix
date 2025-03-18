@@ -23,6 +23,17 @@ from WorkLoad.CronJobsPage import CronJobsPage
 
 # Config pages
 from Config.ConfigMapsPage import ConfigMapsPage
+from Config.SecretsPage import SecretsPage
+from Config.ResourceQuotasPage import ResourceQuotasPage
+from Config.LimitRangesPage import LimitRangesPage
+from Config.HorizontalPodAutoscalersPage import HorizontalPodAutoscalersPage
+from Config.PodDisruptionBudgetsPage import PodDisruptionBudgetsPage
+from Config.PriorityClassesPage import PriorityClassesPage
+from Config.RuntimeClassesPage import RuntimeClassesPage
+from Config.LeasesPage import LeasesPage
+from Config.MutatingWebhookConfigsPage import MutatingWebhookConfigsPage
+from Config.ValidatingWebhookConfigsPage import ValidatingWebhookConfigsPage
+
 
 # Network pages
 from NetWork.ServicesPage import ServicesPage
@@ -50,6 +61,11 @@ from Helm.ReleasesPage import ReleasesPage
 # Custome Resource Pages
 from CustomResources.DefinitionsPage import DefinitionsPage
 
+# Event pages
+from EventsPage import EventPage
+
+# NameSpace Pages
+from NamespacesPage import NamespacesPage
 
 class DockerDesktopUI(QMainWindow):
     def __init__(self):
@@ -162,7 +178,19 @@ class DockerDesktopUI(QMainWindow):
         self.replicationcontrollers_page = ReplicaControllersPage()
         self.jobs_page = JobsPage()
         self.cronjobs_page = CronJobsPage()
+
         self.configmaps_page = ConfigMapsPage()
+        self.secrets_page = SecretsPage()
+        self.resourcequotas_page = ResourceQuotasPage()
+        self.limitranges_page = LimitRangesPage()
+        self.horizontalpodautoscalers_page = HorizontalPodAutoscalersPage()
+        self.poddisruptionbudgets_page = PodDisruptionBudgetsPage()
+        self.priorityclasses_page = PriorityClassesPage()
+        self.runtimeclasses_page = RuntimeClassesPage()
+        self.leases_page = LeasesPage()
+        self.mutatingwebhookconfigs_page = MutatingWebhookConfigsPage()
+        self.validatingwebhookconfigs_page = ValidatingWebhookConfigsPage()
+
         self.services_page = ServicesPage()
         self.endpoints_page = EndpointsPage()
         self.ingresses_page = IngressesPage()
@@ -184,6 +212,9 @@ class DockerDesktopUI(QMainWindow):
 
         self.definitions_page = DefinitionsPage()
 
+        self.events_page = EventPage()
+
+        self.namespace_page = NamespacesPage()
 
 
 
@@ -201,7 +232,20 @@ class DockerDesktopUI(QMainWindow):
         self.stacked_widget.addWidget(self.replicationcontrollers_page)
         self.stacked_widget.addWidget(self.jobs_page)
         self.stacked_widget.addWidget(self.cronjobs_page)
+
         self.stacked_widget.addWidget(self.configmaps_page)
+        self.stacked_widget.addWidget(self.secrets_page)
+        self.stacked_widget.addWidget(self.resourcequotas_page)
+        self.stacked_widget.addWidget(self.limitranges_page)
+        self.stacked_widget.addWidget(self.horizontalpodautoscalers_page)
+        self.stacked_widget.addWidget(self.poddisruptionbudgets_page)
+        self.stacked_widget.addWidget(self.priorityclasses_page)
+        self.stacked_widget.addWidget(self.runtimeclasses_page)
+        self.stacked_widget.addWidget(self.leases_page)
+        self.stacked_widget.addWidget(self.mutatingwebhookconfigs_page)
+        self.stacked_widget.addWidget(self.validatingwebhookconfigs_page)
+
+
         self.stacked_widget.addWidget(self.services_page)
         self.stacked_widget.addWidget(self.endpoints_page)
         self.stacked_widget.addWidget(self.ingresses_page)
@@ -223,6 +267,11 @@ class DockerDesktopUI(QMainWindow):
 
         self.stacked_widget.addWidget(self.definitions_page)
 
+        self.stacked_widget.addWidget(self.events_page)
+        
+        self.stacked_widget.addWidget(self.namespace_page)
+
+
 
         # Register pages in dictionary for easy access
         self.pages["Cluster"] = self.cluster_page
@@ -236,7 +285,19 @@ class DockerDesktopUI(QMainWindow):
         self.pages["Replication Controllers"] = self.replicationcontrollers_page
         self.pages["Jobs"] = self.jobs_page
         self.pages["Cron Jobs"] = self.cronjobs_page
+
         self.pages["Config Maps"] = self.configmaps_page
+        self.pages["Secrets"] = self.secrets_page
+        self.pages["Resource Quotas"] = self.resourcequotas_page
+        self.pages["Limit Ranges"] = self.limitranges_page
+        self.pages["Horizontal Pod Autoscalers"] = self.horizontalpodautoscalers_page
+        self.pages["Pod Disruption Budgets"] = self.poddisruptionbudgets_page
+        self.pages["Priority Classes"] = self.priorityclasses_page
+        self.pages["Runtime Classes"] = self.runtimeclasses_page
+        self.pages["Leases"] = self.leases_page
+        self.pages["Mutating Webhook Configs"] = self.mutatingwebhookconfigs_page
+        self.pages["Validating Webhook Configs"] = self.validatingwebhookconfigs_page
+
         self.pages["Services"] = self.services_page
         self.pages["Endpoints"] = self.endpoints_page
         self.pages["Ingresses"] = self.ingresses_page
@@ -259,6 +320,9 @@ class DockerDesktopUI(QMainWindow):
 
         self.pages["Definitions"] = self.definitions_page
 
+        self.pages["Events"] = self.events_page
+
+        self.pages["Namespaces"] = self.namespace_page
         
 
 
@@ -285,6 +349,11 @@ class DockerDesktopUI(QMainWindow):
             self.stacked_widget.setCurrentWidget(self.nodes_page)
         elif active_button.item_text == "Cluster":
             self.stacked_widget.setCurrentWidget(self.cluster_page)
+        elif active_button.item_text == "Events":
+            self.stacked_widget.setCurrentWidget(self.events_page)
+        elif active_button.item_text == "Namespaces":
+            self.stacked_widget.setCurrentWidget(self.namespace_page)
+        
 
     def handle_dropdown_selection(self, item_name):
         """Handle dropdown menu selections"""
