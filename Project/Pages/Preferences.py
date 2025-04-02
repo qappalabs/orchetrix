@@ -455,20 +455,606 @@ class PreferencesWidget(QWidget):
         self.content_scroll.setWidget(content_widget)
     
     def show_proxy_section(self):
-        # Create placeholder section
-        self.show_placeholder_section("Proxy")
+        # Create content widget
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setContentsMargins(40, 40, 40, 40)
+        content_layout.setSpacing(5)
+        
+        # Header container with proxy title and close button
+        header_container = QWidget()
+        header_layout = QHBoxLayout(header_container)
+        header_layout.setContentsMargins(0, 0, 0, 20)
+        
+        # Proxy header
+        proxy_header = QLabel("Proxy")
+        proxy_header.setObjectName("header")
+        header_layout.addWidget(proxy_header)
+        
+        # Add close button to header with alignment
+        header_layout.addWidget(self.create_back_button(), 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
+        
+        # Add the header to main content
+        content_layout.addWidget(header_container)
+        
+        # HTTP PROXY section
+        http_proxy_label = QLabel("HTTP PROXY")
+        http_proxy_label.setObjectName("sectionHeader")
+        content_layout.addWidget(http_proxy_label)
+        
+        # Proxy URL input
+        proxy_input = QLineEdit()
+        proxy_input.setPlaceholderText("Type HTTP proxy url (example: http://proxy.acme.org:8080)")
+        content_layout.addWidget(proxy_input)
+        
+        # Description
+        proxy_desc = QLabel("Proxy is used only for non-cluster communication.")
+        proxy_desc.setStyleSheet("color: #8e9ba9; font-size: 13px; padding: 10px 0px;")
+        content_layout.addWidget(proxy_desc)
+        
+        # Divider
+        divider = QFrame()
+        divider.setObjectName("divider")
+        divider.setFrameShape(QFrame.Shape.HLine)
+        content_layout.addWidget(divider)
+        
+        # CERTIFICATE TRUST section
+        cert_label = QLabel("CERTIFICATE TRUST")
+        cert_label.setObjectName("sectionHeader")
+        content_layout.addWidget(cert_label)
+        
+        # Certificate toggle
+        cert_container = QWidget()
+        cert_layout = QHBoxLayout(cert_container)
+        cert_layout.setContentsMargins(0, 10, 0, 10)
+        
+        cert_text = QLabel("Allow untrusted Certificate Authorities")
+        cert_text.setStyleSheet("color: #ffffff; font-size: 14px;")
+        
+        cert_toggle = ToggleSwitch()
+        cert_toggle.setChecked(False)
+        
+        cert_layout.addWidget(cert_text)
+        cert_layout.addStretch()
+        cert_layout.addWidget(cert_toggle)
+        
+        content_layout.addWidget(cert_container)
+        
+        # Certificate description
+        cert_desc = QLabel("This will make Lens to trust ANY certificate authority without any validations. Needed with some corporate proxies that do certificate re-writing. Does not affect cluster communications!")
+        cert_desc.setStyleSheet("color: #8e9ba9; font-size: 13px; padding: 10px 0px;")
+        cert_desc.setWordWrap(True)
+        content_layout.addWidget(cert_desc)
+        
+        content_layout.addStretch()
+        
+        # Set the content widget
+        self.content_scroll.setWidget(content_widget)
     
     def show_kubernetes_section(self):
-        # Create placeholder section
-        self.show_placeholder_section("Kubernetes")
+        # Create content widget
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setContentsMargins(40, 40, 40, 40)
+        content_layout.setSpacing(5)
+        
+        # Header container with Kubernetes title and close button
+        header_container = QWidget()
+        header_layout = QHBoxLayout(header_container)
+        header_layout.setContentsMargins(0, 0, 0, 20)
+        
+        # Kubernetes header
+        kubernetes_header = QLabel("Kubernetes")
+        kubernetes_header.setObjectName("header")
+        header_layout.addWidget(kubernetes_header)
+        
+        # Add close button to header with alignment
+        header_layout.addWidget(self.create_back_button(), 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
+        
+        # Add the header to main content
+        content_layout.addWidget(header_container)
+        
+        # KUBECTL BINARY DOWNLOAD section
+        kubectl_label = QLabel("KUBECTL BINARY DOWNLOAD")
+        kubectl_label.setObjectName("sectionHeader")
+        content_layout.addWidget(kubectl_label)
+        
+        # Toggle switch for kubectl binary download
+        kubectl_download_container = QWidget()
+        kubectl_download_layout = QHBoxLayout(kubectl_download_container)
+        kubectl_download_layout.setContentsMargins(0, 10, 0, 10)
+        
+        kubectl_download_text = QLabel("Download kubectl binaries matching the Kubernetes cluster version")
+        kubectl_download_text.setStyleSheet("color: #ffffff; font-size: 14px;")
+        
+        kubectl_download_toggle = ToggleSwitch()
+        kubectl_download_toggle.setChecked(True)
+        
+        kubectl_download_layout.addWidget(kubectl_download_text)
+        kubectl_download_layout.addStretch()
+        kubectl_download_layout.addWidget(kubectl_download_toggle)
+        
+        content_layout.addWidget(kubectl_download_container)
+        
+        # Divider
+        divider1 = QFrame()
+        divider1.setObjectName("divider")
+        divider1.setFrameShape(QFrame.Shape.HLine)
+        content_layout.addWidget(divider1)
+        
+        # DOWNLOAD MIRROR section
+        download_mirror_label = QLabel("DOWNLOAD MIRROR")
+        download_mirror_label.setObjectName("sectionHeader")
+        content_layout.addWidget(download_mirror_label)
+        
+        # Download mirror dropdown
+        download_mirror_combo = QComboBox()
+        download_mirror_combo.addItem("Default (Google)")
+        download_mirror_combo.addItem("Alternative Mirror 1")
+        download_mirror_combo.addItem("Alternative Mirror 2")
+        download_mirror_combo.setCursor(Qt.CursorShape.PointingHandCursor)
+        content_layout.addWidget(download_mirror_combo)
+        
+        # Divider
+        divider2 = QFrame()
+        divider2.setObjectName("divider")
+        divider2.setFrameShape(QFrame.Shape.HLine)
+        content_layout.addWidget(divider2)
+        
+        # DIRECTORY FOR BINARIES section
+        binaries_dir_label = QLabel("DIRECTORY FOR BINARIES")
+        binaries_dir_label.setObjectName("sectionHeader")
+        content_layout.addWidget(binaries_dir_label)
+        
+        # Binaries directory input
+        binaries_dir_input = QLineEdit()
+        binaries_dir_input.setText(r"C:\Users\Admin\AppData\Roaming\OpenLens\binaries")
+        binaries_dir_input.setPlaceholderText("Directory to download binaries into")
+        content_layout.addWidget(binaries_dir_input)
+        
+        binaries_dir_desc = QLabel("The directory to download binaries into.")
+        binaries_dir_desc.setStyleSheet("color: #8e9ba9; font-size: 13px; padding: 10px 0px;")
+        content_layout.addWidget(binaries_dir_desc)
+        
+        # Divider
+        divider3 = QFrame()
+        divider3.setObjectName("divider")
+        divider3.setFrameShape(QFrame.Shape.HLine)
+        content_layout.addWidget(divider3)
+        
+        # PATH TO KUBECTL BINARY section
+        kubectl_path_label = QLabel("PATH TO KUBECTL BINARY")
+        kubectl_path_label.setObjectName("sectionHeader")
+        content_layout.addWidget(kubectl_path_label)
+        
+        # Kubectl binary path input
+        kubectl_path_input = QLineEdit()
+        kubectl_path_input.setText(r"C:\Users\Admin\AppData\Roaming\OpenLens\binaries\kubectl")
+        kubectl_path_input.setPlaceholderText("Path to kubectl binary")
+        content_layout.addWidget(kubectl_path_input)
+        
+        # Divider
+        divider4 = QFrame()
+        divider4.setObjectName("divider")
+        divider4.setFrameShape(QFrame.Shape.HLine)
+        content_layout.addWidget(divider4)
+        
+        # KUBECONFIG SYNCS section
+        kubeconfig_label = QLabel("KUBECONFIG SYNCS")
+        kubeconfig_label.setObjectName("sectionHeader")
+        content_layout.addWidget(kubeconfig_label)
+        
+        # Kubeconfig sync buttons
+        kubeconfig_sync_container = QWidget()
+        kubeconfig_sync_layout = QHBoxLayout(kubeconfig_sync_container)
+        kubeconfig_sync_layout.setContentsMargins(0, 10, 0, 10)
+        
+        sync_file_btn = QPushButton("Sync file(s)")
+        sync_file_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4A9EFF;
+                color: white;
+                border: none;
+                padding: 8px 15px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #3A8EDF;
+            }
+        """)
+        sync_folder_btn = QPushButton("Sync folder(s)")
+        sync_folder_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #252a2e;
+                color: #8e9ba9;
+                border: 1px solid #4A9EFF;
+                padding: 8px 15px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #2D2D2D;
+            }
+        """)
+        
+        kubeconfig_sync_layout.addWidget(sync_file_btn)
+        kubeconfig_sync_layout.addSpacing(10)
+        kubeconfig_sync_layout.addWidget(sync_folder_btn)
+        kubeconfig_sync_layout.addStretch()
+        
+        content_layout.addWidget(kubeconfig_sync_container)
+        
+        # SYNCED ITEMS section
+        synced_items_label = QLabel("SYNCED ITEMS")
+        synced_items_label.setObjectName("sectionHeader")
+        content_layout.addWidget(synced_items_label)
+        
+        # Synced items container
+        synced_items_container = QWidget()
+        synced_items_layout = QHBoxLayout(synced_items_container)
+        synced_items_layout.setContentsMargins(0, 10, 0, 10)
+        
+        synced_item = QLabel(r"C:\Users\Admin\.kube")
+        synced_item.setStyleSheet("color: #ffffff; font-size: 14px; background-color: #252a2e; padding: 8px; border-radius: 4px;")
+        
+        delete_btn = QPushButton("🗑")
+        delete_btn.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                color: #8e9ba9;
+                border: none;
+                font-size: 16px;
+            }
+            QPushButton:hover {
+                color: #ff0000;
+            }
+        """)
+        
+        synced_items_layout.addWidget(synced_item)
+        synced_items_layout.addStretch()
+        synced_items_layout.addWidget(delete_btn)
+        
+        content_layout.addWidget(synced_items_container)
+        
+        # Divider
+        divider5 = QFrame()
+        divider5.setObjectName("divider")
+        divider5.setFrameShape(QFrame.Shape.HLine)
+        content_layout.addWidget(divider5)
+        
+        # HELM CHARTS section
+        helm_charts_label = QLabel("HELM CHARTS")
+        helm_charts_label.setObjectName("sectionHeader")
+        content_layout.addWidget(helm_charts_label)
+        
+        # Helm Charts repositories container
+        helm_repos_container = QWidget()
+        helm_repos_layout = QHBoxLayout(helm_repos_container)
+        helm_repos_layout.setContentsMargins(0, 10, 0, 10)
+        
+        # Repositories dropdown
+        helm_repos_combo = QComboBox()
+        helm_repos_combo.addItem("Repositories")
+        helm_repos_combo.setStyleSheet("""
+            QComboBox {
+                background-color: #252a2e;
+                border: 1px solid #333639;
+                border-radius: 4px;
+                padding: 8px 12px;
+                color: #ffffff;
+                min-width: 200px;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 30px;
+            }
+        """)
+        
+        # Add Custom Helm Repo button
+        add_repo_btn = QPushButton("Add Custom Helm Repo")
+        add_repo_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4A9EFF;
+                color: white;
+                border: none;
+                padding: 8px 15px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #3A8EDF;
+            }
+        """)
+        
+        helm_repos_layout.addWidget(helm_repos_combo)
+        helm_repos_layout.addSpacing(10)
+        helm_repos_layout.addWidget(add_repo_btn)
+        helm_repos_layout.addStretch()
+        
+        content_layout.addWidget(helm_repos_container)
+        
+        # Helm repositories list
+        helm_repo_item_container = QWidget()
+        helm_repo_item_layout = QHBoxLayout(helm_repo_item_container)
+        helm_repo_item_layout.setContentsMargins(0, 10, 0, 10)
+        
+        helm_repo_item = QLabel("bitnami")
+        helm_repo_url = QLabel("https://charts.bitnami.com/bitnami")
+        helm_repo_item.setStyleSheet("color: #ffffff; font-size: 14px;")
+        helm_repo_url.setStyleSheet("color: #8e9ba9; font-size: 12px;")
+        
+        delete_repo_btn = QPushButton("🗑")
+        delete_repo_btn.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                color: #8e9ba9;
+                border: none;
+                font-size: 16px;
+            }
+            QPushButton:hover {
+                color: #ff0000;
+            }
+        """)
+        
+        repo_details_layout = QVBoxLayout()
+        repo_details_layout.addWidget(helm_repo_item)
+        repo_details_layout.addWidget(helm_repo_url)
+        
+        helm_repo_item_layout.addLayout(repo_details_layout)
+        helm_repo_item_layout.addStretch()
+        helm_repo_item_layout.addWidget(delete_repo_btn)
+        
+        content_layout.addWidget(helm_repo_item_container)
+        
+        content_layout.addStretch()
+        
+        # Set the content widget
+        self.content_scroll.setWidget(content_widget)
+
     
     def show_editor_section(self):
-        # Create placeholder section
-        self.show_placeholder_section("Editor")
-    
+        # Create content widget
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setContentsMargins(40, 40, 40, 40)
+        content_layout.setSpacing(5)
+        
+        # Header container with Editor title and close button
+        header_container = QWidget()
+        header_layout = QHBoxLayout(header_container)
+        header_layout.setContentsMargins(0, 0, 0, 20)
+        
+        # Editor header
+        editor_header = QLabel("Editor")
+        editor_header.setObjectName("header")
+        header_layout.addWidget(editor_header)
+        
+        # Add close button to header with alignment
+        header_layout.addWidget(self.create_back_button(), 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
+        
+        # Add the header to main content
+        content_layout.addWidget(header_container)
+        
+        # MINIMAP section
+        minimap_label = QLabel("MINIMAP")
+        minimap_label.setObjectName("sectionHeader")
+        content_layout.addWidget(minimap_label)
+        
+        # Minimap toggle and position container
+        minimap_container = QWidget()
+        minimap_layout = QHBoxLayout(minimap_container)
+        minimap_layout.setContentsMargins(0, 10, 0, 10)
+        
+        # Minimap toggle
+        minimap_text = QLabel("Show minimap")
+        minimap_text.setStyleSheet("color: #ffffff; font-size: 14px;")
+        
+        minimap_toggle = ToggleSwitch()
+        minimap_toggle.setChecked(True)
+        
+        # Minimap position dropdown
+        minimap_position = QComboBox()
+        minimap_position.addItem("right")
+        minimap_position.addItem("left")
+        minimap_position.setCursor(Qt.CursorShape.PointingHandCursor)
+        
+        minimap_layout.addWidget(minimap_text)
+        minimap_layout.addStretch()
+        minimap_layout.addWidget(minimap_position)
+        minimap_layout.addWidget(minimap_toggle)
+        
+        content_layout.addWidget(minimap_container)
+        
+        # Divider
+        divider1 = QFrame()
+        divider1.setObjectName("divider")
+        divider1.setFrameShape(QFrame.Shape.HLine)
+        content_layout.addWidget(divider1)
+        
+        # LINE NUMBERS section
+        line_numbers_label = QLabel("LINE NUMBERS")
+        line_numbers_label.setObjectName("sectionHeader")
+        content_layout.addWidget(line_numbers_label)
+        
+        # Line numbers dropdown
+        line_numbers_combo = QComboBox()
+        line_numbers_combo.addItem("On")
+        line_numbers_combo.addItem("Off")
+        line_numbers_combo.setCursor(Qt.CursorShape.PointingHandCursor)
+        content_layout.addWidget(line_numbers_combo)
+        
+        # Divider
+        divider2 = QFrame()
+        divider2.setObjectName("divider")
+        divider2.setFrameShape(QFrame.Shape.HLine)
+        content_layout.addWidget(divider2)
+        
+        # TAB SIZE section
+        tab_size_label = QLabel("TAB SIZE")
+        tab_size_label.setObjectName("sectionHeader")
+        content_layout.addWidget(tab_size_label)
+        
+        # Tab size input
+        tab_size_input = QLineEdit()
+        tab_size_input.setText("2")
+        content_layout.addWidget(tab_size_input)
+        
+        # Divider
+        divider3 = QFrame()
+        divider3.setObjectName("divider")
+        divider3.setFrameShape(QFrame.Shape.HLine)
+        content_layout.addWidget(divider3)
+        
+        # FONT SIZE section
+        font_size_label = QLabel("FONT SIZE")
+        font_size_label.setObjectName("sectionHeader")
+        content_layout.addWidget(font_size_label)
+        
+        # Font size input
+        font_size_input = QLineEdit()
+        font_size_input.setText("12")
+        content_layout.addWidget(font_size_input)
+        
+        # Divider
+        divider4 = QFrame()
+        divider4.setObjectName("divider")
+        divider4.setFrameShape(QFrame.Shape.HLine)
+        content_layout.addWidget(divider4)
+        
+        # FONT FAMILY section
+        font_family_label = QLabel("FONT FAMILY")
+        font_family_label.setObjectName("sectionHeader")
+        content_layout.addWidget(font_family_label)
+        
+        # Font family input
+        font_family_input = QLineEdit()
+        font_family_input.setText("RobotoMono")
+        content_layout.addWidget(font_family_input)
+        
+        content_layout.addStretch()
+        
+        # Set the content widget
+        self.content_scroll.setWidget(content_widget)
+
     def show_terminal_section(self):
-        # Create placeholder section
-        self.show_placeholder_section("Terminal")
+        # Create content widget
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setContentsMargins(40, 40, 40, 40)
+        content_layout.setSpacing(5)
+        
+        # Header container with Terminal title and close button
+        header_container = QWidget()
+        header_layout = QHBoxLayout(header_container)
+        header_layout.setContentsMargins(0, 0, 0, 20)
+        
+        # Terminal header
+        terminal_header = QLabel("Terminal")
+        terminal_header.setObjectName("header")
+        header_layout.addWidget(terminal_header)
+        
+        # Add close button to header with alignment
+        header_layout.addWidget(self.create_back_button(), 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
+        
+        # Add the header to main content
+        content_layout.addWidget(header_container)
+        
+        # TERMINAL SHELL PATH section
+        shell_path_label = QLabel("TERMINAL SHELL PATH")
+        shell_path_label.setObjectName("sectionHeader")
+        content_layout.addWidget(shell_path_label)
+        
+        # Shell path input
+        shell_path_input = QLineEdit()
+        shell_path_input.setText("powershell.exe")
+        content_layout.addWidget(shell_path_input)
+        
+        # Divider
+        divider1 = QFrame()
+        divider1.setObjectName("divider")
+        divider1.setFrameShape(QFrame.Shape.HLine)
+        content_layout.addWidget(divider1)
+        
+        # TERMINAL COPY & PASTE section
+        copy_paste_label = QLabel("TERMINAL COPY & PASTE")
+        copy_paste_label.setObjectName("sectionHeader")
+        content_layout.addWidget(copy_paste_label)
+        
+        # Copy & Paste container
+        copy_paste_container = QWidget()
+        copy_paste_layout = QHBoxLayout(copy_paste_container)
+        copy_paste_layout.setContentsMargins(0, 10, 0, 10)
+        
+        # Copy & Paste text
+        copy_paste_text = QLabel("Copy on select and paste on right-click")
+        copy_paste_text.setStyleSheet("color: #ffffff; font-size: 14px;")
+        
+        # Copy & Paste toggle
+        copy_paste_toggle = ToggleSwitch()
+        copy_paste_toggle.setChecked(False)
+        
+        copy_paste_layout.addWidget(copy_paste_text)
+        copy_paste_layout.addStretch()
+        copy_paste_layout.addWidget(copy_paste_toggle)
+        
+        content_layout.addWidget(copy_paste_container)
+        
+        # Divider
+        divider2 = QFrame()
+        divider2.setObjectName("divider")
+        divider2.setFrameShape(QFrame.Shape.HLine)
+        content_layout.addWidget(divider2)
+        
+        # TERMINAL THEME section
+        theme_label = QLabel("TERMINAL THEME")
+        theme_label.setObjectName("sectionHeader")
+        content_layout.addWidget(theme_label)
+        
+        # Theme dropdown
+        theme_combo = QComboBox()
+        theme_combo.addItem("Light")
+        theme_combo.addItem("Dark")
+        theme_combo.addItem("System")
+        theme_combo.setCursor(Qt.CursorShape.PointingHandCursor)
+        content_layout.addWidget(theme_combo)
+        
+        # Divider
+        divider3 = QFrame()
+        divider3.setObjectName("divider")
+        divider3.setFrameShape(QFrame.Shape.HLine)
+        content_layout.addWidget(divider3)
+        
+        # FONT SIZE section
+        font_size_label = QLabel("FONT SIZE")
+        font_size_label.setObjectName("sectionHeader")
+        content_layout.addWidget(font_size_label)
+        
+        # Font size input
+        font_size_input = QLineEdit()
+        font_size_input.setText("12")
+        content_layout.addWidget(font_size_input)
+        
+        # Divider
+        divider4 = QFrame()
+        divider4.setObjectName("divider")
+        divider4.setFrameShape(QFrame.Shape.HLine)
+        content_layout.addWidget(divider4)
+        
+        # FONT FAMILY section
+        font_family_label = QLabel("FONT FAMILY")
+        font_family_label.setObjectName("sectionHeader")
+        content_layout.addWidget(font_family_label)
+        
+        # Font family dropdown
+        font_family_combo = QComboBox()
+        font_family_combo.addItem("RobotoMono")
+        font_family_combo.addItem("Consolas")
+        font_family_combo.addItem("Courier New")
+        font_family_combo.setCursor(Qt.CursorShape.PointingHandCursor)
+        content_layout.addWidget(font_family_combo)
+        
+        content_layout.addStretch()
+        
+        # Set the content widget
+        self.content_scroll.setWidget(content_widget)
     
     def show_placeholder_section(self, title):
         # Create content widget for placeholder sections

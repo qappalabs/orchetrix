@@ -1,400 +1,390 @@
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-                           QFrame, QGraphicsDropShadowEffect, QSizePolicy,
-                           QGridLayout, QScrollArea, QToolTip)
-from PyQt6.QtCore import Qt, QRectF, QPointF, QEvent
-from PyQt6.QtGui import QColor, QPainter, QPen, QBrush, QPainterPath, QFont, QCursor
-import math
-
-class ResourceStatus:
-    """Class to represent status of a resource"""
-    RUNNING = "Running"
-    STOPPED = "Stopped"
-    IN_PROCESS = "In Process"
+import sys
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
+                             QHBoxLayout, QLabel, QSizePolicy, QTableWidget,
+                             QScrollArea, QFrame, QTableWidgetItem, QHeaderView)
+from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QBrush
+from PyQt6.QtCore import Qt, QSize
 
 
-class ResourceDonutChart(QWidget):
-    """Widget to display a small donut chart for a specific resource"""
-    def __init__(self, resource_name, counts, parent=None):
-        """
-        Initialize with resource details and counts
-        
-        Args:
-            resource_name (str): Name of the resource
-            counts (dict): Dictionary with keys 'running', 'stopped', 'in_process', and 'total'
-        """
-        super().__init__(parent)
-        self.resource_name = resource_name
-        self.counts = counts
-        
-        # Define specific colors for different statuses as requested
-        self.status_colors = {
-            ResourceStatus.RUNNING: "#ff7808",    # Orange
-            ResourceStatus.STOPPED: "#df0f0f",    # Red
-            ResourceStatus.IN_PROCESS: "#1bbd02"  # Green
-        }
-        
-        # Set fixed size for the small chart - increased size for larger radius
-        self.setMinimumSize(150, 150)  # Increased from 120, 120
-        self.setMaximumSize(180, 180)  # Increased from 150, 150
-    
+class CircularProgressIndicator(QWidget):
+    def __init__(self, running=0, in_progress=0, failed=0, total=20):
+        super().__init__()
+        self.running = running
+        self.in_progress = in_progress
+        self.failed = failed
+        self.total = total
+        self.setMinimumSize(120, 120)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
     def paintEvent(self, event):
-        super().paintEvent(event)
-        
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        # Get chart area geometry
-        center_x = self.width() // 2
-        center_y = self.height() // 2
-        
-        # Increased outer radius by reducing the padding
-        outer_radius = min(self.width(), self.height()) // 2 - 5  # Changed from 10 to 5
-        inner_radius = outer_radius * 0.8  # Large inner radius for thin ring
-        
-        # Initialize starting angle (start from top, clockwise)
-        start_angle = 90
-        
-        # Draw background circle if total is 0
-        if self.counts['total'] == 0:
-            # Draw outer circle
-            painter.setPen(QPen(QColor("#333333"), 1))
-            painter.setBrush(QBrush(QColor("#2d2d2d")))
-            painter.drawEllipse(
-                int(center_x - outer_radius),
-                int(center_y - outer_radius),
-                int(outer_radius * 2),
-                int(outer_radius * 2)
-            )
-            
-            # Draw inner circle (donut hole)
-            painter.setBrush(QBrush(QColor("#1e1e1e")))
-            painter.drawEllipse(
-                int(center_x - inner_radius),
-                int(center_y - inner_radius),
-                int(inner_radius * 2),
-                int(inner_radius * 2)
-            )
-            
-            font = QFont("Segoe UI", 8, QFont.Weight.Bold)
-            painter.setFont(font)
-            painter.setPen(QPen(QColor("#888888")))
-            painter.drawText(
-                QRectF(center_x - inner_radius, center_y - inner_radius, inner_radius * 2, inner_radius * 2),
-                Qt.AlignmentFlag.AlignCenter,
-                "No Data"
-            )
-            return
-        
-        # Draw segments for different statuses
-        segments = [
-            (ResourceStatus.RUNNING, self.counts['running']),
-            (ResourceStatus.STOPPED, self.counts['stopped']),
-            (ResourceStatus.IN_PROCESS, self.counts['in_process'])
-        ]
-        
-        # Filter out zero counts
-        segments = [(status, count) for status, count in segments if count > 0]
-        
-        for i, (status, count) in enumerate(segments):
-            # Skip if count is 0
-            if count == 0:
-                continue
-                
-            # Calculate slice angle
-            slice_angle = (count / self.counts['total']) * 360
-            
-            # Get color for this status
-            color = self.status_colors.get(status, "#cccccc")  # Default gray if status not found
-            
-            # Draw outer arc
-            path = QPainterPath()
-            
-            # Start arc - outer edge
-            path.arcMoveTo(
-                int(center_x - outer_radius),
-                int(center_y - outer_radius),
-                int(outer_radius * 2),
-                int(outer_radius * 2),
-                start_angle
-            )
-            
-            # Draw outer arc
-            path.arcTo(
-                int(center_x - outer_radius),
-                int(center_y - outer_radius),
-                int(outer_radius * 2),
-                int(outer_radius * 2),
-                start_angle,
-                -slice_angle
-            )
-            
-            # Draw line to inner arc
-            end_angle = start_angle - slice_angle
-            end_x = center_x + inner_radius * math.cos(math.radians(end_angle))
-            end_y = center_y - inner_radius * math.sin(math.radians(end_angle))
-            path.lineTo(end_x, end_y)
-            
-            # Draw inner arc
-            path.arcTo(
-                int(center_x - inner_radius),
-                int(center_y - inner_radius),
-                int(inner_radius * 2),
-                int(inner_radius * 2),
-                end_angle,
-                slice_angle
-            )
-            
-            # Close path
-            path.closeSubpath()
-            
-            # Set pen and brush - made slightly thicker for better visibility
-            painter.setPen(QPen(QColor(color).darker(110), 1.5))  # Increased from 1 to 1.5
-            painter.setBrush(QBrush(QColor(color)))
-            painter.drawPath(path)
-            
-            # Update starting angle for next slice
-            start_angle -= slice_angle
-        
-        # Draw center hole (clean up any artifacts)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(QColor("#1e1e1e")))
-        painter.drawEllipse(
-            int(center_x - inner_radius),
-            int(center_y - inner_radius),
-            int(inner_radius * 2),
-            int(inner_radius * 2)
-        )
-        
-        # Choose text color based on primary status
-        # If running counts are highest, use running color, otherwise use white
-        primary_status = max(segments, key=lambda x: x[1])[0] if segments else None
-        text_color = self.status_colors.get(primary_status, "#ffffff") if primary_status else "#ffffff"
-        
-        # Draw resource name and count in the center
-        font = QFont("Segoe UI", 9, QFont.Weight.Bold)
-        painter.setFont(font)
-        painter.setPen(QPen(QColor(text_color)))
-        
-        # Draw the resource name
-        name_rect = QRectF(
-            center_x - inner_radius,
-            center_y - 12,
-            inner_radius * 2,
-            15
-        )
-        painter.drawText(name_rect, Qt.AlignmentFlag.AlignCenter, self.resource_name)
-        
-        # Draw the count below
-        font = QFont("Segoe UI", 8)
-        painter.setFont(font)
-        painter.setPen(QPen(QColor("#FFFFFF")))
-        
-        count_rect = QRectF(
-            center_x - inner_radius,
-            center_y + 3,
-            inner_radius * 2,
-            15
-        )
-        painter.drawText(count_rect, Qt.AlignmentFlag.AlignCenter, f"{self.counts['running']}/{self.counts['total']}")
+
+        # Get dimensions for the circle
+        width = self.width()
+        height = self.height()
+        center_x = width / 2
+        center_y = height / 2
+
+        # Ring sizes - make them proportional to widget size
+        size_factor = min(width, height) / 150  # Scale factor based on widget size
+
+        outer_radius = min(width, height) / 2 - (15 * size_factor)
+        middle_radius = outer_radius - (10 * size_factor)
+        inner_radius = middle_radius - (10 * size_factor)
+
+        # Scale pen width based on widget size but make it thicker for visibility
+        pen_width = 6 * size_factor
+
+        # Set up pen properties
+        pen = QPen()
+        pen.setWidth(max(3, int(pen_width)))  # Increased minimum width from 2 to 3
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+
+        # Draw the background circles - make them darker for better contrast
+        pen.setColor(QColor(30, 30, 30))  # Darker background color
+        painter.setPen(pen)
+
+        # Draw outer ring background (for running)
+        painter.drawEllipse(int(center_x - outer_radius), int(center_y - outer_radius),
+                            int(outer_radius * 2), int(outer_radius * 2))
+
+        # Draw middle ring background (for in progress)
+        painter.drawEllipse(int(center_x - middle_radius), int(center_y - middle_radius),
+                            int(middle_radius * 2), int(middle_radius * 2))
+
+        # Draw inner ring background (for failed)
+        painter.drawEllipse(int(center_x - inner_radius), int(center_y - inner_radius),
+                            int(inner_radius * 2), int(inner_radius * 2))
+
+        # Start angle for all segments (same starting point)
+        start_angle = -90 * 16  # Start at top (negative numbers go clockwise in Qt)
+
+        # Draw the running segment (green) on outer ring - make colors brighter
+        if self.running > 0:
+            pen.setColor(QColor(50, 220, 50))  # Brighter green
+            painter.setPen(pen)
+            segment_angle = int(self.running / self.total * 360 * 16)
+            painter.drawArc(int(center_x - outer_radius), int(center_y - outer_radius),
+                            int(outer_radius * 2), int(outer_radius * 2),
+                            start_angle, segment_angle)
+
+        # Draw the in progress segment (yellow/orange) on middle ring
+        if self.in_progress > 0:
+            pen.setColor(QColor(255, 180, 0))  # Brighter orange/yellow
+            painter.setPen(pen)
+            segment_angle = int(self.in_progress / self.total * 360 * 16)
+            painter.drawArc(int(center_x - middle_radius), int(center_y - middle_radius),
+                            int(middle_radius * 2), int(middle_radius * 2),
+                            start_angle, segment_angle)
+
+        # Draw the failed segment (red) on inner ring
+        if self.failed > 0:
+            pen.setColor(QColor(255, 60, 60))  # Brighter red
+            painter.setPen(pen)
+            segment_angle = int(self.failed / self.total * 360 * 16)
+            painter.drawArc(int(center_x - inner_radius), int(center_y - inner_radius),
+                            int(inner_radius * 2), int(inner_radius * 2),
+                            start_angle, segment_angle)
+
+    def sizeHint(self):
+        return QSize(150, 150)
 
 
-class ResourcesOverviewWidget(QFrame):
-    """Widget to display individual donut charts for each resource type"""
-    def __init__(self, resources_data, parent=None):
-        """
-        Initialize with resource data
-        
-        Args:
-            resources_data: List of tuples (name, total, running, stopped, in_process)
-        """
-        super().__init__(parent)
-        self.resources_data = resources_data
-        
-        # Styling
+class StatusWidget(QWidget):
+    def __init__(self, title, running=0, in_progress=0, failed=0):
+        super().__init__()
+
+        # Main layout
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(10)
+
+        # Create a frame for the box background
+        self.box = QFrame()
+        self.box.setObjectName("statusBox")
+        self.box.setStyleSheet("""
+            #statusBox {
+                background-color: #262626;
+                border-radius: 5px;
+            }
+        """)
+
+        # Box layout
+        box_layout = QVBoxLayout(self.box)
+        box_layout.setContentsMargins(10, 10, 10, 10)
+
+        # Add title - now with bold font
+        title_label = QLabel(title)
+        # Create a bold font for the title
+        font = QFont()
+        font.setBold(True)
+        title_label.setFont(font)
+        title_label.setStyleSheet("color: white; font-size: 16px;")
+        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        box_layout.addWidget(title_label)
+
+        # Add circular progress indicator
+        self.progress = CircularProgressIndicator(running, in_progress, failed)
+        self.progress.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        box_layout.addWidget(self.progress)
+
+        # Add status labels - center-aligned with brighter colors
+        running_label = QLabel(f"● Running: {running}")
+        running_label.setStyleSheet("color: #32dc32;")  # Brighter green
+        running_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        box_layout.addWidget(running_label)
+
+        in_progress_label = QLabel(f"● In Progress: {in_progress}")
+        in_progress_label.setStyleSheet("color: #ffb400;")  # Brighter orange
+        in_progress_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        box_layout.addWidget(in_progress_label)
+
+        failed_label = QLabel(f"● Failed: {failed}")
+        failed_label.setStyleSheet("color: #ff3c3c;")  # Brighter red
+        failed_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        box_layout.addWidget(failed_label)
+
+        # Add the box to the main layout
+        main_layout.addWidget(self.box)
+
+        # Set widget to be transparent (the box inside has the background)
+        self.setStyleSheet("background-color: transparent;")
+
+    def sizeHint(self):
+        return QSize(170, 270)
+
+    def minimumSizeHint(self):
+        return QSize(150, 240)
+
+
+class EventsTable(QTableWidget):
+    def __init__(self):
+        super().__init__()
+        # Configure table
+        self.setColumnCount(7)
+        self.setHorizontalHeaderLabels(["Type", "Message", "Namespace", "Involved Object", "Source", "Count", "Age"])
+
+        # Make table resize correctly
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        self.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+
+        # Disable alternating row colors
+        self.setAlternatingRowColors(False)
+
+        # Make table non-editable
+        self.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+
+        # Keep selection mode but make it more subtle
+        self.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+
+        # Make vertical header fixed size
+        self.verticalHeader().setDefaultSectionSize(36)
+        self.verticalHeader().setVisible(False)
+
+        # Style - with hover effect and subtle selection
         self.setStyleSheet("""
-            QFrame {
-                background-color: #1e1e1e;
-                border-radius: 4px;
-                border: 1px solid #2d2d2d;
-            }
-            QScrollArea {
+            QTableWidget {
+                background-color: #262626;
+                color: white;
+                gridline-color: transparent;
                 border: none;
-                background-color: transparent;
             }
-            QWidget#scrollContents {
-                background-color: transparent;
+            QHeaderView::section {
+                background-color: #212121;
+                color: white;
+                padding: 8px;
+                border: none;
+            }
+            QTableWidget::item {
+                padding: 8px;
+                border: none;
+                background: transparent;
+            }
+            QTableWidget::item:hover {
+                background-color: rgba(80, 80, 80, 120);
+            }
+            QTableWidget::item:selected {
+                background-color: rgba(60, 60, 60, 150);
+                color: white;
+            }
+            QTableWidget:focus {
+                outline: none;
+            }
+            QHeaderView::section:hover {
+                background-color: #2a2a2a;
+            }
+            QScrollBar:vertical {
+                background-color: #212121;
+                width: 8px;
+                margin: 0px;
+            }
+            QScrollBar::handle:vertical {
+                background-color: rgba(160, 160, 160, 150);
+                border-radius: 4px;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+            QScrollBar:horizontal {
+                background-color: #212121;
+                height: 8px;
+                margin: 0px;
+            }
+            QScrollBar::handle:horizontal {
+                background-color: rgba(160, 160, 160, 150);
+                border-radius: 4px;
+            }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+                width: 0px;
             }
         """)
-        
-        # Add shadow
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(15)
-        shadow.setOffset(0, 2)
-        shadow.setColor(QColor(0, 0, 0, 80))
-        self.setGraphicsEffect(shadow)
-        
-        self.setup_ui()
-    
-    def setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(20)
-        
-        # Add header
-        header = QLabel("Resource Status")
-        header.setStyleSheet("""
-            color: #ffffff;
-            font-size: 18px;
-            font-weight: bold;
-        """)
-        layout.addWidget(header)
-        
-        # Add color legend
-        # legend_frame = QFrame()
-        legend_layout = QHBoxLayout()
-        legend_layout.setContentsMargins(0, 0, 0, 10)
-        legend_layout.setSpacing(15)
-        
-        # Add legend items
-        status_colors = {
-            ResourceStatus.RUNNING: "#ff7808",
-            ResourceStatus.STOPPED: "#df0f0f",
-            ResourceStatus.IN_PROCESS: "#1bbd02"
-        }
-        
-        for status, color in status_colors.items():
-            legend_item = QHBoxLayout()
-            legend_item.setSpacing(5)
-            
-            # Color indicator
-            color_indicator = QFrame()
-            color_indicator.setFixedSize(12, 12)
-            color_indicator.setStyleSheet(f"background-color: {color}; border-radius: 6px;")
-            
-            # Status label
-            status_label = QLabel(status)
-            status_label.setStyleSheet(f"color: #ffffff; font-size: 12px;")
-            
-            legend_item.addWidget(color_indicator)
-            legend_item.addWidget(status_label)
-            legend_layout.addLayout(legend_item)
-        
-        legend_layout.addStretch()
-        layout.addLayout(legend_layout)
-        
-        # Create scroll area for donut charts
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        
-        # Create widget to hold charts
-        scroll_contents = QWidget()
-        scroll_contents.setObjectName("scrollContents")
-        
-        # Grid layout for charts - adjusted for larger chart sizes
-        grid_layout = QGridLayout(scroll_contents)
-        grid_layout.setContentsMargins(10, 10, 10, 10)
-        grid_layout.setSpacing(20)
-        
-        # Add individual charts for each resource
-        # Using 2 charts per row since they're larger
-        charts_per_row = 4
-        
-        for i, resource in enumerate(self.resources_data):
-            name, total, running, stopped, in_process = resource
-            
-            # Create counts dictionary
-            counts = {
-                'total': total,
-                'running': running,
-                'stopped': stopped,
-                'in_process': in_process
-            }
-            
-            # Create chart widget
-            chart = ResourceDonutChart(name, counts)
-            
-            # Add to grid layout - 2 charts per row
-            row = i // charts_per_row
-            col = i % charts_per_row
-            grid_layout.addWidget(chart, row, col, Qt.AlignmentFlag.AlignCenter)
-        
-        # Add empty widgets to fill any remaining grid cells
-        # remaining = (charts_per_row - (len(self.resources_data) % charts_per_row)) % charts_per_row
-        # for i in range(remaining):
-        #     empty_widget = QWidget()
-        #     empty_widget.setMinimumSize(150, 150)  # Match the chart size
-        #     grid_layout.addWidget(empty_widget, len(self.resources_data) // charts_per_row, 
-        #                         (len(self.resources_data) % charts_per_row) + i)
-        
-        # Set scroll area widget
-        scroll_area.setWidget(scroll_contents)
-        layout.addWidget(scroll_area)
 
-
-class OverviewPage(QWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setup_ui()
-        
-    def setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(16)
-        
-        # Header
-        header_layout = QHBoxLayout()
-        title = QLabel("Overview")
-        title.setStyleSheet("""
-            font-size: 20px;
-            font-weight: bold;
-            color: #ffffff;
-        """)
-        
-        # Add count of total resources
-        items_count = QLabel("7 items")
-        items_count.setStyleSheet("""
-            color: #9ca3af;
-            font-size: 12px;
-            margin-left: 8px;
-            font-family: 'Segoe UI';
-        """)
-        items_count.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-        
-        header_layout.addWidget(title)
-        header_layout.addWidget(items_count)
-        header_layout.addStretch()
-        
-        layout.addLayout(header_layout)
-        
-        # Format: (name, total, running, stopped, in_process)
-        resources_data = [
-            ("Pods", 9, 7, 1, 1),             
-            ("Deployments", 1, 1, 0, 0),      
-            ("Daemon Sets", 1, 1, 0, 0),      
-            ("Stateful Sets", 2, 2, 0, 0),    
-            ("Replica Sets", 1, 1, 0, 0),     
-            ("Jobs", 3, 2, 1, 0),             
-            ("Cron Jobs", 4, 3, 0, 1)         
+        # Sample data based on the image
+        events_data = [
+            ("Normal", "Node docker desktop event: registration", "default", "Node: docker desktop", "Node Controller", "1", "46m"),
+            ("Normal", "Node docker desktop is not responding", "default", "Node: docker desktop", "Kubelet docker...", "7", "46m"),
+            ("Normal", "Update node allocation limit across th pods", "default", "Node: docker desktop", "Kubelet docker...", "1", "46m"),
+            ("Normal", "Starting Kubelet.", "default", "Node: docker desktop", "Kubelet docker...", "1", "46m"),
+            ("Normal", "Node docker desktop event: registration", "default", "Node: docker desktop", "Node Controller", "1", "46m"),
+            ("Normal", "Node docker desktop is not responding", "default", "Node: docker desktop", "Kubelet docker...", "7", "46m"),
+            ("Normal", "Update node allocation limit across th pods", "default", "Node: docker desktop", "Kubelet docker...", "1", "46m"),
+            ("Normal", "Starting Kubelet.", "default", "Node: docker desktop", "Kubelet docker...", "1", "46m")
         ]
-        
-        # Create the resources overview widget
-        resources_widget = ResourcesOverviewWidget(resources_data)
-        
-        layout.addWidget(resources_widget)
-        layout.addStretch()
+
+        # Add the sample data to the table
+        for row_index, event in enumerate(events_data):
+            self.insertRow(row_index)
+            for col_index, value in enumerate(event):
+                item = QTableWidgetItem(value)
+                # Center align count and age columns
+                if col_index >= 5:  # Count and Age columns
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.setItem(row_index, col_index, item)
 
 
-# For testing
-if __name__ == "__main__":
-    from PyQt6.QtWidgets import QApplication
-    import sys
-    
-    app = QApplication(sys.argv)
-    window = OverviewPage()
-    window.setStyleSheet("background-color: #121212;")
-    window.resize(800, 600)
-    window.show()
-    
-    sys.exit(app.exec())
+class OverviewPage(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Docker Desktop")
+        self.resize(1200, 800)
+        self.setStyleSheet("background-color: #1a1a1a; color: white;")
+
+        # Main widget and layout
+        central_widget = QWidget()
+        main_layout = QVBoxLayout(central_widget)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(20)
+
+        # Top bar - just the Overview title
+        top_bar = QWidget()
+        top_bar_layout = QHBoxLayout(top_bar)
+        top_bar_layout.setContentsMargins(0, 0, 0, 10)
+
+        overview_label = QLabel("Overview")
+        overview_label.setStyleSheet("font-size: 22px; font-weight: bold;")
+
+        top_bar_layout.addWidget(overview_label)
+        top_bar_layout.addStretch()
+
+        main_layout.addWidget(top_bar)
+
+        # Status widgets
+        status_row = QWidget()
+        status_layout = QHBoxLayout(status_row)
+        status_layout.setSpacing(15)  # Spacing between widgets
+
+        # Make scroll area for status widgets to handle window resizing
+        status_scroll = QScrollArea()
+        status_scroll.setWidgetResizable(True)
+        status_scroll.setWidget(status_row)
+        status_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        status_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        status_scroll.setStyleSheet("""
+            QScrollArea {
+                background-color: transparent;
+                border: none;
+            }
+            QScrollBar:horizontal {
+                background-color: #212121;
+                height: 8px;
+                margin: 0px;
+            }
+            QScrollBar::handle:horizontal {
+                background-color: rgba(160, 160, 160, 150);
+                border-radius: 4px;
+            }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+                width: 0px;
+            }
+        """)
+
+        status_widgets = [
+            ("Pods", 10, 4, 6),
+            ("Deployment", 4, 10, 6),
+            ("Daemon Sets", 10, 6, 4),
+            ("Stateful Sets", 10, 4, 6),
+            ("Replica Sets", 10, 4, 6),
+            ("Jobs", 8, 6, 6),
+            ("Cron Jobs", 6, 3, 4)
+        ]
+
+        for title, running, in_progress, failed in status_widgets:
+            widget = StatusWidget(title, running, in_progress, failed)
+            widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            widget.setMinimumWidth(150)
+            status_layout.addWidget(widget)
+
+        # Add status section to main content
+        main_layout.addWidget(status_scroll)
+
+        # Events section header
+        events_header = QWidget()
+        events_header_layout = QHBoxLayout(events_header)
+        events_header_layout.setContentsMargins(0, 20, 0, 5)
+
+        # Add Events title with the same style as Overview
+        events_title = QLabel("Events")
+        events_title.setStyleSheet("font-size: 22px; font-weight: bold;")
+        events_count = QLabel("8 of 28")
+        events_count.setAlignment(Qt.AlignmentFlag.AlignRight)
+
+        events_header_layout.addWidget(events_title)
+        events_header_layout.addStretch()
+        events_header_layout.addWidget(events_count)
+
+        main_layout.addWidget(events_header)
+
+        # Events table
+        self.events_table = EventsTable()
+        main_layout.addWidget(self.events_table)
+
+        # Set stretch factor to ensure table takes available space
+        main_layout.setStretchFactor(self.events_table, 1)
+
+        self.setCentralWidget(central_widget)
+
+        # Install event filter to clear table selection when clicking elsewhere
+        central_widget.installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        # Check if the event is a mouse press
+        if event.type() == event.Type.MouseButtonPress:
+            # Check if the click is outside the table
+            if obj != self.events_table and not self.events_table.underMouse():
+                # Clear the selection
+                self.events_table.clearSelection()
+
+        # Always return False to let the event continue to the target
+        return False
+
+    def resizeEvent(self, event):
+        # Call parent class resize event
+        super().resizeEvent(event)
+
+        # Get current window size
+        width = self.width()
+
+        # Could implement additional responsive behavior here based on window size

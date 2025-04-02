@@ -43,6 +43,9 @@ class EventsHeader(QHeaderView):
         self.setSectionsClickable(True)
         self.setHighlightSections(True)
 
+        # Set default alignment to center for all sections
+        self.setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
+
     def mousePressEvent(self, event):
         logicalIndex = self.logicalIndexAt(event.pos())
         if logicalIndex in self.sortable_columns:
@@ -59,6 +62,9 @@ class EventsHeader(QHeaderView):
         # Retrieve header text from the model and set it
         header_text = self.model().headerData(logicalIndex, self.orientation(), Qt.ItemDataRole.DisplayRole)
         option.text = str(header_text) if header_text is not None else ""
+
+        # Set text alignment to center
+        option.textAlignment = Qt.AlignmentFlag.AlignCenter
 
         if logicalIndex in self.sortable_columns:
             mouse_pos = QCursor.pos()
@@ -153,6 +159,7 @@ class EventPage(QWidget):
                 border: none;
                 border-bottom: 1px solid #2d2d2d;
                 font-size: 12px;
+                text-align: center;
             }
         """)
         

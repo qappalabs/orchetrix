@@ -191,6 +191,9 @@ class CustomHeader(QHeaderView):
         self.setSectionsClickable(True)
         self.setHighlightSections(True)
 
+        # Set default alignment to center for all sections
+        self.setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
+
     def mousePressEvent(self, event):
         logicalIndex = self.logicalIndexAt(event.pos())
         if logicalIndex in self.sortable_columns:
@@ -206,6 +209,9 @@ class CustomHeader(QHeaderView):
         # Retrieve header text from the model and set it in the option.
         header_text = self.model().headerData(logicalIndex, self.orientation(), Qt.ItemDataRole.DisplayRole)
         option.text = str(header_text) if header_text is not None else ""
+
+        # Set text alignment to center
+        option.textAlignment = Qt.AlignmentFlag.AlignCenter
 
         if logicalIndex in self.sortable_columns:
             mouse_pos = QCursor.pos()
@@ -303,6 +309,7 @@ class NodesPage(QWidget):
                 border: none;
                 border-bottom: 1px solid #2d2d2d;
                 font-size: 12px;
+                text-align: center;
             }
             QHeaderView::section:hover {
                 background-color: #2d2d2d;
@@ -339,16 +346,8 @@ class NodesPage(QWidget):
         index = self.table.indexAt(event.pos())
         if index.isValid():
             row = index.row()
-            if index.column() != 7:  # Skip action column
-                # Toggle checkbox when clicking anywhere in the row
-                checkbox_container = self.table.cellWidget(row, 0)
-                if checkbox_container:
-                    for child in checkbox_container.children():
-                        if isinstance(child, QCheckBox):
-                            child.setChecked(not child.isChecked())
-                            break
-                # Select the row
-                self.table.selectRow(row)
+
+            self.table.selectRow(row)
             QTableWidget.mousePressEvent(self.table, event)
         else:
             self.table.clearSelection()

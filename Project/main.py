@@ -102,20 +102,13 @@ class MainWindow(QMainWindow):
         
         # Connect table click events
         self.connect_table_click_events()
-    
+
+        
     def setup_detail_page(self):
         """Set up the detail panel"""
         self.detail_page = ResourceDetailPage(self)
     
-    def handle_page_change(self, index):
-        """Handle page changes in the stacked widget"""
-        # Get the current widget
-        current_widget = self.stacked_widget.widget(index)
-        
-        # If not on the cluster view page, hide the terminal
-        if current_widget != self.cluster_view and hasattr(self, 'terminal_panel'):
-            if self.terminal_panel.is_visible:
-                self.terminal_panel.hide_terminal()
+
     
 
     def connect_table_click_events(self):
@@ -200,6 +193,10 @@ class MainWindow(QMainWindow):
             self.previous_page = self.stacked_widget.currentWidget()
         self.cluster_view.set_active_cluster(cluster_name)
         self.stacked_widget.setCurrentWidget(self.cluster_view)
+        
+        # If terminal is visible, update its position after switching to cluster view
+        if hasattr(self.cluster_view, 'terminal_panel') and self.cluster_view.terminal_panel.is_visible:
+            QTimer.singleShot(100, self.cluster_view.adjust_terminal_position)
     
     def switch_to_preferences(self):
         """Switch to the preferences page"""
@@ -214,26 +211,35 @@ class MainWindow(QMainWindow):
         else:
             # Default to home page if there's no previous page
             self.switch_to_home()
+    def handle_page_change(self, index):
+#         """Handle page changes in the stacked widget"""
+        # Get the current widget
+        current_widget = self.stacked_widget.widget(index)
+    
+    # In MainWindow.py, update the resizeEvent method to properly handle terminal positioning:
 
-    def eventFilter(self, obj, event):
-        """Filter events to handle window state changes"""
-        # Handle window state change events
-        if event.type() == QEvent.Type.WindowStateChange:
-            
-            pass
-        # Handle window activate events
-        elif event.type() == QEvent.Type.WindowActivate:
-            # Update components when window becomes active
-            
-                
-            if hasattr(self, 'detail_page') and self.detail_page.is_visible:
-                # Update detail page position
-                self.detail_page.setFixedHeight(self.height())
-                self.detail_page.move(self.width() - self.detail_page.width(), 0)
-                self.detail_page.raise_()
+    def resizeEvent(self, event):
+        """Handle resize event to properly position detail panels and terminal"""
+        super().resizeEvent(event)
         
-        return super().eventFilter(obj, event)
-
+        # Update detail page if visible
+        if hasattr(self, 'detail_page') and self.detail_page.is_visible:
+            # Update height
+            self.detail_page.setFixedHeight(self.height())
+            
+            # Update position (right side)
+            self.detail_page.move(self.width() - self.detail_page.width(), 0)
+        
+        # Update terminal position if visible, using a cleaner approach
+        if hasattr(self, 'cluster_view'):
+            # If cluster view is visible and has a terminal panel
+            if self.stacked_widget.currentWidget() == self.cluster_view and hasattr(self.cluster_view, 'terminal_panel'):
+                if self.cluster_view.terminal_panel.is_visible:
+                    # Delay the adjustment slightly to ensure sidebar size is settled
+                    QTimer.singleShot(10, self.cluster_view.adjust_terminal_position)
+            # Even if we're not on the cluster view, update terminal if it's visible
+            elif hasattr(self.cluster_view, 'terminal_panel') and self.cluster_view.terminal_panel.is_visible:
+                QTimer.singleShot(10, self.cluster_view.adjust_terminal_position)
     # Mouse events to make the window draggable from the title bar
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -253,33 +259,26 @@ class MainWindow(QMainWindow):
                 
             event.accept()
     
-    def resizeEvent(self, event):
-        """Handle resize event to properly position terminal and detail panels"""
-        super().resizeEvent(event)
-        
-        
-        # Update detail page if visible
-        if hasattr(self, 'detail_page') and self.detail_page.is_visible:
-            # Update height
-            self.detail_page.setFixedHeight(self.height())
-            
-            # Update position (right side)
-            self.detail_page.move(self.width() - self.detail_page.width(), 0)
-    
     def moveEvent(self, event):
-        """Handle move event to keep terminal and detail panels in position"""
+        """Handle move event to keep detail panels and terminal in position"""
         super().moveEvent(event)
         
-
         # Update detail page position when window moves
         if hasattr(self, 'detail_page') and self.detail_page.is_visible:
             self.detail_page.move(self.geometry().right() - self.detail_page.width(), self.geometry().top())
-    
+        
+        # Update terminal position when window moves
+        if hasattr(self, 'cluster_view') and hasattr(self.cluster_view, 'terminal_panel'):
+            if self.cluster_view.terminal_panel.is_visible:
+                # Trigger adjustment after a short delay to ensure sidebar is settled
+                QTimer.singleShot(10, self.cluster_view.adjust_terminal_position) 
     def closeEvent(self, event):
         """Clean up any resources before closing"""
         # Hide terminal and detail page if visible
-      
-            
+        if hasattr(self, 'cluster_view') and hasattr(self.cluster_view, 'terminal_panel'):
+            if self.cluster_view.terminal_panel.is_visible:
+                self.cluster_view.terminal_panel.hide_terminal()
+                
         if hasattr(self, 'detail_page') and self.detail_page.is_visible:
             self.detail_page.hide_detail()
             

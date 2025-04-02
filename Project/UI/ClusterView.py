@@ -1,9 +1,10 @@
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QStackedWidget, QLabel
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 
 from UI.Sidebar import Sidebar
 from UI.Header import Header
 from UI.Styles import AppColors, AppStyles
+from UI.TerminalPanel import TerminalPanel
 
 # Import cluster pages
 from Pages.ClusterPage import ClusterPage
@@ -91,6 +92,12 @@ class ClusterView(QWidget):
         self.active_cluster = "docker-desktop"
         
         self.setup_ui()
+        
+        # Initialize the terminal panel
+        self.initialize_terminal()
+        
+        # Install event filter to detect window resize events
+        self.installEventFilter(self)
     
     def setup_ui(self):
         # Main layout
@@ -125,6 +132,76 @@ class ClusterView(QWidget):
         
         # Set initial page
         self.stacked_widget.setCurrentWidget(self.pages["Cluster"])
+    
+    def initialize_terminal(self):
+        """Initialize the terminal panel as a child of the main window"""
+        # Create terminal but don't make it a child of any widget
+        # This allows it to float independently
+        self.terminal_panel = TerminalPanel(self.parent_window)
+        
+        # Connect terminal button in sidebar to toggle terminal
+        for btn in self.sidebar.nav_buttons:
+            if btn.item_text == "Terminal":
+                # Disconnect any existing connections
+                try:
+                    btn.clicked.disconnect()
+                except TypeError:
+                    pass  # No connections to disconnect
+                
+                # Connect to our toggle function
+                btn.clicked.connect(self.toggle_terminal)
+                break
+        
+        # Connect sidebar toggle to update terminal position
+        self.sidebar.toggle_btn.clicked.connect(self.update_terminal_on_sidebar_toggle)
+    
+    def update_terminal_on_sidebar_toggle(self):
+        """Update terminal position and size when sidebar is toggled"""
+        # Add a short delay to allow sidebar animation to complete
+        QTimer.singleShot(250, self.adjust_terminal_position)
+        
+        # Notify terminal panel about the sidebar state change
+        if hasattr(self, 'terminal_panel'):
+            self.terminal_panel.sidebar_width = self.sidebar.width()
+        
+    def toggle_terminal(self):
+        """Toggle the terminal visibility and update its position/size"""
+        self.terminal_panel.toggle_terminal()
+        
+        # If terminal became visible, adjust its position and size
+        if self.terminal_panel.is_visible:
+            self.adjust_terminal_position()
+    
+    def adjust_terminal_position(self):
+        """Adjust terminal position and size based on sidebar state"""
+        if hasattr(self, 'terminal_panel') and self.terminal_panel.is_visible:
+            # Get main window width and height
+            parent_width = self.parent_window.width()
+            parent_height = self.parent_window.height()
+            
+            # Get sidebar width based on its expanded state
+            sidebar_width = self.sidebar.width()
+            
+            # Calculate terminal width (only cover area to the right of sidebar)
+            terminal_width = parent_width - sidebar_width
+            
+            # Set terminal width
+            self.terminal_panel.setFixedWidth(terminal_width)
+            
+            # Position terminal at bottom-right, ensuring it's placed next to sidebar
+            self.terminal_panel.move(sidebar_width, 
+                                    parent_height - self.terminal_panel.height())
+            
+            # Bring terminal to front
+            self.terminal_panel.raise_()
+    def eventFilter(self, obj, event):
+        """Handle events for window resize"""
+        if obj == self and event.type() == event.Type.Resize:
+            # When window is resized, adjust terminal position
+            if hasattr(self, 'terminal_panel') and self.terminal_panel.is_visible:
+                self.adjust_terminal_position()
+        
+        return super().eventFilter(obj, event)
     
     def create_pages(self):
         # Create pages
@@ -285,12 +362,16 @@ class ClusterView(QWidget):
     
     def set_active_nav_button(self, active_button):
         """Handle sidebar navigation button clicks"""
+        # Special handling for Terminal button - don't change active state
+        if active_button.item_text == "Terminal":
+            return
+            
         for btn in self.sidebar.nav_buttons:
             btn.is_active = False
             btn.update_style()
         active_button.is_active = True
         active_button.update_style()
-        
+            
         # Switch to the corresponding page
         if active_button.item_text in self.pages:
             self.stacked_widget.setCurrentWidget(self.pages[active_button.item_text])
@@ -330,3 +411,9 @@ class ClusterView(QWidget):
             
             if not found:
                 print("Could not find cluster name label in header")
+                
+    def showEvent(self, event):
+        """Handle show event - update terminal position if needed"""
+        super().showEvent(event)
+        if hasattr(self, 'terminal_panel') and self.terminal_panel.is_visible:
+            self.adjust_terminal_position()
