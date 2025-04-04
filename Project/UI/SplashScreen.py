@@ -154,7 +154,7 @@ class SplashScreen(QWidget):
         # Start a timer for progress animation
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_progress)
-        self.timer.start(30)  # Update every 30ms
+        self.timer.start(60)  # Update every 30ms
     
     def update_progress(self):
         # Update progress counter
