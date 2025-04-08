@@ -1,625 +1,667 @@
-# from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, 
-#                              QTabWidget, QGridLayout, QFrame)
-# from PyQt6.QtCore import Qt, QSize
-
-# class ClusterPage(QWidget):
-#     def __init__(self, parent=None):
-#         super().__init__(parent)
-#         self.setup_ui()
-
-#     def setup_ui(self):
-#         layout = QVBoxLayout(self)
-#         layout.setContentsMargins(0, 0, 0, 0)
-#         layout.setSpacing(0)
-
-#         # Add tab container
-#         tab_container = self.create_tab_container()
-#         layout.addWidget(tab_container)
-
-#         # Add content area
-#         content_area = self.create_content_area()
-#         layout.addWidget(content_area)
-
-#     def create_tab_container(self):
-#         tab_widget = QTabWidget()
-#         tab_widget.setFixedHeight(44)
-#         tab_widget.addTab(QWidget(), "Master")
-#         tab_widget.addTab(QWidget(), "Worker")
-#         tab_widget.setCurrentIndex(0)
-#         return tab_widget
-
-#     def create_content_area(self):
-#         content_widget = QWidget()
-#         content_layout = QGridLayout(content_widget)
-#         content_layout.setContentsMargins(16, 16, 16, 16)
-#         content_layout.setSpacing(16)
-
-#         metric_panel1 = self.create_metric_panel()
-#         metric_panel2 = self.create_metric_panel()
-#         status_panel = self.create_status_panel()
-
-#         content_layout.addWidget(metric_panel1, 0, 0)
-#         content_layout.addWidget(metric_panel2, 0, 1)
-#         content_layout.addWidget(status_panel, 1, 0, 1, 2)
-
-#         return content_widget
-
-#     def create_metric_panel(self):
-#         panel = QWidget()
-#         panel.setStyleSheet("""
-#             QWidget {
-#                 background-color: #1e1e1e;
-#                 border-radius: 4px;
-#             }
-#         """)
-
-#         layout = QVBoxLayout(panel)
-#         layout.setContentsMargins(16, 16, 16, 16)
-#         layout.setSpacing(16)
-
-#         # Tab-like buttons
-#         tabs = QWidget()
-#         tabs_layout = QHBoxLayout(tabs)
-#         tabs_layout.setContentsMargins(0, 0, 0, 0)
-#         tabs_layout.setSpacing(4)
-
-#         cpu_btn = QPushButton("CPU")
-#         cpu_btn.setStyleSheet("""
-#             QPushButton {
-#                 background-color: #333333;
-#                 color: #ffffff;
-#                 border: none;
-#                 padding: 6px 16px;
-#                 font-size: 13px;
-#                 border-radius: 4px;
-#             }
-#         """)
-
-#         memory_btn = QPushButton("Memory")
-#         memory_btn.setStyleSheet("""
-#             QPushButton {
-#                 background-color: transparent;
-#                 color: #888888;
-#                 border: none;
-#                 padding: 6px 16px;
-#                 font-size: 13px;
-#             }
-#             QPushButton:hover {
-#                 color: #ffffff;
-#             }
-#         """)
-
-#         tabs_layout.addWidget(cpu_btn)
-#         tabs_layout.addWidget(memory_btn)
-#         tabs_layout.addStretch()
-
-#         # Info message
-#         info_container = QWidget()
-#         info_layout = QVBoxLayout(info_container)
-#         info_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-#         info_msg = QLabel("Metrics are not available due to missing or invalid Prometheus")
-#         info_msg.setStyleSheet("color: #888888; font-size: 13px;")
-#         info_msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-#         settings_link = QLabel("Open cluster settings")
-#         settings_link.setStyleSheet("""
-#             color: #0095ff;
-#             font-size: 13px;
-#             margin-top: 8px;
-#         """)
-#         settings_link.setAlignment(Qt.AlignmentFlag.AlignCenter)
-#         settings_link.setCursor(Qt.CursorShape.PointingHandCursor)
-
-#         info_layout.addWidget(info_msg)
-#         info_layout.addWidget(settings_link)
-
-#         layout.addWidget(tabs)
-#         layout.addWidget(info_container, 1, Qt.AlignmentFlag.AlignCenter)
-
-#         return panel
-
-#     def create_status_panel(self):
-#         panel = QWidget()
-#         panel.setStyleSheet("""
-#             background-color: #1e1e1e;
-#             border-radius: 4px;
-#         """)
-
-#         layout = QVBoxLayout(panel)
-#         layout.setContentsMargins(32, 48, 32, 48)
-#         layout.setSpacing(8)
-#         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-#         # Success icon
-#         success_icon = QLabel("✓")
-#         success_icon.setFixedSize(80, 80)
-#         success_icon.setStyleSheet("""
-#             background-color: #4CAF50;
-#             color: white;
-#             font-size: 40px;
-#             border-radius: 40px;
-#             qproperty-alignment: AlignCenter;
-#         """)
-
-#         # Status text
-#         status_title = QLabel("No issues found")
-#         status_title.setStyleSheet("""
-#             color: white;
-#             font-size: 20px;
-#             font-weight: 500;
-#             margin-top: 16px;
-#         """)
-#         status_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-#         status_subtitle = QLabel("Everything is fine in the Cluster")
-#         status_subtitle.setStyleSheet("""
-#             color: #888888;
-#             font-size: 14px;
-#             margin-top: 4px;
-#         """)
-#         status_subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-#         layout.addWidget(success_icon, 0, Qt.AlignmentFlag.AlignCenter)
-#         layout.addWidget(status_title)
-#         layout.addWidget(status_subtitle)
-
-#         return panel
-
-
-
-
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, 
-                             QTabWidget, QGridLayout, QFrame, QTableWidget, QTableWidgetItem,
-                             QHeaderView, QGraphicsDropShadowEffect, QSizePolicy)
-from PyQt6.QtCore import Qt, QSize, QTimer, pyqtSlot
-from PyQt6.QtGui import QColor, QFont, QPainter, QPen, QBrush, QLinearGradient, QRadialGradient
+                             QTabWidget, QGridLayout, QSizePolicy, QFrame, QToolTip)
+from PyQt6.QtCore import Qt, QSize, QPoint, QRect, QEvent
+from PyQt6.QtGui import QColor, QPainter, QPen, QBrush, QFont, QCursor
+import math
 
-from utils.kubernetes_client import get_kubernetes_client
-
-class MetricGauge(QFrame):
-    """Custom widget for displaying circular gauge with utilization metrics"""
-    def __init__(self, title, color, parent=None):
+class BarChart(QWidget):
+    def __init__(self, parent=None, color="#ff0000"):
         super().__init__(parent)
-        self.title = title
-        self.color = color
-        self.value = 0
-        self.history = []
-        self.capacity = 0
-        self.requests = 0
-        self.limits = 0
-        self.allocate_capacity = 0
+        self.color = QColor(color)
+        # Increase minimum height to make the graph taller
+        self.setMinimumHeight(300)  # Increased from 200
+        self.setMouseTracking(True)  # Enable mouse tracking for hover effects
+        self.hovered_bar = -1  # Track which bar is hovered
         
-        self.setMinimumHeight(120)
-        self.setMinimumWidth(220)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        # Sample data - heights in percentage (0-100)
+        if color == "#ff0000":  # Red for CPU
+            self.bar_data = [10, 40, 60, 20, 25, 15, 10, 40, 30, 15, 10, 20]
+            self.chart_title = "CPU Usage"
+        else:  # Cyan for Memory
+            self.bar_data = [25, 50, 45, 30, 20, 5, 5, 10, 45, 40, 20, 10]
+            self.chart_title = "Memory Usage"
+            
+        self.times = ["00:00", "01:00", "02:00", "03:00", "04:00", "05:00", 
+                     "06:00", "07:00", "08:00", "09:00", "10:00", "11:00"]
         
-        # Setup UI
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
-        
-        # Title
-        self.title_label = QLabel(title)
-        self.title_label.setStyleSheet(f"color: white; font-size: 16px; font-weight: bold;")
-        self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        # Value labels
-        self.value_layout = QVBoxLayout()
-        self.value_layout.setSpacing(2)
-        
-        # Usage value
-        self.usage_label = QLabel(f"Usage: 0.00")
-        self.usage_label.setStyleSheet(f"color: {color}; font-size: 12px;")
-        
-        # Requests value
-        self.requests_label = QLabel(f"Requests: 0.00")
-        self.requests_label.setStyleSheet("color: #4CAF50; font-size: 12px;")
-        
-        # Limits value
-        self.limits_label = QLabel(f"Limits: 0.00")
-        self.limits_label.setStyleSheet("color: #2196F3; font-size: 12px;")
-        
-        # Allocate capacity value
-        self.allocate_label = QLabel(f"Allocate Capacity: 0.00")
-        self.allocate_label.setStyleSheet("color: #FFC107; font-size: 12px;")
-        
-        # Capacity value
-        self.capacity_label = QLabel(f"Capacity: 0.00")
-        self.capacity_label.setStyleSheet("color: white; font-size: 12px;")
-        
-        # Add labels to value layout
-        self.value_layout.addWidget(self.usage_label)
-        self.value_layout.addWidget(self.requests_label)
-        self.value_layout.addWidget(self.limits_label)
-        self.value_layout.addWidget(self.allocate_label)
-        self.value_layout.addWidget(self.capacity_label)
-        
-        # Add widgets to main layout
-        layout.addWidget(self.title_label)
-        layout.addLayout(self.value_layout)
-        
+        # Store bar positions for hover detection
+        self.bar_positions = []
+
+        # Style tooltips
         self.setStyleSheet("""
-            background-color: #1E1E1E;
-            border-radius: 8px;
+            QToolTip {
+                background-color: #2a2a2a;
+                color: white;
+                border: 1px solid #3a3a3a;
+                border-radius: 4px;
+                padding: 5px;
+                font-size: 12px;
+            }
+        """)
+
+    def mouseMoveEvent(self, event):
+        # Check if mouse is over any bar
+        for i, rect in enumerate(self.bar_positions):
+            if rect.contains(event.pos()):
+                if self.hovered_bar != i:
+                    self.hovered_bar = i
+                    self.update()  # Redraw with new hover state
+                    # Show tooltip with details
+                    tooltip_text = f"{self.chart_title}\nTime: {self.times[i]}\nValue: {self.bar_data[i]}%"
+                    QToolTip.showText(QCursor.pos(), tooltip_text, self)
+                return
+        
+        # If not hovering any bar
+        if self.hovered_bar != -1:
+            self.hovered_bar = -1
+            self.update()  # Redraw with no hover
+            QToolTip.hideText()
+        
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event):
+        # Reset hover state when mouse leaves the widget
+        if self.hovered_bar != -1:
+            self.hovered_bar = -1
+            self.update()
+        super().leaveEvent(event)
+    
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        width = self.width()
+        height = self.height()
+        
+        # Increase space for labels at the bottom even more
+        chart_height = height - 120  # Increased from 100 to 120 for more space
+        
+        # Clear the bar positions for this paint cycle
+        self.bar_positions = []
+        
+        # Draw y-axis labels and horizontal guidelines
+        y_labels = ["0%", "20%", "40%", "60%", "80%", "100%"]
+        for i, label in enumerate(y_labels):
+            y = height - 120 - (i * chart_height / 5)  # Adjusted to use new bottom margin
+            
+            # First set pen for the guidelines (for all lines including 0%)
+            painter.setPen(QPen(QColor("#333333"), 1, Qt.PenStyle.DotLine))
+            painter.drawLine(40, int(y), width, int(y))
+            
+            # Then set pen for the text - changed from white to light gray to remove borders
+            painter.setPen(QColor("#aaaaaa"))
+            painter.drawText(0, int(y) - 5, 30, 20, int(Qt.AlignmentFlag.AlignRight), label)
+            
+        # Calculate bar width and spacing
+        bar_count = len(self.bar_data)
+        available_width = width - 50
+        bar_width = available_width / bar_count * 0.7
+        bar_spacing = available_width / bar_count * 0.3
+        
+        # X-axis baseline - moved lower to give more space for labels
+        painter.setPen(QPen(QColor("#333333"), 1, Qt.PenStyle.SolidLine))
+        painter.drawLine(40, height - 120, width, height - 120)  # Adjusted to use new bottom margin
+        
+        # Draw bars - make sure we use no pen (no borders) for all bars
+        for i, value in enumerate(self.bar_data):
+            bar_height = (value / 100) * chart_height
+            x = 40 + i * (bar_width + bar_spacing)
+            y = height - 120 - bar_height  # Adjusted to use new bottom margin
+            
+            # Define bar rect and store it
+            bar_rect = QRect(int(x), int(y), int(bar_width), int(bar_height))
+            self.bar_positions.append(bar_rect)
+            
+            # Important: Set the pen explicitly to NoPen before drawing each bar
+            # to ensure no white borders
+            if i == self.hovered_bar:
+                # Only for hovered bars we use a slight border effect
+                if self.color == QColor("#ff0000"):  # Red
+                    hover_color = QColor("#ff5555")
+                else:  # Cyan
+                    hover_color = QColor("#55ffff")
+                painter.setBrush(QBrush(hover_color))
+                # Thin gray border for hovered bars
+                painter.setPen(QPen(QColor("#666666"), 1))
+            else:
+                # Explicitly no border for non-hovered bars
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QBrush(self.color))
+                
+            painter.drawRect(bar_rect)
+            
+            # Draw time labels - improved visibility with larger font and better positioning
+            painter.setPen(QColor("#ffffff"))  # White for maximum visibility
+            
+            # Use a larger font for x-axis labels
+            label_font = painter.font()
+            label_font.setPointSize(10)  # Increased font size
+            painter.setFont(label_font)
+            
+            # Calculate position - center of the bar
+            x_center = x + (bar_width / 2)
+            
+            # Draw the time label with significantly more space below the chart
+            # and increase the height of the text rectangle
+            painter.drawText(
+                int(x_center - 25),  # Keep x position centered
+                height - 105,        # Move labels higher up (closer to the bars)
+                50,                  # Width of the text area
+                20,                  # Significant increase in height to ensure visibility
+                int(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignTop),  # Align top center
+                self.times[i]
+            )
+
+class ResourceCircularIndicator(QWidget):
+    def __init__(self, usage=0, requests=0, limits=0, allocated=0, capacity=100):
+        super().__init__()
+        self.usage = usage          # Current usage
+        self.requests = requests    # Requested resources
+        self.limits = limits        # Resource limits
+        self.allocated = allocated  # Allocated capacity
+        self.capacity = capacity    # Total capacity
+        self.hovered_segment = None  # Track which segment is hovered
+        self.setMinimumSize(120, 120)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setMouseTracking(True)  # Enable mouse tracking for hover
+        self.title = ""  # Add a title property
+
+        # Style tooltips
+        self.setStyleSheet("""
+            QToolTip {
+                background-color: #2a2a2a;
+                color: white;
+                border: 1px solid #3a3a3a;
+                border-radius: 4px;
+                padding: 5px;
+                font-size: 12px;
+            }
         """)
         
-        # Add shadow effect
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(15)
-        shadow.setOffset(0, 2)
-        shadow.setColor(QColor(0, 0, 0, 80))
-        self.setGraphicsEffect(shadow)
-    
-    def update_values(self, value, capacity=None, requests=None, limits=None, allocate_capacity=None, history=None):
-        """Update the gauge values"""
-        self.value = value
+    def set_title(self, title):
+        self.title = title
+
+    def get_segment_at_position(self, x, y):
+        """Determine which segment (if any) contains the given point"""
+        width = self.width()
+        height = self.height()
+        center_x = width / 2
+        center_y = height / 2
+        
+        # Calculate distance from center
+        dx = x - center_x
+        dy = y - center_y
+        distance = (dx**2 + dy**2)**0.5
+        
+        # Calculate angle (in degrees)
+        angle = -1 * math.atan2(-dy, dx) * 180 / math.pi
+        if angle < 0:
+            angle += 360
+            
+        # Adjust to match the -90 degree start point in the paint event
+        angle = (angle + 90) % 360
+        
+        # Ring sizes - same as in paint event
+        size_factor = min(width, height) / 150
+        
+        # Define all ring radiuses
+        outer_radius = min(width, height) / 2 - (10 * size_factor)
+        ring4_radius = outer_radius - (8 * size_factor)
+        ring3_radius = ring4_radius - (8 * size_factor)
+        ring2_radius = ring3_radius - (8 * size_factor)
+        inner_radius = ring2_radius - (8 * size_factor)
+        
+        # Check if point is within any ring
+        if distance > outer_radius or distance < inner_radius - 5:
+            return None
+            
+        # Calculate segment angles
+        usage_angle = self.usage / self.capacity * 360
+        requests_angle = self.requests / self.capacity * 360
+        limits_angle = self.limits / self.capacity * 360
+        allocated_angle = self.allocated / self.capacity * 360
+        
+        # Determine which segment the point is in based on the ring and angle
+        if distance >= ring4_radius + 5:
+            # In the outer ring (usage)
+            return "usage" if angle <= usage_angle else None
+        elif distance >= ring3_radius + 5:
+            # In the second ring (requests)
+            return "requests" if angle <= requests_angle else None
+        elif distance >= ring2_radius + 5:
+            # In the third ring (limits)
+            return "limits" if angle <= limits_angle else None
+        else:
+            # In the inner ring (allocated)
+            return "allocated" if angle <= allocated_angle else None
+
+    def mouseMoveEvent(self, event):
+        segment = self.get_segment_at_position(event.pos().x(), event.pos().y())
+        
+        if segment != self.hovered_segment:
+            self.hovered_segment = segment
+            self.update()
+            
+            # Show tooltip with details based on segment
+            if segment == "usage":
+                tooltip_text = f"{self.title}\nUsage: {self.usage} ({self.usage/self.capacity*100:.1f}%)"
+                QToolTip.showText(QCursor.pos(), tooltip_text, self)
+            elif segment == "requests":
+                tooltip_text = f"{self.title}\nRequests: {self.requests} ({self.requests/self.capacity*100:.1f}%)"
+                QToolTip.showText(QCursor.pos(), tooltip_text, self)
+            elif segment == "limits":
+                tooltip_text = f"{self.title}\nLimits: {self.limits} ({self.limits/self.capacity*100:.1f}%)"
+                QToolTip.showText(QCursor.pos(), tooltip_text, self)
+            elif segment == "allocated":
+                tooltip_text = f"{self.title}\nAllocated: {self.allocated} ({self.allocated/self.capacity*100:.1f}%)"
+                QToolTip.showText(QCursor.pos(), tooltip_text, self)
+            else:
+                QToolTip.hideText()
+        
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event):
+        self.hovered_segment = None
+        self.update()
+        QToolTip.hideText()
+        super().leaveEvent(event)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Get dimensions for the circle
+        width = self.width()
+        height = self.height()
+        center_x = width / 2
+        center_y = height / 2
+
+        # Ring sizes - make them proportional to widget size
+        size_factor = min(width, height) / 150
+
+        # Define all ring radiuses with even spacing
+        outer_radius = min(width, height) / 2 - (10 * size_factor)
+        ring4_radius = outer_radius - (8 * size_factor)
+        ring3_radius = ring4_radius - (8 * size_factor)
+        ring2_radius = ring3_radius - (8 * size_factor)
+        inner_radius = ring2_radius - (8 * size_factor)
+
+        # Scale pen width based on widget size
+        pen_width = 6 * size_factor
+
+        # Set up pen properties
+        pen = QPen()
+        pen.setWidth(max(3, int(pen_width)))
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+
+        # Draw the background circles
+        pen.setColor(QColor(30, 30, 30))
+        painter.setPen(pen)
+
+        # Draw background rings
+        painter.drawEllipse(int(center_x - outer_radius), int(center_y - outer_radius),
+                            int(outer_radius * 2), int(outer_radius * 2))
+        painter.drawEllipse(int(center_x - ring4_radius), int(center_y - ring4_radius),
+                            int(ring4_radius * 2), int(ring4_radius * 2))
+        painter.drawEllipse(int(center_x - ring3_radius), int(center_y - ring3_radius),
+                            int(ring3_radius * 2), int(ring3_radius * 2))
+        painter.drawEllipse(int(center_x - ring2_radius), int(center_y - ring2_radius),
+                            int(ring2_radius * 2), int(ring2_radius * 2))
+        painter.drawEllipse(int(center_x - inner_radius), int(center_y - inner_radius),
+                            int(inner_radius * 2), int(inner_radius * 2))
+
+        # Start angle for all segments (same starting point)
+        start_angle = -90 * 16  # Start at top (negative numbers go clockwise in Qt)
+
+        # Draw the usage segment (green) on outer ring
+        if self.usage > 0:
+            # Normal vs hovered color
+            color = QColor(80, 255, 80) if self.hovered_segment == "usage" else QColor(50, 220, 50)
+            pen.setColor(color)
+            painter.setPen(pen)
+            segment_angle = int(self.usage / self.capacity * 360 * 16)
+            painter.drawArc(int(center_x - outer_radius), int(center_y - outer_radius),
+                            int(outer_radius * 2), int(outer_radius * 2),
+                            start_angle, segment_angle)
+
+        # Draw the requests segment (blue) on ring4
+        if self.requests > 0:
+            # Normal vs hovered color
+            color = QColor(80, 180, 255) if self.hovered_segment == "requests" else QColor(50, 150, 220)
+            pen.setColor(color)
+            painter.setPen(pen)
+            segment_angle = int(self.requests / self.capacity * 360 * 16)
+            painter.drawArc(int(center_x - ring4_radius), int(center_y - ring4_radius),
+                            int(ring4_radius * 2), int(ring4_radius * 2),
+                            start_angle, segment_angle)
+
+        # Draw the limits segment (purple) on ring3
+        if self.limits > 0:
+            # Normal vs hovered color
+            color = QColor(200, 100, 255) if self.hovered_segment == "limits" else QColor(170, 70, 220)
+            pen.setColor(color)
+            painter.setPen(pen)
+            segment_angle = int(self.limits / self.capacity * 360 * 16)
+            painter.drawArc(int(center_x - ring3_radius), int(center_y - ring3_radius),
+                            int(ring3_radius * 2), int(ring3_radius * 2),
+                            start_angle, segment_angle)
+
+        # Draw the allocated segment (orange) on ring2
+        if self.allocated > 0:
+            # Normal vs hovered color
+            color = QColor(255, 160, 80) if self.hovered_segment == "allocated" else QColor(255, 140, 40)
+            pen.setColor(color)
+            painter.setPen(pen)
+            segment_angle = int(self.allocated / self.capacity * 360 * 16)
+            painter.drawArc(int(center_x - ring2_radius), int(center_y - ring2_radius),
+                            int(ring2_radius * 2), int(ring2_radius * 2),
+                            start_angle, segment_angle)
+
+    def sizeHint(self):
+        return QSize(150, 150)
+
+
+class ResourceStatusWidget(QWidget):
+    def __init__(self, title, usage=0, requests=0, limits=0, allocated=0, capacity=100):
+        super().__init__()
+
+        # Main layout
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(10)
+
+        # Create a frame for the box background
+        self.box = QFrame()
+        self.box.setObjectName("statusBox")
+        self.box.setStyleSheet("""
+            #statusBox {
+                background-color: #262626;
+                border-radius: 5px;
+                border: 1px solid transparent;
+            }
+            #statusBox:hover {
+                background-color: #333333;
+                border: 1px solid #4d4d4d;
+            }
+        """)
+
+        # Box layout
+        box_layout = QVBoxLayout(self.box)
+        box_layout.setContentsMargins(10, 10, 10, 10)
+
+        # Add title with bold font
+        self.title = title
+        title_label = QLabel(title)
+        font = QFont()
+        font.setBold(True)
+        title_label.setFont(font)
+        title_label.setStyleSheet("color: white; font-size: 16px;")
+        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        box_layout.addWidget(title_label)
+
+        # Add circular progress indicator
+        self.progress = ResourceCircularIndicator(usage, requests, limits, allocated, capacity)
+        self.progress.set_title(title)  # Set the title for tooltips
+        self.progress.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        box_layout.addWidget(self.progress)
+
+        # Add status labels - center-aligned with distinct colors
+        self.usage_label = QLabel(f"● Usage: {usage}")
+        self.usage_label.setStyleSheet("color: #32dc32;")  # Green
+        self.usage_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        box_layout.addWidget(self.usage_label)
+
+        self.requests_label = QLabel(f"● Requests: {requests}")
+        self.requests_label.setStyleSheet("color: #50a0ff;")  # Blue
+        self.requests_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        box_layout.addWidget(self.requests_label)
+
+        self.limits_label = QLabel(f"● Limits: {limits}")
+        self.limits_label.setStyleSheet("color: #c050ff;")  # Purple
+        self.limits_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        box_layout.addWidget(self.limits_label)
+
+        self.allocated_label = QLabel(f"● Allocated: {allocated}")
+        self.allocated_label.setStyleSheet("color: #ff9428;")  # Orange
+        self.allocated_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        box_layout.addWidget(self.allocated_label)
+
+        # Add a capacity label
+        self.capacity_label = QLabel(f"● Capacity: {capacity}")
+        self.capacity_label.setStyleSheet("color: #d0d0d0;")  # Light gray
+        self.capacity_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        box_layout.addWidget(self.capacity_label)
+
+        # Add the box to the main layout
+        main_layout.addWidget(self.box)
+
+        # Set widget to be transparent (the box inside has the background)
+        self.setStyleSheet("background-color: transparent;")
+        
+    def update_metrics(self, usage, requests, limits, allocated, capacity=None):
+        """Update metrics and labels"""
+        self.progress.usage = usage
+        self.progress.requests = requests
+        self.progress.limits = limits
+        self.progress.allocated = allocated
+        if capacity is not None:
+            self.progress.capacity = capacity
+        self.progress.update()
+        
+        self.usage_label.setText(f"● Usage: {usage}")
+        self.requests_label.setText(f"● Requests: {requests}")
+        self.limits_label.setText(f"● Limits: {limits}")
+        self.allocated_label.setText(f"● Allocated: {allocated}")
         
         if capacity is not None:
-            self.capacity = capacity
-        
-        if requests is not None:
-            self.requests = requests
-        
-        if limits is not None:
-            self.limits = limits
-        
-        if allocate_capacity is not None:
-            self.allocate_capacity = allocate_capacity
-        
-        if history is not None:
-            self.history = history
-        
-        # Update labels with formatted values
-        self.usage_label.setText(f"Usage: {value:.2f}%")
-        self.requests_label.setText(f"Requests: {self.requests:.2f}")
-        self.limits_label.setText(f"Limits: {self.limits:.2f}")
-        self.allocate_label.setText(f"Allocate Capacity: {self.allocate_capacity:.2f}")
-        self.capacity_label.setText(f"Capacity: {self.capacity:.2f}")
-        
-        self.update()
-    
-    def paintEvent(self, event):
-        super().paintEvent(event)
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        # Calculate center and radius
-        width = self.width()
-        height = self.height()
-        center_x = width * 0.5
-        center_y = height * 0.4  # Position gauge in upper portion
-        outer_radius = min(center_x, center_y) * 0.8
-        inner_radius = outer_radius * 0.75
-        
-        # Draw background circle
-        painter.setPen(Qt.PenStyle.NoPen)
-        bg_gradient = QRadialGradient(center_x, center_y, outer_radius)
-        bg_gradient.setColorAt(0, QColor(40, 40, 40))
-        bg_gradient.setColorAt(1, QColor(30, 30, 30))
-        painter.setBrush(QBrush(bg_gradient))
-        painter.drawEllipse(center_x - outer_radius, center_y - outer_radius,
-                           outer_radius * 2, outer_radius * 2)
-        
-        # Draw track (gray circle)
-        painter.setPen(QPen(QColor(60, 60, 60), 5))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawEllipse(center_x - inner_radius, center_y - inner_radius,
-                           inner_radius * 2, inner_radius * 2)
-        
-        # Calculate angle for current value
-        angle = self.value / 100 * 360
-        
-        # Draw progress arc (colored)
-        painter.setPen(QPen(QColor(self.color), 5))
-        painter.drawArc(center_x - inner_radius, center_y - inner_radius,
-                       inner_radius * 2, inner_radius * 2,
-                       90 * 16, -angle * 16)  # Start at 90 degrees, move counterclockwise
+            self.capacity_label.setText(f"● Capacity: {capacity}")
 
-class IssuesTable(QTableWidget):
-    """Custom table widget for displaying cluster issues"""
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setup_ui()
-    
-    def setup_ui(self):
-        # Set table properties
-        self.setColumnCount(4)
-        self.setHorizontalHeaderLabels(["Message", "Object", "Type", "Age"])
-        self.setFrameShape(QFrame.Shape.NoFrame)
-        self.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        self.verticalHeader().setVisible(False)
-        
-        # Set styles
-        self.setStyleSheet("""
-            QTableWidget {
-                background-color: #1e1e1e;
-                border: none;
-                gridline-color: #2d2d2d;
-                outline: none;
-            }
-            QTableWidget::item {
-                padding: 8px;
-                border: none;
-                outline: none;
-                color: #e2e8f0;
-            }
-            QTableWidget::item:selected {
-                background-color: rgba(33, 150, 243, 0.2);
-                border: none;
-            }
-            QHeaderView::section {
-                background-color: #252525;
-                color: #888888;
-                padding: 8px;
-                border: none;
-                border-bottom: 1px solid #2d2d2d;
-                font-size: 12px;
-                text-align: left;
-            }
-        """)
-    
-    def update_issues(self, issues):
-        """Update table with cluster issues"""
-        self.setRowCount(0)
-        
-        if not issues:
-            return
-        
-        self.setRowCount(len(issues))
-        
-        for row, issue in enumerate(issues):
-            # Message column
-            message_item = QTableWidgetItem(issue.get("message", ""))
-            message_item.setToolTip(issue.get("message", ""))
-            self.setItem(row, 0, message_item)
-            
-            # Object column
-            object_item = QTableWidgetItem(issue.get("object", ""))
-            self.setItem(row, 1, object_item)
-            
-            # Type column
-            type_item = QTableWidgetItem(issue.get("type", ""))
-            if issue.get("type") == "Warning":
-                type_item.setForeground(QColor("#FFC107"))
-            elif issue.get("type") == "Error":
-                type_item.setForeground(QColor("#FF5252"))
-            self.setItem(row, 2, type_item)
-            
-            # Age column
-            age_item = QTableWidgetItem(issue.get("age", ""))
-            self.setItem(row, 3, age_item)
+    def sizeHint(self):
+        return QSize(170, 300)
 
-class MetricsChart(QFrame):
-    """Custom widget for displaying bar charts for metrics history"""
-    def __init__(self, color, parent=None):
-        super().__init__(parent)
-        self.color = color
-        self.data = []
-        self.setMinimumHeight(150)
-        self.setStyleSheet(f"""
-            background-color: transparent;
-            border: none;
-        """)
-    
-    def update_data(self, data):
-        """Update the chart data"""
-        self.data = data
-        self.update()
-    
-    def paintEvent(self, event):
-        super().paintEvent(event)
-        if not self.data:
-            return
-        
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        width = self.width()
-        height = self.height()
-        
-        # Draw background grid lines
-        painter.setPen(QPen(QColor(60, 60, 60), 1, Qt.PenStyle.DotLine))
-        for i in range(1, 5):
-            y = height - (height * i / 5)
-            painter.drawLine(0, y, width, y)
-        
-        # Get min/max values for scaling
-        max_value = max(self.data) if self.data else 100
-        min_value = 0  # Start from 0 for better visualization
-        
-        # Ensure min/max difference to avoid division by zero
-        value_range = max(max_value - min_value, 1)
-        
-        # Calculate bar width and spacing
-        bar_count = len(self.data)
-        if bar_count == 0:
-            return
-        
-        total_spacing = width * 0.2  # 20% of width for spacing
-        spacing = total_spacing / (bar_count + 1)
-        bar_width = (width - total_spacing) / bar_count
-        
-        # Draw bars
-        for i, value in enumerate(self.data):
-            # Calculate bar dimensions
-            bar_height = ((value - min_value) / value_range) * (height * 0.9)
-            x = spacing + i * (bar_width + spacing)
-            y = height - bar_height
-            
-            # Create gradient for bar
-            gradient = QLinearGradient(x, y, x, height)
-            base_color = QColor(self.color)
-            gradient.setColorAt(0, base_color)
-            gradient.setColorAt(1, QColor(base_color.red(), base_color.green(), base_color.blue(), 100))
-            
-            # Draw bar
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QBrush(gradient))
-            painter.drawRoundedRect(x, y, bar_width, bar_height, 2, 2)
-        
-        # Draw time labels along x-axis
-        painter.setPen(QColor(120, 120, 120))
-        font = painter.font()
-        font.setPointSize(8)
-        painter.setFont(font)
-        
-        # Draw hour labels (simplified for this example)
-        for i in range(0, bar_count, max(1, bar_count // 6)):  # Show ~6 labels
-            x = spacing + i * (bar_width + spacing) + bar_width / 2
-            label = f"{i:02d}:00"
-            painter.drawText(x - 15, height - 5, 30, 20, Qt.AlignmentFlag.AlignCenter, label)
+    def minimumSizeHint(self):
+        return QSize(150, 270)
 
 class ClusterPage(QWidget):
+    # Define reusable button styles as class variables
+    ACTIVE_BTN_STYLE = """
+        QPushButton {
+            background-color: #333333;
+            color: #ffffff;
+            border: none;
+            padding: 6px 16px;
+            font-size: 13px;
+            border-radius: 4px;
+        }
+    """
+    
+    INACTIVE_BTN_STYLE = """
+        QPushButton {
+            background-color: transparent;
+            color: #888888;
+            border: none;
+            padding: 6px 16px;
+            font-size: 13px;
+        }
+        QPushButton:hover {
+            color: #ffffff;
+        }
+    """
+    
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.kubernetes_client = get_kubernetes_client()
-        
-        # Connect signals
-        self.kubernetes_client.cluster_metrics_updated.connect(self.update_metrics)
-        self.kubernetes_client.cluster_issues_updated.connect(self.update_issues)
-        
         self.setup_ui()
-        
-        # Start a timer to request metrics updates
-        self.metrics_timer = QTimer(self)
-        self.metrics_timer.timeout.connect(self.request_metrics_update)
-        self.metrics_timer.start(5000)  # Update every 5 seconds
-    
+
     def setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Add tab container
-        tab_container = self.create_tab_container()
-        layout.addWidget(tab_container)
-
-        # Add content area
+        # Add content area (no more tab container)
         content_area = self.create_content_area()
         layout.addWidget(content_area)
-    
-    def create_tab_container(self):
-        tab_widget = QTabWidget()
-        tab_widget.setFixedHeight(44)
-        tab_widget.addTab(QWidget(), "Master")
-        tab_widget.addTab(QWidget(), "Worker")
-        tab_widget.setCurrentIndex(0)
-        return tab_widget
 
     def create_content_area(self):
         content_widget = QWidget()
-        content_layout = QVBoxLayout(content_widget)
+        content_layout = QGridLayout(content_widget)
         content_layout.setContentsMargins(16, 16, 16, 16)
         content_layout.setSpacing(16)
+
+        # First panel with the charts - now with aligned tabs
+        chart_panel = self.create_chart_panel()
         
-        # Top section with metrics
-        metrics_layout = QHBoxLayout()
-        metrics_layout.setSpacing(16)
+        # Create a horizontal layout for the circular indicators
+        metrics_widget = QWidget()
+        metrics_widget.setStyleSheet("background-color: #1e1e1e; border-radius: 4px;")
+        metrics_layout = QHBoxLayout(metrics_widget)
+        metrics_layout.setContentsMargins(16, 16, 16, 16)
+        metrics_layout.setSpacing(15)
         
-        # CPU Metric
-        self.cpu_gauge = MetricGauge("CPU", "#FF5733")
-        metrics_layout.addWidget(self.cpu_gauge)
+        # Create individual ResourceStatusWidget instances with sample values
+        # Arguments: title, usage, requests, limits, allocated, capacity
+        self.cpu_status = ResourceStatusWidget("CPU Resources", 60, 75, 90, 80, 100)
+        self.memory_status = ResourceStatusWidget("Memory Resources", 40, 65, 80, 70, 100)
+        self.disk_status = ResourceStatusWidget("Storage Resources", 30, 50, 75, 60, 100)
         
-        # Memory Metric
-        self.memory_gauge = MetricGauge("Memory", "#33A8FF")
-        metrics_layout.addWidget(self.memory_gauge)
+        # Add them directly to the horizontal layout
+        metrics_layout.addWidget(self.cpu_status)
+        metrics_layout.addWidget(self.memory_status)
+        metrics_layout.addWidget(self.disk_status)
         
-        # Pods Metric
-        self.pods_gauge = MetricGauge("Pods", "#4CAF50")
-        metrics_layout.addWidget(self.pods_gauge)
+        # Status panel (the one with the green checkmark)
+        status_panel = self.create_status_panel()
+
+        # Add all panels to the grid layout
+        content_layout.addWidget(chart_panel, 0, 0)
+        content_layout.addWidget(metrics_widget, 0, 1)
+        content_layout.addWidget(status_panel, 1, 0, 1, 2)
+
+        return content_widget
+
+    def create_chart_panel(self):
+        panel = QWidget()
+        panel.setStyleSheet("""
+            QWidget {
+                background-color: #1e1e1e;
+                border-radius: 4px;
+            }
+        """)
+
+        # Create a vertical layout for the entire panel
+        main_layout = QVBoxLayout(panel)
+        main_layout.setContentsMargins(16, 16, 16, 16)
+        main_layout.setSpacing(16)
         
-        content_layout.addLayout(metrics_layout)
+        # Add a single row of tabs with both sets of buttons aligned
+        tabs = QWidget()
+        tabs_layout = QHBoxLayout(tabs)
+        tabs_layout.setContentsMargins(0, 0, 0, 0)
+        tabs_layout.setSpacing(4)
         
-        # Middle section with charts
-        charts_layout = QHBoxLayout()
-        charts_layout.setSpacing(16)
+        # Add Master/Worker buttons on the left
+        self.master_btn = QPushButton("Master")
+        self.master_btn.setStyleSheet(self.ACTIVE_BTN_STYLE)
+        self.master_btn.clicked.connect(self.show_master_data)
         
-        # CPU History Chart
-        cpu_chart_container = QFrame()
-        cpu_chart_container.setStyleSheet("""
+        self.worker_btn = QPushButton("Worker")
+        self.worker_btn.setStyleSheet(self.INACTIVE_BTN_STYLE)
+        self.worker_btn.clicked.connect(self.show_worker_data)
+        
+        tabs_layout.addWidget(self.master_btn)
+        tabs_layout.addWidget(self.worker_btn)
+        
+        # Add a stretching space to push CPU/Memory buttons to the right
+        tabs_layout.addStretch()
+        
+        # Add CPU/Memory buttons on the right
+        self.cpu_btn = QPushButton("CPU")
+        self.cpu_btn.setStyleSheet(self.ACTIVE_BTN_STYLE)
+        self.cpu_btn.clicked.connect(self.show_cpu_chart)
+
+        self.memory_btn = QPushButton("Memory")
+        self.memory_btn.setStyleSheet(self.INACTIVE_BTN_STYLE)
+        self.memory_btn.clicked.connect(self.show_memory_chart)
+
+        tabs_layout.addWidget(self.cpu_btn)
+        tabs_layout.addWidget(self.memory_btn)
+        
+        # Add the tabs to the main layout
+        main_layout.addWidget(tabs)
+        
+        # Create charts container
+        charts = QWidget()
+        charts.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        charts_layout = QVBoxLayout(charts)
+        charts_layout.setContentsMargins(0, 16, 0, 0)
+        
+        # Create the charts with increased height
+        self.cpu_chart = BarChart(color="#ff0000")  # Red for CPU
+        self.memory_chart = BarChart(color="#00ffff")  # Cyan for Memory
+        
+        # Set size policies to make charts expand
+        self.cpu_chart.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.memory_chart.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        
+        # Initially show only CPU chart
+        self.memory_chart.hide()
+        
+        charts_layout.addWidget(self.cpu_chart)
+        charts_layout.addWidget(self.memory_chart)
+
+        # Add chart container to main layout
+        main_layout.addWidget(charts)
+
+        return panel
+    
+    # Button click handlers for the Master/Worker tabs
+    def show_master_data(self):
+        self.master_btn.setStyleSheet(self.ACTIVE_BTN_STYLE)
+        self.worker_btn.setStyleSheet(self.INACTIVE_BTN_STYLE)
+        # Here you would update chart data to show master node data
+        # For now, we'll just keep this as a placeholder
+        
+    def show_worker_data(self):
+        self.worker_btn.setStyleSheet(self.ACTIVE_BTN_STYLE)
+        self.master_btn.setStyleSheet(self.INACTIVE_BTN_STYLE)
+        # Here you would update chart data to show worker node data
+        # For now, we'll just keep this as a placeholder
+
+    # Button click handlers for the CPU/Memory tabs
+    def show_cpu_chart(self):
+        self.cpu_btn.setStyleSheet(self.ACTIVE_BTN_STYLE)
+        self.memory_btn.setStyleSheet(self.INACTIVE_BTN_STYLE)
+        self.cpu_chart.show()
+        self.memory_chart.hide()
+        
+    def show_memory_chart(self):
+        self.memory_btn.setStyleSheet(self.ACTIVE_BTN_STYLE)
+        self.cpu_btn.setStyleSheet(self.INACTIVE_BTN_STYLE)
+        self.memory_chart.show()
+        self.cpu_chart.hide()
+
+    def create_status_panel(self):
+        panel = QWidget()
+        panel.setStyleSheet("""
             background-color: #1e1e1e;
             border-radius: 4px;
         """)
-        cpu_chart_layout = QVBoxLayout(cpu_chart_container)
-        
-        cpu_chart_title = QLabel("CPU Usage History")
-        cpu_chart_title.setStyleSheet("color: white; font-size: 14px; font-weight: bold;")
-        
-        self.cpu_chart = MetricsChart("#FF5733")
-        
-        cpu_chart_layout.addWidget(cpu_chart_title)
-        cpu_chart_layout.addWidget(self.cpu_chart)
-        
-        # Memory History Chart
-        memory_chart_container = QFrame()
-        memory_chart_container.setStyleSheet("""
-            background-color: #1e1e1e;
-            border-radius: 4px;
-        """)
-        memory_chart_layout = QVBoxLayout(memory_chart_container)
-        
-        memory_chart_title = QLabel("Memory Usage History")
-        memory_chart_title.setStyleSheet("color: white; font-size: 14px; font-weight: bold;")
-        
-        self.memory_chart = MetricsChart("#33A8FF")
-        
-        memory_chart_layout.addWidget(memory_chart_title)
-        memory_chart_layout.addWidget(self.memory_chart)
-        
-        charts_layout.addWidget(cpu_chart_container)
-        charts_layout.addWidget(memory_chart_container)
-        
-        content_layout.addLayout(charts_layout)
-        
-        # Bottom section with issues or status
-        issues_container = QFrame()
-        issues_container.setStyleSheet("""
-            background-color: #1e1e1e;
-            border-radius: 4px;
-        """)
-        issues_layout = QVBoxLayout(issues_container)
-        
-        issues_header = QHBoxLayout()
-        issues_title = QLabel("Cluster Issues")
-        issues_title.setStyleSheet("color: white; font-size: 16px; font-weight: bold;")
-        
-        self.issues_count = QLabel("0 issues found")
-        self.issues_count.setStyleSheet("color: #888888; font-size: 12px; margin-left: 8px;")
-        
-        issues_header.addWidget(issues_title)
-        issues_header.addWidget(self.issues_count)
-        issues_header.addStretch()
-        
-        issues_layout.addLayout(issues_header)
-        
-        # Issues table or status indicator based on issues
-        self.issues_table = IssuesTable()
-        self.issues_table.setVisible(False)
-        issues_layout.addWidget(self.issues_table)
-        
-        # No issues widget
-        self.no_issues_widget = QWidget()
-        no_issues_layout = QVBoxLayout(self.no_issues_widget)
-        no_issues_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
+
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(32, 48, 32, 48)
+        layout.setSpacing(8)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
         # Success icon
-        success_icon_label = QLabel("✓")
-        success_icon_label.setFixedSize(80, 80)
-        success_icon_label.setStyleSheet("""
+        success_icon = QLabel("✓")
+        success_icon.setFixedSize(80, 80)
+        success_icon.setStyleSheet("""
             background-color: #4CAF50;
             color: white;
             font-size: 40px;
             border-radius: 40px;
             qproperty-alignment: AlignCenter;
         """)
-        
+
         # Status text
         status_title = QLabel("No issues found")
         status_title.setStyleSheet("""
@@ -629,84 +671,46 @@ class ClusterPage(QWidget):
             margin-top: 16px;
         """)
         status_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        status_subtitle = QLabel("Everything is fine in the Cluster")
+
+        status_subtitle = QLabel("All resources are within acceptable limits")
         status_subtitle.setStyleSheet("""
             color: #888888;
             font-size: 14px;
             margin-top: 4px;
         """)
         status_subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        no_issues_layout.addWidget(success_icon_label, 0, Qt.AlignmentFlag.AlignCenter)
-        no_issues_layout.addWidget(status_title)
-        no_issues_layout.addWidget(status_subtitle)
-        
-        issues_layout.addWidget(self.no_issues_widget)
-        
-        content_layout.addWidget(issues_container)
-        
-        return content_widget
+
+        layout.addWidget(success_icon, 0, Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(status_title)
+        layout.addWidget(status_subtitle)
+
+        return panel
     
-    def request_metrics_update(self):
-        """Request metrics update from client"""
-        self.kubernetes_client.get_cluster_metrics_async()
-        self.kubernetes_client.get_cluster_issues_async()
-    
-    @pyqtSlot(dict)
-    def update_metrics(self, metrics):
-        """Update UI with new metrics data"""
-        if not metrics:
-            return
-        
-        # Update CPU gauge
-        cpu_data = metrics.get("cpu", {})
-        if cpu_data:
-            self.cpu_gauge.update_values(
-                cpu_data.get("usage", 0),
-                cpu_data.get("capacity", 0),
-                cpu_data.get("requests", 0),
-                cpu_data.get("limits", 0),
-                cpu_data.get("allocatable", 0)
+    def update_metrics(self, cpu_metrics=None, memory_metrics=None, disk_metrics=None):
+        """Update the metrics displays with new data"""
+        if cpu_metrics:
+            self.cpu_status.update_metrics(
+                cpu_metrics.get("usage", 0),
+                cpu_metrics.get("requests", 0),
+                cpu_metrics.get("limits", 0),
+                cpu_metrics.get("allocated", 0),
+                cpu_metrics.get("capacity", 100)
             )
-            self.cpu_chart.update_data(cpu_data.get("history", []))
-        
-        # Update Memory gauge
-        memory_data = metrics.get("memory", {})
-        if memory_data:
-            self.memory_gauge.update_values(
-                memory_data.get("usage", 0),
-                memory_data.get("capacity", 0),
-                memory_data.get("requests", 0),
-                memory_data.get("limits", 0),
-                memory_data.get("allocatable", 0)
+            
+        if memory_metrics:
+            self.memory_status.update_metrics(
+                memory_metrics.get("usage", 0),
+                memory_metrics.get("requests", 0),
+                memory_metrics.get("limits", 0),
+                memory_metrics.get("allocated", 0),
+                memory_metrics.get("capacity", 100)
             )
-            self.memory_chart.update_data(memory_data.get("history", []))
-        
-        # Update Pods gauge
-        pods_data = metrics.get("pods", {})
-        if pods_data:
-            self.pods_gauge.update_values(
-                pods_data.get("usage", 0),
-                pods_data.get("capacity", 0),
-                pods_data.get("count", 0)
+            
+        if disk_metrics:
+            self.disk_status.update_metrics(
+                disk_metrics.get("usage", 0),
+                disk_metrics.get("requests", 0),
+                disk_metrics.get("limits", 0),
+                disk_metrics.get("allocated", 0),
+                disk_metrics.get("capacity", 100)
             )
-    
-    @pyqtSlot(list)
-    def update_issues(self, issues):
-        """Update UI with cluster issues"""
-        if not issues:
-            self.issues_count.setText("0 issues found")
-            self.issues_table.setVisible(False)
-            self.no_issues_widget.setVisible(True)
-            return
-        
-        # Update issues count
-        self.issues_count.setText(f"{len(issues)} issues found")
-        
-        # Update issues table
-        self.issues_table.update_issues(issues)
-        
-        # Show table if issues exist, otherwise show "No issues" widget
-        self.issues_table.setVisible(len(issues) > 0)
-        self.no_issues_widget.setVisible(len(issues) == 0)

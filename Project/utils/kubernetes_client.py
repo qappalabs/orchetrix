@@ -325,6 +325,28 @@ class KubeIssuesWorker(QRunnable):
             self.signals.finished.emit(result)
         except Exception as e:
             self.signals.error.emit(str(e))
+            
+class ResourceDetailWorker(QRunnable):
+    """Worker thread for fetching Kubernetes resource details asynchronously"""
+    def __init__(self, client, resource_type, resource_name, namespace):
+        super().__init__()
+        self.client = client
+        self.resource_type = resource_type
+        self.resource_name = resource_name
+        self.namespace = namespace
+        self.signals = WorkerSignals()
+        
+    @pyqtSlot()
+    def run(self):
+        try:
+            result = self.client.get_resource_detail(
+                self.resource_type, 
+                self.resource_name, 
+                self.namespace
+            )
+            self.signals.finished.emit(result)
+        except Exception as e:
+            self.signals.error.emit(str(e))
 
 class KubernetesClient(QObject):
     """Client for interacting with Kubernetes clusters"""
@@ -333,6 +355,7 @@ class KubernetesClient(QObject):
     cluster_metrics_updated = pyqtSignal(dict)
     node_metrics_updated = pyqtSignal(dict)
     cluster_issues_updated = pyqtSignal(list)
+    resource_detail_loaded = pyqtSignal(dict)
     error_occurred = pyqtSignal(str)
     
     def __init__(self):
@@ -709,6 +732,95 @@ class KubernetesClient(QObject):
         worker.signals.finished.connect(lambda result: self.cluster_issues_updated.emit(result) if result else None)
         worker.signals.error.connect(lambda error: self.error_occurred.emit(error))
         self.threadpool.start(worker)
+        
+    def get_resource_detail(self, resource_type, resource_name, namespace="default"):
+        """Get detailed information about a specific Kubernetes resource"""
+        try:
+            # Different command formats for cluster-scoped vs namespaced resources
+            cluster_scoped_resources = ["node", "persistentvolume", "clusterrole", "namespace"]
+            
+            if resource_type.lower() in cluster_scoped_resources:
+                # Cluster-scoped resources don't need namespace
+                output = self._execute_kubectl(
+                    ["get", resource_type, resource_name, "-o", "json"], 
+                    "{}"
+                )
+            else:
+                # Namespaced resources
+                output = self._execute_kubectl(
+                    ["get", resource_type, resource_name, "-n", namespace, "-o", "json"], 
+                    "{}"
+                )
+            
+            try:
+                resource_data = json.loads(output)
+                
+                # Add related events (separate API call)
+                events = self._get_resource_events(resource_type, resource_name, namespace)
+                resource_data["events"] = events
+                
+                return resource_data
+            except json.JSONDecodeError:
+                self.error_occurred.emit(f"Error parsing resource data: Invalid JSON")
+                return {}
+                
+        except Exception as e:
+            self.error_occurred.emit(f"Error getting resource details: {str(e)}")
+            return {}
+    
+    def get_resource_detail_async(self, resource_type, resource_name, namespace="default"):
+        """Get resource details asynchronously"""
+        worker = ResourceDetailWorker(self, resource_type, resource_name, namespace)
+        worker.signals.finished.connect(lambda result: self.resource_detail_loaded.emit(result) if result else None)
+        worker.signals.error.connect(lambda error: self.error_occurred.emit(error))
+        self.threadpool.start(worker)
+        
+    def _get_resource_events(self, resource_type, resource_name, namespace="default"):
+        """Get events related to a specific resource"""
+        try:
+            # Use field selector to filter events by resource
+            field_selector = f"involvedObject.name={resource_name},involvedObject.kind={resource_type.capitalize()}"
+            
+            if resource_type.lower() not in ["node", "persistentvolume", "clusterrole", "namespace"]:
+                # Add namespace selector for namespaced resources
+                field_selector += f",involvedObject.namespace={namespace}"
+                output = self._execute_kubectl(
+                    ["get", "events", "-n", namespace, "--field-selector", field_selector, "-o", "json"], 
+                    "{}"
+                )
+            else:
+                # For cluster-scoped resources
+                output = self._execute_kubectl(
+                    ["get", "events", "--field-selector", field_selector, "-o", "json"], 
+                    "{}"
+                )
+            
+            try:
+                events_data = json.loads(output)
+                events = []
+                
+                for item in events_data.get("items", []):
+                    # Format creation timestamp to age
+                    timestamp = item.get("metadata", {}).get("creationTimestamp")
+                    age = self._format_age(timestamp) if timestamp else "Unknown"
+                    
+                    event = {
+                        "type": item.get("type", "Normal"),
+                        "reason": item.get("reason", "Unknown"),
+                        "message": item.get("message", "No message"),
+                        "age": age,
+                        "count": item.get("count", 1),
+                        "source": item.get("source", {}).get("component", "Unknown")
+                    }
+                    events.append(event)
+                
+                return events
+            except json.JSONDecodeError:
+                return []
+                
+        except Exception as e:
+            self.error_occurred.emit(f"Error getting resource events: {str(e)}")
+            return []
     
     def _execute_kubectl(self, args, default_value=None):
         """Execute kubectl command and return result"""
@@ -976,7 +1088,6 @@ def get_kubernetes_client():
     if _instance is None:
         _instance = KubernetesClient()
     return _instance
-
 
 # import os
 # import json
