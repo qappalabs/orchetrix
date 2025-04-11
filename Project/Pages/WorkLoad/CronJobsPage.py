@@ -1,5 +1,5 @@
 """
-Optimized implementation of the cron_jobss page with better memory management
+Optimized implementation of the Cron Jobs page with better memory management
 and performance.
 """
 
@@ -10,10 +10,11 @@ from PyQt6.QtCore import Qt, QEvent
 from PyQt6.QtGui import QColor
 
 from base_components.base_components import BaseTablePage, SortableTableWidgetItem
+from UI.Styles import AppStyles, AppColors
 
 class CronJobsPage(BaseTablePage):
     """
-    Displays Kubernetes cron_jobss with optimizations for performance and memory usage.
+    Displays Kubernetes cron jobs with optimizations for performance and memory usage.
     
     Optimizations:
     1. Uses BaseTablePage for common functionality to reduce code duplication
@@ -28,13 +29,17 @@ class CronJobsPage(BaseTablePage):
         self.load_data()
         
     def setup_page_ui(self):
-        """Set up the main UI elements for the cron_jobss page"""
-        # Define headers and sortable columns
-        headers = ["", "Name", "Namespace", "Sechdule", "Suspend", "Active", "Last sechdule", "Age", ""]
+        """Set up the main UI elements for the Cron Jobs page"""
+        # Define headers and sortable columns (corrected typos: "Sechdule" to "Schedule")
+        headers = ["", "Name", "Namespace", "Schedule", "Suspend", "Active", "Last Schedule", "Age", ""]
         sortable_columns = {1, 2, 4, 5, 6, 7}
         
-        # Set up the base UI components
+        # Set up the base UI components with styles
         layout = self.setup_ui("Cron Jobs", headers, sortable_columns)
+        
+        # Apply table style
+        self.table.setStyleSheet(AppStyles.TABLE_STYLE)
+        self.table.horizontalHeader().setStyleSheet(AppStyles.CUSTOM_HEADER_STYLE)
         
         # Configure column widths
         self.configure_columns()
@@ -54,43 +59,44 @@ class CronJobsPage(BaseTablePage):
         for col in stretch_columns:
             self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
         
-        # Fixed width columns
-       
+        # Fixed width column for actions
         self.table.horizontalHeader().setSectionResizeMode(8, QHeaderView.ResizeMode.Fixed)
         self.table.setColumnWidth(8, 40)
     
     def load_data(self):
         """Load cron jobs data into the table with optimized batch processing"""
-        # Sample cron_jobs data
+        # Sample cron jobs data (corrected to match header count and Kubernetes-like data)
         cron_jobs_data = [
-            ["coredns", "kube-system", "2/2", "2", "Available Progressing", "3", "70d"],
-            ["nginx-deploy", "default", "3/3", "3" ,"Available Progressing", "12d", "12d"],
+            ["coredns", "kube-system", "*/5 * * * *", "False", "0", "1h", "70d"],
+            ["nginx-deploy", "default", "0 0 * * *", "True", "1", "12h", "12d"],
         ]
 
         # Set up the table for the data
         self.table.setRowCount(len(cron_jobs_data))
         
         # Batch process all rows using a single loop for better performance
-        for row, cron_jobs in enumerate(cron_jobs_data):
-            self.populate_cron_jobs_row(row, cron_jobs)
+        for row, cron_job in enumerate(cron_jobs_data):
+            self.populate_cron_jobs_row(row, cron_job)
         
-        # Update the item count
+        # Update the item count with style
+        self.items_count.setStyleSheet(AppStyles.ITEMS_COUNT_STYLE)
         self.items_count.setText(f"{len(cron_jobs_data)} items")
     
     def populate_cron_jobs_row(self, row, cron_jobs_data):
         """
-        Populate a single row with cron_jobs data using efficient methods
+        Populate a single row with cron jobs data using efficient methods
         
         Args:
             row: The row index
-            cron_jobs_data: List containing cron_jobs information
+            cron_jobs_data: List containing cron job information
         """
         # Set row height once
         self.table.setRowHeight(row, 40)
         
         # Create checkbox for row selection
-        cron_jobs_name = cron_jobs_data[0]
-        checkbox_container = self._create_checkbox_container(row, cron_jobs_name)
+        cron_job_name = cron_jobs_data[0]
+        checkbox_container = self._create_checkbox_container(row, cron_job_name)
+        checkbox_container.setStyleSheet(AppStyles.CHECKBOX_STYLE)
         self.table.setCellWidget(row, 0, checkbox_container)
         
         # Populate data columns efficiently
@@ -98,28 +104,29 @@ class CronJobsPage(BaseTablePage):
             cell_col = col + 1  # Adjust for checkbox column
             
             # Handle numeric columns for sorting
-            if col == 2:  # Sechdule column
-                # Convert to numeric value for sorting if possible
+            if col == 3:  # Suspend column (Boolean as string)
+                num = 1 if value.lower() == "true" else 0
+                item = SortableTableWidgetItem(value, num)
+            elif col == 4:  # Active column (numeric)
                 try:
                     num = int(value)
                 except ValueError:
                     num = 0
                 item = SortableTableWidgetItem(value, num)
-            elif col == 3:  # suspend column
+            elif col == 5:  # Last Schedule column (simplified to hours or days)
                 try:
-                    num = int(value)
-                except ValueError:
-                    num = 0
-                item = SortableTableWidgetItem(value, num)
-            elif col == 5:  # Last Sechdule column
-                try:
-                    num = int(value.replace('d', ''))
+                    if 'h' in value:
+                        num = float(value.replace('h', ''))
+                    elif 'd' in value:
+                        num = float(value.replace('d', '')) * 24  # Convert days to hours
+                    else:
+                        num = 0
                 except ValueError:
                     num = 0
                 item = SortableTableWidgetItem(value, num)
             elif col == 6:  # Age column
                 try:
-                    num = int(value.replace('d', ''))
+                    num = float(value.replace('d', ''))
                 except ValueError:
                     num = 0
                 item = SortableTableWidgetItem(value, num)
@@ -127,19 +134,26 @@ class CronJobsPage(BaseTablePage):
                 item = SortableTableWidgetItem(value)
             
             # Set text alignment
-            if col in [2, 3, 4, 5, 6,]:
+            if col in [3, 4, 5, 6]:  # Center-align Suspend, Active, Last Schedule, Age
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            else:
+            else:  # Left-align Name, Namespace, Schedule
                 item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             
             # Make cells non-editable
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             
-            # Set special colors for status column
-            if col == 4 and value == "Available Progressing":
-                item.setForeground(QColor("#4CAF50"))
+            # Set special colors for Active column (assuming col 4 as status-like)
+            if col == 4:  # Active column
+                try:
+                    active_count = int(value)
+                    if active_count > 0:
+                        item.setForeground(QColor(AppColors.STATUS_ACTIVE))  # Green for active jobs
+                    else:
+                        item.setForeground(QColor(AppColors.TEXT_TABLE))  # Default for inactive
+                except ValueError:
+                    item.setForeground(QColor(AppColors.TEXT_TABLE))
             else:
-                item.setForeground(QColor("#e2e8f0"))
+                item.setForeground(QColor(AppColors.TEXT_TABLE))
             
             # Add the item to the table
             self.table.setItem(row, cell_col, item)
@@ -151,7 +165,9 @@ class CronJobsPage(BaseTablePage):
             {"text": "Logs", "icon": "icons/logs.png", "dangerous": False},
             {"text": "Shell", "icon": "icons/shell.png", "dangerous": False},
         ])
+        action_button.setStyleSheet(AppStyles.ACTION_BUTTON_STYLE)
         action_container = self._create_action_container(row, action_button)
+        action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
         self.table.setCellWidget(row, len(cron_jobs_data) + 1, action_container)
     
     def handle_row_click(self, row, column):
@@ -159,6 +175,6 @@ class CronJobsPage(BaseTablePage):
         if column != self.table.columnCount() - 1:  # Skip action column
             # Select the row
             self.table.selectRow(row)
-            # Log selection (can be removed in production)
-            cron_jobs_name = self.table.item(row, 1).text()
-            print(f"Selected cron_jobs: {cron_jobs_name}")
+            # Log selection
+            cron_job_name = self.table.item(row, 1).text()
+            print(f"Selected cron job: {cron_job_name}")

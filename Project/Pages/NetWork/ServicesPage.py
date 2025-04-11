@@ -10,6 +10,7 @@ from PyQt6.QtCore import Qt, QEvent
 from PyQt6.QtGui import QColor
 
 from base_components.base_components import BaseTablePage, SortableTableWidgetItem
+from UI.Styles import AppStyles, AppColors
 
 class ServicesPage(BaseTablePage):
     """
@@ -33,8 +34,12 @@ class ServicesPage(BaseTablePage):
         headers = ["", "Name", "Namespace", "Type", "Cluster IP", "Port", "External IP", "Selector", "Age", "Status", ""]
         sortable_columns = {1, 2, 3, 4, 5, 7, 8, 9}
         
-        # Set up the base UI components
+        # Set up the base UI components with styles
         layout = self.setup_ui("Services", headers, sortable_columns)
+        
+        # Apply table style
+        self.table.setStyleSheet(AppStyles.TABLE_STYLE)
+        self.table.horizontalHeader().setStyleSheet(AppStyles.CUSTOM_HEADER_STYLE)
         
         # Configure column widths
         self.configure_columns()
@@ -54,7 +59,7 @@ class ServicesPage(BaseTablePage):
         for col in stretch_columns:
             self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
         
-      
+        # Fixed width for action column
         self.table.horizontalHeader().setSectionResizeMode(10, QHeaderView.ResizeMode.Fixed)
         self.table.setColumnWidth(10, 40)
     
@@ -72,7 +77,8 @@ class ServicesPage(BaseTablePage):
         for row, service in enumerate(services_data):
             self.populate_service_row(row, service)
         
-        # Update the item count
+        # Update the item count with style
+        self.items_count.setStyleSheet(AppStyles.ITEMS_COUNT_STYLE)
         self.items_count.setText(f"{len(services_data)} items")
     
     def populate_service_row(self, row, service_data):
@@ -89,6 +95,7 @@ class ServicesPage(BaseTablePage):
         # Create checkbox for row selection
         service_name = service_data[0]
         checkbox_container = self._create_checkbox_container(row, service_name)
+        checkbox_container.setStyleSheet(AppStyles.CHECKBOX_STYLE)
         self.table.setCellWidget(row, 0, checkbox_container)
         
         # Populate data columns efficiently
@@ -96,13 +103,13 @@ class ServicesPage(BaseTablePage):
             cell_col = col + 1  # Adjust for checkbox column
             
             # Handle numeric columns for sorting
-            if col == 3:  # Containers column
+            if col == 3:  # Cluster IP column (not typically numeric, but keeping original logic)
                 try:
                     num = int(value)
                 except ValueError:
                     num = 0
                 item = SortableTableWidgetItem(value, num)
-            elif col == 4:  # Restarts column
+            elif col == 4:  # Port column (not typically numeric, but keeping original logic)
                 try:
                     num = int(value)
                 except ValueError:
@@ -110,7 +117,7 @@ class ServicesPage(BaseTablePage):
                 item = SortableTableWidgetItem(value, num)
             elif col == 7:  # Age column
                 try:
-                    num = int(value.replace('d', ''))
+                    num = int(value.replace('d', '').replace('h', ''))
                 except ValueError:
                     num = 0
                 item = SortableTableWidgetItem(value, num)
@@ -127,10 +134,13 @@ class ServicesPage(BaseTablePage):
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             
             # Set special colors for status column
-            if col == 8 and value == "Active":
-                item.setForeground(QColor("#4CAF50"))
+            if col == 8:  # Status column
+                if value == "Active":
+                    item.setForeground(QColor(AppColors.STATUS_ACTIVE))
+                else:
+                    item.setForeground(QColor(AppColors.STATUS_DISCONNECTED))
             else:
-                item.setForeground(QColor("#e2e8f0"))
+                item.setForeground(QColor(AppColors.TEXT_TABLE))
             
             # Add the item to the table
             self.table.setItem(row, cell_col, item)
@@ -140,7 +150,9 @@ class ServicesPage(BaseTablePage):
             {"text": "Edit", "icon": "icons/edit.png", "dangerous": False},
             {"text": "Delete", "icon": "icons/delete.png", "dangerous": True}
         ])
+        action_button.setStyleSheet(AppStyles.ACTION_BUTTON_STYLE)
         action_container = self._create_action_container(row, action_button)
+        action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
         self.table.setCellWidget(row, len(service_data) + 1, action_container)
     
     def _handle_action(self, action, row):

@@ -10,6 +10,7 @@ from PyQt6.QtCore import Qt, QEvent
 from PyQt6.QtGui import QColor
 
 from base_components.base_components import BaseTablePage, SortableTableWidgetItem
+from UI.Styles import AppStyles, AppColors
 
 class ServiceAccountsPage(BaseTablePage):
     """
@@ -33,8 +34,12 @@ class ServiceAccountsPage(BaseTablePage):
         headers = ["", "Name", "Namespace", "Age", ""]
         sortable_columns = {1, 2, 3}
         
-        # Set up the base UI components
+        # Set up the base UI components with styles
         layout = self.setup_ui("Service Accounts", headers, sortable_columns)
+        
+        # Apply table style
+        self.table.setStyleSheet(AppStyles.TABLE_STYLE)
+        self.table.horizontalHeader().setStyleSheet(AppStyles.CUSTOM_HEADER_STYLE)
         
         # Configure column widths
         self.configure_columns()
@@ -74,7 +79,8 @@ class ServiceAccountsPage(BaseTablePage):
         for row, account in enumerate(service_accounts_data):
             self.populate_account_row(row, account)
         
-        # Update the item count
+        # Update the item count with style
+        self.items_count.setStyleSheet(AppStyles.ITEMS_COUNT_STYLE)
         self.items_count.setText(f"{len(service_accounts_data)} items")
     
     def populate_account_row(self, row, account_data):
@@ -91,6 +97,7 @@ class ServiceAccountsPage(BaseTablePage):
         # Create checkbox for row selection
         account_name = account_data[0]
         checkbox_container = self._create_checkbox_container(row, account_name)
+        checkbox_container.setStyleSheet(AppStyles.CHECKBOX_STYLE)
         self.table.setCellWidget(row, 0, checkbox_container)
         
         # Populate data columns efficiently
@@ -116,8 +123,8 @@ class ServiceAccountsPage(BaseTablePage):
             # Make cells non-editable
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             
-            # Set text color
-            item.setForeground(QColor("#e2e8f0"))
+            # Set text color using AppColors
+            item.setForeground(QColor(AppColors.TEXT_TABLE))
             
             # Add the item to the table
             self.table.setItem(row, cell_col, item)
@@ -127,7 +134,9 @@ class ServiceAccountsPage(BaseTablePage):
             {"text": "Edit", "icon": "icons/edit.png", "dangerous": False},
             {"text": "Delete", "icon": "icons/delete.png", "dangerous": True}
         ])
+        action_button.setStyleSheet(AppStyles.ACTION_BUTTON_STYLE)
         action_container = self._create_action_container(row, action_button)
+        action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
         self.table.setCellWidget(row, len(account_data) + 1, action_container)
     
     def _handle_action(self, action, row):

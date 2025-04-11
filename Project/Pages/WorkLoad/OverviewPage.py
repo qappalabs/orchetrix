@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
 from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QBrush
 from PyQt6.QtCore import Qt, QSize
 
+from UI.Styles import AppStyles, AppColors
 
 class CircularProgressIndicator(QWidget):
     def __init__(self, running=0, in_progress=0, failed=0, total=20):
@@ -41,8 +42,8 @@ class CircularProgressIndicator(QWidget):
         pen.setWidth(max(3, int(pen_width)))  # Increased minimum width from 2 to 3
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
 
-        # Draw the background circles - make them darker for better contrast
-        pen.setColor(QColor(30, 30, 30))  # Darker background color
+        # Draw the background circles
+        pen.setColor(QColor(AppColors.BG_DARKER))  # Darker background color
         painter.setPen(pen)
 
         # Draw outer ring background (for running)
@@ -60,9 +61,9 @@ class CircularProgressIndicator(QWidget):
         # Start angle for all segments (same starting point)
         start_angle = -90 * 16  # Start at top (negative numbers go clockwise in Qt)
 
-        # Draw the running segment (green) on outer ring - make colors brighter
+        # Draw the running segment (green) on outer ring
         if self.running > 0:
-            pen.setColor(QColor(50, 220, 50))  # Brighter green
+            pen.setColor(QColor(AppColors.STATUS_ACTIVE))  # Green
             painter.setPen(pen)
             segment_angle = int(self.running / self.total * 360 * 16)
             painter.drawArc(int(center_x - outer_radius), int(center_y - outer_radius),
@@ -71,7 +72,7 @@ class CircularProgressIndicator(QWidget):
 
         # Draw the in progress segment (yellow/orange) on middle ring
         if self.in_progress > 0:
-            pen.setColor(QColor(255, 180, 0))  # Brighter orange/yellow
+            pen.setColor(QColor(AppColors.STATUS_PENDING))  # Orange
             painter.setPen(pen)
             segment_angle = int(self.in_progress / self.total * 360 * 16)
             painter.drawArc(int(center_x - middle_radius), int(center_y - middle_radius),
@@ -80,7 +81,7 @@ class CircularProgressIndicator(QWidget):
 
         # Draw the failed segment (red) on inner ring
         if self.failed > 0:
-            pen.setColor(QColor(255, 60, 60))  # Brighter red
+            pen.setColor(QColor(AppColors.STATUS_DISCONNECTED))  # Red
             painter.setPen(pen)
             segment_angle = int(self.failed / self.total * 360 * 16)
             painter.drawArc(int(center_x - inner_radius), int(center_y - inner_radius),
@@ -103,24 +104,18 @@ class StatusWidget(QWidget):
         # Create a frame for the box background
         self.box = QFrame()
         self.box.setObjectName("statusBox")
-        self.box.setStyleSheet("""
-            #statusBox {
-                background-color: #262626;
-                border-radius: 5px;
-            }
-        """)
+        self.box.setStyleSheet(AppStyles.STATUS_BOX_STYLE)
 
         # Box layout
         box_layout = QVBoxLayout(self.box)
         box_layout.setContentsMargins(10, 10, 10, 10)
 
-        # Add title - now with bold font
+        # Add title
         title_label = QLabel(title)
-        # Create a bold font for the title
+        title_label.setStyleSheet(AppStyles.STATUS_TITLE_STYLE)
         font = QFont()
         font.setBold(True)
         title_label.setFont(font)
-        title_label.setStyleSheet("color: white; font-size: 16px;")
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         box_layout.addWidget(title_label)
 
@@ -129,19 +124,19 @@ class StatusWidget(QWidget):
         self.progress.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         box_layout.addWidget(self.progress)
 
-        # Add status labels - center-aligned with brighter colors
+        # Add status labels
         running_label = QLabel(f"● Running: {running}")
-        running_label.setStyleSheet("color: #32dc32;")  # Brighter green
+        running_label.setStyleSheet(AppStyles.RESOURCE_LABEL_USAGE_STYLE)  # Green
         running_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         box_layout.addWidget(running_label)
 
         in_progress_label = QLabel(f"● In Progress: {in_progress}")
-        in_progress_label.setStyleSheet("color: #ffb400;")  # Brighter orange
+        in_progress_label.setStyleSheet(AppStyles.RESOURCE_LABEL_REQUESTS_STYLE)  # Orange-like
         in_progress_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         box_layout.addWidget(in_progress_label)
 
         failed_label = QLabel(f"● Failed: {failed}")
-        failed_label.setStyleSheet("color: #ff3c3c;")  # Brighter red
+        failed_label.setStyleSheet(AppStyles.MESSAGE_WARNING_STYLE)  # Red
         failed_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         box_layout.addWidget(failed_label)
 
@@ -184,63 +179,8 @@ class EventsTable(QTableWidget):
         self.verticalHeader().setDefaultSectionSize(36)
         self.verticalHeader().setVisible(False)
 
-        # Style - with hover effect and subtle selection
-        self.setStyleSheet("""
-            QTableWidget {
-                background-color: #262626;
-                color: white;
-                gridline-color: transparent;
-                border: none;
-            }
-            QHeaderView::section {
-                background-color: #212121;
-                color: white;
-                padding: 8px;
-                border: none;
-            }
-            QTableWidget::item {
-                padding: 8px;
-                border: none;
-                background: transparent;
-            }
-            QTableWidget::item:hover {
-                background-color: rgba(80, 80, 80, 120);
-            }
-            QTableWidget::item:selected {
-                background-color: rgba(60, 60, 60, 150);
-                color: white;
-            }
-            QTableWidget:focus {
-                outline: none;
-            }
-            QHeaderView::section:hover {
-                background-color: #2a2a2a;
-            }
-            QScrollBar:vertical {
-                background-color: #212121;
-                width: 8px;
-                margin: 0px;
-            }
-            QScrollBar::handle:vertical {
-                background-color: rgba(160, 160, 160, 150);
-                border-radius: 4px;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                height: 0px;
-            }
-            QScrollBar:horizontal {
-                background-color: #212121;
-                height: 8px;
-                margin: 0px;
-            }
-            QScrollBar::handle:horizontal {
-                background-color: rgba(160, 160, 160, 150);
-                border-radius: 4px;
-            }
-            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
-                width: 0px;
-            }
-        """)
+        # Apply styles
+        self.setStyleSheet(AppStyles.EVENTS_TABLE_STYLE)
 
         # Sample data based on the image
         events_data = [
@@ -262,6 +202,7 @@ class EventsTable(QTableWidget):
                 # Center align count and age columns
                 if col_index >= 5:  # Count and Age columns
                     item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                item.setForeground(QColor(AppColors.TEXT_LIGHT))
                 self.setItem(row_index, col_index, item)
 
 
@@ -270,7 +211,7 @@ class OverviewPage(QMainWindow):
         super().__init__()
         self.setWindowTitle("Docker Desktop")
         self.resize(1200, 800)
-        self.setStyleSheet("background-color: #1a1a1a; color: white;")
+        self.setStyleSheet(AppStyles.MAIN_STYLE)
 
         # Main widget and layout
         central_widget = QWidget()
@@ -280,11 +221,12 @@ class OverviewPage(QMainWindow):
 
         # Top bar - just the Overview title
         top_bar = QWidget()
+        top_bar.setStyleSheet(AppStyles.TOP_BAR_STYLE)
         top_bar_layout = QHBoxLayout(top_bar)
         top_bar_layout.setContentsMargins(0, 0, 0, 10)
 
         overview_label = QLabel("Overview")
-        overview_label.setStyleSheet("font-size: 22px; font-weight: bold;")
+        overview_label.setStyleSheet(AppStyles.TITLE_STYLE)
 
         top_bar_layout.addWidget(overview_label)
         top_bar_layout.addStretch()
@@ -302,24 +244,7 @@ class OverviewPage(QMainWindow):
         status_scroll.setWidget(status_row)
         status_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         status_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        status_scroll.setStyleSheet("""
-            QScrollArea {
-                background-color: transparent;
-                border: none;
-            }
-            QScrollBar:horizontal {
-                background-color: #212121;
-                height: 8px;
-                margin: 0px;
-            }
-            QScrollBar::handle:horizontal {
-                background-color: rgba(160, 160, 160, 150);
-                border-radius: 4px;
-            }
-            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
-                width: 0px;
-            }
-        """)
+        status_scroll.setStyleSheet(AppStyles.STATUS_SCROLL_STYLE)
 
         status_widgets = [
             ("Pods", 10, 4, 6),
@@ -345,10 +270,11 @@ class OverviewPage(QMainWindow):
         events_header_layout = QHBoxLayout(events_header)
         events_header_layout.setContentsMargins(0, 20, 0, 5)
 
-        # Add Events title with the same style as Overview
+        # Add Events title
         events_title = QLabel("Events")
-        events_title.setStyleSheet("font-size: 22px; font-weight: bold;")
+        events_title.setStyleSheet(AppStyles.TITLE_STYLE)
         events_count = QLabel("8 of 28")
+        events_count.setStyleSheet(AppStyles.ITEMS_COUNT_STYLE)
         events_count.setAlignment(Qt.AlignmentFlag.AlignRight)
 
         events_header_layout.addWidget(events_title)
@@ -383,8 +309,4 @@ class OverviewPage(QMainWindow):
     def resizeEvent(self, event):
         # Call parent class resize event
         super().resizeEvent(event)
-
-        # Get current window size
-        width = self.width()
-
         # Could implement additional responsive behavior here based on window size

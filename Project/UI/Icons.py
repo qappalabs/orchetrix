@@ -2,6 +2,8 @@ from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor, QLinearGradient, QFont
 from PyQt6.QtCore import Qt, QRect, QSize
 import os
 
+from UI.Styles import AppStyles, AppColors  # Import AppStyles and AppColors for styling
+
 """
 This module provides standard icons for the application.
 Icons can be loaded from local paths or use fallback emoji/text.
@@ -134,7 +136,7 @@ class Icons:
         return Icons.create_text_icon(fallback_text)
     
     @staticmethod
-    def create_text_icon(text, size=QSize(24, 24)):
+    def create_text_icon(text, size=AppStyles.TEXT_ICON_SIZE):
         """Create a simple text-based icon"""
         pixmap = QPixmap(size)
         pixmap.fill(Qt.GlobalColor.transparent)
@@ -142,10 +144,10 @@ class Icons:
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
-        # Draw text
-        painter.setPen(QColor(255, 255, 255))
+        # Draw text with centralized styling
+        painter.setPen(QColor(AppStyles.TEXT_ICON_COLOR))
         font = painter.font()
-        font.setPointSize(size.width() // 2)
+        font.setPointSize(AppStyles.TEXT_ICON_FONT_SIZE)
         painter.setFont(font)
         painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, text)
         painter.end()
@@ -155,7 +157,7 @@ class Icons:
     @staticmethod
     def create_tag_icon(text, color):
         """Create a colored tag icon with text"""
-        pixmap = QPixmap(28, 16)
+        pixmap = QPixmap(AppStyles.TAG_ICON_SIZE)
         pixmap.fill(Qt.GlobalColor.transparent)
         
         painter = QPainter(pixmap)
@@ -164,18 +166,20 @@ class Icons:
         # Draw background rectangle
         painter.setBrush(QColor(color))
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawRoundedRect(0, 0, 28, 16, 2, 2)
+        painter.drawRoundedRect(0, 0, AppStyles.TAG_ICON_SIZE.width(), AppStyles.TAG_ICON_SIZE.height(),
+                              AppStyles.TAG_ICON_RADIUS, AppStyles.TAG_ICON_RADIUS)
         
         # Draw text
-        painter.setPen(QColor("black"))
-        painter.drawText(QRect(0, 0, 28, 16), Qt.AlignmentFlag.AlignCenter, text)
+        painter.setPen(QColor(AppStyles.TAG_ICON_TEXT_COLOR))
+        painter.drawText(QRect(0, 0, AppStyles.TAG_ICON_SIZE.width(), AppStyles.TAG_ICON_SIZE.height()),
+                        Qt.AlignmentFlag.AlignCenter, text)
         painter.end()
         
         return QIcon(pixmap)
     
     @staticmethod
-    def create_logo(size=QSize(24, 24), text="Ox",
-                   start_color="#FF8A00", end_color="#FF5722"):
+    def create_logo(size=AppStyles.LOGO_ICON_SIZE, text="Ox",
+                   start_color=AppStyles.LOGO_START_COLOR, end_color=AppStyles.LOGO_END_COLOR):
         """Create a logo with specified dimensions and gradient"""
         pixmap = QPixmap(size)
         pixmap.fill(Qt.GlobalColor.transparent)
@@ -189,10 +193,10 @@ class Icons:
         gradient.setColorAt(1, QColor(end_color))
         painter.setBrush(gradient)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawRoundedRect(0, 0, size.width(), size.height(), 6, 6)
+        painter.drawRoundedRect(0, 0, size.width(), size.height(), AppStyles.LOGO_ICON_RADIUS, AppStyles.LOGO_ICON_RADIUS)
         
         # Add text
-        painter.setPen(QColor("black"))
+        painter.setPen(QColor(AppStyles.LOGO_TEXT_COLOR))
         font = painter.font()
         font.setBold(True)
         painter.setFont(font)
@@ -202,7 +206,7 @@ class Icons:
         return QIcon(pixmap)
     
     @staticmethod
-    def get_app_logo(size=QSize(120, 30)):
+    def get_app_logo(size=AppStyles.APP_LOGO_SIZE):
         """Get the application logo, trying SVG first, then PNG"""
         try:
             # Try SVG first
@@ -222,4 +226,4 @@ class Icons:
             print(f"Error loading logo: {e}")
             
         # Fallback to a generated logo
-        return Icons.create_logo(size, "Orchestrix", "#4A9EFF", "#0066CC")
+        return Icons.create_logo(size, "Orchestrix")

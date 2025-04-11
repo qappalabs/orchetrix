@@ -1,195 +1,205 @@
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QProgressBar, QSpacerItem, QSizePolicy
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QPixmap, QColor, QPainter, QMovie
-from UI.Styles import AppColors
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QRectF
+from PyQt6.QtGui import QPixmap, QColor, QPainter, QPen, QBrush, QConicalGradient
+from UI.Styles import AppStyles
+import math
+
+class PulsatingSpinner(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(80, 80)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
+        # Rotation angle
+        self.angle = 0
+
+        # Pulsation variables
+        self.pulse_phase = 0
+        self.max_width = 10
+        self.min_width = 4
+
+        # Color definitions for gradient
+        self.orange = QColor("#FF6D3F")
+        self.yellow = QColor("#FFCD3A")
+        self.orange_trans = QColor(self.orange)
+        self.orange_trans.setAlpha(0)
+
+        # Start rotation timer directly in constructor for reliability
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.update_animation)
+        self.timer.start(16)  # ~60fps
+
+    def update_animation(self):
+        # Update rotation
+        self.angle = (self.angle + 5) % 360
+
+        # Update pulsation
+        self.pulse_phase = (self.pulse_phase + 0.05) % (2 * math.pi)
+
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Define center and radius
+        center_x = self.width() / 2
+        center_y = self.height() / 2
+        radius = min(center_x, center_y) - 5
+
+        # Calculate pulsating width
+        pulse_factor = (math.sin(self.pulse_phase) + 1) / 2  # 0 to 1
+        current_width = self.min_width + (self.max_width - self.min_width) * pulse_factor
+
+        # Create conical gradient for the spinner
+        gradient = QConicalGradient(center_x, center_y, self.angle)
+
+        # Create a gradient with a visible "head" to make rotation more obvious
+        gradient.setColorAt(0.0, self.yellow)  # Bright "head"
+        gradient.setColorAt(0.1, self.orange)
+        gradient.setColorAt(0.3, self.orange_trans)  # Fade out
+        gradient.setColorAt(0.7, self.orange_trans)  # Stay transparent
+        gradient.setColorAt(0.9, self.orange)  # Fade in
+        gradient.setColorAt(1.0, self.yellow)  # Back to bright "head"
+
+        # Create pen with the gradient
+        pen = QPen()
+        pen.setBrush(QBrush(gradient))
+        pen.setWidth(int(current_width))
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+
+        # Draw circular spinner
+        painter.drawEllipse(
+            int(center_x - radius),
+            int(center_y - radius),
+            int(radius * 2),
+            int(radius * 2)
+        )
+
+        # Draw brightest point as a dot
+        bright_x = center_x + radius * math.cos(math.radians(self.angle))
+        bright_y = center_y + radius * math.sin(math.radians(self.angle))
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(self.yellow))
+
+        highlight_size = current_width * 0.8  # Slightly smaller than pen width
+        painter.drawEllipse(
+            QRectF(
+                bright_x - highlight_size/2,
+                bright_y - highlight_size/2,
+                highlight_size,
+                highlight_size
+            )
+        )
+
+    def stop(self):
+        if self.timer.isActive():
+            self.timer.stop()
+
 
 class SplashScreen(QWidget):
     # Signal to notify when loading is complete
     finished = pyqtSignal()
-    
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Loading")
-        self.setFixedSize(700, 400)  # Wider and less tall
+        self.setFixedSize(700, 400)  # Size to match the image
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        
-        # Counter for progress
+
+        # Counter for automatic closing
         self.counter = 0
-        
+
         self.setup_ui()
-        
+
     def setup_ui(self):
         # Create main layout
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(10, 10, 10, 10)
-        
+
         # Center container for content
         center_container = QWidget()
         center_container.setObjectName("center_container")
-        center_container.setStyleSheet(f"""
-            #center_container {{
-                background-color: {AppColors.BG_DARK};
-                border-radius: 10px;
-            }}
-        """)
-        
+        center_container.setStyleSheet(AppStyles.SPLASH_CENTER_CONTAINER_STYLE)
+
         # Use a layout for content positioning
         center_layout = QVBoxLayout(center_container)
-        center_layout.setContentsMargins(0, 0, 0, 0)  # No margins to allow full-screen animation
+        center_layout.setContentsMargins(0, 0, 0, 0)  # No margins to allow full-screen image
         center_layout.setSpacing(0)
-        
-        # Create animation container that fills the whole background
-        self.animation_container = QLabel(center_container)
-        self.animation_container.setObjectName("animation_container")
-        self.animation_container.setStyleSheet("""
-            #animation_container {
-                background-color: transparent;
-                border-radius: 10px;
-            }
-        """)
-        self.animation_container.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.animation_container.setFixedSize(680, 380)  # Make it fit the container
-        
+
+        # Create background image container that will display the entire splash image
+        self.bg_container = QLabel(center_container)
+        self.bg_container.setObjectName("bg_container")
+        self.bg_container.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.bg_container.setFixedSize(680, 380)  # Make it fit the container
+
         try:
-            # Try to load an animated GIF to fill the background
-            self.movie = QMovie("animations/loading.gif")
-            if self.movie.isValid():
-                self.animation_container.setMovie(self.movie)
-                self.movie.setScaledSize(self.animation_container.size())
-                self.movie.start()
+            # Load the splash screen image
+            bg_pixmap = QPixmap("images/orchetrix_splash.png")  # Use the image shown in your example
+            if not bg_pixmap.isNull():
+                self.bg_container.setPixmap(bg_pixmap.scaled(
+                    self.bg_container.size(),
+                    Qt.AspectRatioMode.IgnoreAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation
+                ))
             else:
-                # Fallback to a static color if GIF isn't available
-                self.animation_container.setStyleSheet("#animation_container { background-color: #1E1E2E; border-radius: 10px; }")
+                # Fallback to a static color if image isn't available
+                self.bg_container.setStyleSheet(AppStyles.SPLASH_ANIMATION_FALLBACK_STYLE)
         except Exception as e:
-            print(f"Error loading animation: {e}")
+            print(f"Error loading splash image: {e}")
             # Fallback to static color
-            self.animation_container.setStyleSheet("#animation_container { background-color: #1E1E2E; border-radius: 10px; }")
-        
-        # Overlay layout for content on top of animation
-        content_layout = QVBoxLayout()
-        content_layout.setContentsMargins(20, 20, 20, 20)
-        content_layout.setSpacing(15)
-        
-        # Add large spacer at the top to push content down
-        top_spacer = QSpacerItem(20, 240, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
-        content_layout.addItem(top_spacer)
-        
-        # Add logo just above the progress bar
-        self.logo_label = QLabel()
-        self.logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        try:
-            # Try to load the app logo
-            logo_pixmap = QPixmap("logos/Group 31.png")
-            if not logo_pixmap.isNull():
-                scaled_logo = logo_pixmap.scaled(240, 60, Qt.AspectRatioMode.KeepAspectRatio, 
-                                               Qt.TransformationMode.SmoothTransformation)
-                self.logo_label.setPixmap(scaled_logo)
-            else:
-                # If logo can't be loaded, create a text label
-                self.logo_label.setText("Orchestrix")
-                self.logo_label.setStyleSheet("font-size: 36px; font-weight: bold; color: orange;")
-        except Exception as e:
-            print(f"Error loading logo: {e}")
-            # Fallback to text
-            self.logo_label.setText("Orchestrix")
-            self.logo_label.setStyleSheet("font-size: 36px; font-weight: bold; color: white;")
-        
-        self.logo_label.setStyleSheet(self.logo_label.styleSheet() + "background-color: transparent;")
-        content_layout.addWidget(self.logo_label)
-        
-        # Add a description or tagline
-        self.description = QLabel("Kubernetes Management System")
-        self.description.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.description.setStyleSheet("color: #ffffff; font-size: 16px; background-color: transparent;")
-        content_layout.addWidget(self.description)
-        
-        # Small spacer before progress bar (just enough space to separate description and progress)
-        small_spacer = QSpacerItem(20, 10, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
-        content_layout.addItem(small_spacer)
-        
-        # Add loading text
-        self.loading_label = QLabel("Loading...")
-        self.loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.loading_label.setStyleSheet("color: white; font-size: 14px; background-color: transparent;")
-        content_layout.addWidget(self.loading_label)
-        
-        # Add progress bar
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
-        self.progress_bar.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.progress_bar.setTextVisible(True)
-        self.progress_bar.setStyleSheet(f"""
-            QProgressBar {{
-                background-color: rgba(30, 30, 46, 150);
-                color: white;
-                border-radius: 5px;
-                text-align: center;
-                height: 20px;
-            }}
-            
-            QProgressBar::chunk {{
-                background-color: {AppColors.ACCENT_BLUE};
-                border-radius: 5px;
-            }}
-        """)
-        content_layout.addWidget(self.progress_bar)
-        
-        # Version info
-        self.version_label = QLabel("v1.0.0")
-        self.version_label.setAlignment(Qt.AlignmentFlag.AlignRight)
-        self.version_label.setStyleSheet("color: #cccccc; font-size: 12px; margin-top: 10px; background-color: transparent;")
-        content_layout.addWidget(self.version_label)
-        
-        # Set up layout structure - animation as background with content overlay
-        center_container.setLayout(center_layout)
-        center_layout.addWidget(self.animation_container)
-        self.animation_container.setLayout(content_layout)
-        
+            self.bg_container.setStyleSheet(AppStyles.SPLASH_ANIMATION_FALLBACK_STYLE)
+
+        # Create and position the spinner
+        self.spinner = PulsatingSpinner(self.bg_container)
+        # Position at bottom center - adjust these values as needed
+        self.spinner.move(300, 280)
+
         # Add center container to main layout
+        center_layout.addWidget(self.bg_container)
         main_layout.addWidget(center_container)
-        
-        # Start a timer for progress animation
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self.update_progress)
-        self.timer.start(60)  # Update every 30ms
-    
-    def update_progress(self):
-        # Update progress counter
+
+        # Start a timer for auto-closing after some time
+        self.close_timer = QTimer(self)
+        self.close_timer.timeout.connect(self.update_timer)
+        self.close_timer.start(30)  # Update every 30ms for a total of about 3 seconds
+
+    def update_timer(self):
+        # Update counter
         self.counter += 1
-        self.progress_bar.setValue(self.counter)
-        
-        # Update loading text
-        if self.counter <= 30:
-            self.loading_label.setText("Loading components...")
-        elif self.counter <= 50:
-            self.loading_label.setText("Initializing UI...")
-        elif self.counter <= 70:
-            self.loading_label.setText("Connecting to services...")
-        elif self.counter <= 90:
-            self.loading_label.setText("Almost ready...")
-        else:
-            self.loading_label.setText("Loading complete!")
-        
-        # When progress reaches 100, emit finished signal
+
+        # When counter reaches 100, emit finished signal
         if self.counter >= 100:
-            self.timer.stop()
+            self.close_timer.stop()
+            if hasattr(self, 'spinner'):
+                self.spinner.stop()
             self.finished.emit()
-    
+
     def paintEvent(self, event):
         # Add shadow effect to the widget
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
+
         # Draw shadow
         painter.setBrush(QColor(20, 20, 20, 60))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(10, 10, self.width() - 20, self.height() - 20, 10, 10)
-        
+
     def closeEvent(self, event):
         # Clean up resources when the window is closed
-        if hasattr(self, 'movie') and self.movie is not None:
-            self.movie.stop()
+        if hasattr(self, 'spinner'):
+            self.spinner.stop()
         super().closeEvent(event)
+
+
+# For testing (if you want to run this file directly)
+if __name__ == "__main__":
+    import sys
+    from PyQt6.QtWidgets import QApplication
+    app = QApplication(sys.argv)
+    splash = SplashScreen()
+    splash.show()
+    sys.exit(app.exec())

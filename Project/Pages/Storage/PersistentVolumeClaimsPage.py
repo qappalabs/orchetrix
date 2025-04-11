@@ -10,6 +10,7 @@ from PyQt6.QtCore import Qt, QEvent
 from PyQt6.QtGui import QColor
 
 from base_components.base_components import BaseTablePage, SortableTableWidgetItem
+from UI.Styles import AppStyles, AppColors
 
 class PersistentVolumeClaimsPage(BaseTablePage):
     """
@@ -33,8 +34,12 @@ class PersistentVolumeClaimsPage(BaseTablePage):
         headers = ["", "Name", "Namespace", "Storage class", "Size", "Pods", "Age", "Status", ""]
         sortable_columns = {1, 2, 3, 4, 5, 6, 7}
         
-        # Set up the base UI components
+        # Set up the base UI components with styles
         layout = self.setup_ui("Persistent Volume Claims", headers, sortable_columns)
+        
+        # Apply table style
+        self.table.setStyleSheet(AppStyles.TABLE_STYLE)
+        self.table.horizontalHeader().setStyleSheet(AppStyles.CUSTOM_HEADER_STYLE)
         
         # Configure column widths
         self.configure_columns()
@@ -75,7 +80,8 @@ class PersistentVolumeClaimsPage(BaseTablePage):
         for row, pvc in enumerate(pvc_data):
             self.populate_pvc_row(row, pvc)
         
-        # Update the item count
+        # Update the item count with style
+        self.items_count.setStyleSheet(AppStyles.ITEMS_COUNT_STYLE)
         self.items_count.setText(f"{len(pvc_data)} items")
     
     def populate_pvc_row(self, row, pvc_data):
@@ -92,6 +98,7 @@ class PersistentVolumeClaimsPage(BaseTablePage):
         # Create checkbox for row selection
         pvc_name = pvc_data[0]
         checkbox_container = self._create_checkbox_container(row, pvc_name)
+        checkbox_container.setStyleSheet(AppStyles.CHECKBOX_STYLE)
         self.table.setCellWidget(row, 0, checkbox_container)
         
         # Populate data columns efficiently
@@ -99,7 +106,7 @@ class PersistentVolumeClaimsPage(BaseTablePage):
             cell_col = col + 1  # Adjust for checkbox column
             
             # Handle special columns
-            if col == 5:  # Age column
+            if col == 5:  # Age column (intended as index 6 in headers)
                 try:
                     num = float(value.replace('d', ''))
                 except ValueError:
@@ -114,18 +121,16 @@ class PersistentVolumeClaimsPage(BaseTablePage):
             elif col == 6:  # Status column
                 item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
                 # Set special color for status
-                if value == "Active":
-                    item.setForeground(QColor("#4caf50"))  # Green for active
-                elif value in ["Bound", "Running"]:
-                    item.setForeground(QColor("#4caf50"))  # Green for bound/running
+                if value in ["Active", "Bound", "Running"]:
+                    item.setForeground(QColor(AppColors.STATUS_ACTIVE))  # Green for active/bound/running
                 else:
-                    item.setForeground(QColor("#cc0606"))  # Red for other states
+                    item.setForeground(QColor(AppColors.STATUS_DISCONNECTED))  # Red for other states
             else:
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             
             # Set default text color for non-status columns
             if col != 6:  # Skip status column as it has special coloring
-                item.setForeground(QColor("#e2e8f0"))
+                item.setForeground(QColor(AppColors.TEXT_TABLE))
             
             # Make cells non-editable
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
@@ -138,7 +143,9 @@ class PersistentVolumeClaimsPage(BaseTablePage):
             {"text": "Edit", "icon": "icons/edit.png", "dangerous": False},
             {"text": "Delete", "icon": "icons/delete.png", "dangerous": True}
         ])
+        action_button.setStyleSheet(AppStyles.ACTION_BUTTON_STYLE)
         action_container = self._create_action_container(row, action_button)
+        action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
         self.table.setCellWidget(row, len(pvc_data) + 1, action_container)
     
     def _handle_action(self, action, row):

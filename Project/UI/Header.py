@@ -11,8 +11,8 @@ class SearchBar(QLineEdit):
     def __init__(self, placeholder_text, parent=None):
         super().__init__(parent)
         self.setPlaceholderText(placeholder_text)
-        self.setFixedHeight(28)
-        self.setMinimumWidth(300)
+        self.setFixedHeight(AppStyles.SEARCH_BAR_HEIGHT)
+        self.setMinimumWidth(AppStyles.SEARCH_BAR_MIN_WIDTH)
         self.setStyleSheet(AppStyles.SEARCH_BAR_STYLE)
 
 class Header(QWidget):
@@ -25,7 +25,7 @@ class Header(QWidget):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
         
-        # Create top and bottom sections
+        # Create top section
         self.top_header = self.create_top_header()
         
         main_layout.addWidget(self.top_header)
@@ -33,20 +33,12 @@ class Header(QWidget):
     def create_top_header(self):
         top_header = QWidget()
         top_header.setObjectName("header")
-        top_header.setFixedHeight(40)
-        
-        # Add specific styling with bottom border
-        top_header.setStyleSheet(f"""
-            #header {{
-                background-color: {AppColors.BG_HEADER};
-                border-top: 1px solid {AppColors.BORDER_COLOR};
-                border-bottom: 1px solid {AppColors.BORDER_COLOR};
-            }}
-        """)
+        top_header.setFixedHeight(AppStyles.HEADER_HEIGHT)
+        top_header.setStyleSheet(AppStyles.HEADER_STYLE)
 
         layout = QHBoxLayout(top_header)
-        layout.setContentsMargins(16, 0, 16, 0)
-        layout.setSpacing(16)
+        layout.setContentsMargins(AppStyles.HEADER_MARGIN_LEFT, 0, AppStyles.HEADER_MARGIN_RIGHT, 0)
+        layout.setSpacing(AppStyles.HEADER_SPACING)
 
         # Create cluster dropdown menu
         cluster_menu = QMenu()
@@ -59,25 +51,25 @@ class Header(QWidget):
         cluster_menu.addAction("staging-cluster")
         cluster_menu.addAction("production-cluster")
 
-        # Updated cluster dropdown button
+        # Cluster dropdown button
         self.cluster_dropdown = QToolButton()
-        self.cluster_dropdown.setFixedSize(160, 28)
-        self.cluster_dropdown.setMinimumWidth(200)
+        self.cluster_dropdown.setFixedSize(AppStyles.CLUSTER_DROPDOWN_WIDTH, AppStyles.CLUSTER_DROPDOWN_HEIGHT)
+        self.cluster_dropdown.setMinimumWidth(AppStyles.CLUSTER_DROPDOWN_MIN_WIDTH)
 
         # Create horizontal layout for text and arrow
         button_layout = QHBoxLayout(self.cluster_dropdown)
-        button_layout.setContentsMargins(12, 0, 32, 0)
-        button_layout.setSpacing(8)
+        button_layout.setContentsMargins(AppStyles.CLUSTER_DROPDOWN_MARGIN_LEFT, 0, AppStyles.CLUSTER_DROPDOWN_MARGIN_RIGHT, 0)
+        button_layout.setSpacing(AppStyles.CLUSTER_DROPDOWN_SPACING)
 
         # Text label
         text_label = QLabel("docker-desktop")
-        text_label.setStyleSheet(f"color: {AppColors.ACCENT_GREEN}; background: transparent;")
+        text_label.setStyleSheet(AppStyles.CLUSTER_DROPDOWN_TEXT_STYLE)
 
         # Arrow label
         arrow_label = QLabel(Icons.DROPDOWN_ARROW)
-        arrow_label.setFixedWidth(20)  # Fixed width for arrow
+        arrow_label.setFixedWidth(AppStyles.CLUSTER_DROPDOWN_ARROW_WIDTH)
         arrow_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight)
-        arrow_label.setStyleSheet(f"color: {AppColors.TEXT_SECONDARY}; background: transparent; padding-right: 8px;")
+        arrow_label.setStyleSheet(AppStyles.CLUSTER_DROPDOWN_ARROW_STYLE)
 
         button_layout.addWidget(text_label)
         button_layout.addStretch()
@@ -85,31 +77,13 @@ class Header(QWidget):
 
         self.cluster_dropdown.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.cluster_dropdown.setMenu(cluster_menu)
-        self.cluster_dropdown.setStyleSheet(f"""
-            QToolButton {{
-                background-color: transparent;
-                border: none;
-                background-color: {AppColors.HOVER_BG};
-                font-size: 13px;
-                text-align: left;
-                padding-left: 12px;
-                padding-right: 32px;
-                position: relative;
-                border-radius: 4px;
-            }}
-            QToolButton::menu-indicator {{
-                image: none;
-            }}
-            QToolButton:hover {{
-                background-color: {AppColors.HOVER_BG_DARKER};
-            }}
-        """)
+        self.cluster_dropdown.setStyleSheet(AppStyles.CLUSTER_DROPDOWN_STYLE)
 
         # Create search bars
         search_bar = SearchBar("Search...", self)
-        search_bar.setFixedHeight(28)
+        search_bar.setFixedHeight(AppStyles.SEARCH_BAR_HEIGHT)
         namespace_search = SearchBar("Search namespace...", self)
-        namespace_search.setFixedHeight(28)
+        namespace_search.setFixedHeight(AppStyles.SEARCH_BAR_HEIGHT)
 
         # Add all widgets to layout
         layout.addWidget(self.cluster_dropdown)
@@ -123,7 +97,7 @@ class Header(QWidget):
         """Create filter dropdown buttons for the bottom header"""
         button = QToolButton()
         button.setText(text)
-        button.setFixedHeight(28)
+        button.setFixedHeight(AppStyles.FILTER_BUTTON_HEIGHT)
         
         # Create dropdown menu
         menu = QMenu()
@@ -157,35 +131,18 @@ class Header(QWidget):
         
         # Create a horizontal layout with button text and arrow
         layout = QHBoxLayout(button)
-        layout.setContentsMargins(8, 0, 24, 0)
-        layout.setSpacing(4)
+        layout.setContentsMargins(AppStyles.FILTER_BUTTON_MARGIN_LEFT, 0, AppStyles.FILTER_BUTTON_MARGIN_RIGHT, 0)
+        layout.setSpacing(AppStyles.FILTER_BUTTON_SPACING)
         
         # Add arrow indicator
         arrow_label = QLabel(Icons.DROPDOWN_ARROW)
-        arrow_label.setFixedWidth(10)  # Fixed width for arrow
+        arrow_label.setFixedWidth(AppStyles.FILTER_BUTTON_ARROW_WIDTH)
         arrow_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight)
-        arrow_label.setStyleSheet(f"color: {AppColors.TEXT_SECONDARY}; background: transparent;")
+        arrow_label.setStyleSheet(AppStyles.FILTER_BUTTON_ARROW_STYLE)
         
         layout.addStretch()
         layout.addWidget(arrow_label)
         
-        button.setStyleSheet(f"""
-            QToolButton {{
-                background-color: {AppColors.HOVER_BG};
-                color: {AppColors.TEXT_LIGHT};
-                border: none;
-                border-radius: 3px;
-                padding-left: 10px;
-                padding-right: 20px;
-                font-size: 12px;
-                text-align: left;
-            }}
-            QToolButton:hover {{
-                background-color: {AppColors.HOVER_BG_DARKER};
-            }}
-            QToolButton::menu-indicator {{
-                image: none;
-            }}
-        """)
+        button.setStyleSheet(AppStyles.FILTER_BUTTON_STYLE)
         
         return button

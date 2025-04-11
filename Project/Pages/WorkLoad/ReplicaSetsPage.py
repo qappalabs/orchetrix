@@ -10,6 +10,7 @@ from PyQt6.QtCore import Qt, QEvent
 from PyQt6.QtGui import QColor
 
 from base_components.base_components import BaseTablePage, SortableTableWidgetItem
+from UI.Styles import AppStyles, AppColors
 
 class ReplicaSetsPage(BaseTablePage):
     """
@@ -33,8 +34,12 @@ class ReplicaSetsPage(BaseTablePage):
         headers = ["", "Name", "Namespace", "Desired", "Current", "Ready", "Age", ""]
         sortable_columns = {1, 2, 3, 4, 5, 6}
         
-        # Set up the base UI components
+        # Set up the base UI components with styles
         layout = self.setup_ui("Replica Sets", headers, sortable_columns)
+        
+        # Apply table style
+        self.table.setStyleSheet(AppStyles.TABLE_STYLE)
+        self.table.horizontalHeader().setStyleSheet(AppStyles.CUSTOM_HEADER_STYLE)
         
         # Configure column widths
         self.configure_columns()
@@ -46,21 +51,17 @@ class ReplicaSetsPage(BaseTablePage):
         """Configure column widths and behaviors"""
         # Column 0: Checkbox (fixed width) - already set in base class
         
-        # Column 1: Name (stretch)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        
         # Configure stretch columns
         stretch_columns = [1, 2, 3, 4, 5, 6]
         for col in stretch_columns:
             self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
         
-        # Fixed width columns
-       
+        # Fixed width column for action
         self.table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
         self.table.setColumnWidth(7, 40)
     
     def load_data(self):
-        """Load  replicasets data into the table with optimized batch processing"""
+        """Load replicasets data into the table with optimized batch processing"""
         # Sample replicasets data
         replicasets_data = [
             ["coredns-7c65d6cfc9", "kube-system", "2", "2", "2", "123m"]
@@ -73,7 +74,8 @@ class ReplicaSetsPage(BaseTablePage):
         for row, replicasets in enumerate(replicasets_data):
             self.populate_replicasets_row(row, replicasets)
         
-        # Update the item count
+        # Update the item count with style
+        self.items_count.setStyleSheet(AppStyles.ITEMS_COUNT_STYLE)
         self.items_count.setText(f"{len(replicasets_data)} items")
     
     def populate_replicasets_row(self, row, replicasets_data):
@@ -90,6 +92,7 @@ class ReplicaSetsPage(BaseTablePage):
         # Create checkbox for row selection
         replicasets_name = replicasets_data[0]
         checkbox_container = self._create_checkbox_container(row, replicasets_name)
+        checkbox_container.setStyleSheet(AppStyles.CHECKBOX_STYLE)
         self.table.setCellWidget(row, 0, checkbox_container)
         
         # Populate data columns efficiently
@@ -97,22 +100,19 @@ class ReplicaSetsPage(BaseTablePage):
             cell_col = col + 1  # Adjust for checkbox column
             
             # Handle numeric columns for sorting
-            if col == 2:  # desired column
-                # Convert to numeric value for sorting if possible
+            if col == 2:  # Desired column
                 try:
                     num = int(value)
                 except ValueError:
                     num = 0
                 item = SortableTableWidgetItem(value, num)
-        
-            elif col == 3:  # current column
+            elif col == 3:  # Current column
                 try:
                     num = int(value)
                 except ValueError:
                     num = 0
                 item = SortableTableWidgetItem(value, num)
-            
-            elif col == 4:  # ready column
+            elif col == 4:  # Ready column
                 try:
                     num = int(value)
                 except ValueError:
@@ -120,16 +120,15 @@ class ReplicaSetsPage(BaseTablePage):
                 item = SortableTableWidgetItem(value, num)
             elif col == 5:  # Age column
                 try:
-                    num = int(value.replace('d', ''))
+                    num = int(value.replace('m', ''))  # Assuming 'm' for minutes in sample data
                 except ValueError:
                     num = 0
                 item = SortableTableWidgetItem(value, num)
-
             else:
                 item = SortableTableWidgetItem(value)
             
             # Set text alignment
-            if col in [2, 3, 4, 5]:
+            if col in [2, 3, 4, 5]:  # Desired, Current, Ready, Age
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             else:
                 item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
@@ -137,6 +136,10 @@ class ReplicaSetsPage(BaseTablePage):
             # Make cells non-editable
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             
+            # Set default text color
+            item.setForeground(QColor(AppColors.TEXT_TABLE))
+            
+            # Add the item to the table
             self.table.setItem(row, cell_col, item)
         
         # Create and add action button
@@ -146,7 +149,9 @@ class ReplicaSetsPage(BaseTablePage):
             {"text": "Logs", "icon": "icons/logs.png", "dangerous": False},
             {"text": "Shell", "icon": "icons/shell.png", "dangerous": False},
         ])
+        action_button.setStyleSheet(AppStyles.ACTION_BUTTON_STYLE)
         action_container = self._create_action_container(row, action_button)
+        action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
         self.table.setCellWidget(row, len(replicasets_data) + 1, action_container)
     
     def handle_row_click(self, row, column):
@@ -154,6 +159,6 @@ class ReplicaSetsPage(BaseTablePage):
         if column != self.table.columnCount() - 1:  # Skip action column
             # Select the row
             self.table.selectRow(row)
-            # Log selection (can be removed in production)
+            # Log selection
             replicasets_name = self.table.item(row, 1).text()
             print(f"Selected replicasets: {replicasets_name}")

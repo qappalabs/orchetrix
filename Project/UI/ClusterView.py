@@ -1,10 +1,15 @@
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QStackedWidget, QLabel
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QPoint, QPointF
+from PyQt6.QtGui import QFont, QColor, QPainter, QBrush
+import math
 
 from UI.Sidebar import Sidebar
 from UI.Header import Header
 from UI.Styles import AppColors, AppStyles
 from UI.TerminalPanel import TerminalPanel
+
+# Import cluster connector
+from utils.cluster_connector import get_cluster_connector
 
 # Import cluster pages
 from Pages.ClusterPage import ClusterPage
@@ -62,8 +67,41 @@ from Pages.Helm.ReleasesPage import ReleasesPage
 # Custome Resource Pages
 from Pages.CustomResources.DefinitionsPage import DefinitionsPage
 
-
-
+class LoadingOverlay(QWidget):
+    """Overlay to show loading state"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("loadingOverlay")
+        self.setStyleSheet("""
+            #loadingOverlay {
+                background-color: rgba(20, 20, 20, 0.7);
+            }
+            QLabel {
+                color: white;
+                font-size: 24px;
+                font-weight: bold;
+            }
+        """)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        
+        layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        self.message = QLabel("Connecting to cluster...")
+        self.message.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.message)
+        
+        self.hide()
+    
+    def show_loading(self, message="Connecting to cluster..."):
+        """Show loading overlay with custom message"""
+        self.message.setText(message)
+        self.show()
+        self.raise_()
+    
+    def hide_loading(self):
+        """Hide loading overlay"""
+        self.hide()
 
 class ClusterView(QWidget):
     """
@@ -89,15 +127,96 @@ class ClusterView(QWidget):
         self.pages = {}
         
         # Current active cluster
-        self.active_cluster = "docker-desktop"
+        self.active_cluster = None
+        
+        # Get the cluster connector
+        self.cluster_connector = get_cluster_connector()
+        
+        # Connect to signals
+        self.cluster_connector.connection_started.connect(self.on_connection_started)
+        self.cluster_connector.connection_complete.connect(self.on_connection_complete)
+        self.cluster_connector.cluster_data_loaded.connect(self.on_cluster_data_loaded)
+        self.cluster_connector.error_occurred.connect(self.on_error)
         
         self.setup_ui()
         
         # Initialize the terminal panel
         self.initialize_terminal()
         
+        # Create loading overlay
+        self.loading_overlay = LoadingOverlay(self)
+        
         # Install event filter to detect window resize events
         self.installEventFilter(self)
+    
+    def set_active_cluster(self, cluster_name):
+        """Set the active cluster and update the UI accordingly"""
+        # Avoid unnecessary reconnection to the same cluster
+        if self.active_cluster == cluster_name:
+            # Even if it's the same cluster, ensure UI is updated correctly
+            # This helps fix the issue with action dots
+            if hasattr(self.header, 'cluster_dropdown'):
+                self._update_cluster_ui(cluster_name)
+            return
+            
+        self.active_cluster = cluster_name
+        
+        # Show loading overlay
+        if hasattr(self, 'loading_overlay'):
+            self.loading_overlay.show_loading(f"Loading cluster: {cluster_name}")
+            self.loading_overlay.resize(self.size())
+        
+        # Update UI first to provide immediate feedback
+        if hasattr(self.header, 'cluster_dropdown'):
+            self._update_cluster_ui(cluster_name)
+        
+        # Connect to the cluster
+        if hasattr(self, 'cluster_connector') and self.cluster_connector:
+            self.cluster_connector.connect_to_cluster(cluster_name)
+        else:
+            self.on_error("Cluster connector not initialized")
+    def _update_cluster_ui(self, cluster_name):
+        """Internal method to update the UI elements for the active cluster"""
+        # Find the text label within the cluster dropdown layout
+        found = False
+        for child in self.header.cluster_dropdown.findChildren(QLabel):
+            if not child.text().startswith("▼"):  # Skip the arrow label
+                child.setText(cluster_name)
+                child.setStyleSheet(f"color: {AppColors.ACCENT_GREEN}; background: transparent;")
+                found = True
+                break
+        
+        if not found:
+            print("Could not find cluster name label in header")    
+    def on_connection_started(self, cluster_name):
+        """Handle when a cluster connection starts"""
+        if cluster_name == self.active_cluster:
+            self.loading_overlay.show_loading(f"Connecting to cluster: {cluster_name}")
+            self.loading_overlay.resize(self.size())
+    
+    def on_connection_complete(self, cluster_name, success):
+        """Handle when a cluster connection completes"""
+        if cluster_name == self.active_cluster:
+            if success:
+                self.loading_overlay.show_loading(f"Loading data from: {cluster_name}")
+            else:
+                self.loading_overlay.hide_loading()
+                # Show error message
+                if hasattr(self.parent_window, 'show_error_message'):
+                    self.parent_window.show_error_message(f"Failed to connect to cluster: {cluster_name}")
+    
+    def on_cluster_data_loaded(self, cluster_info):
+        """Handle when cluster data is loaded"""
+        # Hide loading overlay
+        self.loading_overlay.hide_loading()
+    
+    def on_error(self, error_message):
+        """Handle error messages"""
+        # Hide loading overlay
+        self.loading_overlay.hide_loading()
+        # Show error message
+        if hasattr(self.parent_window, 'show_error_message'):
+            self.parent_window.show_error_message(error_message)
     
     def setup_ui(self):
         # Main layout
@@ -194,6 +313,13 @@ class ClusterView(QWidget):
             
             # Bring terminal to front
             self.terminal_panel.raise_()
+    
+    def resizeEvent(self, event):
+        """Handle resize event to update loading overlay size"""
+        super().resizeEvent(event)
+        if hasattr(self, 'loading_overlay'):
+            self.loading_overlay.resize(self.size())
+    
     def eventFilter(self, obj, event):
         """Handle events for window resize"""
         if obj == self and event.type() == event.Type.Resize:
@@ -394,26 +520,101 @@ class ClusterView(QWidget):
                         btn.is_active = False
                         btn.update_style()
     
-    def set_active_cluster(self, cluster_name):
-        """Set the active cluster and update the UI accordingly"""
-        self.active_cluster = cluster_name
-        
-        # Update header cluster name
-        if hasattr(self.header, 'cluster_dropdown'):
-            # Find the text label within the cluster dropdown layout
-            found = False
-            for child in self.header.cluster_dropdown.findChildren(QLabel):
-                if not child.text().startswith("▼"):  # Skip the arrow label
-                    child.setText(cluster_name)
-                    child.setStyleSheet(f"color: {AppColors.ACCENT_GREEN}; background: transparent;")
-                    found = True
-                    break
-            
-            if not found:
-                print("Could not find cluster name label in header")
-                
     def showEvent(self, event):
         """Handle show event - update terminal position if needed"""
         super().showEvent(event)
         if hasattr(self, 'terminal_panel') and self.terminal_panel.is_visible:
             self.adjust_terminal_position()
+            
+        # If we have an active cluster, make sure loading overlay is sized correctly
+        if hasattr(self, 'loading_overlay'):
+            self.loading_overlay.resize(self.size())
+class LoadingOverlay(QWidget):
+    """Overlay to show loading state with animation"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("loadingOverlay")
+        self.setStyleSheet("""
+            #loadingOverlay {
+                background-color: rgba(20, 20, 20, 0.8);
+            }
+            QLabel {
+                color: white;
+                font-size: 18px;
+                font-weight: bold;
+            }
+        """)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        
+        layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # Add a loading spinner
+        self.spinner_label = QLabel()
+        self.spinner_label.setMinimumSize(64, 64)
+        self.spinner_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # Create spinner animation
+        self.spinner_angle = 0
+        self.spinner_timer = QTimer(self)
+        self.spinner_timer.timeout.connect(self.update_spinner)
+        
+        # Message label
+        self.message = QLabel("Connecting to cluster...")
+        self.message.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        layout.addWidget(self.spinner_label)
+        layout.addWidget(self.message)
+        
+        self.hide()
+    
+    def update_spinner(self):
+        """Update the spinner animation"""
+        self.spinner_angle = (self.spinner_angle + 10) % 360
+        self.update()
+    
+    def paintEvent(self, event):
+        """Paint the loading spinner"""
+        super().paintEvent(event)
+        
+        if self.isVisible():
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            
+            # Draw spinner in the spinner_label
+            rect = self.spinner_label.geometry()
+            center = QPoint(rect.center().x(), rect.center().y())
+            radius = min(rect.width(), rect.height()) / 2 - 5
+            
+            # Draw 12 dots with varying opacity
+            for i in range(12):
+                angle = (self.spinner_angle - i * 30) % 360
+                angle_rad = angle * 3.14159 / 180.0
+                
+                # Calculate opacity based on position
+                opacity = 0.2 + 0.8 * ((12 - i) % 12) / 12
+                
+                # Calculate position
+                x = center.x() + radius * 0.8 * math.cos(angle_rad)
+                y = center.y() + radius * 0.8 * math.sin(angle_rad)
+                
+                # Set color with appropriate opacity
+                color = QColor(AppColors.ACCENT_GREEN)
+                color.setAlphaF(opacity)
+                
+                # Draw the dot
+                painter.setBrush(QBrush(color))
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.drawEllipse(QPointF(x, y), 5, 5)
+    
+    def show_loading(self, message="Connecting to cluster..."):
+        """Show loading overlay with custom message"""
+        self.message.setText(message)
+        self.spinner_timer.start(50)  # Update every 50ms
+        self.show()
+        self.raise_()
+    
+    def hide_loading(self):
+        """Hide loading overlay"""
+        self.spinner_timer.stop()
+        self.hide()

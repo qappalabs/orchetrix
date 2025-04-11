@@ -10,6 +10,7 @@ from PyQt6.QtCore import Qt, QEvent
 from PyQt6.QtGui import QColor
 
 from base_components.base_components import BaseTablePage, SortableTableWidgetItem
+from UI.Styles import AppStyles, AppColors
 
 class PersistentVolumesPage(BaseTablePage):
     """
@@ -33,8 +34,12 @@ class PersistentVolumesPage(BaseTablePage):
         headers = ["", "Name", "Storage Class", "Capacity", "Claim", "Age", "Status", ""]
         sortable_columns = {1, 2, 3, 4, 5, 6}
         
-        # Set up the base UI components
+        # Set up the base UI components with styles
         layout = self.setup_ui("Persistent Volumes", headers, sortable_columns)
+        
+        # Apply table style
+        self.table.setStyleSheet(AppStyles.TABLE_STYLE)
+        self.table.horizontalHeader().setStyleSheet(AppStyles.CUSTOM_HEADER_STYLE)
         
         # Configure column widths
         self.configure_columns()
@@ -62,7 +67,7 @@ class PersistentVolumesPage(BaseTablePage):
     
     def load_data(self):
         """Load persistent volume data into the table with optimized batch processing"""
-        # Sample persistent volume data - empty array as per the original
+        # Sample persistent volume data - empty array as per the original, with a commented example
         pv_data = [
             # ["docker.io-hostpath", "kube-system", "<none>", "<none>", "<none>", "<none>"]
         ]
@@ -74,7 +79,8 @@ class PersistentVolumesPage(BaseTablePage):
         for row, pv in enumerate(pv_data):
             self.populate_pv_row(row, pv)
         
-        # Update the item count
+        # Update the item count with style
+        self.items_count.setStyleSheet(AppStyles.ITEMS_COUNT_STYLE)
         self.items_count.setText(f"{len(pv_data)} items")
     
     def populate_pv_row(self, row, pv_data):
@@ -91,6 +97,7 @@ class PersistentVolumesPage(BaseTablePage):
         # Create checkbox for row selection
         pv_name = pv_data[0]
         checkbox_container = self._create_checkbox_container(row, pv_name)
+        checkbox_container.setStyleSheet(AppStyles.CHECKBOX_STYLE)
         self.table.setCellWidget(row, 0, checkbox_container)
         
         # Populate data columns efficiently
@@ -113,16 +120,16 @@ class PersistentVolumesPage(BaseTablePage):
             elif col == 5:  # Status column
                 item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
                 # Set special color for status
-                if value == "Active" or value == "Bound":
-                    item.setForeground(QColor("#4caf50"))  # Green for active/bound
+                if value in ["Active", "Bound"]:
+                    item.setForeground(QColor(AppColors.STATUS_ACTIVE))  # Green for active/bound
                 else:
-                    item.setForeground(QColor("#cc0606"))  # Red for other states
+                    item.setForeground(QColor(AppColors.STATUS_DISCONNECTED))  # Red for other states
             else:
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             
             # Set default text color for non-status columns
             if col != 5:  # Skip status column as it has special coloring
-                item.setForeground(QColor("#e2e8f0"))
+                item.setForeground(QColor(AppColors.TEXT_TABLE))
             
             # Make cells non-editable
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
@@ -135,7 +142,9 @@ class PersistentVolumesPage(BaseTablePage):
             {"text": "Edit", "icon": "icons/edit.png", "dangerous": False},
             {"text": "Delete", "icon": "icons/delete.png", "dangerous": True}
         ])
+        action_button.setStyleSheet(AppStyles.ACTION_BUTTON_STYLE)
         action_container = self._create_action_container(row, action_button)
+        action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
         self.table.setCellWidget(row, len(pv_data) + 1, action_container)
     
     def _handle_action(self, action, row):

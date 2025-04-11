@@ -10,6 +10,7 @@ from PyQt6.QtCore import Qt, QEvent
 from PyQt6.QtGui import QColor
 
 from base_components.base_components import BaseTablePage, SortableTableWidgetItem
+from UI.Styles import AppStyles, AppColors
 
 class NetworkPoliciesPage(BaseTablePage):
     """
@@ -33,8 +34,12 @@ class NetworkPoliciesPage(BaseTablePage):
         headers = ["", "Name", "Namespace", "Policy Type", "Age", ""]
         sortable_columns = {1, 2, 4}
         
-        # Set up the base UI components
+        # Set up the base UI components with styles
         layout = self.setup_ui("Network Policies", headers, sortable_columns)
+        
+        # Apply table style
+        self.table.setStyleSheet(AppStyles.TABLE_STYLE)
+        self.table.horizontalHeader().setStyleSheet(AppStyles.CUSTOM_HEADER_STYLE)
         
         # Configure column widths
         self.configure_columns()
@@ -74,7 +79,8 @@ class NetworkPoliciesPage(BaseTablePage):
         for row, policy in enumerate(network_policies_data):
             self.populate_policy_row(row, policy)
         
-        # Update the item count
+        # Update the item count with style
+        self.items_count.setStyleSheet(AppStyles.ITEMS_COUNT_STYLE)
         self.items_count.setText(f"{len(network_policies_data)} items")
     
     def populate_policy_row(self, row, policy_data):
@@ -91,6 +97,7 @@ class NetworkPoliciesPage(BaseTablePage):
         # Create checkbox for row selection
         policy_name = policy_data[0]
         checkbox_container = self._create_checkbox_container(row, policy_name)
+        checkbox_container.setStyleSheet(AppStyles.CHECKBOX_STYLE)
         self.table.setCellWidget(row, 0, checkbox_container)
         
         # Populate data columns efficiently
@@ -116,8 +123,8 @@ class NetworkPoliciesPage(BaseTablePage):
             # Make cells non-editable
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             
-            # Set text color
-            item.setForeground(QColor("#e2e8f0"))
+            # Set text color using AppColors
+            item.setForeground(QColor(AppColors.TEXT_TABLE))
             
             # Add the item to the table
             self.table.setItem(row, cell_col, item)
@@ -127,7 +134,9 @@ class NetworkPoliciesPage(BaseTablePage):
             {"text": "Edit", "icon": "icons/edit.png", "dangerous": False},
             {"text": "Delete", "icon": "icons/delete.png", "dangerous": True}
         ])
+        action_button.setStyleSheet(AppStyles.ACTION_BUTTON_STYLE)
         action_container = self._create_action_container(row, action_button)
+        action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
         self.table.setCellWidget(row, len(policy_data) + 1, action_container)
     
     def _handle_action(self, action, row):

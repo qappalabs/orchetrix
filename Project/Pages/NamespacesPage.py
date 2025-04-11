@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import QLabel, QHeaderView
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 
+from UI.Styles import AppColors, AppStyles
 from base_components.base_components import BaseTablePage, SortableTableWidgetItem
 
 class NamespacesPage(BaseTablePage):
@@ -32,8 +33,16 @@ class NamespacesPage(BaseTablePage):
         headers = ["", "Name", "Labels", "Age", "Status", ""]
         sortable_columns = {1, 2, 3, 4}
         
-        # Set up the base UI components
+        # Set up the base UI components (assumes this initializes self.title, self.items_count, self.table)
         layout = self.setup_ui("Namespaces", headers, sortable_columns)
+        
+        # Apply styles after base setup
+        try:
+            self.table.setStyleSheet(AppStyles.TABLE_STYLE)
+            self.title.setStyleSheet(AppStyles.TITLE_STYLE)
+            self.items_count.setStyleSheet(AppStyles.ITEMS_COUNT_STYLE)
+        except AttributeError as e:
+            pass
         
         # Configure column widths
         self.configure_columns()
@@ -43,7 +52,7 @@ class NamespacesPage(BaseTablePage):
     
     def configure_columns(self):
         """Configure column widths and behaviors"""
-        # Column 0: Checkbox (fixed width) - already set in base class
+        # Column 0: Checkbox (fixed width) - handled in BaseTablePage
         
         # Column 1: Name (stretch)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
@@ -109,14 +118,14 @@ class NamespacesPage(BaseTablePage):
         # Column 1: Name
         name_item = SortableTableWidgetItem(name)
         name_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        name_item.setForeground(QColor("#e2e8f0"))
+        name_item.setForeground(QColor(AppColors.TEXT_TABLE))
         name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
         self.table.setItem(row, 1, name_item)
         
         # Column 2: Labels
         labels_item = SortableTableWidgetItem(labels)
         labels_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        labels_item.setForeground(QColor("#e2e8f0"))
+        labels_item.setForeground(QColor(AppColors.TEXT_TABLE))
         labels_item.setFlags(labels_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
         self.table.setItem(row, 2, labels_item)
         
@@ -127,17 +136,15 @@ class NamespacesPage(BaseTablePage):
             age_value = 0
         age_item = SortableTableWidgetItem(age, age_value)
         age_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        age_item.setForeground(QColor("#e2e8f0"))
+        age_item.setForeground(QColor(AppColors.TEXT_TABLE))
         age_item.setFlags(age_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
         self.table.setItem(row, 3, age_item)
         
         # Column 4: Status
         status_item = SortableTableWidgetItem(status)
         status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        if status == "Active":
-            status_item.setForeground(QColor("#4CAF50"))  # Green for Active
-        else:
-            status_item.setForeground(QColor("#FF5252"))  # Red for non-Active
+        status_color = AppColors.STATUS_ACTIVE if status == "Active" else AppColors.TEXT_DANGER
+        status_item.setForeground(QColor(status_color))
         status_item.setFlags(status_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
         self.table.setItem(row, 4, status_item)
         
@@ -153,13 +160,11 @@ class NamespacesPage(BaseTablePage):
         """Handle row clicks"""
         if column != 5:  # Skip action column
             self.table.selectRow(row)
-            namespace_name = self.table.item(row, 1).text()
-            print(f"Selected namespace: {namespace_name}")
     
     def _handle_action(self, action, row):
         """Override to handle namespace-specific actions"""
         namespace_name = self.table.item(row, 1).text()
         if action == "Edit":
-            print(f"Editing namespace: {namespace_name}")
+            pass  # Placeholder for edit action
         elif action == "Delete":
-            print(f"Deleting namespace: {namespace_name}")
+            pass  # Placeholder for delete action

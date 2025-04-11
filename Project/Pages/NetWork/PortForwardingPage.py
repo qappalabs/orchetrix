@@ -10,6 +10,7 @@ from PyQt6.QtCore import Qt, QEvent
 from PyQt6.QtGui import QColor
 
 from base_components.base_components import BaseTablePage, SortableTableWidgetItem
+from UI.Styles import AppStyles, AppColors
 
 class PortForwardingPage(BaseTablePage):
     """
@@ -33,8 +34,12 @@ class PortForwardingPage(BaseTablePage):
         headers = ["", "Name", "Namespace", "Kind", "Pod Port", "Local Port", "Protocol", "Status", ""]
         sortable_columns = {1, 2, 3, 4, 5, 6, 7}
         
-        # Set up the base UI components
+        # Set up the base UI components with styles
         layout = self.setup_ui("Port Forwarding", headers, sortable_columns)
+        
+        # Apply table style
+        self.table.setStyleSheet(AppStyles.TABLE_STYLE)
+        self.table.horizontalHeader().setStyleSheet(AppStyles.CUSTOM_HEADER_STYLE)
         
         # Configure column widths
         self.configure_columns()
@@ -75,7 +80,8 @@ class PortForwardingPage(BaseTablePage):
         for row, port_forward in enumerate(port_forwarding_data):
             self.populate_port_forward_row(row, port_forward)
         
-        # Update the item count
+        # Update the item count with style
+        self.items_count.setStyleSheet(AppStyles.ITEMS_COUNT_STYLE)
         self.items_count.setText(f"{len(port_forwarding_data)} items")
     
     def populate_port_forward_row(self, row, port_forward_data):
@@ -92,6 +98,7 @@ class PortForwardingPage(BaseTablePage):
         # Create checkbox for row selection
         port_forward_name = port_forward_data[0]
         checkbox_container = self._create_checkbox_container(row, port_forward_name)
+        checkbox_container.setStyleSheet(AppStyles.CHECKBOX_STYLE)
         self.table.setCellWidget(row, 0, checkbox_container)
         
         # Populate data columns efficiently
@@ -113,11 +120,11 @@ class PortForwardingPage(BaseTablePage):
             # Set special colors for status column
             if col == 6:  # Status column
                 if value == "Active":
-                    item.setForeground(QColor("#4caf50"))
+                    item.setForeground(QColor(AppColors.STATUS_ACTIVE))
                 else:
-                    item.setForeground(QColor("#cc0606"))
+                    item.setForeground(QColor(AppColors.STATUS_DISCONNECTED))
             else:
-                item.setForeground(QColor("#e2e8f0"))
+                item.setForeground(QColor(AppColors.TEXT_TABLE))
             
             # Add the item to the table
             self.table.setItem(row, cell_col, item)
@@ -127,7 +134,9 @@ class PortForwardingPage(BaseTablePage):
             {"text": "Edit", "icon": "icons/edit.png", "dangerous": False},
             {"text": "Delete", "icon": "icons/delete.png", "dangerous": True}
         ])
+        action_button.setStyleSheet(AppStyles.ACTION_BUTTON_STYLE)
         action_container = self._create_action_container(row, action_button)
+        action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
         self.table.setCellWidget(row, len(port_forward_data) + 1, action_container)
     
     def _handle_action(self, action, row):

@@ -13,29 +13,7 @@ class NavMenuDropdown(QMenu):
         super().__init__(parent)
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.FramelessWindowHint | Qt.WindowType.NoDropShadowWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setStyleSheet("""
-            QMenu {
-                background-color: #2d2d2d;
-                border: 1px solid #444444;
-                border-radius: 6px;
-                padding: 5px;
-            }
-            QMenu::item {
-                padding: 1px 16px;
-                border-radius: 4px;
-                margin: 2px 5px;
-                color: #e0e0e0;
-                font-size: 14px;
-            }
-            QMenu::item:selected {
-                background-color: rgba(33, 150, 243, 0.15);
-            }
-            QMenu::separator {
-                height: 1px;
-                background-color: #444444;
-                margin: 5px 10px;
-            }
-        """)
+        self.setStyleSheet(AppStyles.NAV_MENU_DROPDOWN_STYLE)
 
         shadow = QGraphicsDropShadowEffect(self)
         shadow.setColor(QColor(0, 0, 0, 100))
@@ -44,28 +22,17 @@ class NavMenuDropdown(QMenu):
         self.setGraphicsEffect(shadow)
 
 
-
 class SidebarToggleButton(QToolButton):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedSize(20, 20)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolTip("Toggle Sidebar")
-        self.setStyleSheet("""
-            QToolButton {
-                background-color: transparent;
-                border-top: none;
-            }
-            QToolButton:hover {
-                background-color: rgba(255, 255, 255, 0.1);
-            }
-        """)
+        self.setStyleSheet(AppStyles.SIDEBAR_TOGGLE_BUTTON_STYLE)
         self.expanded = True
 
         # Try to load icons from files
         try:
-            # self.expanded_icon = QIcon("logos/collapse icon.png")
-            # self.collapsed_icon = QIcon("logos/expand icon.png")
             self.expanded_icon = QIcon("icons/back.svg")
             self.collapsed_icon = QIcon("icons/forward.svg")
             # Check if icons loaded successfully
@@ -165,11 +132,16 @@ class NavIconButton(QToolButton):
             text_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
             text_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             
+            # Apply styles to labels
+            icon_label.setStyleSheet(AppStyles.NAV_ICON_BUTTON_ICON_LABEL_STYLE)
+            text_label.setStyleSheet(AppStyles.NAV_ICON_BUTTON_TEXT_LABEL_STYLE)
+            
             # Add dropdown indicator if needed
             if self.has_dropdown:
                 dropdown_label = QLabel(Icons.RIGHT_ARROW)
                 dropdown_label.setFixedWidth(15)
                 dropdown_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                dropdown_label.setStyleSheet(AppStyles.NAV_ICON_BUTTON_DROPDOWN_LABEL_STYLE)
                 layout.addWidget(icon_label)
                 layout.addWidget(text_label)
                 layout.addWidget(dropdown_label)
@@ -217,38 +189,7 @@ class NavIconButton(QToolButton):
             self.update_style()
 
     def setup_dropdown(self):
-        self.dropdown_menu = QMenu(self.parent_window)
-        self.dropdown_menu.setWindowFlags(self.dropdown_menu.windowFlags() | Qt.WindowType.FramelessWindowHint | Qt.WindowType.NoDropShadowWindowHint)
-        self.dropdown_menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.dropdown_menu.setStyleSheet("""
-            QMenu {
-                background-color: #2d2d2d;
-                border: 1px solid #444444;
-                border-radius: 6px;
-                padding: 5px;
-            }
-            QMenu::item {
-                padding: 1px 16px;
-                border-radius: 4px;
-                margin: 2px 5px;
-                color: #e0e0e0;
-                font-size: 14px;
-            }
-            QMenu::item:selected {
-                background-color: rgba(33, 150, 243, 0.15);
-            }
-            QMenu::separator {
-                height: 1px;
-                background-color: #444444;
-                margin: 5px 10px;
-            }
-        """)
-
-        shadow = QGraphicsDropShadowEffect(self.dropdown_menu)
-        shadow.setColor(QColor(0, 0, 0, 100))
-        shadow.setBlurRadius(15)
-        shadow.setOffset(0, 5)
-        self.dropdown_menu.setGraphicsEffect(shadow)
+        self.dropdown_menu = NavMenuDropdown(self.parent_window)
         
         title_action = QAction(f"{self.icon_text} {self.item_text}", self)
         title_action.setEnabled(False)
@@ -305,44 +246,17 @@ class NavIconButton(QToolButton):
 
     def update_style(self):
         if self.expanded:
-            # Style for labels inside the button when expanded
-            self.setStyleSheet(f"""
-                QToolButton {{
-                    background-color: {self.get_background_color()};
-                    border: none;
-                    border-radius: 0;
-                    text-align: left;
-                }}
-                QToolButton:hover {{
-                    background-color: {AppColors.HOVER_BG};
-                }}
-                QLabel {{
-                    background-color: transparent;
-                    color: {self.get_text_color()};
-                }}
-            """)
-            
-            # Update label colors
-            if self.layout():
-                for i in range(self.layout().count()):
-                    widget = self.layout().itemAt(i).widget()
-                    if isinstance(widget, QLabel):
-                        widget.setStyleSheet(f"color: {self.get_text_color()};")
+            self.setStyleSheet(AppStyles.NAV_ICON_BUTTON_EXPANDED_STYLE.format(
+                background_color=self.get_background_color(),
+                hover_background_color=AppColors.HOVER_BG,
+                text_color=self.get_text_color()
+            ))
         else:
-            # Simple style for collapsed state
-            self.setStyleSheet(f"""
-                QToolButton {{
-                    background-color: {self.get_background_color()};
-                    color: {self.get_text_color()};
-                    border: none;
-                    border-radius: 0;
-                    padding-left: 10px;
-                    text-align: left;
-                }}
-                QToolButton:hover {{
-                    background-color: {AppColors.HOVER_BG};
-                }}
-            """)
+            self.setStyleSheet(AppStyles.NAV_ICON_BUTTON_COLLAPSED_STYLE.format(
+                background_color=self.get_background_color(),
+                hover_background_color=AppColors.HOVER_BG,
+                text_color=self.get_text_color()
+            ))
 
     def get_background_color(self):
         if self.is_active:
@@ -364,6 +278,7 @@ class NavIconButton(QToolButton):
                 2000
             )
         return super().eventFilter(obj, event)
+
 
 class Sidebar(QWidget):
     def __init__(self, parent=None):
@@ -407,7 +322,7 @@ class Sidebar(QWidget):
         self.border.setFrameShape(QFrame.Shape.VLine)
         self.border.setFrameShadow(QFrame.Shadow.Plain)
         self.border.setLineWidth(1)
-        self.border.setStyleSheet("color: #444444;")
+        self.border.setStyleSheet(AppStyles.SIDEBAR_BORDER_STYLE)
         
         # Add the sidebar content and border to the main layout
         main_layout.addWidget(self.content_widget)
@@ -429,7 +344,7 @@ class Sidebar(QWidget):
         sidebar_controls = QWidget()
         sidebar_controls.setObjectName("sidebar_controls")
         sidebar_controls.setFixedHeight(40)
-        sidebar_controls.setStyleSheet(f"border-top: 1px solid {AppColors.BORDER_COLOR};")
+        sidebar_controls.setStyleSheet(AppStyles.SIDEBAR_CONTROLS_STYLE)
         controls_layout = QHBoxLayout(sidebar_controls)
         
         # Set margins to position the toggle button correctly
@@ -476,14 +391,11 @@ class Sidebar(QWidget):
             self.nav_buttons.append(nav_btn)
             self.sidebar_layout.addWidget(nav_btn)
     
-    
     def toggle_complete_event(self):
         """Fire an event when sidebar toggle animation completes"""
         # This is a placeholder that will be connected to by the parent window
         pass
     
-    # In Sidebar.py, add this method to the Sidebar class:
-
     def toggle_sidebar(self):
         """Toggle sidebar expansion state and adjust any dependent components"""
         self.sidebar_expanded = not self.sidebar_expanded
@@ -530,7 +442,6 @@ class Sidebar(QWidget):
         
         # We don't want the terminal button to behave like other navigation buttons
         # So we prevent it from calling activate() which would mark it as the active button
-        # We'll connect it directly to the terminal toggle function in ClusterView
         try:
             terminal_btn.clicked.disconnect(terminal_btn.activate)
         except TypeError:
@@ -547,11 +458,7 @@ class Sidebar(QWidget):
         
         self.sidebar_layout.addWidget(compare_btn)
         self.sidebar_layout.addWidget(terminal_btn)
-        self.sidebar_layout.addWidget(chat_btn)    
-    def toggle_sidebar(self):
-        self.sidebar_expanded = not self.sidebar_expanded
-        self.toggle_btn.toggle_expanded()
-        self.update_sidebar_state()
+        self.sidebar_layout.addWidget(chat_btn)
     
     def update_sidebar_state(self):
         # Create animation for smooth transition

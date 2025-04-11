@@ -8,6 +8,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 
 from base_components.base_components import BaseTablePage, SortableTableWidgetItem
+from UI.Styles import AppStyles, AppColors
 
 class DeploymentsPage(BaseTablePage):
     """
@@ -31,8 +32,12 @@ class DeploymentsPage(BaseTablePage):
         headers = ["", "Name", "Namespace", "Pods", "Replicas", "Age", "Conditions", ""]
         sortable_columns = {1, 2, 3, 4, 5}
         
-        # Set up the base UI components
+        # Set up the base UI components with styles
         layout = self.setup_ui("Deployments", headers, sortable_columns)
+        
+        # Apply table style
+        self.table.setStyleSheet(AppStyles.TABLE_STYLE)
+        self.table.horizontalHeader().setStyleSheet(AppStyles.CUSTOM_HEADER_STYLE)
         
         # Configure column widths
         self.configure_columns()
@@ -73,6 +78,7 @@ class DeploymentsPage(BaseTablePage):
             self.populate_deployment_row(row, deployment)
         
         # Update item count and re-enable updates
+        self.items_count.setStyleSheet(AppStyles.ITEMS_COUNT_STYLE)
         self.items_count.setText(f"{len(self.deployments_data)} items")
         self.table.setUpdatesEnabled(True)
     
@@ -91,6 +97,7 @@ class DeploymentsPage(BaseTablePage):
         
         # Column 0: Checkbox
         checkbox_container = self._create_checkbox_container(row, name)
+        checkbox_container.setStyleSheet(AppStyles.CHECKBOX_STYLE)
         self.table.setCellWidget(row, 0, checkbox_container)
         
         # Parse numeric values for proper sorting
@@ -146,9 +153,9 @@ class DeploymentsPage(BaseTablePage):
             
             # Set special color for conditions
             if col == 6 and "Available" in conditions_str:
-                item.setForeground(QColor("#4CAF50"))
+                item.setForeground(QColor(AppColors.STATUS_ACTIVE))  # Green for available
             else:
-                item.setForeground(QColor("#e2e8f0"))
+                item.setForeground(QColor(AppColors.TEXT_TABLE))  # Default text color
                 
             # Make non-editable
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
@@ -162,7 +169,9 @@ class DeploymentsPage(BaseTablePage):
             {"text": "Scale", "icon": "icons/scale.png", "dangerous": False},
             {"text": "Delete", "icon": "icons/delete.png", "dangerous": True}
         ])
+        action_button.setStyleSheet(AppStyles.ACTION_BUTTON_STYLE)
         action_container = self._create_action_container(row, action_button)
+        action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
         self.table.setCellWidget(row, 7, action_container)
     
     def handle_row_click(self, row, column):

@@ -10,6 +10,7 @@ from PyQt6.QtCore import Qt, QEvent
 from PyQt6.QtGui import QColor
 
 from base_components.base_components import BaseTablePage, SortableTableWidgetItem
+from UI.Styles import AppStyles, AppColors
 
 class PodsPage(BaseTablePage):
     """
@@ -33,8 +34,12 @@ class PodsPage(BaseTablePage):
         headers = ["", "Name", "Namespace", "Containers", "Restarts", "Age", "By", "Node", "QoS", "Status", ""]
         sortable_columns = {1, 2, 3, 4, 5, 7, 9}
         
-        # Set up the base UI components
+        # Set up the base UI components with styles
         layout = self.setup_ui("Pods", headers, sortable_columns)
+        
+        # Apply table style
+        self.table.setStyleSheet(AppStyles.TABLE_STYLE)
+        self.table.horizontalHeader().setStyleSheet(AppStyles.CUSTOM_HEADER_STYLE)
         
         # Configure column widths
         self.configure_columns()
@@ -82,7 +87,8 @@ class PodsPage(BaseTablePage):
         for row, pod in enumerate(pods_data):
             self.populate_pod_row(row, pod)
         
-        # Update the item count
+        # Update the item count with style
+        self.items_count.setStyleSheet(AppStyles.ITEMS_COUNT_STYLE)
         self.items_count.setText(f"{len(pods_data)} items")
     
     def populate_pod_row(self, row, pod_data):
@@ -99,6 +105,7 @@ class PodsPage(BaseTablePage):
         # Create checkbox for row selection
         pod_name = pod_data[0]
         checkbox_container = self._create_checkbox_container(row, pod_name)
+        checkbox_container.setStyleSheet(AppStyles.CHECKBOX_STYLE)
         self.table.setCellWidget(row, 0, checkbox_container)
         
         # Populate data columns efficiently
@@ -107,7 +114,6 @@ class PodsPage(BaseTablePage):
             
             # Handle numeric columns for sorting
             if col == 2:  # Containers column
-                # Convert to numeric value for sorting if possible
                 try:
                     num = int(value)
                 except ValueError:
@@ -129,7 +135,7 @@ class PodsPage(BaseTablePage):
                 item = SortableTableWidgetItem(value)
             
             # Set text alignment
-            if col in [2, 3, 4, 8]:
+            if col in [2, 3, 4, 8]:  # Containers, Restarts, Age, QoS
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             else:
                 item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
@@ -137,11 +143,14 @@ class PodsPage(BaseTablePage):
             # Make cells non-editable
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             
-            # Set special colors for status column
-            if col == 8 and value == "Running":
-                item.setForeground(QColor("#4CAF50"))
+            # Set special colors for Status column (col 8 in pod_data, col 9 in table)
+            if col == 8:
+                if value == "Running":
+                    item.setForeground(QColor(AppColors.STATUS_ACTIVE))  # Green for Running
+                else:
+                    item.setForeground(QColor(AppColors.TEXT_TABLE))  # Default text color
             else:
-                item.setForeground(QColor("#e2e8f0"))
+                item.setForeground(QColor(AppColors.TEXT_TABLE))
             
             # Add the item to the table
             self.table.setItem(row, cell_col, item)
@@ -153,7 +162,9 @@ class PodsPage(BaseTablePage):
             {"text": "Logs", "icon": "icons/logs.png", "dangerous": False},
             {"text": "Shell", "icon": "icons/shell.png", "dangerous": False},
         ])
+        action_button.setStyleSheet(AppStyles.ACTION_BUTTON_STYLE)
         action_container = self._create_action_container(row, action_button)
+        action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
         self.table.setCellWidget(row, len(pod_data) + 1, action_container)
     
     def handle_row_click(self, row, column):
@@ -161,6 +172,6 @@ class PodsPage(BaseTablePage):
         if column != self.table.columnCount() - 1:  # Skip action column
             # Select the row
             self.table.selectRow(row)
-            # Log selection (can be removed in production)
+            # Log selection
             pod_name = self.table.item(row, 1).text()
             print(f"Selected pod: {pod_name}")
