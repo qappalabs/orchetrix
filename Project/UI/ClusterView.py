@@ -490,7 +490,7 @@ class ClusterView(QWidget):
         """Handle sidebar navigation button clicks"""
         # Special handling for Terminal button - don't change active state
         if active_button.item_text == "Terminal":
-            return
+            return  
             
         for btn in self.sidebar.nav_buttons:
             btn.is_active = False

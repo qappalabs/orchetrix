@@ -372,6 +372,19 @@ class OrchestrixGUI(QMainWindow):
         for view_name, filter_func in view_types.items():
             self.all_data[view_name] = [item for item in self.all_data["Browse All"] if filter_func(item)]
 
+    # Modify the OrchestrixGUI class in HomePage.py to handle single-click navigation
+
+    # 1. Add this new method to handle single-click on items
+    def handle_item_single_click(self, item, column):
+        """Handle single click on item to navigate to cluster or other content"""
+        original_name = item.data(0, Qt.ItemDataRole.UserRole)
+        data_item = self._find_data_item(self.current_view, original_name)
+        
+        # Only process cluster items for single-click navigation
+        if data_item and "Cluster" in data_item.get("kind", ""):
+            self.navigate_to_cluster(data_item)
+
+    # 2. Update the create_table_widget method to add single-click handling
     def create_table_widget(self):
         tree_widget = QTreeWidget()
         tree_widget.setColumnCount(6)
@@ -395,7 +408,9 @@ class OrchestrixGUI(QMainWindow):
         tree_widget.setRootIsDecorated(False)
         tree_widget.setItemsExpandable(False)
         tree_widget.setHorizontalScrollMode(QTreeWidget.ScrollMode.ScrollPerPixel)
-        tree_widget.itemDoubleClicked.connect(self.handle_item_double_click)
+        
+        tree_widget.itemClicked.connect(self.handle_item_single_click)
+        
         return tree_widget
 
     def _find_data_item(self, view, original_name):
@@ -403,12 +418,6 @@ class OrchestrixGUI(QMainWindow):
             if data_item["name"] == original_name:
                 return data_item
         return None
-
-    def handle_item_double_click(self, item, column):
-        original_name = item.data(0, Qt.ItemDataRole.UserRole)
-        data_item = self._find_data_item(self.current_view, original_name)
-        if data_item and data_item["action"]:
-            data_item["action"](data_item)
 
     def handle_open_item(self, item):
         original_name = item.data(0, Qt.ItemDataRole.UserRole)
