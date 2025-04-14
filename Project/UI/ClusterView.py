@@ -149,6 +149,33 @@ class ClusterView(QWidget):
         # Install event filter to detect window resize events
         self.installEventFilter(self)
     
+    # def set_active_cluster(self, cluster_name):
+    #     """Set the active cluster and update the UI accordingly"""
+    #     # Avoid unnecessary reconnection to the same cluster
+    #     if self.active_cluster == cluster_name:
+    #         # Even if it's the same cluster, ensure UI is updated correctly
+    #         # This helps fix the issue with action dots
+    #         if hasattr(self.header, 'cluster_dropdown'):
+    #             self._update_cluster_ui(cluster_name)
+    #         return
+            
+    #     self.active_cluster = cluster_name
+        
+    #     # Show loading overlay
+    #     if hasattr(self, 'loading_overlay'):
+    #         self.loading_overlay.show_loading(f"Loading cluster: {cluster_name}")
+    #         self.loading_overlay.resize(self.size())
+        
+    #     # Update UI first to provide immediate feedback
+    #     if hasattr(self.header, 'cluster_dropdown'):
+    #         self._update_cluster_ui(cluster_name)
+        
+    #     # Connect to the cluster
+    #     if hasattr(self, 'cluster_connector') and self.cluster_connector:
+    #         self.cluster_connector.connect_to_cluster(cluster_name)
+    #     else:
+    #         self.on_error("Cluster connector not initialized")
+
     def set_active_cluster(self, cluster_name):
         """Set the active cluster and update the UI accordingly"""
         # Avoid unnecessary reconnection to the same cluster
@@ -170,8 +197,39 @@ class ClusterView(QWidget):
         if hasattr(self.header, 'cluster_dropdown'):
             self._update_cluster_ui(cluster_name)
         
-        # Connect to the cluster
+        # Check if we have cached data first and immediately render it
         if hasattr(self, 'cluster_connector') and self.cluster_connector:
+            # Check if data is cached
+            if hasattr(self.cluster_connector, 'cluster_data_cache') and \
+               cluster_name in self.cluster_connector.cluster_data_cache and \
+               self.cluster_connector.cluster_data_cache[cluster_name].get('info'):
+                
+                # We have cached data, use it immediately
+                cached_data = self.cluster_connector.cluster_data_cache[cluster_name]
+                
+                # Update UI with cached data
+                if cached_data.get('info'):
+                    self.on_cluster_data_loaded(cached_data['info'])
+                
+                if cached_data.get('metrics'):
+                    # Find the cluster page and update metrics
+                    if hasattr(self, 'pages') and 'Cluster' in self.pages:
+                        cluster_page = self.pages['Cluster']
+                        if hasattr(cluster_page, 'update_metrics'):
+                            cluster_page.update_metrics(cached_data['metrics'])
+                
+                if cached_data.get('issues'):
+                    # Find the cluster page and update issues
+                    if hasattr(self, 'pages') and 'Cluster' in self.pages:
+                        cluster_page = self.pages['Cluster']
+                        if hasattr(cluster_page, 'update_issues'):
+                            cluster_page.update_issues(cached_data['issues'])
+                
+                # Hide loading overlay since we've loaded the data
+                if hasattr(self, 'loading_overlay'):
+                    self.loading_overlay.hide_loading()
+                    
+            # Connect to the cluster (this will now use cache when available)
             self.cluster_connector.connect_to_cluster(cluster_name)
         else:
             self.on_error("Cluster connector not initialized")
@@ -490,7 +548,7 @@ class ClusterView(QWidget):
         """Handle sidebar navigation button clicks"""
         # Special handling for Terminal button - don't change active state
         if active_button.item_text == "Terminal":
-            return  
+            return
             
         for btn in self.sidebar.nav_buttons:
             btn.is_active = False

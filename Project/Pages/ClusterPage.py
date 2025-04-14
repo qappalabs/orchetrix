@@ -786,11 +786,11 @@ class ClusterPage(QWidget):
     def update_metrics(self, metrics):
         """Update metrics with real data and proper formatting"""
         try:
-            self.metrics_data = metrics
-            
             if not metrics:
                 return
-                    
+                
+            self.metrics_data = metrics
+            
             # Check if widgets still exist
             if not all(hasattr(self, attr) for attr in ['cpu_status', 'memory_status', 'disk_status', 'cpu_chart', 'memory_chart']):
                 return

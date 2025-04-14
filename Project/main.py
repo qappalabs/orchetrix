@@ -7,6 +7,9 @@ try:
     # Import splash screen
     from UI.SplashScreen import SplashScreen
 
+    # Import the welcome screen
+    from UI.SignupScreen import SignupScreen
+
     # Import the original Home Page
     from Pages.HomePage import OrchestrixGUI
     from Pages.Preferences import PreferencesWidget
@@ -18,7 +21,7 @@ try:
 
     # Import style definitions
     from UI.Styles import AppColors, AppStyles
-    
+
     # Import cluster connector
     from utils.cluster_connector import get_cluster_connector
 
@@ -27,13 +30,17 @@ try:
             super().__init__()
             # Setup window properties first
             self.setup_window()
-            
+
             # Initialize cluster connector before UI setup
             self.cluster_connector = get_cluster_connector()
-            
+
             # Now initialize UI components
             self.init_ui()
             self.installEventFilter(self)
+
+            # Pass cluster connector to home page if needed
+            if hasattr(self, 'home_page') and hasattr(self.home_page, 'initialize_cluster_connector'):
+                self.home_page.initialize_cluster_connector()
 
         def setup_window(self):
             """Set up the basic window properties"""
@@ -97,7 +104,7 @@ try:
                             pass
                         table = page.table
                         table.cellDoubleClicked.connect(
-                            lambda row, col, p=page, n=page_name: 
+                            lambda row, col, p=page, n=page_name:
                             self.show_detail_for_table_item(row, col, p, n)
                         )
 
@@ -128,7 +135,7 @@ try:
             self.title_bar.home_btn.clicked.connect(self.switch_to_home)
             self.title_bar.settings_btn.clicked.connect(self.switch_to_preferences)
             self.preferences_page.back_signal.connect(self.handle_preferences_back)
-            
+
             # Connect error signals from cluster connector
             if hasattr(self, 'cluster_connector'):
                 self.cluster_connector.error_occurred.connect(self.show_error_message)
@@ -143,18 +150,18 @@ try:
             """Switch to the cluster view and set the active cluster"""
             if self.stacked_widget.currentWidget() != self.cluster_view:
                 self.previous_page = self.stacked_widget.currentWidget()
-            
+
             # Check if cluster connector is ready
             if not hasattr(self, 'cluster_connector') or not self.cluster_connector:
                 self.show_error_message("Cluster connector not initialized.")
                 return
-                
+
             # Switch to cluster view first, then set active cluster to show loading state
             self.stacked_widget.setCurrentWidget(self.cluster_view)
-            
+
             # Set active cluster after switching to the view
             QTimer.singleShot(100, lambda: self.cluster_view.set_active_cluster(cluster_name))
-            
+
             # Adjust terminal panel if visible
             if hasattr(self.cluster_view, 'terminal_panel') and self.cluster_view.terminal_panel.is_visible:
                 QTimer.singleShot(200, self.cluster_view.adjust_terminal_position)
@@ -170,7 +177,7 @@ try:
                 self.stacked_widget.setCurrentWidget(self.previous_page)
             else:
                 self.switch_to_home()
-        
+
         def show_error_message(self, error_message):
             """Display error messages from various components"""
             from PyQt6.QtWidgets import QMessageBox
@@ -226,17 +233,31 @@ try:
     if __name__ == "__main__":
         app = QApplication(sys.argv)
         app.setFont(QFont("Segoe UI", 10))
-        
+
+        # Create splash screen
         splash = SplashScreen()
         splash.show()
-        
+
+        # Create welcome screen (but don't show it yet)
+        signup_screen = SignupScreen()
+
+        # Create main window (but don't show it yet)
         window = MainWindow()
-        
+
+        # Connect the splash screen finish to show welcome screen
+        def show_signup_screen():
+            signup_screen.show()
+            splash.close()
+
+        # Connect welcome screen completion to show main window
         def show_main_window():
             window.show()
-            splash.close()
-        
-        splash.finished.connect(show_main_window)
+            signup_screen.close()
+
+        # Set up the signal chain
+        splash.finished.connect(show_signup_screen)
+        signup_screen.welcome_completed.connect(show_main_window)
+
         sys.exit(app.exec())
 
 except Exception as e:

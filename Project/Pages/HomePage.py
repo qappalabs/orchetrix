@@ -419,6 +419,7 @@ class OrchestrixGUI(QMainWindow):
                 return data_item
         return None
 
+
     def handle_open_item(self, item):
         original_name = item.data(0, Qt.ItemDataRole.UserRole)
         data_item = self._find_data_item(self.current_view, original_name)
