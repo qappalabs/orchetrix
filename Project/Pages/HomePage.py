@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QLabel, QPushButton, QLineEdit, QTreeWidget, 
                              QTreeWidgetItem, QFrame, QMenu, QHeaderView,
-                             QSplashScreen, QProgressBar, QMessageBox)
+                             QMessageBox)
 from PyQt6.QtCore import Qt, QObject, pyqtSignal, QPoint, QSize, QTimer
 from PyQt6.QtGui import QColor, QPainter, QIcon, QMouseEvent
 
@@ -79,6 +79,51 @@ class LoadingIndicator(QWidget):
     def showEvent(self, event):
         self.timer.start(50)
         super().showEvent(event)
+class SmallLoadingIndicator(QWidget):
+    """Smaller loading spinner for inline use in tables"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.angle = 0
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.update_angle)
+        self.timer.start(50)
+        self.setFixedSize(16, 16)
+        
+    def update_angle(self):
+        self.angle = (self.angle + 10) % 360
+        self.update()
+        
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        center = self.rect().center()
+        radius = min(self.width(), self.height()) / 2 - 2
+        
+        painter.setPen(Qt.PenStyle.NoPen)
+        
+        # Draw 8 dots with varying opacity for a more compact spinner
+        for i in range(8):
+            angle = (self.angle - i * 45) % 360
+            angle_rad = angle * 3.14159 / 180
+            opacity = 0.2 + 0.8 * ((8 - i) % 8) / 8
+            
+            x = center.x() + radius * cos(angle_rad)
+            y = center.y() + radius * sin(angle_rad)
+            
+            color = QColor(AppColors.ACCENT_GREEN)
+            color.setAlphaF(opacity)
+            painter.setBrush(color)
+            
+            painter.drawEllipse(int(x - 1.5), int(y - 1.5), 3, 3)
+            
+    def hideEvent(self, event):
+        self.timer.stop()
+        super().hideEvent(event)
+        
+    def showEvent(self, event):
+        self.timer.start(50)
+        super().showEvent(event)
 
 class SidebarButton(QPushButton):
     """Customized button for sidebar navigation"""
@@ -113,6 +158,8 @@ class OrchestrixGUI(QMainWindow):
         self.cluster_connector.connection_started.connect(self.on_cluster_connection_started)
         self.cluster_connector.connection_complete.connect(self.on_cluster_connection_complete)
         self.cluster_connector.error_occurred.connect(self.show_error_message)
+        self.cluster_connector.metrics_data_loaded.connect(self.check_cluster_data_loaded)
+        self.cluster_connector.issues_data_loaded.connect(self.check_cluster_data_loaded)
 
         self.drag_position = None
         self.setWindowTitle("Kubernetes Manager")
@@ -129,11 +176,15 @@ class OrchestrixGUI(QMainWindow):
         
         # Keep track of clusters in connection process
         self.connecting_clusters = set()
+        # Add flag to track if we're waiting for data to load
+        self.waiting_for_cluster_load = None
 
         self.init_data_model()
         self.setup_ui()
         self.update_content_view("Browse All")
         QTimer.singleShot(100, self.load_kubernetes_clusters)
+
+
 
     def load_kubernetes_clusters(self):
         self.kube_client.load_clusters_async()
@@ -143,12 +194,20 @@ class OrchestrixGUI(QMainWindow):
             exists = False
             for item in self.all_data["Browse All"]:
                 if item.get("name") == cluster.name:
+
+                    # Ensure status starts as "available" rather than using the existing status
+                    status = "available"
+                    if cluster.status == "active":
+                        status = "available"  # Even active clusters show as available initially
+                    elif cluster.status == "disconnect":
+                        status = "disconnect"
+
                     item.update({
                         "name": cluster.name,
                         "kind": cluster.kind,
                         "source": cluster.source,
                         "label": cluster.label,
-                        "status": cluster.status,
+                        "status": status,
                         "badge_color": None,
                         "action": self.navigate_to_cluster,
                         "cluster_data": cluster
@@ -156,12 +215,18 @@ class OrchestrixGUI(QMainWindow):
                     exists = True
                     break
             if not exists:
+
+                # Start new clusters with "available" status
+                status = "available"
+                if cluster.status == "disconnect":
+                    status = "disconnect"  # Only keep disconnect status
+
                 self.all_data["Browse All"].append({
                     "name": cluster.name,
                     "kind": cluster.kind,
                     "source": cluster.source,
                     "label": cluster.label,
-                    "status": cluster.status,
+                    "status": status,
                     "badge_color": None,
                     "action": self.navigate_to_cluster,
                     "cluster_data": cluster
@@ -169,6 +234,30 @@ class OrchestrixGUI(QMainWindow):
         self.update_filtered_views()
         self.update_content_view(self.current_view)
 
+    def check_cluster_data_loaded(self, data):
+        """Check if all data is loaded for the cluster we're waiting on"""
+        if self.waiting_for_cluster_load:
+            cluster_name = self.waiting_for_cluster_load
+            
+            # Check if data is fully loaded
+            if hasattr(self.cluster_connector, 'is_data_loaded') and self.cluster_connector.is_data_loaded(cluster_name):
+                # Clear waiting flag
+                self.waiting_for_cluster_load = None
+                
+                # Data is fully loaded, update status to connected
+                print(f"All data loaded for {cluster_name}, navigating to cluster view")
+                
+                # Update the status to "connected" instead of "available"
+                for view_type in self.all_data:
+                    for item in self.all_data[view_type]:
+                        if item.get("name") == cluster_name:
+                            item["status"] = "connected"  # New status to show "Connected"
+                
+                # Refresh the view first to show "Connected" status
+                self.update_content_view(self.current_view)
+                
+                # Then navigate to the cluster view
+                QTimer.singleShot(100, lambda: self.open_cluster_signal.emit(cluster_name))
     def on_cluster_connection_started(self, cluster_name):
         """Handle when a cluster connection process starts"""
         self.connecting_clusters.add(cluster_name)
@@ -184,6 +273,7 @@ class OrchestrixGUI(QMainWindow):
     
     def on_cluster_connection_complete(self, cluster_name, success):
         """Handle when a cluster connection completes"""
+        # Remove from connecting clusters set
         self.connecting_clusters.discard(cluster_name)
         
         # Update the status in the data model
@@ -191,16 +281,17 @@ class OrchestrixGUI(QMainWindow):
             for item in self.all_data[view_type]:
                 if item.get("name") == cluster_name:
                     if success:
-                        item["status"] = "available"
+                        # Change to "loading" instead of "available"
+                        item["status"] = "loading"
+                        # Set waiting flag for this cluster
+                        self.waiting_for_cluster_load = cluster_name
+                        print(f"Connection to {cluster_name} successful, loading data...")
                     else:
                         item["status"] = "disconnect"
+                        print(f"Connection to {cluster_name} failed")
         
-        # Refresh the view
+        # Refresh the view to update status
         self.update_content_view(self.current_view)
-        
-        # If connection was successful, navigate to the cluster view
-        if success:
-            self.open_cluster_signal.emit(cluster_name)
 
     def show_error_message(self, error_message):
         QMessageBox.critical(self, "Error", error_message)
@@ -262,22 +353,68 @@ class OrchestrixGUI(QMainWindow):
         item.setText(2, source)
         item.setText(3, label)
 
+        # Define status colors
         status_colors = {
             "available": AppColors.STATUS_AVAILABLE,
             "active": AppColors.STATUS_ACTIVE,
+            "connected": AppColors.STATUS_AVAILABLE,  # Add "connected" status with same color as available
             "disconnect": AppColors.STATUS_DISCONNECTED,
-            "connecting": AppColors.STATUS_WARNING
+            "connecting": AppColors.STATUS_WARNING,
+            "loading": AppColors.STATUS_WARNING
         }
         
-        # Set status text based on state
-        status_text = status
-        if status == "connecting":
-            status_text = "Connecting..."
-            
-        status_color = status_colors.get(status, AppColors.STATUS_DISCONNECTED)
-        item.setText(4, status_text)
-        item.setForeground(4, QColor(status_color))
+        # Check if this is a cluster item
+        is_cluster = "Cluster" in kind
+        
+        # Create column cell for status
+        status_widget = QWidget()
+        status_widget.setObjectName("statusCell")
+        status_widget.setStyleSheet("QWidget#statusCell { background: transparent; }")
+        
+        status_layout = QHBoxLayout(status_widget)
+        status_layout.setContentsMargins(5, 0, 0, 0)
+        status_layout.setSpacing(5)
+        status_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        
+        # Create status indicator based on type and state
+        if is_cluster:
+            # Handle cluster-specific statuses
+            if status in ["connecting", "loading"]:
+                # Show loading indicator
+                loading_indicator = SmallLoadingIndicator()
+                status_layout.addWidget(loading_indicator)
+                
+                # Add status text
+                status_text = "Connecting..." if status == "connecting" else "Loading data..."
+                status_label = QLabel(status_text)
+                status_label.setStyleSheet(f"color: {status_colors.get(status, AppColors.STATUS_DISCONNECTED)}; background: transparent;")
+                status_layout.addWidget(status_label)
+            else:
+                # Set appropriate status text for clusters
+                if status == "available":
+                    status_text = "Available"  # Initial state shows "Available"
+                elif status == "active" or status == "connected":
+                    status_text = "Connected"  # After connection, shows "Connected"
+                elif status == "disconnect":
+                    status_text = "Disconnected"
+                else:
+                    status_text = status.capitalize()
+                    
+                # Just show status text without loading indicator
+                status_label = QLabel(status_text)
+                status_label.setStyleSheet(f"color: {status_colors.get(status, AppColors.STATUS_DISCONNECTED)}; background: transparent;")
+                status_layout.addWidget(status_label)
+        else:
+            # For non-cluster items, show the exact status text
+            status_text = status
+            status_label = QLabel(status_text)
+            status_label.setStyleSheet(f"color: {status_colors.get(status, AppColors.STATUS_DISCONNECTED)}; background: transparent;")
+            status_layout.addWidget(status_label)
+        
+        # Set the custom widget for status column
+        self.tree_widget.setItemWidget(item, 4, status_widget)
 
+        # Create action column
         action_widget = QWidget()
         action_widget.setFixedWidth(AppConstants.SIZES["ACTION_WIDTH"])
         action_widget.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
@@ -286,11 +423,12 @@ class OrchestrixGUI(QMainWindow):
         action_layout.setSpacing(0)
         action_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        # If the cluster is connecting, show loading indicator instead of menu button
-        if status == "connecting" and name in self.connecting_clusters:
-            loading = LoadingIndicator()
-            action_layout.addWidget(loading)
+        # For active operations (connecting/loading), just show a spinner with no menu
+        if status in ["connecting", "loading"] and (name in self.connecting_clusters or self.waiting_for_cluster_load == name):
+            # For connecting/loading states, no menu needed - already showing spinner in status column
+            pass
         else:
+            # Create menu button for actions
             menu_btn = QPushButton("⋮")
             menu_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             menu_btn.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE)
@@ -302,11 +440,12 @@ class OrchestrixGUI(QMainWindow):
             menu.setStyleSheet(AppStyles.MENU_STYLE)
             
             # Different menu actions based on status
-            if status in ["available", "active"]:
+            if status in ["available", "active", "connected"]:
                 open_action = menu.addAction("Open")
-                disconnect_action = menu.addAction("Disconnect")
+                if is_cluster:
+                    disconnect_action = menu.addAction("Disconnect")
                 delete_action = menu.addAction("Delete")
-            elif status == "disconnect":
+            elif status == "disconnect" and is_cluster:
                 connect_action = menu.addAction("Connect")
                 delete_action = menu.addAction("Delete")
             else:
@@ -316,14 +455,17 @@ class OrchestrixGUI(QMainWindow):
             def show_menu():
                 pos = menu_btn.mapToGlobal(QPoint(0, menu_btn.height()))
                 action = menu.exec(pos)
-                if status in ["available", "active"]:
+                if action is None:
+                    return
+                    
+                if status in ["available", "active", "connected"]:
                     if action == open_action:
                         self.handle_open_item(item)
-                    elif action == disconnect_action:
+                    elif is_cluster and 'disconnect_action' in locals() and action == disconnect_action:
                         self.handle_disconnect_item(item)
                     elif action == delete_action:
                         self.handle_delete_item(item)
-                elif status == "disconnect":
+                elif status == "disconnect" and is_cluster:
                     if action == connect_action:
                         self.handle_connect_item(item)
                     elif action == delete_action:
@@ -339,7 +481,6 @@ class OrchestrixGUI(QMainWindow):
             
         self.tree_widget.setItemWidget(item, 5, action_widget)
         item.setSizeHint(5, QSize(AppConstants.SIZES["ACTION_WIDTH"], AppConstants.SIZES["ROW_HEIGHT"]))
-
     def init_data_model(self):
         self.all_data = {
             "Browse All": [
@@ -372,17 +513,23 @@ class OrchestrixGUI(QMainWindow):
         for view_name, filter_func in view_types.items():
             self.all_data[view_name] = [item for item in self.all_data["Browse All"] if filter_func(item)]
 
-    # Modify the OrchestrixGUI class in HomePage.py to handle single-click navigation
 
-    # 1. Add this new method to handle single-click on items
+    # Add this new method to handle single-click on items
     def handle_item_single_click(self, item, column):
         """Handle single click on item to navigate to cluster or other content"""
         original_name = item.data(0, Qt.ItemDataRole.UserRole)
         data_item = self._find_data_item(self.current_view, original_name)
         
-        # Only process cluster items for single-click navigation
-        if data_item and "Cluster" in data_item.get("kind", ""):
+        if not data_item:
+            return
+        
+        # Handle both clusters and other items
+        if "Cluster" in data_item.get("kind", ""):
             self.navigate_to_cluster(data_item)
+        else:
+            # For non-cluster items, execute their action directly
+            if data_item.get("action"):
+                data_item["action"](data_item)
 
     # 2. Update the create_table_widget method to add single-click handling
     def create_table_widget(self):
@@ -425,29 +572,63 @@ class OrchestrixGUI(QMainWindow):
         data_item = self._find_data_item(self.current_view, original_name)
         if data_item and data_item["action"]:
             data_item["action"](data_item)
-            
+  
     def handle_connect_item(self, item):
         """Handle connecting to a cluster"""
         original_name = item.data(0, Qt.ItemDataRole.UserRole)
         data_item = self._find_data_item(self.current_view, original_name)
+        
         if data_item and "Cluster" in data_item["kind"]:
+            # Update the status to connecting
+            for view_type in self.all_data:
+                for item in self.all_data[view_type]:
+                    if item["name"] == original_name:
+                        item["status"] = "connecting"
+                        
+            # Add to connecting clusters set
+            self.connecting_clusters.add(original_name)
+            
+            # Update the view to show connecting status
+            self.update_content_view(self.current_view)
+            
             # Start the connection process
-            self.cluster_connector.connect_to_cluster(original_name)
-    
+            print(f"Connecting to cluster: {original_name}")
+            QTimer.singleShot(100, lambda: self.cluster_connector.connect_to_cluster(original_name))
+
+
     def handle_disconnect_item(self, item):
         """Handle disconnecting from a cluster"""
         original_name = item.data(0, Qt.ItemDataRole.UserRole)
+        
         # Update status to disconnected
         for view_type in self.all_data:
             for data_item in self.all_data[view_type]:
                 if data_item["name"] == original_name:
                     data_item["status"] = "disconnect"
         
-        # Refresh the view
+        # If there's cache for this cluster, clear it
+        if hasattr(self.cluster_connector, 'data_cache'):
+            if original_name in self.cluster_connector.data_cache:
+                del self.cluster_connector.data_cache[original_name]
+            
+        # Also clear from loading_complete tracking
+        if hasattr(self.cluster_connector, 'loading_complete'):
+            if original_name in self.cluster_connector.loading_complete:
+                del self.cluster_connector.loading_complete[original_name]
+        
+        # Stop any polling for this cluster if it's the current one
+        if hasattr(self.cluster_connector, 'kube_client') and \
+        self.cluster_connector.kube_client.current_cluster == original_name:
+            self.cluster_connector.stop_polling()
+        
+        # Call the disconnect_cluster method if it exists
+        if hasattr(self.cluster_connector, 'disconnect_cluster'):
+            self.cluster_connector.disconnect_cluster(original_name)
+        
+        # Refresh the view to show updated status
         self.update_content_view(self.current_view)
         
-        # In a real implementation, you would need to stop any active connections
-        # or background processes related to this cluster
+        print(f"Cluster {original_name} disconnected")
 
     def handle_delete_item(self, item):
         original_name = item.data(0, Qt.ItemDataRole.UserRole)
@@ -473,12 +654,19 @@ class OrchestrixGUI(QMainWindow):
         cluster_name = item["name"]
         cluster_status = item["status"]
         
-        # If already connecting, do nothing
-        if cluster_status == "connecting":
-            print(f"Already connecting to cluster: {cluster_name}")
+        # If already connecting or loading, do nothing
+        if cluster_status in ["connecting", "loading"]:
+            print(f"Already working with cluster: {cluster_name}")
             return
         
-        # Change status to connecting
+        # Check if data is already fully loaded
+        if hasattr(self.cluster_connector, 'is_data_loaded') and self.cluster_connector.is_data_loaded(cluster_name):
+            # Data is ready, navigate immediately
+            print(f"Cluster {cluster_name} data already loaded, navigating directly")
+            self.open_cluster_signal.emit(cluster_name)
+            return
+        
+        # Data not loaded, start the connection process
         for view_type in self.all_data:
             for data_item in self.all_data[view_type]:
                 if data_item["name"] == cluster_name:
@@ -487,14 +675,9 @@ class OrchestrixGUI(QMainWindow):
         # Update the UI to show connecting status
         self.update_content_view(self.current_view)
         
-        # Signal to start connection
+        # Start the connection process
         print(f"Connecting to Cluster: {cluster_name}")
-        
-        # Allow UI to update before actually starting the connection
         QTimer.singleShot(100, lambda: self.cluster_connector.connect_to_cluster(cluster_name))
-        
-        # The actual navigation to cluster view will happen after connection completes
-        # This is handled in on_cluster_connection_complete
 
     def open_web_link(self, item):
         print(f"Opening web link: {item['name']}")

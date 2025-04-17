@@ -1,122 +1,126 @@
 """
-Optimized implementation of the limit_rangess page with better memory management
-and performance.
+Dynamic implementation of the PodDisruptionBudgets page with live Kubernetes data.
 """
 
-from PyQt6.QtWidgets import  QHeaderView
+from PyQt6.QtWidgets import QHeaderView, QPushButton
 from PyQt6.QtCore import Qt
 
-from base_components.base_components import BaseTablePage, SortableTableWidgetItem
+from base_components.base_components import SortableTableWidgetItem
+from base_components.base_resource_page import BaseResourcePage
 
-class PodDisruptionBudgetsPage(BaseTablePage):
+class PodDisruptionBudgetsPage(BaseResourcePage):
     """
-    Displays Kubernetes limit_ranges with optimizations for performance and memory usage.
+    Displays Kubernetes PodDisruptionBudgets with live data and resource operations.
     
-    Optimizations:
-    1. Uses BaseTablePage for common functionality to reduce code duplication
-    2. Implements lazy loading of table rows for better performance with large datasets
-    3. Uses object pooling to reduce GC pressure from widget creation
-    4. Implements virtualized scrolling for better performance with large tables
+    Features:
+    1. Dynamic loading of PodDisruptionBudgets from the cluster
+    2. Editing PodDisruptionBudgets with editor
+    3. Deleting PodDisruptionBudgets (individual and batch)
+    4. Resource details viewer
     """
     
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.resource_type = "poddisruptionbudgets"
         self.setup_page_ui()
-        self.load_data()
         
     def setup_page_ui(self):
-        """Set up the main UI elements for the limit_ranges page"""
+        """Set up the main UI elements for the PodDisruptionBudgets page"""
         # Define headers and sortable columns
-        headers = ["", "Name", "Namespace","Min Available", "Max Unavailable", "Current Healthy", "Desired Healthy", "Age", ""]
+        headers = ["", "Name", "Namespace", "Min Available", "Max Unavailable", "Current Healthy", "Desired Healthy", "Age", ""]
         sortable_columns = {1, 2, 3, 4, 5, 6, 7}
         
         # Set up the base UI components
-        layout = self.setup_ui("Pod Disruption Budgets", headers, sortable_columns)
+        layout = super().setup_ui("Pod Disruption Budgets", headers, sortable_columns)
         
         # Configure column widths
         self.configure_columns()
         
-        # Connect the row click handler
-        self.table.cellClicked.connect(self.handle_row_click)
+        # Add delete selected button
+        self._add_delete_selected_button()
+        
+    def _add_delete_selected_button(self):
+        """Add a button to delete selected resources."""
+        delete_btn = QPushButton("Delete Selected")
+        delete_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #d32f2f;
+                color: #ffffff;
+                border: none;
+                border-radius: 4px;
+                padding: 5px 10px;
+            }
+            QPushButton:hover {
+                background-color: #b71c1c;
+            }
+            QPushButton:pressed {
+                background-color: #d32f2f;
+            }
+            QPushButton:disabled {
+                background-color: #555555;
+                color: #888888;
+            }
+        """)
+        delete_btn.clicked.connect(self.delete_selected_resources)
+        
+        # Find the header layout
+        for i in range(self.layout().count()):
+            item = self.layout().itemAt(i)
+            if item.layout():
+                for j in range(item.layout().count()):
+                    widget = item.layout().itemAt(j).widget()
+                    if isinstance(widget, QPushButton) and widget.text() == "Refresh":
+                        # Insert before the refresh button
+                        item.layout().insertWidget(item.layout().count() - 1, delete_btn)
+                        break
     
     def configure_columns(self):
         """Configure column widths and behaviors"""
         # Column 0: Checkbox (fixed width) - already set in base class
         
-        # Column 1: Name (stretch)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        
         # Configure stretch columns
-        stretch_columns = [2, 3, 4, 5, 6, 7]
+        stretch_columns = [1, 2, 3, 4, 5, 6, 7]
         for col in stretch_columns:
             self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
         
-        
+        # Fixed width columns
         self.table.horizontalHeader().setSectionResizeMode(8, QHeaderView.ResizeMode.Fixed)
         self.table.setColumnWidth(8, 40)
     
-    def load_data(self):
-        """Load  limit_ranges data into the table with optimized batch processing"""
-        # Sample limit_ranges data
-        PDG_data = [
-            ["frontend-pdb", "default", "80%", "N/A", "5", "5", "15d"],
-            ["backend-pdb", "backend", "2", "N/A", "3", "3", "30d"],
-            ["database-pdb", "database", "N/A", "1", "4", "5", "45d"],
-            ["redis-pdb", "cache", "2", "N/A", "3", "3", "10d"],
-            ["elasticsearch-pdb", "logging", "N/A", "25%", "7", "8", "60d"],
-            ["kafka-pdb", "messaging", "50%", "N/A", "6", "6", "90d"],
-            ["nginx-pdb", "ingress", "1", "N/A", "2", "2", "14d"],
-            ["monitoring-pdb", "monitoring", "N/A", "1", "3", "3", "120d"],
-            ["auth-service-pdb", "auth", "2", "N/A", "2", "2", "7d"],
-            ["api-gateway-pdb", "gateway", "N/A", "33%", "6", "6", "25d"]
-        ]
-
-        # Set up the table for the data
-        self.table.setRowCount(len(PDG_data))
-        
-        # Batch process all rows using a single loop for better performance
-        for row, limit_ranges in enumerate(PDG_data):
-            self.populate_limit_ranges_row(row, limit_ranges)
-        
-        # Update the item count
-        self.items_count.setText(f"{len(PDG_data)} items")
-    
-    def populate_limit_ranges_row(self, row, PDG_data):
+    def populate_resource_row(self, row, resource):
         """
-        Populate a single row with limit_ranges data using efficient methods
-        
-        Args:
-            row: The row index
-            PDG_data: List containing limit_ranges information
+        Populate a single row with PodDisruptionBudget data
         """
-        # Set row height once
+        # Set row height
         self.table.setRowHeight(row, 40)
         
         # Create checkbox for row selection
-        PDG_name = PDG_data[0]
-        checkbox_container = self._create_checkbox_container(row, PDG_name)
+        resource_name = resource["name"]
+        checkbox_container = self._create_checkbox_container(row, resource_name)
         self.table.setCellWidget(row, 0, checkbox_container)
         
-        # Populate data columns efficiently
-        for col, value in enumerate(PDG_data):
+        # Prepare data columns
+        columns = [
+            resource["name"],
+            resource["namespace"],
+            resource.get("min_available", "N/A"),
+            resource.get("max_unavailable", "N/A"),
+            resource.get("current_healthy", "0"),
+            resource.get("desired_healthy", "0"),
+            resource["age"]
+        ]
+        
+        # Add columns to table
+        for col, value in enumerate(columns):
             cell_col = col + 1  # Adjust for checkbox column
             
             # Handle numeric columns for sorting
-            
-            if col == 4:  # Current Healthy column
+            if col in [4, 5]:  # Current/Desired Healthy columns
                 try:
                     num = int(value)
                 except ValueError:
                     num = 0
                 item = SortableTableWidgetItem(value, num)
-
-            elif col == 5:  # Desired Healthy  column
-                try:
-                    num = int(value)
-                except ValueError:
-                    num = 0
-                item = SortableTableWidgetItem(value, num)
-
             elif col == 6:  # Age column
                 try:
                     num = int(value.replace('d', ''))
@@ -127,7 +131,7 @@ class PodDisruptionBudgetsPage(BaseTablePage):
                 item = SortableTableWidgetItem(value)
             
             # Set text alignment
-            if col in [4, 5, 6]:
+            if col in [2, 3, 4, 5, 6]:
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             else:
                 item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
@@ -135,23 +139,16 @@ class PodDisruptionBudgetsPage(BaseTablePage):
             # Make cells non-editable
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             
+            # Add item to table
             self.table.setItem(row, cell_col, item)
         
         # Create and add action button
-        action_button = self._create_action_button(row, [
-            {"text": "Edit", "icon": "icons/edit.png", "dangerous": False},
-            {"text": "Delete", "icon": "icons/delete.png", "dangerous": True},
-            {"text": "Logs", "icon": "icons/logs.png", "dangerous": False},
-            {"text": "Shell", "icon": "icons/shell.png", "dangerous": False},
-        ])
+        action_button = self._create_action_button(row, resource["name"], resource["namespace"])
         action_container = self._create_action_container(row, action_button)
-        self.table.setCellWidget(row, len(PDG_data) + 1, action_container)
+        self.table.setCellWidget(row, len(columns) + 1, action_container)
     
     def handle_row_click(self, row, column):
         """Handle row selection when a table cell is clicked"""
         if column != self.table.columnCount() - 1:  # Skip action column
             # Select the row
             self.table.selectRow(row)
-            # Log selection (can be removed in production)
-            PDG_name = self.table.item(row, 1).text()
-            print(f"Selected PDG: {PDG_name}")

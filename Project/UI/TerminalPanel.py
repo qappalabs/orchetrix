@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton,
     QLabel, QSplitter, QFrame, QToolButton, QSizePolicy
 )
-from PyQt6.QtCore import Qt, QProcess, QTimer, pyqtSignal, QSize, QEvent
+from PyQt6.QtCore import Qt, QProcess, QTimer, pyqtSignal, QSize, QEvent, QPropertyAnimation, QEasingCurve, QPoint
 from PyQt6.QtGui import QColor, QTextCursor, QFont, QIcon
 
 from UI.Styles import AppColors, AppStyles
@@ -389,6 +389,9 @@ class UnifiedTerminalHeader(QWidget):
         # We don't need these for the dedicated handle approach
         # self.setMouseTracking(True)
         # self.in_resize_area = False
+        # Track if we're in edit mode
+        self.edit_mode = False
+        self.current_file = None
 
         self.setup_ui()
 
@@ -440,6 +443,11 @@ class UnifiedTerminalHeader(QWidget):
 
         self.download_btn = self.create_header_button("↓", "Download Terminal Output",
                                                       self.download_terminal_output)
+        
+        # Create save button for edit mode (hidden by default)
+        self.save_btn = self.create_header_button("💾", "Save File",
+                                               self.save_current_file)
+        self.save_btn.hide()  # Hide initially
 
         self.maximize_btn = self.create_header_button("🔼", "Maximize/Restore Terminal",
                                                       self.toggle_maximize)
@@ -451,6 +459,7 @@ class UnifiedTerminalHeader(QWidget):
         self.controls_layout.addWidget(self.new_tab_btn)
         self.controls_layout.addWidget(self.refresh_btn)
         self.controls_layout.addWidget(self.download_btn)
+        self.controls_layout.addWidget(self.save_btn)  # Add save button to layout
         self.controls_layout.addWidget(self.maximize_btn)
         self.controls_layout.addWidget(self.close_btn)
 
@@ -492,11 +501,93 @@ class UnifiedTerminalHeader(QWidget):
         if self.parent_terminal and hasattr(self.parent_terminal, 'add_terminal_tab'):
             self.parent_terminal.add_terminal_tab()
 
-    def refresh_terminal(self):
-        """Refresh the active terminal - forwards to parent terminal panel"""
-        if self.parent_terminal and hasattr(self.parent_terminal, 'restart_active_terminal'):
-            self.parent_terminal.restart_active_terminal()
+    # def refresh_terminal(self):
+    #     """Refresh the active terminal - forwards to parent terminal panel"""
+    #     if self.parent_terminal and hasattr(self.parent_terminal, 'restart_active_terminal'):
+    #         self.parent_terminal.restart_active_terminal()
 
+    def enter_edit_mode(self, file_path):
+        """Enter edit mode for a file"""
+        self.edit_mode = True
+        self.current_file = file_path
+        self.save_btn.show()
+        
+        # Update the refresh button to say "Cancel Edit"
+        self.refresh_btn.setText("✖")
+        self.refresh_btn.setToolTip("Cancel Editing")
+
+    def exit_edit_mode(self):
+        """Exit edit mode"""
+        self.edit_mode = False
+        self.current_file = None
+        self.save_btn.hide()
+        
+        # Reset the refresh button
+        self.refresh_btn.setText("⟳")
+        self.refresh_btn.setToolTip("Refresh Terminal")
+
+    def save_current_file(self):
+        """Save the current file being edited"""
+        if not self.edit_mode or not self.current_file or not self.parent_terminal:
+            return
+            
+        # Get the active terminal
+        if self.parent_terminal.active_terminal_index < len(self.parent_terminal.terminal_tabs):
+            terminal_data = self.parent_terminal.terminal_tabs[self.parent_terminal.active_terminal_index]
+            terminal_widget = terminal_data.get('terminal_widget')
+            
+            if terminal_widget and terminal_widget.is_valid:
+                # Get the content from the terminal
+                content = terminal_widget.toPlainText()
+                
+                # Find where the file content begins (after command prompt)
+                start_marker = "# Editing "
+                end_marker = "\n# COMMANDS:"
+                
+                start_idx = content.find(start_marker)
+                if start_idx >= 0:
+                    start_idx = content.find("\n", start_idx) + 1
+                    
+                    end_idx = content.find(end_marker, start_idx)
+                    if end_idx >= 0:
+                        # Extract the file content
+                        file_content = content[start_idx:end_idx].strip()
+                        
+                        try:
+                            # Save the file
+                            with open(self.current_file, 'w') as f:
+                                f.write(file_content)
+                                
+                            # Inform the user
+                            terminal_widget.append_output(f"\n# File saved successfully: {self.current_file}\n", "#4CAF50")
+                            
+                            # Apply the changes
+                            terminal_widget.append_output("\n$ kubectl apply -f " + self.current_file + "\n")
+                            terminal_widget.commandEntered.emit("kubectl apply -f " + self.current_file)
+                            
+                            # Exit edit mode
+                            self.exit_edit_mode()
+                            
+                        except Exception as e:
+                            terminal_widget.append_output(f"\n# Error saving file: {str(e)}\n", "#FF6B68")
+                    else:
+                        terminal_widget.append_output("\n# Could not determine file content bounds\n", "#FF6B68")
+                else:
+                    terminal_widget.append_output("\n# Could not determine file content bounds\n", "#FF6B68")
+
+    def refresh_terminal(self):
+        """Refresh the active terminal or cancel edit mode"""
+        if self.edit_mode:
+            # Cancel edit mode
+            self.exit_edit_mode()
+            
+            # Restart the terminal
+            if self.parent_terminal and hasattr(self.parent_terminal, 'restart_active_terminal'):
+                self.parent_terminal.restart_active_terminal()
+        else:
+            # Regular refresh
+            if self.parent_terminal and hasattr(self.parent_terminal, 'restart_active_terminal'):
+                self.parent_terminal.restart_active_terminal()
     def download_terminal_output(self):
         """Download terminal output - forwards to parent terminal panel"""
         if self.parent_terminal and hasattr(self.parent_terminal, 'download_terminal_output'):
@@ -1177,7 +1268,42 @@ class TerminalPanel(QWidget):
 
             # Bring to front
             self.raise_()
+    def animate_position(self, start_x, end_x):
+        """Animate the terminal panel position smoothly"""
+        # Create animation for smooth transition
+        self.position_animation = QPropertyAnimation(self, b"pos")
+        self.position_animation.setDuration(200)  # Same duration as sidebar animation
+        self.position_animation.setEasingCurve(QEasingCurve.Type.InOutQuad)  # Same easing curve
 
+        # Calculate and update width with each animation frame
+        def update_during_animation(value):
+            # Calculate current sidebar width based on animation progress
+            current_x = value.x()
+            self.sidebar_width = current_x  # Update sidebar width
+            self.update_width_with_sidebar(current_x)
+
+        self.position_animation.valueChanged.connect(update_during_animation)
+
+        # Set start and end positions
+        start_pos = QPoint(start_x, self.y())
+        end_pos = QPoint(end_x, self.y())
+
+        self.position_animation.setStartValue(start_pos)
+        self.position_animation.setEndValue(end_pos)
+
+        # Start the animation
+        self.position_animation.start()
+
+    def update_width_with_sidebar(self, sidebar_width):
+        """Update terminal width based on new sidebar width"""
+        if self.parent_window:
+            parent_width = self.parent_window.width()
+            # Calculate new terminal width
+            terminal_width = parent_width - sidebar_width
+            # Ensure width is at least a minimum value
+            terminal_width = max(terminal_width, 300)
+            # Set new width
+            self.setFixedWidth(terminal_width)
     def resizeEvent(self, event):
         """Handle resize events"""
         # Keep terminal width in sync with available space
@@ -1352,4 +1478,3 @@ class TerminalPanel(QWidget):
                         "#FF6B68"  # Red text for error
                     )
                     terminal_widget.append_prompt()
-

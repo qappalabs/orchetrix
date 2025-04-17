@@ -1,6 +1,5 @@
-from PyQt6.QtCore import QObject, pyqtSignal, QRunnable, QThreadPool, pyqtSlot, QTimer, QMetaObject, Qt, Q_ARG
+from PyQt6.QtCore import QObject, pyqtSignal, QRunnable, QThreadPool, pyqtSlot, QTimer
 from utils.kubernetes_client import get_kubernetes_client
-import time
 
 class WorkerSignals(QObject):
     """Signals for worker threads"""
@@ -25,9 +24,9 @@ class ClusterConnection(QObject):
         self.kube_client = get_kubernetes_client()
         self.threadpool = QThreadPool()
 
-        # Add data caching
-        self.cluster_data_cache = {}  # {cluster_name: {'info': {...}, 'metrics': {...}, 'issues': [...]}}
         
+        self.data_cache = {}  # Store loaded data by cluster name
+        self.loading_complete = {}  # Track which clusters have complete data
         
         # Connect signals from the Kubernetes client
         self.kube_client.cluster_info_loaded.connect(self.handle_cluster_info_loaded)
@@ -42,133 +41,31 @@ class ClusterConnection(QObject):
         
         self.issues_timer = QTimer(self)
         self.issues_timer.timeout.connect(self.load_issues)
-        
+
+        # Add flag to indicate if the object is being destroyed
+        self._is_being_destroyed = False
+        # Add cache for cluster data
     
-        # Add method to preload cluster data
-    def preload_cluster_data(self, cluster_name):
-        """Preload cluster data in background while still on home page"""
-        if not cluster_name:
-            self.error_occurred.emit("No cluster name provided")
-            return
+    def __del__(self):
+        """Clean up resources when object is deleted"""
+        try:
+            # Set flag to prevent further signal emissions
+            self._is_being_destroyed = True
             
-        # Create empty cache entry if it doesn't exist
-        if cluster_name not in self.cluster_data_cache:
-            self.cluster_data_cache[cluster_name] = {
-                'info': None,
-                'metrics': None,
-                'issues': None,
-                'nodes': None,
-                'loading': True
-            }
-        
-        # Start background loading
-        class PreloadWorker(QRunnable):
-            def __init__(self, client, cluster_name, parent):
-                super().__init__()
-                self.client = client
-                self.cluster_name = cluster_name
-                self.parent = parent
-                self.signals = WorkerSignals()
-                
-            @pyqtSlot()
-            def run(self):
-                try:
-                    # Set context
-                    import subprocess
-                    result = subprocess.run(
-                        ["kubectl", "config", "use-context", self.cluster_name],
-                        capture_output=True,
-                        text=True,
-                        timeout=10
-                    )
-                    
-                    if result.returncode != 0:
-                        self.parent.error_occurred.emit(f"Failed to switch context: {result.stderr}")
-                        self.parent.cluster_data_cache[self.cluster_name]['loading'] = False
-                        return
-                        
-                    # Get cluster info
-                    try:
-                        cluster_info = self.parent.kube_client.get_cluster_info(self.cluster_name)
-                        self.parent.cluster_data_cache[self.cluster_name]['info'] = cluster_info
-                        
-                        # Emit signal to update UI if needed
-                        QMetaObject.invokeMethod(
-                            self.parent, 
-                            "cluster_data_loaded", 
-                            Qt.ConnectionType.QueuedConnection,
-                            Q_ARG(dict, cluster_info)
-                        )
-                    except Exception as e:
-                        self.parent.error_occurred.emit(f"Error loading cluster info: {str(e)}")
-                    
-                    # Get metrics
-                    try:
-                        metrics = self.parent.kube_client.get_cluster_metrics()
-                        self.parent.cluster_data_cache[self.cluster_name]['metrics'] = metrics
-                        
-                        # Emit signal to update UI if needed
-                        QMetaObject.invokeMethod(
-                            self.parent, 
-                            "metrics_data_loaded", 
-                            Qt.ConnectionType.QueuedConnection,
-                            Q_ARG(dict, metrics)
-                        )
-                    except Exception as e:
-                        self.parent.error_occurred.emit(f"Error loading metrics: {str(e)}")
-                    
-                    # Get issues
-                    try:
-                        issues = self.parent.kube_client.get_cluster_issues()
-                        self.parent.cluster_data_cache[self.cluster_name]['issues'] = issues
-                        
-                        # Emit signal to update UI if needed
-                        QMetaObject.invokeMethod(
-                            self.parent, 
-                            "issues_data_loaded", 
-                            Qt.ConnectionType.QueuedConnection,
-                            Q_ARG(list, issues)
-                        )
-                    except Exception as e:
-                        self.parent.error_occurred.emit(f"Error loading issues: {str(e)}")
-                    
-                    # Get nodes
-                    try:
-                        self.parent.load_nodes()
-                    except Exception as e:
-                        self.parent.error_occurred.emit(f"Error loading nodes: {str(e)}")
-                    
-                    # Mark loading as complete
-                    self.parent.cluster_data_cache[self.cluster_name]['loading'] = False
-                    
-                    # Set as current cluster if it's still the requested one
-                    if self.parent.current_cluster == self.cluster_name:
-                        self.parent.notify_data_ready(self.cluster_name)
-                    
-                except Exception as e:
-                    self.parent.error_occurred.emit(f"Error preloading cluster data: {str(e)}")
-                    self.parent.cluster_data_cache[self.cluster_name]['loading'] = False
-        
-        # Create and start the worker
-        worker = PreloadWorker(self.kube_client, cluster_name, self)
-        self.threadpool.start(worker)
-    
-    def notify_data_ready(self, cluster_name):
-        """Emit signals for any loaded data to update UI immediately"""
-        if cluster_name in self.cluster_data_cache:
-            cache = self.cluster_data_cache[cluster_name]
+            # Stop any running timers
+            if hasattr(self, 'metrics_timer') and self.metrics_timer.isActive():
+                self.metrics_timer.stop()
             
-            if cache.get('info'):
-                self.cluster_data_loaded.emit(cache['info'])
+            if hasattr(self, 'issues_timer') and self.issues_timer.isActive():
+                self.issues_timer.stop()
             
-            if cache.get('metrics'):
-                self.metrics_data_loaded.emit(cache['metrics'])
+            # Clear QThreadPool
+            if hasattr(self, 'threadpool'):
+                self.threadpool.clear()
                 
-            if cache.get('issues'):
-                self.issues_data_loaded.emit(cache['issues'])
-                
-            if cache.get('nodes'):
-                self.node_data_loaded.emit(cache['nodes'])
+        except Exception as e:
+            print(f"Error during ClusterConnection cleanup: {str(e)}")
+
     def connect_to_cluster(self, cluster_name):
         """Start the cluster connection process asynchronously"""
         if not cluster_name:
@@ -176,23 +73,6 @@ class ClusterConnection(QObject):
             return
             
         self.connection_started.emit(cluster_name)
-
-        
-        # Check if we have cached data
-        if cluster_name in self.cluster_data_cache and self.cluster_data_cache[cluster_name].get('info'):
-            # We have cached data, set as current
-            self.connection_complete.emit(cluster_name, True)
-            self.current_cluster = cluster_name
-            
-            # Emit cached data
-            self.notify_data_ready(cluster_name)
-            
-            # If loading was already complete, start polling
-            # Otherwise, the preload worker will handle this
-            if not self.cluster_data_cache[cluster_name].get('loading', False):
-                self.start_polling()
-                
-            return
         
         class ConnectionWorker(QRunnable):
             def __init__(self, client, cluster_name, parent):
@@ -252,9 +132,30 @@ class ClusterConnection(QObject):
         # Create and start the worker
         worker = ConnectionWorker(self.kube_client, cluster_name, self)
         self.threadpool.start(worker)
-    
+
+    def disconnect_cluster(self, cluster_name):
+        """Disconnect from a cluster and clean up resources"""
+        if not cluster_name:
+            return
+            
+        # Stop polling
+        self.stop_polling()
+        
+        # Clear data for this cluster
+        if cluster_name in self.data_cache:
+            del self.data_cache[cluster_name]
+        
+        if cluster_name in self.loading_complete:
+            del self.loading_complete[cluster_name]
+            
+        # Reset current cluster if it's the one being disconnected
+        if self.kube_client.current_cluster == cluster_name:
+            self.kube_client.current_cluster = None
     def on_connection_complete(self, result):
         """Handle connection completion from worker thread"""
+        if self._is_being_destroyed:
+            return
+            
         cluster_name, success = result
         # Now that we're back in the main thread, we can safely emit signals
         self.connection_complete.emit(cluster_name, success)
@@ -263,12 +164,16 @@ class ClusterConnection(QObject):
             # Set the current cluster in the client
             self.kube_client.current_cluster = cluster_name
             
+            # Initialize cache for this cluster
+            if cluster_name not in self.data_cache:
+                self.data_cache[cluster_name] = {}
+            
             # Load initial data
             self.load_cluster_info()
             
             # Start polling timers
             self.start_polling()
-    
+
     def start_polling(self):
         """Start polling for metrics and issues"""
         if not self.metrics_timer.isActive():
@@ -295,48 +200,80 @@ class ClusterConnection(QObject):
                 self.load_nodes()
         except Exception as e:
             self.error_occurred.emit(f"Error loading cluster info: {str(e)}")
-    
-    # def handle_cluster_info_loaded(self, info):
-    #     """Handle when cluster info is loaded from the client"""
-    #     self.cluster_data_loaded.emit(info)
+   
 
+    # Add to handle_cluster_info_loaded method
     def handle_cluster_info_loaded(self, info):
         """Handle when cluster info is loaded from the client"""
-        # Cache the info
-        if hasattr(self, 'current_cluster') and self.current_cluster:
-            if self.current_cluster not in self.cluster_data_cache:
-                self.cluster_data_cache[self.current_cluster] = {}
-            self.cluster_data_cache[self.current_cluster]['info'] = info
+        if self._is_being_destroyed:
+            return
+            
+        cluster_name = self.kube_client.current_cluster
+        if cluster_name:
+            if cluster_name not in self.data_cache:
+                self.data_cache[cluster_name] = {}
+            self.data_cache[cluster_name]['cluster_info'] = info
+            
+            # Check if we have all required data now
+            self._check_data_completeness(cluster_name)
             
         self.cluster_data_loaded.emit(info)
-        
-    # def handle_metrics_updated(self, metrics):
-    #     """Handle when metrics are received from the client"""
-    #     self.metrics_data_loaded.emit(metrics)
 
     def handle_metrics_updated(self, metrics):
         """Handle when metrics are received from the client"""
-        # Cache the metrics
-        if hasattr(self, 'current_cluster') and self.current_cluster:
-            if self.current_cluster not in self.cluster_data_cache:
-                self.cluster_data_cache[self.current_cluster] = {}
-            self.cluster_data_cache[self.current_cluster]['metrics'] = metrics
+        if self._is_being_destroyed:
+            return
+            
+        cluster_name = self.kube_client.current_cluster
+        if cluster_name:
+            if cluster_name not in self.data_cache:
+                self.data_cache[cluster_name] = {}
+            self.data_cache[cluster_name]['metrics'] = metrics
+            
+            # Check if we have all required data now
+            self._check_data_completeness(cluster_name)
             
         self.metrics_data_loaded.emit(metrics)
-    
-    # def handle_issues_updated(self, issues):
-    #     """Handle when issues are received from the client"""
-    #     self.issues_data_loaded.emit(issues)
-    
+
     def handle_issues_updated(self, issues):
         """Handle when issues are received from the client"""
-        # Cache the issues
-        if hasattr(self, 'current_cluster') and self.current_cluster:
-            if self.current_cluster not in self.cluster_data_cache:
-                self.cluster_data_cache[self.current_cluster] = {}
-            self.cluster_data_cache[self.current_cluster]['issues'] = issues
+        if self._is_being_destroyed:
+            return
+            
+        cluster_name = self.kube_client.current_cluster
+        if cluster_name:
+            if cluster_name not in self.data_cache:
+                self.data_cache[cluster_name] = {}
+            self.data_cache[cluster_name]['issues'] = issues
+            
+            # Check if we have all required data now
+            self._check_data_completeness(cluster_name)
             
         self.issues_data_loaded.emit(issues)
+
+    def _check_data_completeness(self, cluster_name):
+        """Check if we have all required data for a cluster"""
+        if cluster_name not in self.data_cache:
+            return False
+            
+        cache = self.data_cache[cluster_name]
+        if ('cluster_info' in cache and 
+            'metrics' in cache and 
+            'issues' in cache):
+            self.loading_complete[cluster_name] = True
+            return True
+        return False
+
+    # Add a new method to check if data is fully loaded
+    def is_data_loaded(self, cluster_name):
+        """Check if all essential data is loaded for a cluster"""
+        return self.loading_complete.get(cluster_name, False)
+
+    # Add method to get cached data
+    def get_cached_data(self, cluster_name):
+        """Get cached data for a cluster if available"""
+        return self.data_cache.get(cluster_name, {})
+
     def handle_error(self, error_message):
         """Handle any errors from the Kubernetes client"""
         self.error_occurred.emit(error_message)
@@ -433,22 +370,16 @@ class ClusterConnection(QObject):
         worker = NodesWorker(self.kube_client, self)
         self.threadpool.start(worker)
     
-    # def on_nodes_loaded(self, nodes):
-    #     """Handle nodes data loaded from worker thread"""
-    #     self.node_data_loaded.emit(nodes)
-
     def on_nodes_loaded(self, nodes):
         """Handle nodes data loaded from worker thread"""
-        # Cache the nodes
-        if hasattr(self, 'current_cluster') and self.current_cluster:
-            if self.current_cluster not in self.cluster_data_cache:
-                self.cluster_data_cache[self.current_cluster] = {}
-            self.cluster_data_cache[self.current_cluster]['nodes'] = nodes
-            
         self.node_data_loaded.emit(nodes)
     
     def load_metrics(self):
-        """Load cluster metrics with better formatting and units"""
+        """Load cluster metrics safely with better formatting and units"""
+
+        if self._is_being_destroyed:
+            return
+        
         try:
             # Get metrics directly without using the client's signal emitting methods
             import subprocess
@@ -703,7 +634,11 @@ class ClusterConnection(QObject):
         except Exception as e:
             self.error_occurred.emit(f"Error loading metrics: {str(e)}")
     def load_issues(self):
-        """Load cluster issues"""
+        """Load cluster issues safely"""
+
+        if self._is_being_destroyed:
+            return
+        
         try:
             import subprocess
             import json

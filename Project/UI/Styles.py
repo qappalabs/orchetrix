@@ -540,7 +540,7 @@ class AppStyles:
     TOOLTIP_STYLE = f"""
         QToolTip {{
             background-color: {AppColors.BG_DARKER};
-            color: {AppColors.TEXT_LIGHT};
+            color: #FFFFFF;
             border: 1px solid {AppColors.BORDER_COLOR};
             padding: 4px 8px;
             border-radius: 4px;
@@ -663,7 +663,6 @@ class AppStyles:
     HEADER_STYLE = f"""
         #header {{
             background-color: {AppColors.BG_HEADER};
-            border-top: 1px solid {AppColors.BORDER_COLOR};
             border-bottom: 1px solid {AppColors.BORDER_COLOR};
         }}
     """
@@ -685,32 +684,38 @@ class AppStyles:
             font-size: 14px;
         }}
         QPushButton:hover {{
-            background-color: {AppColors.BG_MEDIUM};
+            background-color: {AppColors.HOVER_BG};
             color: {AppColors.TEXT_LIGHT};
         }}
         QPushButton:checked {{
-            background-color: {AppColors.BG_HEADER};
+            background-color: {AppColors.HOVER_BG};
             color: {AppColors.TEXT_LIGHT};
-            border-left: 3px solid {AppColors.ACCENT_BLUE};
             padding-left: 17px;
         }}
     """
     
     SIDEBAR_CONTAINER_STYLE = f"""
         QWidget {{
-            background-color: {AppColors.BG_DARK};
-            border-right: 1px solid {AppColors.BORDER_COLOR};
+            background-color: {AppColors.BG_SIDEBAR};
+            border-right: 2px solid {AppColors.BORDER_COLOR};
         }}
     """
     
     TITLE_BAR_STYLE = f"""
         QWidget {{
-            background-color: {AppColors.BG_DARKER};
+            background-color: {AppColors.BG_DARK};
             color: {AppColors.TEXT_LIGHT};
-            border-bottom: 1px solid {AppColors.BORDER_COLOR};
         }}
     """
-    
+
+    TITLE_BAR_BOTTOM_FRAME_STYLE = f"""
+        QFrame {{
+            background-color: {AppColors.BORDER_COLOR};
+            min-height: 1px;
+            max-height: 1px;
+        }}
+    """
+
     PANEL_STYLE = f"""
         QWidget {{
             background-color: {AppColors.CARD_BG};
@@ -1326,7 +1331,6 @@ class AppStyles:
     
     SIDEBAR_CONTROLS_STYLE = f"""
         QWidget#sidebar_controls {{
-            border-top: 1px solid {AppColors.BORDER_COLOR};
         }}
     """
 

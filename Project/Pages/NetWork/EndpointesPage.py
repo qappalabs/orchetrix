@@ -1,100 +1,115 @@
 """
-Optimized implementation of the Endpoints page with better memory management
-and performance.
+Dynamic implementation of the Endpoints page with live Kubernetes data.
 """
 
-from PyQt6.QtWidgets import (
-    QLabel, QHeaderView, QWidget, QToolButton, QHBoxLayout
-)
-from PyQt6.QtCore import Qt, QEvent
+from PyQt6.QtWidgets import QHeaderView, QPushButton
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 
-from base_components.base_components import BaseTablePage, SortableTableWidgetItem
+from base_components.base_components import SortableTableWidgetItem
+from base_components.base_resource_page import BaseResourcePage
 
-class EndpointsPage(BaseTablePage):
+class EndpointsPage(BaseResourcePage):
     """
-    Displays Kubernetes endpoints with optimizations for performance and memory usage.
+    Displays Kubernetes Endpoints with live data and resource operations.
     
-    Optimizations:
-    1. Uses BaseTablePage for common functionality to reduce code duplication
-    2. Implements lazy loading of table rows for better performance with large datasets
-    3. Uses object pooling to reduce GC pressure from widget creation
-    4. Implements virtualized scrolling for better performance with large tables
+    Features:
+    1. Dynamic loading of Endpoints from the cluster
+    2. Editing Endpoints with editor
+    3. Deleting Endpoints (individual and batch)
+    4. Resource details viewer
     """
     
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.resource_type = "endpoints"
         self.setup_page_ui()
-        self.load_data()
         
     def setup_page_ui(self):
         """Set up the main UI elements for the Endpoints page"""
         # Define headers and sortable columns
         headers = ["", "Name", "Namespace", "Endpoints", "Age", ""]
-        sortable_columns = {1, 2, 4}
+        sortable_columns = {1, 2, 3, 4}
         
         # Set up the base UI components
-        layout = self.setup_ui("Endpoints", headers, sortable_columns)
+        layout = super().setup_ui("Endpoints", headers, sortable_columns)
         
         # Configure column widths
         self.configure_columns()
         
-        # Connect the row click handler
-        self.table.cellClicked.connect(self.handle_row_click)
+        # Add delete selected button
+        self._add_delete_selected_button()
+        
+    def _add_delete_selected_button(self):
+        """Add a button to delete selected resources."""
+        delete_btn = QPushButton("Delete Selected")
+        delete_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #d32f2f;
+                color: #ffffff;
+                border: none;
+                border-radius: 4px;
+                padding: 5px 10px;
+            }
+            QPushButton:hover {
+                background-color: #b71c1c;
+            }
+            QPushButton:pressed {
+                background-color: #d32f2f;
+            }
+            QPushButton:disabled {
+                background-color: #555555;
+                color: #888888;
+            }
+        """)
+        delete_btn.clicked.connect(self.delete_selected_resources)
+        
+        # Find the header layout
+        for i in range(self.layout().count()):
+            item = self.layout().itemAt(i)
+            if item.layout():
+                for j in range(item.layout().count()):
+                    widget = item.layout().itemAt(j).widget()
+                    if isinstance(widget, QPushButton) and widget.text() == "Refresh":
+                        # Insert before the refresh button
+                        item.layout().insertWidget(item.layout().count() - 1, delete_btn)
+                        break
     
     def configure_columns(self):
         """Configure column widths and behaviors"""
         # Column 0: Checkbox (fixed width) - already set in base class
         
-        # Column 1: Name (stretch)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        
         # Configure stretch columns
-        stretch_columns = [2, 3, 4]
+        stretch_columns = [1, 2, 3, 4]
         for col in stretch_columns:
             self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
         
         # Fixed width columns
-        fixed_widths = {5: 40}
-        for col, width in fixed_widths.items():
-            self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
-            self.table.setColumnWidth(col, width)
+        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
+        self.table.setColumnWidth(5, 40)
     
-    def load_data(self):
-        """Load endpoint data into the table with optimized batch processing"""
-        # Sample endpoint data
-        endpoints_data = [
-            ["docker.io-hostpath", "kube-system", "<none>", "70d"]
-        ]
-
-        # Set up the table for the data
-        self.table.setRowCount(len(endpoints_data))
-        
-        # Batch process all rows using a single loop for better performance
-        for row, endpoint in enumerate(endpoints_data):
-            self.populate_endpoint_row(row, endpoint)
-        
-        # Update the item count
-        self.items_count.setText(f"{len(endpoints_data)} items")
-    
-    def populate_endpoint_row(self, row, endpoint_data):
+    def populate_resource_row(self, row, resource):
         """
-        Populate a single row with endpoint data using efficient methods
-        
-        Args:
-            row: The row index
-            endpoint_data: List containing endpoint information
+        Populate a single row with Endpoint data
         """
-        # Set row height once
+        # Set row height
         self.table.setRowHeight(row, 40)
         
         # Create checkbox for row selection
-        endpoint_name = endpoint_data[0]
-        checkbox_container = self._create_checkbox_container(row, endpoint_name)
+        resource_name = resource["name"]
+        checkbox_container = self._create_checkbox_container(row, resource_name)
         self.table.setCellWidget(row, 0, checkbox_container)
         
-        # Populate data columns efficiently
-        for col, value in enumerate(endpoint_data):
+        # Prepare data columns
+        columns = [
+            resource["name"],
+            resource["namespace"],
+            resource.get("endpoints", "<none>"),
+            resource["age"]
+        ]
+        
+        # Add columns to table
+        for col, value in enumerate(columns):
             cell_col = col + 1  # Adjust for checkbox column
             
             # Handle numeric columns for sorting
@@ -108,7 +123,7 @@ class EndpointsPage(BaseTablePage):
                 item = SortableTableWidgetItem(value)
             
             # Set text alignment
-            if col in [2, 3]:
+            if col == 3:
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             else:
                 item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
@@ -116,25 +131,16 @@ class EndpointsPage(BaseTablePage):
             # Make cells non-editable
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             
-            # Set text color
-            item.setForeground(QColor("#e2e8f0"))
-            
-            # Add the item to the table
+            # Add item to table
             self.table.setItem(row, cell_col, item)
         
         # Create and add action button
-        action_button = self._create_action_button(row, [
-            {"text": "Edit", "icon": "icons/edit.png", "dangerous": False},
-            {"text": "Delete", "icon": "icons/delete.png", "dangerous": True}
-        ])
+        action_button = self._create_action_button(row, resource["name"], resource["namespace"])
         action_container = self._create_action_container(row, action_button)
-        self.table.setCellWidget(row, len(endpoint_data) + 1, action_container)
+        self.table.setCellWidget(row, len(columns) + 1, action_container)
     
     def handle_row_click(self, row, column):
         """Handle row selection when a table cell is clicked"""
         if column != self.table.columnCount() - 1:  # Skip action column
             # Select the row
             self.table.selectRow(row)
-            # Log selection (can be removed in production)
-            endpoint_name = self.table.item(row, 1).text()
-            print(f"Selected endpoint: {endpoint_name}")

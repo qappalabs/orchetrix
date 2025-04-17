@@ -1,6 +1,6 @@
 from PyQt6.QtCore import Qt, QPoint, QEvent, QSize
-from PyQt6.QtGui import QFont, QLinearGradient, QPainter, QColor, QPixmap, QIcon, QPainterPath
-from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel, QToolButton, QPushButton
+from PyQt6.QtGui import QFont, QLinearGradient, QPainter, QColor, QPixmap, QIcon, QPainterPath, QCursor
+from PyQt6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QLabel, QToolButton, QPushButton, QFrame
 
 from UI.Styles import AppColors, AppStyles
 from UI.Icons import Icons
@@ -24,11 +24,19 @@ class TitleBar(QWidget):
         # Apply title bar style from Styles.py
         self.setStyleSheet(AppStyles.TITLE_BAR_STYLE)
 
-        layout = QHBoxLayout(self)
+        # Create a container widget with vertical layout
+        container = QWidget(self)
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(0)
+
+        # Create the main content widget
+        content = QWidget()
+        layout = QHBoxLayout(content)
         layout.setContentsMargins(10, 0, 10, 0)
         layout.setSpacing(14)
 
-        # Orchestrix logo on the left
+        # Orchetrix logo on the left
         self.logo_label = QLabel()
         self.logo_label.setFixedSize(self.logo_icon_size)
 
@@ -53,10 +61,10 @@ class TitleBar(QWidget):
         self.troubleshoot_btn = self.create_icon_button("help", "Help & Troubleshoot")
         self.notifications_btn = self.create_icon_button("notifications", "Notifications")
         self.profile_btn = self.create_icon_button("profile", "Profile")
+        self.profile_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))  # Set pointing hand cursor for profile button
         self.settings_btn = self.create_icon_button("preferences", "Settings")
 
-        # MODIFIED: Window control buttons with consistent size (30x30) to match other icon buttons
-        # Instead of using create_window_button, use create_icon_button for consistent sizing
+        # Window control buttons
         self.minimize_btn = self.create_window_control_button("minimize", "Minimize")
         self.minimize_btn.clicked.connect(self.parent.showMinimized)
 
@@ -79,6 +87,21 @@ class TitleBar(QWidget):
         layout.addWidget(self.maximize_btn)
         layout.addWidget(self.close_btn)
 
+        # Add the content to the container
+        container_layout.addWidget(content)
+
+        # Create a frame for the bottom border
+        bottom_frame = QFrame()
+        bottom_frame.setFixedHeight(2)  # You can adjust the height as needed
+        bottom_frame.setStyleSheet(f"background-color: {AppColors.BORDER_COLOR};")  # Use accent color
+        container_layout.addWidget(bottom_frame)
+
+        # Set up the main layout for this widget
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        main_layout.addWidget(container)
+
         # Install event filter for double-click
         self.installEventFilter(self)
 
@@ -87,6 +110,7 @@ class TitleBar(QWidget):
         btn = QToolButton()
         btn.setFixedSize(30, 30)
         btn.setToolTip(tooltip)
+        btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))  # Set pointing hand cursor for all icon buttons
 
         # Try to load icon from file
         icon = Icons.get_icon(icon_id)

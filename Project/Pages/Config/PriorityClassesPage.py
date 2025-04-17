@@ -1,110 +1,123 @@
 """
-Optimized implementation of the priority_classess page with better memory management
-and performance.
+Dynamic implementation of the PriorityClasses page with live Kubernetes data.
 """
 
-from PyQt6.QtWidgets import  QHeaderView
+from PyQt6.QtWidgets import QHeaderView, QPushButton
 from PyQt6.QtCore import Qt
 
-from base_components.base_components import BaseTablePage, SortableTableWidgetItem
+from base_components.base_components import SortableTableWidgetItem
+from base_components.base_resource_page import BaseResourcePage
 
-class PriorityClassesPage(BaseTablePage):
+class PriorityClassesPage(BaseResourcePage):
     """
-    Displays Kubernetes priority_classes with optimizations for performance and memory usage.
+    Displays Kubernetes PriorityClasses with live data and resource operations.
     
-    Optimizations:
-    1. Uses BaseTablePage for common functionality to reduce code duplication
-    2. Implements lazy loading of table rows for better performance with large datasets
-    3. Uses object pooling to reduce GC pressure from widget creation
-    4. Implements virtualized scrolling for better performance with large tables
+    Features:
+    1. Dynamic loading of PriorityClasses from the cluster
+    2. Editing PriorityClasses with editor
+    3. Deleting PriorityClasses (individual and batch)
+    4. Resource details viewer
     """
     
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.resource_type = "priorityclasses"
         self.setup_page_ui()
-        self.load_data()
         
     def setup_page_ui(self):
-        """Set up the main UI elements for the priority_classes page"""
+        """Set up the main UI elements for the PriorityClasses page"""
         # Define headers and sortable columns
-        headers = ["", "Name", "Value","Global Default", "Age", ""]
+        headers = ["", "Name", "Value", "Global Default", "Age", ""]
         sortable_columns = {1, 2, 3, 4}
         
         # Set up the base UI components
-        layout = self.setup_ui("Priority Classes", headers, sortable_columns)
+        layout = super().setup_ui("Priority Classes", headers, sortable_columns)
         
         # Configure column widths
         self.configure_columns()
         
-        # Connect the row click handler
-        self.table.cellClicked.connect(self.handle_row_click)
+        # Add delete selected button
+        self._add_delete_selected_button()
+        
+    def _add_delete_selected_button(self):
+        """Add a button to delete selected resources."""
+        delete_btn = QPushButton("Delete Selected")
+        delete_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #d32f2f;
+                color: #ffffff;
+                border: none;
+                border-radius: 4px;
+                padding: 5px 10px;
+            }
+            QPushButton:hover {
+                background-color: #b71c1c;
+            }
+            QPushButton:pressed {
+                background-color: #d32f2f;
+            }
+            QPushButton:disabled {
+                background-color: #555555;
+                color: #888888;
+            }
+        """)
+        delete_btn.clicked.connect(self.delete_selected_resources)
+        
+        # Find the header layout
+        for i in range(self.layout().count()):
+            item = self.layout().itemAt(i)
+            if item.layout():
+                for j in range(item.layout().count()):
+                    widget = item.layout().itemAt(j).widget()
+                    if isinstance(widget, QPushButton) and widget.text() == "Refresh":
+                        # Insert before the refresh button
+                        item.layout().insertWidget(item.layout().count() - 1, delete_btn)
+                        break
     
     def configure_columns(self):
         """Configure column widths and behaviors"""
         # Column 0: Checkbox (fixed width) - already set in base class
         
-        # Column 1: Name (stretch)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        
         # Configure stretch columns
-        stretch_columns = [2, 3, 4]
+        stretch_columns = [1, 2, 3, 4]
         for col in stretch_columns:
             self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
         
-        
+        # Fixed width columns
         self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
         self.table.setColumnWidth(5, 40)
     
-    def load_data(self):
-        """Load  priority_classes data into the table with optimized batch processing"""
-        # Sample priority_classes data
-        priority_classes_data = [
-            ["cluster-info", "2000000", "false", "71d"],
-            ["coredns", "2000002", "true", "71d"],
-            ["extension-apiserver-authentication", "2000001", "false", "71d"],
-            ["kube-apiserver-legacy", "2000001", "false", "71d"],
-            ["kube-proxy", "2000007", "flase", "71d"]
-        ]
-
-        # Set up the table for the data
-        self.table.setRowCount(len(priority_classes_data))
-        
-        # Batch process all rows using a single loop for better performance
-        for row, priority_classes in enumerate(priority_classes_data):
-            self.populate_priority_classes_row(row, priority_classes)
-        
-        # Update the item count
-        self.items_count.setText(f"{len(priority_classes_data)} items")
-    
-    def populate_priority_classes_row(self, row, priority_classes_data):
+    def populate_resource_row(self, row, resource):
         """
-        Populate a single row with priority_classes data using efficient methods
-        
-        Args:
-            row: The row index
-            priority_classes_data: List containing priority_classes information
+        Populate a single row with PriorityClass data
         """
-        # Set row height once
+        # Set row height
         self.table.setRowHeight(row, 40)
         
         # Create checkbox for row selection
-        priority_classes_name = priority_classes_data[0]
-        checkbox_container = self._create_checkbox_container(row, priority_classes_name)
+        resource_name = resource["name"]
+        checkbox_container = self._create_checkbox_container(row, resource_name)
         self.table.setCellWidget(row, 0, checkbox_container)
         
-        # Populate data columns efficiently
-        for col, value in enumerate(priority_classes_data):
+        # Prepare data columns
+        columns = [
+            resource["name"],
+            resource.get("value", "0"),
+            resource.get("global_default", "false"),
+            resource["age"]
+        ]
+        
+        # Add columns to table
+        for col, value in enumerate(columns):
             cell_col = col + 1  # Adjust for checkbox column
             
             # Handle numeric columns for sorting
-            
-            if col == 1:  # Current Healthy column
+            if col == 1:  # Value column
                 try:
                     num = int(value)
                 except ValueError:
                     num = 0
                 item = SortableTableWidgetItem(value, num)
-
             elif col == 3:  # Age column
                 try:
                     num = int(value.replace('d', ''))
@@ -115,7 +128,7 @@ class PriorityClassesPage(BaseTablePage):
                 item = SortableTableWidgetItem(value)
             
             # Set text alignment
-            if col in [1,3]:
+            if col in [1, 2, 3]:
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             else:
                 item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
@@ -123,23 +136,16 @@ class PriorityClassesPage(BaseTablePage):
             # Make cells non-editable
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             
+            # Add item to table
             self.table.setItem(row, cell_col, item)
         
         # Create and add action button
-        action_button = self._create_action_button(row, [
-            {"text": "Edit", "icon": "icons/edit.png", "dangerous": False},
-            {"text": "Delete", "icon": "icons/delete.png", "dangerous": True},
-            {"text": "Logs", "icon": "icons/logs.png", "dangerous": False},
-            {"text": "Shell", "icon": "icons/shell.png", "dangerous": False},
-        ])
+        action_button = self._create_action_button(row, resource["name"], resource["namespace"])
         action_container = self._create_action_container(row, action_button)
-        self.table.setCellWidget(row, len(priority_classes_data) + 1, action_container)
+        self.table.setCellWidget(row, len(columns) + 1, action_container)
     
     def handle_row_click(self, row, column):
         """Handle row selection when a table cell is clicked"""
         if column != self.table.columnCount() - 1:  # Skip action column
             # Select the row
             self.table.selectRow(row)
-            # Log selection (can be removed in production)
-            priority_classes_name = self.table.item(row, 1).text()
-            print(f"Selected priority classes : {priority_classes_name}")

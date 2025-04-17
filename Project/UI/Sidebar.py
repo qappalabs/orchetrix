@@ -25,7 +25,7 @@ class NavMenuDropdown(QMenu):
 class SidebarToggleButton(QToolButton):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedSize(20, 20)
+        self.setFixedSize(30, 30)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolTip("Toggle Sidebar")
         self.setStyleSheet(AppStyles.SIDEBAR_TOGGLE_BUTTON_STYLE)
@@ -48,7 +48,7 @@ class SidebarToggleButton(QToolButton):
         
         # Set the initial icon
         self.update_icon()
-        self.setIconSize(QSize(16, 16))
+        self.setIconSize(QSize(24, 24))
 
     def toggle_expanded(self):
         self.expanded = not self.expanded
@@ -395,36 +395,45 @@ class Sidebar(QWidget):
         """Fire an event when sidebar toggle animation completes"""
         # This is a placeholder that will be connected to by the parent window
         pass
-    
+
     def toggle_sidebar(self):
         """Toggle sidebar expansion state and adjust any dependent components"""
         self.sidebar_expanded = not self.sidebar_expanded
         self.toggle_btn.toggle_expanded()
-        self.update_sidebar_state()
-        
+
+        # Determine start and end values for animation
+        start_width = self.sidebar_width_expanded if not self.sidebar_expanded else self.sidebar_width_collapsed
+        end_width = self.sidebar_width_collapsed if not self.sidebar_expanded else self.sidebar_width_expanded
+
         # Find the parent cluster view
         parent_cluster_view = None
         if hasattr(self.parent_window, 'cluster_view'):
             parent_cluster_view = self.parent_window.cluster_view
         elif isinstance(self.parent_window, QWidget) and hasattr(self.parent_window, 'terminal_panel'):
             parent_cluster_view = self.parent_window
-        
-        # Trigger updating of terminal position if cluster view is found
+
+        # Notify terminal directly if possible
         if parent_cluster_view and hasattr(parent_cluster_view, 'terminal_panel'):
-            # Emit an event that the sidebar has been toggled
-            # This allows the parent window to update terminal position if needed
-            QTimer.singleShot(250, lambda: self.toggle_complete_event())
-            
-            # Notify terminal directly if possible
-            if hasattr(parent_cluster_view, 'terminal_panel'):
-                # Update terminal sidebar width after animation completes
-                def update_terminal():
-                    if hasattr(parent_cluster_view.terminal_panel, 'sidebar_width'):
-                        parent_cluster_view.terminal_panel.sidebar_width = self.width()
-                        if parent_cluster_view.terminal_panel.is_visible:
-                            parent_cluster_view.terminal_panel.reposition()
-                
-                QTimer.singleShot(250, update_terminal)
+            if parent_cluster_view.terminal_panel.is_visible:
+                # Trigger the terminal animation in sync with sidebar
+                parent_cluster_view.terminal_panel.animate_position(start_width, end_width)
+
+        # Now update the sidebar state with animation
+        self.update_sidebar_state()
+
+        # Emit event when animation completes for any other components that need notification
+        QTimer.singleShot(250, lambda: self.toggle_complete_event())
+
+        # Notify terminal directly if possible
+        if parent_cluster_view and hasattr(parent_cluster_view, 'terminal_panel'):
+            # Update terminal sidebar width after animation completes
+            def update_terminal():
+                if hasattr(parent_cluster_view.terminal_panel, 'sidebar_width'):
+                    parent_cluster_view.terminal_panel.sidebar_width = self.width()
+                    if parent_cluster_view.terminal_panel.is_visible:
+                        parent_cluster_view.terminal_panel.reposition()
+
+            QTimer.singleShot(250, update_terminal)
         
     def create_utility_buttons(self):
         """Create utility buttons at the bottom of the sidebar"""

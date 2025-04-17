@@ -1,44 +1,80 @@
 """
-Optimized implementation of the config_mapss page with better memory management
-and performance.
+Dynamic implementation of the ConfigMaps page with live Kubernetes data and resource operations.
 """
 
-from PyQt6.QtWidgets import  QHeaderView
+from PyQt6.QtWidgets import QHeaderView, QMenu, QPushButton, QMessageBox
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QColor
 
-from base_components.base_components import BaseTablePage, SortableTableWidgetItem
+from base_components.base_components import SortableTableWidgetItem
+from base_components.base_resource_page import BaseResourcePage
 
-class ConfigMapsPage(BaseTablePage):
+class ConfigMapsPage(BaseResourcePage):
     """
-    Displays Kubernetes config_maps with optimizations for performance and memory usage.
+    Displays Kubernetes ConfigMaps with live data and resource operations.
     
-    Optimizations:
-    1. Uses BaseTablePage for common functionality to reduce code duplication
-    2. Implements lazy loading of table rows for better performance with large datasets
-    3. Uses object pooling to reduce GC pressure from widget creation
-    4. Implements virtualized scrolling for better performance with large tables
+    Features:
+    1. Dynamic loading of ConfigMaps from the cluster
+    2. Editing ConfigMaps with editor
+    3. Deleting ConfigMaps (individual and batch)
+    4. Resource details viewer
     """
     
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.resource_type = "configmaps"
         self.setup_page_ui()
-        self.load_data()
         
     def setup_page_ui(self):
-        """Set up the main UI elements for the config_maps page"""
+        """Set up the main UI elements for the ConfigMaps page"""
         # Define headers and sortable columns
         headers = ["", "Name", "Namespace", "Keys", "Age", ""]
         sortable_columns = {1, 2, 3, 4}
         
         # Set up the base UI components
-        layout = self.setup_ui("Config Maps", headers, sortable_columns)
+        layout = super().setup_ui("Config Maps", headers, sortable_columns)
         
         # Configure column widths
         self.configure_columns()
         
-        # Connect the row click handler
-        self.table.cellClicked.connect(self.handle_row_click)
-    
+        # Add delete selected button
+        self._add_delete_selected_button()
+        
+    def _add_delete_selected_button(self):
+        """Add a button to delete selected resources."""
+        delete_btn = QPushButton("Delete Selected")
+        delete_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #d32f2f;
+                color: #ffffff;
+                border: none;
+                border-radius: 4px;
+                padding: 5px 10px;
+            }
+            QPushButton:hover {
+                background-color: #b71c1c;
+            }
+            QPushButton:pressed {
+                background-color: #d32f2f;
+            }
+            QPushButton:disabled {
+                background-color: #555555;
+                color: #888888;
+            }
+        """)
+        delete_btn.clicked.connect(self.delete_selected_resources)
+        
+        # Find the header layout
+        for i in range(self.layout().count()):
+            item = self.layout().itemAt(i)
+            if item.layout():
+                for j in range(item.layout().count()):
+                    widget = item.layout().itemAt(j).widget()
+                    if isinstance(widget, QPushButton) and widget.text() == "Refresh":
+                        # Insert before the refresh button
+                        item.layout().insertWidget(item.layout().count() - 1, delete_btn)
+                        break
+        
     def configure_columns(self):
         """Configure column widths and behaviors"""
         # Column 0: Checkbox (fixed width) - already set in base class
@@ -47,64 +83,39 @@ class ConfigMapsPage(BaseTablePage):
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         
         # Configure stretch columns
-        stretch_columns = [1, 2, 3, 4]
+        stretch_columns = [2, 3, 4]
         for col in stretch_columns:
             self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
         
         # Fixed width columns
-       
         self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
         self.table.setColumnWidth(5, 40)
     
-    def load_data(self):
-        """Load  config_maps data into the table with optimized batch processing"""
-        # Sample config_maps data
-        config_maps_data = [
-            ["cluster-info", "kube-public", "kubeconfig", "71d"],
-            ["coredns", "kube-system", "Corefile", "71d"],
-            ["extension-apiserver-authentication", "kube-system", "client-ca-file, requestheader-allowed-names, requestheader", "71d"],
-            ["kube-apiserver-legacy-service-account-token-tra", "kube-system", "since", "71d"],
-            ["kube-proxy", "kube-system", "config.conf, kubeconfig.conf", "71d"],
-            ["kube-root-ca.crt", "default", "ca.crt", "71d"],
-            ["kube-root-ca.crt", "kube-node-lease", "ca.crt", "71d"],
-            ["kube-root-ca.crt", "kube-public", "ca.crt", "71d"],
-            ["kube-root-ca.crt", "kube-system", "ca.crt", "71d"],
-            ["kubeadm-config", "kube-system", "ClusterConfiguration", "71d"],
-            ["kubelet-config", "kube-system", "kubelet", "71d"]
-        ]
-
-        # Set up the table for the data
-        self.table.setRowCount(len(config_maps_data))
-        
-        # Batch process all rows using a single loop for better performance
-        for row, config_maps in enumerate(config_maps_data):
-            self.populate_config_maps_row(row, config_maps)
-        
-        # Update the item count
-        self.items_count.setText(f"{len(config_maps_data)} items")
-    
-    def populate_config_maps_row(self, row, config_maps_data):
+    def populate_resource_row(self, row, resource):
         """
-        Populate a single row with config_maps data using efficient methods
-        
-        Args:
-            row: The row index
-            config_maps_data: List containing config_maps information
+        Populate a single row with ConfigMap data
         """
-        # Set row height once
+        # Set row height
         self.table.setRowHeight(row, 40)
         
         # Create checkbox for row selection
-        config_maps_name = config_maps_data[0]
-        checkbox_container = self._create_checkbox_container(row, config_maps_name)
+        resource_name = resource["name"]
+        checkbox_container = self._create_checkbox_container(row, resource_name)
         self.table.setCellWidget(row, 0, checkbox_container)
         
-        # Populate data columns efficiently
-        for col, value in enumerate(config_maps_data):
+        # Prepare data columns
+        columns = [
+            resource["name"],
+            resource["namespace"],
+            resource.get("keys", "<none>"),
+            resource["age"]
+        ]
+        
+        # Add columns to table
+        for col, value in enumerate(columns):
             cell_col = col + 1  # Adjust for checkbox column
             
             # Handle numeric columns for sorting
-            
             if col == 3:  # Age column
                 try:
                     num = int(value.replace('d', ''))
@@ -123,23 +134,16 @@ class ConfigMapsPage(BaseTablePage):
             # Make cells non-editable
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             
+            # Add item to table
             self.table.setItem(row, cell_col, item)
         
         # Create and add action button
-        action_button = self._create_action_button(row, [
-            {"text": "Edit", "icon": "icons/edit.png", "dangerous": False},
-            {"text": "Delete", "icon": "icons/delete.png", "dangerous": True},
-            {"text": "Logs", "icon": "icons/logs.png", "dangerous": False},
-            {"text": "Shell", "icon": "icons/shell.png", "dangerous": False},
-        ])
+        action_button = self._create_action_button(row, resource["name"], resource["namespace"])
         action_container = self._create_action_container(row, action_button)
-        self.table.setCellWidget(row, len(config_maps_data) + 1, action_container)
+        self.table.setCellWidget(row, len(columns) + 1, action_container)
     
     def handle_row_click(self, row, column):
         """Handle row selection when a table cell is clicked"""
         if column != self.table.columnCount() - 1:  # Skip action column
             # Select the row
             self.table.selectRow(row)
-            # Log selection (can be removed in production)
-            config_maps_name = self.table.item(row, 1).text()
-            print(f"Selected config_maps: {config_maps_name}")

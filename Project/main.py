@@ -1,7 +1,7 @@
 import sys
-from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QStackedWidget, QTableWidget, QLabel, QFrame, QPushButton, QHBoxLayout
-from PyQt6.QtCore import Qt, QTimer, QEvent, QSize
-from PyQt6.QtGui import QFont, QIcon
+from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QStackedWidget, QTableWidget, QLabel
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QFont
 
 try:
     # Import splash screen
@@ -24,6 +24,9 @@ try:
 
     # Import cluster connector
     from utils.cluster_connector import get_cluster_connector
+
+    from UI.ProfileScreen import ProfileScreen
+    from UI.NotificationScreen import NotificationScreen
 
     class MainWindow(QMainWindow):
         def __init__(self):
@@ -85,11 +88,54 @@ try:
             self.previous_page = None
 
             self.setup_detail_page()
+            self.setup_profile_screen()
+            self.setup_notification_screen()
             self.connect_table_click_events()
 
         def setup_detail_page(self):
             """Set up the detail panel"""
             self.detail_page = ResourceDetailPage(self)
+
+        def setup_profile_screen(self):
+            """Set up the profile panel"""
+            self.profile_screen = ProfileScreen(self)
+
+            # Connect signals
+            if hasattr(self.title_bar, 'profile_btn'):
+                self.title_bar.profile_btn.clicked.connect(self.toggle_profile_screen)
+
+        
+        def toggle_profile_screen(self):
+            """Toggle the profile screen visibility"""
+            if hasattr(self, 'profile_screen'):
+                if self.profile_screen.is_visible:
+                    self.profile_screen.hide_profile()
+                else:
+                    # Set user information before showing
+                    self.profile_screen.set_user_info(
+                        name="John Doe",
+                        username="johndoe",
+                        email="john.doe@example.com",
+                        organization="Acme Corp",
+                        team="DevOps",
+                        role="Administrator"
+                    )
+                    self.profile_screen.show_profile()
+                    # Ensure profile screen is on top
+                    self.profile_screen.raise_()
+
+        def setup_notification_screen(self):
+            """Set up the notification panel"""
+            self.notification_screen = NotificationScreen(self, self.title_bar.notifications_btn)
+
+            # Connect signals
+            if hasattr(self.title_bar, 'notifications_btn'):
+                self.title_bar.notifications_btn.clicked.connect(self.toggle_notification_screen)
+
+        def toggle_notification_screen(self):
+            """Toggle the notification screen visibility"""
+            if hasattr(self, 'notification_screen'):
+                self.notification_screen.toggle_notifications()
 
         def connect_table_click_events(self):
             """Connect double-click events on tables to show detail panel"""
@@ -142,6 +188,11 @@ try:
 
         def switch_to_home(self):
             """Switch to the home page view"""
+            # Hide terminal if visible
+            if hasattr(self, 'cluster_view') and hasattr(self.cluster_view, 'terminal_panel'):
+                if self.cluster_view.terminal_panel.is_visible:
+                    self.cluster_view.terminal_panel.hide_terminal()
+
             if self.stacked_widget.currentWidget() != self.home_page:
                 self.previous_page = self.stacked_widget.currentWidget()
                 self.stacked_widget.setCurrentWidget(self.home_page)
@@ -156,17 +207,42 @@ try:
                 self.show_error_message("Cluster connector not initialized.")
                 return
 
-            # Switch to cluster view first, then set active cluster to show loading state
-            self.stacked_widget.setCurrentWidget(self.cluster_view)
+            # Get cached data if available
+            cached_data = {}
+            if hasattr(self.cluster_connector, 'is_data_loaded') and self.cluster_connector.is_data_loaded(cluster_name):
+                cached_data = self.cluster_connector.get_cached_data(cluster_name)
+                
+                # Pre-populate cluster page with cached data if available
+                if hasattr(self.cluster_view, 'pages') and 'Cluster' in self.cluster_view.pages and cached_data:
+                    cluster_page = self.cluster_view.pages['Cluster']
+                    if hasattr(cluster_page, 'preload_with_cached_data'):
+                        cluster_page.preload_with_cached_data(
+                            cached_data.get('cluster_info'),
+                            cached_data.get('metrics'),
+                            cached_data.get('issues')
+                        )
 
+            # Switch to cluster view
+            self.stacked_widget.setCurrentWidget(self.cluster_view)
+            
             # Set active cluster after switching to the view
-            QTimer.singleShot(100, lambda: self.cluster_view.set_active_cluster(cluster_name))
+            QTimer.singleShot(10, lambda: self.cluster_view.set_active_cluster(cluster_name))
 
             # Adjust terminal panel if visible
             if hasattr(self.cluster_view, 'terminal_panel') and self.cluster_view.terminal_panel.is_visible:
                 QTimer.singleShot(200, self.cluster_view.adjust_terminal_position)
+                
+            QTimer.singleShot(250, lambda: self.cluster_view.handle_page_change(
+            self.cluster_view.stacked_widget.currentWidget()))
+
         def switch_to_preferences(self):
             """Switch to the preferences page"""
+
+            # Hide terminal if visible
+            if hasattr(self, 'cluster_view') and hasattr(self.cluster_view, 'terminal_panel'):
+                if self.cluster_view.terminal_panel.is_visible:
+                    self.cluster_view.terminal_panel.hide_terminal()
+
             if self.stacked_widget.currentWidget() != self.preferences_page:
                 self.previous_page = self.stacked_widget.currentWidget()
                 self.stacked_widget.setCurrentWidget(self.preferences_page)
@@ -177,7 +253,6 @@ try:
                 self.stacked_widget.setCurrentWidget(self.previous_page)
             else:
                 self.switch_to_home()
-
         def show_error_message(self, error_message):
             """Display error messages from various components"""
             from PyQt6.QtWidgets import QMessageBox
@@ -187,12 +262,22 @@ try:
             """Handle page changes in the stacked widget"""
             current_widget = self.stacked_widget.widget(index)
 
+            # Hide terminal panel when not on cluster page
+            if hasattr(self, 'cluster_view') and hasattr(self.cluster_view, 'terminal_panel'):
+                if current_widget != self.cluster_view and self.cluster_view.terminal_panel.is_visible:
+                    self.cluster_view.terminal_panel.hide_terminal()
+
         def resizeEvent(self, event):
             """Handle resize event to position detail panels and terminal"""
             super().resizeEvent(event)
             if hasattr(self, 'detail_page') and self.detail_page.is_visible:
                 self.detail_page.setFixedHeight(self.height())
                 self.detail_page.move(self.width() - self.detail_page.width(), 0)
+
+            if hasattr(self, 'profile_screen') and self.profile_screen.is_visible:
+                self.profile_screen.setFixedHeight(self.height())
+                self.profile_screen.move(self.width() - self.profile_screen.width(), 0)
+
             if hasattr(self, 'cluster_view'):
                 if self.stacked_widget.currentWidget() == self.cluster_view and hasattr(self.cluster_view, 'terminal_panel'):
                     if self.cluster_view.terminal_panel.is_visible:
@@ -210,6 +295,8 @@ try:
                 self.move(event.globalPosition().toPoint() - self.drag_position)
                 if hasattr(self, 'detail_page') and self.detail_page.is_visible:
                     self.detail_page.move(self.geometry().right() - self.detail_page.width(), self.geometry().top())
+                if hasattr(self, 'profile_screen') and self.profile_screen.is_visible:
+                    self.profile_screen.move(self.geometry().right() - self.profile_screen.width(), self.geometry().top())
                 event.accept()
 
         def moveEvent(self, event):
@@ -217,6 +304,8 @@ try:
             super().moveEvent(event)
             if hasattr(self, 'detail_page') and self.detail_page.is_visible:
                 self.detail_page.move(self.geometry().right() - self.detail_page.width(), self.geometry().top())
+            if hasattr(self, 'profile_screen') and self.profile_screen.is_visible:
+                self.profile_screen.move(self.geometry().right() - self.profile_screen.width(), self.geometry().top())
             if hasattr(self, 'cluster_view') and hasattr(self.cluster_view, 'terminal_panel'):
                 if self.cluster_view.terminal_panel.is_visible:
                     QTimer.singleShot(10, self.cluster_view.adjust_terminal_position)
@@ -226,6 +315,10 @@ try:
             if hasattr(self, 'cluster_view') and hasattr(self.cluster_view, 'terminal_panel'):
                 if self.cluster_view.terminal_panel.is_visible:
                     self.cluster_view.terminal_panel.hide_terminal()
+            if hasattr(self, 'detail_page') and self.detail_page.is_visible:
+                self.detail_page.hide_detail()
+            if hasattr(self, 'profile_screen') and self.profile_screen.is_visible:
+                self.profile_screen.hide_profile()
             if hasattr(self, 'detail_page') and self.detail_page.is_visible:
                 self.detail_page.hide_detail()
             super().closeEvent(event)

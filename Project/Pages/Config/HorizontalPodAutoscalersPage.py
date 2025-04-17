@@ -1,41 +1,39 @@
 """
-Optimized implementation of the Horizontal Pod Autoscalers page with better memory management
-and performance.
+Dynamic implementation of the Horizontal Pod Autoscalers page with live Kubernetes data.
 """
 
-from PyQt6.QtWidgets import (
-    QLabel, QHeaderView, QWidget, QToolButton, QHBoxLayout
-)
-from PyQt6.QtCore import Qt, QEvent
+from PyQt6.QtWidgets import QHeaderView, QPushButton, QLabel, QWidget, QHBoxLayout
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 
-from base_components.base_components import BaseTablePage, SortableTableWidgetItem
-from UI.Styles import AppStyles, AppColors
+from base_components.base_components import SortableTableWidgetItem
+from base_components.base_resource_page import BaseResourcePage
+from UI.Styles import AppColors, AppStyles
 
-class HorizontalPodAutoscalersPage(BaseTablePage):
+class HorizontalPodAutoscalersPage(BaseResourcePage):
     """
-    Displays Kubernetes horizontal pod autoscalers with optimizations for performance and memory usage.
+    Displays Kubernetes Horizontal Pod Autoscalers with live data and resource operations.
     
-    Optimizations:
-    1. Uses BaseTablePage for common functionality to reduce code duplication
-    2. Implements lazy loading of table rows for better performance with large datasets
-    3. Uses object pooling to reduce GC pressure from widget creation
-    4. Implements virtualized scrolling for better performance with large tables
+    Features:
+    1. Dynamic loading of HPAs from the cluster
+    2. Editing HPAs with editor
+    3. Deleting HPAs (individual and batch)
+    4. Resource details viewer
     """
     
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.resource_type = "horizontalpodautoscalers"
         self.setup_page_ui()
-        self.load_data()
         
     def setup_page_ui(self):
-        """Set up the main UI elements for the Horizontal Pod Autoscalers page"""
+        """Set up the main UI elements for the HPAs page"""
         # Define headers and sortable columns
         headers = ["", "Name", "Namespace", "Metrics", "Min Pods", "Max Pods", "Replicas", "Age", "Status", ""]
         sortable_columns = {1, 2, 3, 4, 5, 6, 7, 8}
         
         # Set up the base UI components with styles
-        layout = self.setup_ui("Horizontal Pod Autoscalers", headers, sortable_columns)
+        layout = super().setup_ui("Horizontal Pod Autoscalers", headers, sortable_columns)
         
         # Apply table style
         self.table.setStyleSheet(AppStyles.TABLE_STYLE)
@@ -44,12 +42,49 @@ class HorizontalPodAutoscalersPage(BaseTablePage):
         # Configure column widths
         self.configure_columns()
         
-        # Connect the row click handler
-        self.table.cellClicked.connect(self.handle_row_click)
+        # Add delete selected button
+        self._add_delete_selected_button()
+        
+    def _add_delete_selected_button(self):
+        """Add a button to delete selected resources."""
+        delete_btn = QPushButton("Delete Selected")
+        delete_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #d32f2f;
+                color: #ffffff;
+                border: none;
+                border-radius: 4px;
+                padding: 5px 10px;
+            }
+            QPushButton:hover {
+                background-color: #b71c1c;
+            }
+            QPushButton:pressed {
+                background-color: #d32f2f;
+            }
+            QPushButton:disabled {
+                background-color: #555555;
+                color: #888888;
+            }
+        """)
+        delete_btn.clicked.connect(self.delete_selected_resources)
+        
+        # Find the header layout
+        for i in range(self.layout().count()):
+            item = self.layout().itemAt(i)
+            if item.layout():
+                for j in range(item.layout().count()):
+                    widget = item.layout().itemAt(j).widget()
+                    if isinstance(widget, QPushButton) and widget.text() == "Refresh":
+                        # Insert before the refresh button
+                        item.layout().insertWidget(item.layout().count() - 1, delete_btn)
+                        break
     
     def configure_columns(self):
         """Configure column widths and behaviors"""
         # Column 0: Checkbox (fixed width) - already set in base class
+        
+        # Configure column 1 (Name) to stretch
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
 
         # Configure stretch columns
@@ -61,47 +96,33 @@ class HorizontalPodAutoscalersPage(BaseTablePage):
         self.table.horizontalHeader().setSectionResizeMode(9, QHeaderView.ResizeMode.Fixed)
         self.table.setColumnWidth(9, 40)
     
-    def load_data(self):
-        """Load horizontal pod autoscaler data into the table with optimized batch processing"""
-        # Sample horizontal pod autoscaler data
-        pods_data = [
-            ["default-quota", "default", "CPU/80%", "1", "10", "3", "71d", "Healthy"],
-            ["dev-quota", "dev", "Memory/70%", "2", "8", "5", "45d", "Healthy"],
-            ["system-quota", "kube-system", "CPU/60%", "3", "12", "6", "71d", "Scaling"],
-            ["test-quota", "test", "CPU/90%", "1", "5", "4", "30d", "Healthy"],
-            ["production-quota", "production", "Memory/85%", "5", "20", "10", "71d", "Warning"]
-        ]
-
-        # Set up the table for the data
-        self.table.setRowCount(len(pods_data))
-        
-        # Batch process all rows using a single loop for better performance
-        for row, pod in enumerate(pods_data):
-            self.populate_pod_row(row, pod)
-        
-        # Update the item count with style
-        self.items_count.setStyleSheet(AppStyles.ITEMS_COUNT_STYLE)
-        self.items_count.setText(f"{len(pods_data)} items")
-    
-    def populate_pod_row(self, row, horizontal_pod_autoscalers_data):
+    def populate_resource_row(self, row, resource):
         """
-        Populate a single row with pod data using efficient methods
-        
-        Args:
-            row: The row index
-            horizontal_pod_autoscalers_data: List containing pod information
+        Populate a single row with HPA data
         """
-        # Set row height once
+        # Set row height
         self.table.setRowHeight(row, 40)
         
         # Create checkbox for row selection
-        horizontal_pod_autoscalers_name = horizontal_pod_autoscalers_data[0]
-        checkbox_container = self._create_checkbox_container(row, horizontal_pod_autoscalers_name)
+        resource_name = resource["name"]
+        checkbox_container = self._create_checkbox_container(row, resource_name)
         checkbox_container.setStyleSheet(AppStyles.CHECKBOX_STYLE)
         self.table.setCellWidget(row, 0, checkbox_container)
         
-        # Populate data columns efficiently
-        for col, value in enumerate(horizontal_pod_autoscalers_data):
+        # Prepare data columns
+        columns = [
+            resource["name"],
+            resource["namespace"],
+            resource.get("metrics", "None"),
+            resource.get("min_pods", "1"),
+            resource.get("max_pods", "10"),
+            resource.get("current_replicas", "0"),
+            resource["age"],
+            resource.get("status", "Unknown")
+        ]
+        
+        # Add columns to table
+        for col, value in enumerate(columns):
             cell_col = col + 1  # Adjust for checkbox column
             
             # Handle numeric columns for sorting
@@ -133,7 +154,7 @@ class HorizontalPodAutoscalersPage(BaseTablePage):
                 item = SortableTableWidgetItem(value)
             
             # Set text alignment
-            if col in [2, 3, 4, 5, 6, 7]:
+            if col in [3, 4, 5, 6]:
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             else:
                 item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
@@ -154,26 +175,18 @@ class HorizontalPodAutoscalersPage(BaseTablePage):
             else:
                 item.setForeground(QColor(AppColors.TEXT_TABLE))
             
-            # Add the item to the table
+            # Add item to table
             self.table.setItem(row, cell_col, item)
         
         # Create and add action button
-        action_button = self._create_action_button(row, [
-            {"text": "Edit", "icon": "icons/edit.png", "dangerous": False},
-            {"text": "Delete", "icon": "icons/delete.png", "dangerous": True},
-            {"text": "Logs", "icon": "icons/logs.png", "dangerous": False},
-            {"text": "Shell", "icon": "icons/shell.png", "dangerous": False},
-        ])
+        action_button = self._create_action_button(row, resource["name"], resource["namespace"])
         action_button.setStyleSheet(AppStyles.ACTION_BUTTON_STYLE)
         action_container = self._create_action_container(row, action_button)
         action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
-        self.table.setCellWidget(row, len(horizontal_pod_autoscalers_data) + 1, action_container)
+        self.table.setCellWidget(row, len(columns) + 1, action_container)
     
     def handle_row_click(self, row, column):
         """Handle row selection when a table cell is clicked"""
         if column != self.table.columnCount() - 1:  # Skip action column
             # Select the row
             self.table.selectRow(row)
-            # Log selection (can be removed in production)
-            horizontal_pod_autoscalers_name = self.table.item(row, 1).text()
-            print(f"Selected horizontal pod autoscaler: {horizontal_pod_autoscalers_name}")

@@ -1,11 +1,11 @@
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QStackedWidget, QLabel
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QPoint, QPointF
-from PyQt6.QtGui import QFont, QColor, QPainter, QBrush
+from PyQt6.QtGui import QColor, QPainter, QBrush
 import math
 
 from UI.Sidebar import Sidebar
 from UI.Header import Header
-from UI.Styles import AppColors, AppStyles
+from UI.Styles import AppColors
 from UI.TerminalPanel import TerminalPanel
 
 # Import cluster connector
@@ -148,88 +148,56 @@ class ClusterView(QWidget):
         
         # Install event filter to detect window resize events
         self.installEventFilter(self)
-    
-    # def set_active_cluster(self, cluster_name):
-    #     """Set the active cluster and update the UI accordingly"""
-    #     # Avoid unnecessary reconnection to the same cluster
-    #     if self.active_cluster == cluster_name:
-    #         # Even if it's the same cluster, ensure UI is updated correctly
-    #         # This helps fix the issue with action dots
-    #         if hasattr(self.header, 'cluster_dropdown'):
-    #             self._update_cluster_ui(cluster_name)
-    #         return
-            
-    #     self.active_cluster = cluster_name
-        
-    #     # Show loading overlay
-    #     if hasattr(self, 'loading_overlay'):
-    #         self.loading_overlay.show_loading(f"Loading cluster: {cluster_name}")
-    #         self.loading_overlay.resize(self.size())
-        
-    #     # Update UI first to provide immediate feedback
-    #     if hasattr(self.header, 'cluster_dropdown'):
-    #         self._update_cluster_ui(cluster_name)
-        
-    #     # Connect to the cluster
-    #     if hasattr(self, 'cluster_connector') and self.cluster_connector:
-    #         self.cluster_connector.connect_to_cluster(cluster_name)
-    #     else:
-    #         self.on_error("Cluster connector not initialized")
+   
 
     def set_active_cluster(self, cluster_name):
         """Set the active cluster and update the UI accordingly"""
         # Avoid unnecessary reconnection to the same cluster
         if self.active_cluster == cluster_name:
             # Even if it's the same cluster, ensure UI is updated correctly
-            # This helps fix the issue with action dots
             if hasattr(self.header, 'cluster_dropdown'):
                 self._update_cluster_ui(cluster_name)
             return
             
         self.active_cluster = cluster_name
         
-        # Show loading overlay
-        if hasattr(self, 'loading_overlay'):
-            self.loading_overlay.show_loading(f"Loading cluster: {cluster_name}")
-            self.loading_overlay.resize(self.size())
-        
         # Update UI first to provide immediate feedback
         if hasattr(self.header, 'cluster_dropdown'):
             self._update_cluster_ui(cluster_name)
         
-        # Check if we have cached data first and immediately render it
+        # Check if there's cached data for this cluster
+        if (hasattr(self, 'cluster_connector') and self.cluster_connector and 
+            hasattr(self.cluster_connector, 'is_data_loaded') and
+            self.cluster_connector.is_data_loaded(cluster_name)):
+            
+            # Get cached data
+            cached_data = self.cluster_connector.get_cached_data(cluster_name)
+            
+            # Use cached data to update UI immediately
+            if 'cluster_info' in cached_data:
+                self.on_cluster_data_loaded(cached_data['cluster_info'])
+            
+            if 'metrics' in cached_data and hasattr(self, 'pages') and 'Cluster' in self.pages:
+                # If we have the cluster_page, update its metrics directly
+                self.pages["Cluster"].update_metrics(cached_data['metrics'])
+            
+            if 'issues' in cached_data and hasattr(self, 'pages') and 'Cluster' in self.pages:
+                # If we have the cluster_page, update its issues directly
+                self.pages["Cluster"].update_issues(cached_data['issues'])
+            
+            # Hide loading overlay since we already have the data
+            if hasattr(self, 'loading_overlay'):
+                self.loading_overlay.hide_loading()
+            
+            return
+        
+        # If we don't have cached data, show loading overlay and connect
+        if hasattr(self, 'loading_overlay'):
+            self.loading_overlay.show_loading(f"Loading cluster: {cluster_name}")
+            self.loading_overlay.resize(self.size())
+        
+        # Connect to the cluster
         if hasattr(self, 'cluster_connector') and self.cluster_connector:
-            # Check if data is cached
-            if hasattr(self.cluster_connector, 'cluster_data_cache') and \
-               cluster_name in self.cluster_connector.cluster_data_cache and \
-               self.cluster_connector.cluster_data_cache[cluster_name].get('info'):
-                
-                # We have cached data, use it immediately
-                cached_data = self.cluster_connector.cluster_data_cache[cluster_name]
-                
-                # Update UI with cached data
-                if cached_data.get('info'):
-                    self.on_cluster_data_loaded(cached_data['info'])
-                
-                if cached_data.get('metrics'):
-                    # Find the cluster page and update metrics
-                    if hasattr(self, 'pages') and 'Cluster' in self.pages:
-                        cluster_page = self.pages['Cluster']
-                        if hasattr(cluster_page, 'update_metrics'):
-                            cluster_page.update_metrics(cached_data['metrics'])
-                
-                if cached_data.get('issues'):
-                    # Find the cluster page and update issues
-                    if hasattr(self, 'pages') and 'Cluster' in self.pages:
-                        cluster_page = self.pages['Cluster']
-                        if hasattr(cluster_page, 'update_issues'):
-                            cluster_page.update_issues(cached_data['issues'])
-                
-                # Hide loading overlay since we've loaded the data
-                if hasattr(self, 'loading_overlay'):
-                    self.loading_overlay.hide_loading()
-                    
-            # Connect to the cluster (this will now use cache when available)
             self.cluster_connector.connect_to_cluster(cluster_name)
         else:
             self.on_error("Cluster connector not initialized")
@@ -301,6 +269,10 @@ class ClusterView(QWidget):
         self.stacked_widget = QStackedWidget()
         self.stacked_widget.setStyleSheet(f"background-color: {AppColors.BG_DARK};")
         
+        # Add this line to connect the signal:
+        self.stacked_widget.currentChanged.connect(
+            lambda index: self.handle_page_change(self.stacked_widget.widget(index))
+        )
         # Create and add pages
         self.create_pages()
         
@@ -544,49 +516,136 @@ class ClusterView(QWidget):
         self.pages["Events"] = self.events_page
         self.pages["Namespaces"] = self.namespace_page
     
+
+    def handle_page_change(self, page_widget):
+        """
+        Update the sidebar selection based on the current page that's displayed.
+        Call this whenever a page change happens from any source.
+        """
+        # Find the page name from our pages dictionary
+        page_name = None
+        for name, widget in self.pages.items():
+            if widget == page_widget:
+                page_name = name
+                break
+        
+        if not page_name:
+            return  # Page not found in our dictionary
+        
+        # Determine if this is a child of a dropdown menu
+        parent_menu = None
+        dropdown_menus = {
+            "Workloads": ["Overview", "Pods", "Deployments", "Daemon Sets", 
+                        "Stateful Sets", "Replica Sets", "Replication Controllers", 
+                        "Jobs", "Cron Jobs"],
+            "Config": ["Config Maps", "Secrets", "Resource Quotas", "Limit Ranges",
+                    "Horizontal Pod Autoscalers", "Pod Disruption Budgets",
+                    "Priority Classes", "Runtime Classes", "Leases", 
+                    "Mutating Webhook Configs", "Validating Webhook Configs"],
+            "Network": ["Services", "Endpoints", "Ingresses", "Ingress Classes",
+                    "Network Policies", "Port Forwarding"],
+            "Storage": ["Persistent Volume Claims", "Persistent Volumes", "Storage Classes"],
+            "Access Control": ["Service Accounts", "Cluster Roles", "Roles",
+                            "Cluster Role Bindings", "Role Bindings"],
+            "Custom Resources": ["Definitions"],
+            "Helm": ["Releases", "Charts"]
+        }
+        
+        # Find which dropdown menu this page belongs to
+        for menu, items in dropdown_menus.items():
+            if page_name in items:
+                parent_menu = menu
+                break
+        
+        # Reset all navigation button states first
+        for btn in self.sidebar.nav_buttons:
+            # Reset active state but preserve dropdown open state
+            dropdown_state = getattr(btn, 'dropdown_open', False)  # Use the correct attribute name
+            btn.is_active = False
+            # Ensure the dropdown_open attribute exists before setting it
+            if hasattr(btn, 'dropdown_open'):
+                btn.dropdown_open = dropdown_state  # Keep dropdown open state unchanged
+        
+        # Now set the correct button as active based on the current page
+        if parent_menu:
+            # For pages that are part of a dropdown menu, set the parent as active
+            for btn in self.sidebar.nav_buttons:
+                if btn.item_text == parent_menu:
+                    btn.is_active = True
+                    break
+        else:
+            # For direct pages, set that specific button as active
+            for btn in self.sidebar.nav_buttons:
+                if btn.item_text == page_name:
+                    btn.is_active = True
+                    break
+        
+        # Update the visual appearance of all buttons
+        for btn in self.sidebar.nav_buttons:
+            btn.update_style()
+
     def set_active_nav_button(self, active_button):
         """Handle sidebar navigation button clicks"""
         # Special handling for Terminal button - don't change active state
         if active_button.item_text == "Terminal":
             return
-            
-        for btn in self.sidebar.nav_buttons:
-            btn.is_active = False
-            btn.update_style()
-        active_button.is_active = True
-        active_button.update_style()
-            
-        # Switch to the corresponding page
-        if active_button.item_text in self.pages:
+        
+        # For dropdown buttons, don't change the active page
+        # The dropdown menu will handle page changes when items are selected
+        if not active_button.has_dropdown and active_button.item_text in self.pages:
+            # Only switch pages for non-dropdown buttons
             self.stacked_widget.setCurrentWidget(self.pages[active_button.item_text])
+            
+            # Since we've changed the page, update all sidebar buttons
+            # This will be handled by the stacked_widget.currentChanged signal
+            # which will call handle_page_change
+        else:
+            # For dropdown buttons, just update their visual state
+            # but don't consider them "active" in terms of navigation
+            for btn in self.sidebar.nav_buttons:
+                # Only reset dropdown open state for other dropdown buttons
+                if btn != active_button and btn.has_dropdown and hasattr(btn, 'dropdown_open'):
+                    btn.dropdown_open = False
+            
+            # The click itself will trigger show_dropdown which sets dropdown_open
+            # We don't need to change is_active here since handle_page_change manages that
+            
+            # Make sure all buttons have updated styles
+            for btn in self.sidebar.nav_buttons:
+                btn.update_style()
     
+
     def handle_dropdown_selection(self, item_name):
         """Handle dropdown menu selections"""
         if item_name in self.pages:
+            # When a dropdown item is selected, switch to that page
             self.stacked_widget.setCurrentWidget(self.pages[item_name])
             
-            # Find and set the correct nav button as active
-            if item_name == "Overview" or item_name in ["Pods", "Deployments", "Daemon Sets",
-                                                    "Stateful Sets", "Replica Sets",
-                                                    "Replication Controllers", "Jobs", "Cron Jobs"]:
-                # Set Workloads nav button as active
-                for btn in self.sidebar.nav_buttons:
-                    if btn.item_text == "Workloads":
-                        btn.is_active = True
-                        btn.update_style()
-                    else:
-                        btn.is_active = False
-                        btn.update_style()
-    
+            # The page change will trigger currentChanged signal
+            # which will call handle_page_change to update sidebar selection
+            
+            # Find the dropdown button that was open and close its visual state
+            for btn in self.sidebar.nav_buttons:
+                # Check if the button has the dropdown_open attribute and it's True
+                if hasattr(btn, 'dropdown_open') and btn.dropdown_open:
+                    btn.dropdown_open = False
+                    btn.update_style()
+   
     def showEvent(self, event):
-        """Handle show event - update terminal position if needed"""
+        """Handle show event - update terminal position if needed and sync sidebar state"""
         super().showEvent(event)
         if hasattr(self, 'terminal_panel') and self.terminal_panel.is_visible:
             self.adjust_terminal_position()
-            
+                
         # If we have an active cluster, make sure loading overlay is sized correctly
         if hasattr(self, 'loading_overlay'):
             self.loading_overlay.resize(self.size())
+        
+        # Sync the sidebar selection with the current page
+        if hasattr(self, 'stacked_widget') and hasattr(self, 'sidebar'):
+            current_widget = self.stacked_widget.currentWidget()
+            if current_widget:
+                self.handle_page_change(current_widget)
 class LoadingOverlay(QWidget):
     """Overlay to show loading state with animation"""
     def __init__(self, parent=None):

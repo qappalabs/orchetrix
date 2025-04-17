@@ -1,8 +1,8 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, 
-                             QTabWidget, QGridLayout, QSizePolicy, QFrame, QToolTip,
-                             QTableWidget, QTableWidgetItem, QHeaderView, QScrollArea, QStackedLayout)
-from PyQt6.QtCore import Qt, QSize, QPoint, QRect, QEvent, pyqtSlot
-from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QBrush, QFont, QCursor
+                             QGridLayout, QSizePolicy, QFrame, QToolTip,
+                             QTableWidget, QTableWidgetItem, QHeaderView, QStackedLayout)
+from PyQt6.QtCore import Qt, QSize, QRect
+from PyQt6.QtGui import QColor,QPainter, QPen, QBrush, QFont, QCursor
 import math
 
 from UI.Styles import AppStyles, AppColors
@@ -782,15 +782,25 @@ class ClusterPage(QWidget):
         self.cluster_info = info
         # We don't immediately update UI here because we wait for metrics
 
-
+    # In the ClusterPage class, add a method to directly update with cached data
+    def preload_with_cached_data(self, cluster_info, metrics, issues):
+        """Preload the page with cached data"""
+        if cluster_info:
+            self.update_cluster_info(cluster_info)
+        
+        if metrics:
+            self.update_metrics(metrics)
+        
+        if issues:
+            self.update_issues(issues)
     def update_metrics(self, metrics):
         """Update metrics with real data and proper formatting"""
         try:
-            if not metrics:
-                return
-                
             self.metrics_data = metrics
             
+            if not metrics:
+                return
+                    
             # Check if widgets still exist
             if not all(hasattr(self, attr) for attr in ['cpu_status', 'memory_status', 'disk_status', 'cpu_chart', 'memory_chart']):
                 return

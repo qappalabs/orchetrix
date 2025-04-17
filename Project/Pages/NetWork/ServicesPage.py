@@ -1,41 +1,41 @@
 """
-Optimized implementation of the Services page with better memory management
-and performance.
+Dynamic implementation of the Services page with live Kubernetes data
+and a status column.
 """
 
-from PyQt6.QtWidgets import (
-    QLabel, QHeaderView, QWidget, QToolButton, QHBoxLayout
-)
-from PyQt6.QtCore import Qt, QEvent
+from PyQt6.QtWidgets import (QHeaderView, QPushButton, QLabel, QVBoxLayout, 
+                            QWidget, QHBoxLayout)
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 
-from base_components.base_components import BaseTablePage, SortableTableWidgetItem
-from UI.Styles import AppStyles, AppColors
+from base_components.base_components import SortableTableWidgetItem
+from base_components.base_resource_page import BaseResourcePage
+from UI.Styles import AppColors, AppStyles
 
-class ServicesPage(BaseTablePage):
+class ServicesPage(BaseResourcePage):
     """
-    Displays Kubernetes services with optimizations for performance and memory usage.
+    Displays Kubernetes Services with live data and resource operations.
     
-    Optimizations:
-    1. Uses BaseTablePage for common functionality to reduce code duplication
-    2. Implements lazy loading of table rows for better performance with large datasets
-    3. Uses object pooling to reduce GC pressure from widget creation
-    4. Implements virtualized scrolling for better performance with large tables
+    Features:
+    1. Dynamic loading of Services from the cluster
+    2. Editing Services with terminal editor
+    3. Deleting Services (individual and batch)
+    4. Status column showing service availability
     """
     
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.resource_type = "services"
         self.setup_page_ui()
-        self.load_data()
         
     def setup_page_ui(self):
         """Set up the main UI elements for the Services page"""
-        # Define headers and sortable columns
+        # Define headers and sortable columns - added Status column
         headers = ["", "Name", "Namespace", "Type", "Cluster IP", "Port", "External IP", "Selector", "Age", "Status", ""]
-        sortable_columns = {1, 2, 3, 4, 5, 7, 8, 9}
+        sortable_columns = {1, 2, 3, 4, 5, 6, 7, 8, 9}
         
-        # Set up the base UI components with styles
-        layout = self.setup_ui("Services", headers, sortable_columns)
+        # Set up the base UI components
+        layout = super().setup_ui("Services", headers, sortable_columns)
         
         # Apply table style
         self.table.setStyleSheet(AppStyles.TABLE_STYLE)
@@ -44,8 +44,43 @@ class ServicesPage(BaseTablePage):
         # Configure column widths
         self.configure_columns()
         
-        # Connect the row click handler
-        self.table.cellClicked.connect(self.handle_row_click)
+        # Add delete selected button
+        self._add_delete_selected_button()
+        
+    def _add_delete_selected_button(self):
+        """Add a button to delete selected resources."""
+        delete_btn = QPushButton("Delete Selected")
+        delete_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #d32f2f;
+                color: #ffffff;
+                border: none;
+                border-radius: 4px;
+                padding: 5px 10px;
+            }
+            QPushButton:hover {
+                background-color: #b71c1c;
+            }
+            QPushButton:pressed {
+                background-color: #d32f2f;
+            }
+            QPushButton:disabled {
+                background-color: #555555;
+                color: #888888;
+            }
+        """)
+        delete_btn.clicked.connect(self.delete_selected_resources)
+        
+        # Find the header layout
+        for i in range(self.layout().count()):
+            item = self.layout().itemAt(i)
+            if item.layout():
+                for j in range(item.layout().count()):
+                    widget = item.layout().itemAt(j).widget()
+                    if isinstance(widget, QPushButton) and widget.text() == "Refresh":
+                        # Insert before the refresh button
+                        item.layout().insertWidget(item.layout().count() - 1, delete_btn)
+                        break
     
     def configure_columns(self):
         """Configure column widths and behaviors"""
@@ -59,63 +94,74 @@ class ServicesPage(BaseTablePage):
         for col in stretch_columns:
             self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
         
-        # Fixed width for action column
+        # Fixed width columns
         self.table.horizontalHeader().setSectionResizeMode(10, QHeaderView.ResizeMode.Fixed)
         self.table.setColumnWidth(10, 40)
     
-    def load_data(self):
-        """Load service data into the table with optimized batch processing"""
-        # Sample service data
-        services_data = [
-            ["kube-dns", "kube-system", "Cluster", "09:87.012", "89/UDS,89/TCP,9", "", "k8s-app=kub..", "2d23h", "Active"]
-        ]
-
-        # Set up the table for the data
-        self.table.setRowCount(len(services_data))
-        
-        # Batch process all rows using a single loop for better performance
-        for row, service in enumerate(services_data):
-            self.populate_service_row(row, service)
-        
-        # Update the item count with style
-        self.items_count.setStyleSheet(AppStyles.ITEMS_COUNT_STYLE)
-        self.items_count.setText(f"{len(services_data)} items")
-    
-    def populate_service_row(self, row, service_data):
+    def populate_resource_row(self, row, resource):
         """
-        Populate a single row with service data using efficient methods
-        
-        Args:
-            row: The row index
-            service_data: List containing service information
+        Populate a single row with Service data including status
         """
         # Set row height once
         self.table.setRowHeight(row, 40)
         
         # Create checkbox for row selection
-        service_name = service_data[0]
-        checkbox_container = self._create_checkbox_container(row, service_name)
+        resource_name = resource["name"]
+        checkbox_container = self._create_checkbox_container(row, resource_name)
         checkbox_container.setStyleSheet(AppStyles.CHECKBOX_STYLE)
         self.table.setCellWidget(row, 0, checkbox_container)
         
-        # Populate data columns efficiently
-        for col, value in enumerate(service_data):
+        # Extract service details
+        spec = resource.get("raw_data", {}).get("spec", {})
+        service_type = spec.get("type", "ClusterIP")
+        cluster_ip = spec.get("clusterIP", "<none>")
+        
+        # Get ports
+        ports = spec.get("ports", [])
+        port_strs = []
+        for port in ports:
+            port_str = f"{port.get('port')}/{port.get('protocol', 'TCP')}"
+            if 'targetPort' in port:
+                port_str += f"→{port.get('targetPort')}"
+            port_strs.append(port_str)
+        port_text = ", ".join(port_strs) if port_strs else "<none>"
+        
+        # Get external IPs
+        external_ips = spec.get("externalIPs", [])
+        lb_status = resource.get("raw_data", {}).get("status", {}).get("loadBalancer", {}).get("ingress", [])
+        for lb in lb_status:
+            if "ip" in lb:
+                external_ips.append(lb["ip"])
+            elif "hostname" in lb:
+                external_ips.append(lb["hostname"])
+        external_ip_text = ", ".join(external_ips) if external_ips else "<none>"
+        
+        # Get selector
+        selector = spec.get("selector", {})
+        selector_text = ", ".join([f"{k}={v}" for k, v in selector.items()]) if selector else "<none>"
+        
+        # Determine service status - based on multiple factors
+        status = self.determine_service_status(resource)
+        
+        # Prepare data columns
+        columns = [
+            resource["name"],
+            resource["namespace"],
+            service_type,
+            cluster_ip,
+            port_text,
+            external_ip_text,
+            selector_text,
+            resource["age"],
+            status
+        ]
+        
+        # Add columns to table
+        for col, value in enumerate(columns):
             cell_col = col + 1  # Adjust for checkbox column
             
             # Handle numeric columns for sorting
-            if col == 3:  # Cluster IP column (not typically numeric, but keeping original logic)
-                try:
-                    num = int(value)
-                except ValueError:
-                    num = 0
-                item = SortableTableWidgetItem(value, num)
-            elif col == 4:  # Port column (not typically numeric, but keeping original logic)
-                try:
-                    num = int(value)
-                except ValueError:
-                    num = 0
-                item = SortableTableWidgetItem(value, num)
-            elif col == 7:  # Age column
+            if col == 7:  # Age column
                 try:
                     num = int(value.replace('d', '').replace('h', ''))
                 except ValueError:
@@ -125,7 +171,7 @@ class ServicesPage(BaseTablePage):
                 item = SortableTableWidgetItem(value)
             
             # Set text alignment
-            if col in [3, 4, 7, 8]:
+            if col in [2, 3, 4, 5, 7, 8]:
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             else:
                 item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
@@ -133,41 +179,105 @@ class ServicesPage(BaseTablePage):
             # Make cells non-editable
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             
-            # Set special colors for status column
+            # Set status color
             if col == 8:  # Status column
                 if value == "Active":
                     item.setForeground(QColor(AppColors.STATUS_ACTIVE))
+                elif value == "Warning":
+                    item.setForeground(QColor(AppColors.STATUS_WARNING))
+                elif value == "Error":
+                    item.setForeground(QColor(AppColors.STATUS_ERROR))
                 else:
-                    item.setForeground(QColor(AppColors.STATUS_DISCONNECTED))
+                    item.setForeground(QColor(AppColors.TEXT_TABLE))
             else:
                 item.setForeground(QColor(AppColors.TEXT_TABLE))
             
-            # Add the item to the table
+            # Add item to table
             self.table.setItem(row, cell_col, item)
         
         # Create and add action button
-        action_button = self._create_action_button(row, [
-            {"text": "Edit", "icon": "icons/edit.png", "dangerous": False},
-            {"text": "Delete", "icon": "icons/delete.png", "dangerous": True}
-        ])
+        action_button = self._create_action_button(row, resource["name"], resource["namespace"])
         action_button.setStyleSheet(AppStyles.ACTION_BUTTON_STYLE)
         action_container = self._create_action_container(row, action_button)
         action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
-        self.table.setCellWidget(row, len(service_data) + 1, action_container)
+        self.table.setCellWidget(row, len(columns) + 1, action_container)
     
-    def _handle_action(self, action, row):
-        """Override base action handler for service-specific actions"""
-        service_name = self.table.item(row, 1).text()
-        if action == "Edit":
-            print(f"Editing Service: {service_name}")
-        elif action == "Delete":
-            print(f"Deleting Service: {service_name}")
+    def determine_service_status(self, resource):
+        """
+        Determine the status of a service based on its configuration and state
+        """
+        # Get raw data
+        raw_data = resource.get("raw_data", {})
+        spec = raw_data.get("spec", {})
+        status = raw_data.get("status", {})
+        
+        # Get service type
+        service_type = spec.get("type", "ClusterIP")
+        
+        # Check for endpoints
+        has_endpoints = False
+        try:
+            import subprocess
+            import json
+            
+            # Use kubectl to check endpoints
+            namespace = resource.get("namespace", "default")
+            service_name = resource.get("name", "")
+            
+            if service_name and namespace:
+                # Run kubectl command to get endpoints
+                result = subprocess.run(
+                    ["kubectl", "get", "endpoints", service_name, "-n", namespace, "-o", "json"],
+                    capture_output=True,
+                    text=True
+                )
+                
+                if result.returncode == 0:
+                    # Parse JSON response
+                    endpoints_data = json.loads(result.stdout)
+                    subsets = endpoints_data.get("subsets", [])
+                    
+                    # Check if there are any ready endpoints
+                    for subset in subsets:
+                        if subset.get("addresses", []):
+                            has_endpoints = True
+                            break
+        except:
+            # If there's an error checking endpoints, assume they exist
+            has_endpoints = True
+        
+        # Determine status based on service type and configuration
+        if service_type == "ExternalName":
+            # External name services are always "active" if configured
+            if "externalName" in spec:
+                return "Active"
+            else:
+                return "Warning"
+        
+        elif service_type == "LoadBalancer":
+            # Check if load balancer is provisioned
+            lb_ingress = status.get("loadBalancer", {}).get("ingress", [])
+            if lb_ingress:
+                # Load balancer has an external address
+                if has_endpoints:
+                    return "Active"
+                else:
+                    return "Warning"  # Has LB but no endpoints
+            else:
+                return "Pending"  # LB not provisioned yet
+        
+        elif service_type == "NodePort" or service_type == "ClusterIP":
+            # Check if the service has endpoints
+            if has_endpoints:
+                return "Active"
+            else:
+                return "Warning"  # No endpoints
+        
+        # Default status if we can't determine
+        return "Unknown"
     
     def handle_row_click(self, row, column):
         """Handle row selection when a table cell is clicked"""
         if column != self.table.columnCount() - 1:  # Skip action column
             # Select the row
             self.table.selectRow(row)
-            # Log selection
-            service_name = self.table.item(row, 1).text()
-            print(f"Selected service: {service_name}")

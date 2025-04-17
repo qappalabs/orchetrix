@@ -4,7 +4,7 @@ import yaml
 import subprocess
 from PyQt6.QtCore import QObject, pyqtSignal, QRunnable, QThreadPool, pyqtSlot, QTimer
 from dataclasses import dataclass
-from typing import List, Dict, Optional, Any
+from typing import Optional
 import datetime
 
 @dataclass
@@ -50,6 +50,22 @@ class KubeMetricsWorker(QRunnable):
         self.client = client
         self.node_name = node_name
         self.signals = WorkerSignals()
+
+    def __del__(self):
+        """Clean up resources when worker is deleted"""
+        try:
+            # Disconnect any signals to prevent calls to deleted objects
+            if hasattr(self, 'signals'):
+                try:
+                    self.signals.finished.disconnect()
+                except:
+                    pass
+                try:
+                    self.signals.error.disconnect()
+                except:
+                    pass
+        except Exception as e:
+            print(f"Error during KubeMetricsWorker cleanup: {str(e)}")
         
     @pyqtSlot()
     def run(self):
@@ -61,6 +77,7 @@ class KubeMetricsWorker(QRunnable):
             self.signals.finished.emit(result)
         except Exception as e:
             self.signals.error.emit(str(e))
+    
 
 class KubeIssuesWorker(QRunnable):
     """Worker thread for fetching Kubernetes issues asynchronously"""
@@ -123,6 +140,23 @@ class KubernetesClient(QObject):
         self.issues_timer = QTimer()
         self.issues_timer.timeout.connect(self.refresh_issues)
     
+    def __del__(self):
+        """Clean up resources when object is deleted"""
+        try:
+            # Stop any running timers
+            if hasattr(self, 'metrics_timer') and self.metrics_timer.isActive():
+                self.metrics_timer.stop()
+            
+            if hasattr(self, 'issues_timer') and self.issues_timer.isActive():
+                self.issues_timer.stop()
+                
+            # Clear QThreadPool
+            if hasattr(self, 'threadpool'):
+                self.threadpool.clear()
+                
+        except Exception as e:
+            print(f"Error during KubernetesClient cleanup: {str(e)}")
+
     def start_metrics_polling(self, interval_ms=5000):
         """Start polling for metrics updates"""
         self.metrics_timer.start(interval_ms)
