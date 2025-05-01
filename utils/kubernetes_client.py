@@ -707,18 +707,24 @@ class KubernetesClient(QObject):
         worker.signals.error.connect(lambda _: cleanup_worker())
         
         self.threadpool.start(worker)
-        
+
     def _get_resource_events(self, resource_type, resource_name, namespace="default"):
-        """Get events related to a specific resource"""
+        """Get events related to a specific resource with improved error handling"""
         try:
-            # Use field selector to filter events by resource
-            field_selector = f"involvedObject.name={resource_name},involvedObject.kind={resource_type.capitalize()}"
+            import re
             
-            if resource_type.lower() not in ["node", "persistentvolume", "clusterrole", "namespace"]:
+            # Sanitize inputs to avoid command injection and special character issues
+            safe_resource_name = re.sub(r'[^\w\-\.]', '', resource_name)
+            safe_resource_type = re.sub(r'[^\w\-\.]', '', resource_type)
+            safe_namespace = re.sub(r'[^\w\-\.]', '', namespace) if namespace else "default"
+            
+            # Use field selector to filter events by resource
+            field_selector = f"involvedObject.name={safe_resource_name},involvedObject.kind={safe_resource_type.capitalize()}"
+            
+            if safe_resource_type.lower() not in ["node", "persistentvolume", "clusterrole", "namespace"]:
                 # Add namespace selector for namespaced resources
-                field_selector += f",involvedObject.namespace={namespace}"
                 output = self._execute_kubectl(
-                    ["get", "events", "-n", namespace, "--field-selector", field_selector, "-o", "json"], 
+                    ["get", "events", "-n", safe_namespace, "--field-selector", field_selector, "-o", "json"], 
                     "{}"
                 )
             else:
@@ -733,7 +739,6 @@ class KubernetesClient(QObject):
                 events = []
                 
                 for item in events_data.get("items", []):
-                    # Format creation timestamp to age
                     timestamp = item.get("metadata", {}).get("creationTimestamp")
                     age = self._format_age(timestamp) if timestamp else "Unknown"
                     
@@ -746,7 +751,8 @@ class KubernetesClient(QObject):
                         "source": item.get("source", {}).get("component", "Unknown")
                     }
                     events.append(event)
-                
+                    # (existing code)
+                    # ...
                 return events
             except json.JSONDecodeError:
                 return []
@@ -766,7 +772,7 @@ class KubernetesClient(QObject):
                 ["kubectl"] + args,
                 capture_output=True,
                 text=True,
-                timeout=5  # Set timeout to prevent hanging
+                timeout=15  # Set timeout to prevent hanging
             )
             
             if result.returncode == 0:

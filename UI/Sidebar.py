@@ -441,7 +441,7 @@ class Sidebar(QWidget):
             "compare", "Compare", False, False, 
             self.parent_window, self.sidebar_expanded
         )
-        
+
         # Terminal button - special handling
         terminal_btn = NavIconButton(
             "terminal", "Terminal", False, False, 
@@ -467,7 +467,6 @@ class Sidebar(QWidget):
         self.sidebar_layout.addWidget(compare_btn)
         self.sidebar_layout.addWidget(terminal_btn)
         self.sidebar_layout.addWidget(chat_btn)
-    
     def update_sidebar_state(self):
         # Create animation for smooth transition
         self.sidebar_animation = QPropertyAnimation(self.content_widget, b"minimumWidth")

@@ -694,28 +694,63 @@ class TerminalPanel(QWidget):
         # Hide initially
         self.hide()
 
+    # def closeEvent(self, event):
+    #     """Handle proper cleanup when terminal is closed"""
+    #     self.terminate_all_processes()
+    #     super().closeEvent(event)
+
     def closeEvent(self, event):
         """Handle proper cleanup when terminal is closed"""
+        # Make sure to also close the processes when the window is closed
+        # or when navigating away from terminal view
         self.terminate_all_processes()
+        
+        # Wait for processes to finish to avoid "Destroyed while process is running" errors
+        for terminal_data in self.terminal_tabs:
+            process = terminal_data.get('process')
+            if process and process.state() == QProcess.ProcessState.Running:
+                process.waitForFinished(100)  # Short timeout to avoid blocking UI
+        
         super().closeEvent(event)
 
     def __del__(self):
         """Clean up processes when the panel is destroyed"""
         self.terminate_all_processes()
 
+    # def terminate_all_processes(self):
+    #     """Terminate all running processes"""
+    #     for terminal_data in self.terminal_tabs:
+    #         process = terminal_data.get('process')
+    #         if process and process.state() == QProcess.ProcessState.Running:
+    #             try:
+    #                 process.terminate()
+    #                 if not process.waitForFinished(500):
+    #                     process.kill()
+    #             except Exception:
+    #                 # Process might already be gone
+    #                 pass
+
     def terminate_all_processes(self):
-        """Terminate all running processes"""
+        """Terminate all running processes with a clean shutdown sequence"""
         for terminal_data in self.terminal_tabs:
             process = terminal_data.get('process')
             if process and process.state() == QProcess.ProcessState.Running:
                 try:
+                    # On Windows, try to send a termination command first
+                    if sys.platform == 'win32':
+                        process.write(b"exit\r\n")  # Try to exit gracefully first
+                        if process.waitForFinished(300):  # Give it time to exit
+                            continue  # Process exited cleanly
+                    
+                    # If still running or not on Windows, terminate
                     process.terminate()
-                    if not process.waitForFinished(500):
+                    
+                    # If terminate doesn't work, kill it
+                    if not process.waitForFinished(200):
                         process.kill()
-                except Exception:
-                    # Process might already be gone
-                    pass
-
+                        process.waitForFinished(100)
+                except Exception as e:
+                    print(f"Error terminating process: {e}")
     def add_terminal_tab(self):
         """Add a new terminal tab with unified terminal widget"""
         # Create a tab index for the new terminal

@@ -16,8 +16,7 @@ try:
     from UI.TitleBar import TitleBar
     from UI.ClusterView import ClusterView
 
-    # Import terminal and detail page components
-    from detail_page_component import ResourceDetailPage
+
 
     # Import style definitions
     from UI.Styles import AppColors, AppStyles
@@ -59,14 +58,18 @@ try:
             self.main_layout.setContentsMargins(0, 0, 0, 0)
             self.main_layout.setSpacing(0)
 
-            self.title_bar = TitleBar(self)
+            self.home_page = OrchestrixGUI()
+            # Create the title bar and pass the update_pinned_items_signal from home_page
+            self.title_bar = TitleBar(self, update_pinned_items_signal=self.home_page.update_pinned_items_signal)
             self.main_layout.addWidget(self.title_bar)
+            # self.title_bar = TitleBar(self)
+            # self.main_layout.addWidget(self.title_bar)
 
             self.stacked_widget = QStackedWidget()
             self.stacked_widget.currentChanged.connect(self.handle_page_change)
             self.main_layout.addWidget(self.stacked_widget)
 
-            self.home_page = OrchestrixGUI()
+            
             self.cluster_view = ClusterView(self)
             self.preferences_page = PreferencesWidget()
 
@@ -87,14 +90,9 @@ try:
             self.drag_position = None
             self.previous_page = None
 
-            self.setup_detail_page()
             self.setup_profile_screen()
             self.setup_notification_screen()
-            self.connect_table_click_events()
 
-        def setup_detail_page(self):
-            """Set up the detail panel"""
-            self.detail_page = ResourceDetailPage(self)
 
         def setup_profile_screen(self):
             """Set up the profile panel"""
@@ -136,44 +134,6 @@ try:
             """Toggle the notification screen visibility"""
             if hasattr(self, 'notification_screen'):
                 self.notification_screen.toggle_notifications()
-
-        def connect_table_click_events(self):
-            """Connect double-click events on tables to show detail panel"""
-            if hasattr(self.cluster_view, 'pages'):
-                for page_name, page in self.cluster_view.pages.items():
-                    if hasattr(page, 'table') and isinstance(page.table, QTableWidget):
-                        page.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-                        page.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-                        try:
-                            page.table.cellDoubleClicked.disconnect()
-                        except:
-                            pass
-                        table = page.table
-                        table.cellDoubleClicked.connect(
-                            lambda row, col, p=page, n=page_name:
-                            self.show_detail_for_table_item(row, col, p, n)
-                        )
-
-        def show_detail_for_table_item(self, row, col, page, page_name):
-            """Show detail page for clicked table item"""
-            resource_type = page_name.rstrip('s')
-            resource_name = None
-
-            if hasattr(page.table, 'item') and page.table.item(row, 1) is not None:
-                resource_name = page.table.item(row, 1).text()
-            elif hasattr(page.table, 'cellWidget') and page.table.cellWidget(row, 1) is not None:
-                widget = page.table.cellWidget(row, 1)
-                for label in widget.findChildren(QLabel):
-                    if label.text() and not label.text().isspace():
-                        resource_name = label.text()
-                        break
-            elif hasattr(page.table, 'item') and page.table.item(row, 0) is not None:
-                resource_name = page.table.item(row, 0).text()
-            else:
-                resource_name = f"{resource_type}-{row}"
-
-            if resource_name:
-                self.detail_page.show_detail(resource_type, resource_name)
 
         def setup_connections(self):
             """Set up signal connections between components"""
@@ -280,10 +240,6 @@ try:
         def resizeEvent(self, event):
             """Handle resize event to position detail panels and terminal"""
             super().resizeEvent(event)
-            if hasattr(self, 'detail_page') and self.detail_page.is_visible:
-                self.detail_page.setFixedHeight(self.height())
-                self.detail_page.move(self.width() - self.detail_page.width(), 0)
-
             if hasattr(self, 'profile_screen') and self.profile_screen.is_visible:
                 self.profile_screen.setFixedHeight(self.height())
                 self.profile_screen.move(self.width() - self.profile_screen.width(), 0)
@@ -295,25 +251,9 @@ try:
                 elif hasattr(self.cluster_view, 'terminal_panel') and self.cluster_view.terminal_panel.is_visible:
                     QTimer.singleShot(10, self.cluster_view.adjust_terminal_position)
 
-        def mousePressEvent(self, event):
-            if event.button() == Qt.MouseButton.LeftButton:
-                self.drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-                event.accept()
-
-        def mouseMoveEvent(self, event):
-            if event.buttons() == Qt.MouseButton.LeftButton and hasattr(self, 'drag_position') and self.drag_position is not None:
-                self.move(event.globalPosition().toPoint() - self.drag_position)
-                if hasattr(self, 'detail_page') and self.detail_page.is_visible:
-                    self.detail_page.move(self.geometry().right() - self.detail_page.width(), self.geometry().top())
-                if hasattr(self, 'profile_screen') and self.profile_screen.is_visible:
-                    self.profile_screen.move(self.geometry().right() - self.profile_screen.width(), self.geometry().top())
-                event.accept()
-
         def moveEvent(self, event):
             """Handle move event to keep detail panels and terminal in position"""
             super().moveEvent(event)
-            if hasattr(self, 'detail_page') and self.detail_page.is_visible:
-                self.detail_page.move(self.geometry().right() - self.detail_page.width(), self.geometry().top())
             if hasattr(self, 'profile_screen') and self.profile_screen.is_visible:
                 self.profile_screen.move(self.geometry().right() - self.profile_screen.width(), self.geometry().top())
             if hasattr(self, 'cluster_view') and hasattr(self.cluster_view, 'terminal_panel'):
@@ -325,12 +265,8 @@ try:
             if hasattr(self, 'cluster_view') and hasattr(self.cluster_view, 'terminal_panel'):
                 if self.cluster_view.terminal_panel.is_visible:
                     self.cluster_view.terminal_panel.hide_terminal()
-            if hasattr(self, 'detail_page') and self.detail_page.is_visible:
-                self.detail_page.hide_detail()
             if hasattr(self, 'profile_screen') and self.profile_screen.is_visible:
                 self.profile_screen.hide_profile()
-            if hasattr(self, 'detail_page') and self.detail_page.is_visible:
-                self.detail_page.hide_detail()
             super().closeEvent(event)
 
     if __name__ == "__main__":

@@ -3,9 +3,12 @@ from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QPoint, QPointF
 from PyQt6.QtGui import QColor, QPainter, QBrush
 import math
 
+from .DetailManager import DetailManager
+
 from UI.Sidebar import Sidebar
 
 from UI.Styles import AppColors
+
 from UI.TerminalPanel import TerminalPanel
 
 # Import cluster connector
@@ -197,13 +200,140 @@ class ClusterView(QWidget):
         
         # Initialize the terminal panel
         self.initialize_terminal()
-        
+
+        self.initialize_detail_page()
         # Create loading overlay
         self.loading_overlay = LoadingOverlay(self)
         
         # Install event filter to detect window resize events
         self.installEventFilter(self)
+
+    def initialize_detail_page(self):
+        """Initialize the detail page manager"""
+        self.detail_manager = DetailManager(self.parent_window)
+        
+        # Connect signals
+        self.detail_manager.resource_updated.connect(self.handle_resource_updated)
     
+    # Add to ClusterView.show_detail_for_table_item method (replace the existing method)
+    def show_detail_for_table_item(self, row, col, page, page_name):
+        """Show detail page for clicked table item with improved handling"""
+        resource_type = page_name.rstrip('s')  # Remove trailing 's' to get singular form
+        resource_name = None
+        namespace = None
+
+        # Try to get the resource name from the table
+        if hasattr(page.table, 'item') and page.table.item(row, 1) is not None:
+            resource_name = page.table.item(row, 1).text()
+        elif hasattr(page.table, 'cellWidget') and page.table.cellWidget(row, 1) is not None:
+            widget = page.table.cellWidget(row, 1)
+            for label in widget.findChildren(QLabel):
+                if label.text() and not label.text().isspace():
+                    resource_name = label.text()
+                    break
+        elif hasattr(page.table, 'item') and page.table.item(row, 0) is not None:
+            resource_name = page.table.item(row, 0).text()
+        else:
+            resource_name = f"{resource_type}-{row}"
+        
+        # Try to get namespace (usually in column 2)
+        if hasattr(page.table, 'item') and page.table.item(row, 2) is not None:
+            namespace = page.table.item(row, 2).text()
+        elif hasattr(page.table, 'cellWidget') and page.table.cellWidget(row, 2) is not None:
+            widget = page.table.cellWidget(row, 2)
+            for label in widget.findChildren(QLabel):
+                if label.text() and not label.text().isspace():
+                    namespace = label.text()
+                    break
+        
+        # Handle special case for cluster-scoped resources
+        if resource_type in ['node', 'persistentvolume', 'clusterrole', 'clusterrolebinding']:
+            namespace = None
+        
+        # Show the detail page
+        if resource_name:
+            self.detail_manager.show_detail(resource_type, resource_name, namespace)
+
+    # Add to ClusterView.handle_resource_updated method
+    def handle_resource_updated(self, resource_type, resource_name, namespace):
+        """Handle when a resource is updated in the detail view"""
+        # Find the corresponding page and reload its data
+        page_name = resource_type + "s"  # Add 's' to get plural form
+        
+        if page_name in self.pages:
+            page = self.pages[page_name]
+            if hasattr(page, 'force_load_data'):
+                page.force_load_data()
+            elif hasattr(page, 'load_data'):
+                page.load_data()
+        
+        # Special handling for Events page - always refresh
+        if "Events" in self.pages:
+            events_page = self.pages["Events"]
+            if hasattr(events_page, 'force_load_data'):
+                events_page.force_load_data()
+            elif hasattr(events_page, 'load_data'):
+                events_page.load_data()
+
+
+    # Add to ClusterView.resizeEvent and moveEvent methods
+    def update_detail_on_resize(self, event):
+        """Update detail page position when window is resized"""
+        super().resizeEvent(event)
+        
+        # Update detail page position if it's visible
+        if hasattr(self, 'detail_manager'):
+            self.detail_manager.update_detail_position()
+        
+        # Also update terminal position
+        if hasattr(self, 'terminal_panel') and self.terminal_panel.is_visible:
+            QTimer.singleShot(10, self.adjust_terminal_position)
+    def update_detail_on_move(self, event):
+        """Update detail page position when window is moved"""
+        super().moveEvent(event)
+        
+        # Update detail page position if it's visible
+        if hasattr(self, 'detail_manager'):
+            self.detail_manager.update_detail_position()
+        
+        # Also update terminal position
+        if hasattr(self, 'terminal_panel') and self.terminal_panel.is_visible:
+            QTimer.singleShot(10, self.adjust_terminal_position)
+
+    # Add to ClusterView.handle_page_change method
+    def update_detail_on_page_change(self, page_widget):
+        """Handle page changes to update detail page if needed"""
+        # (existing code)
+        
+        # Hide detail view if different resource type
+        if hasattr(self, 'detail_manager') and self.detail_manager.is_detail_visible():
+            # Find the page name from our pages dictionary
+            page_name = None
+            for name, widget in self.pages.items():
+                if widget == page_widget:
+                    page_name = name
+                    break
+            
+            if page_name:
+                # Get current resource type being viewed
+                resource_type = page_name.rstrip('s')  # Remove trailing 's' to get singular form
+                
+                # If resource type doesn't match current detail view, hide it
+                if resource_type != self.detail_manager.current_resource_type:
+                    self.detail_manager.hide_detail()
+    
+
+    # Add to ClusterView.closeEvent
+    def update_close_event(self, event):
+        """Clean up resources before closing"""
+        if hasattr(self, 'detail_manager') and self.detail_manager.is_detail_visible():
+            self.detail_manager.hide_detail()
+        
+        # (Existing code)
+        if hasattr(self, 'terminal_panel') and self.terminal_panel.is_visible:
+            self.terminal_panel.hide_terminal()
+        super().closeEvent(event)
+        
     def set_active_cluster(self, cluster_name):
         """Set the active cluster and update the UI accordingly"""
         # Avoid unnecessary reconnection to the same cluster
@@ -249,20 +379,6 @@ class ClusterView(QWidget):
             self.cluster_connector.connect_to_cluster(cluster_name)
         else:
             self.on_error("Cluster connector not initialized")
-            
-    # def _update_cluster_ui(self, cluster_name):
-    #     """Internal method to update the UI elements for the active cluster"""
-    #     # Find the text label within the cluster dropdown layout
-    #     found = False
-    #     for child in self.header.cluster_dropdown.findChildren(QLabel):
-    #         if not child.text().startswith("▼"):  # Skip the arrow label
-    #             child.setText(cluster_name)
-    #             child.setStyleSheet(f"color: {AppColors.ACCENT_GREEN}; background: transparent;")
-    #             found = True
-    #             break
-        
-    #     if not found:
-    #         print("Could not find cluster name label in header")    
             
     def on_connection_started(self, cluster_name):
         """Handle when a cluster connection starts"""
@@ -399,14 +515,17 @@ class ClusterView(QWidget):
             self.loading_overlay.resize(self.size())
     
     def eventFilter(self, obj, event):
-        """Handle events for window resize"""
+        """Handle events for window resize and detail page interaction"""
         if obj == self and event.type() == event.Type.Resize:
             # When window is resized, adjust terminal position
             if hasattr(self, 'terminal_panel') and self.terminal_panel.is_visible:
                 self.adjust_terminal_position()
+            
+            # Also update detail page position if visible
+            if hasattr(self, 'detail_manager') and self.detail_manager.is_detail_visible():
+                self.detail_manager.update_detail_position()
         
         return super().eventFilter(obj, event)
-    
     def create_pages(self):
         """Create all page components and add them to the stacked widget"""
         # Create pages
@@ -561,12 +680,17 @@ class ClusterView(QWidget):
         self.pages["Events"] = self.events_page
         self.pages["Namespaces"] = self.namespace_page
     
-
     def handle_page_change(self, page_widget):
         """
         Update the sidebar selection based on the current page and trigger data loading.
         Called whenever a page change happens from any source.
         """
+        # Close detail page when changing pages 
+        # This ensures that the detail closes even when page changes happen through
+        # other means besides direct sidebar navigation
+        if hasattr(self, 'detail_manager') and self.detail_manager.is_detail_visible():
+            self.detail_manager.hide_detail()
+        
         # Find the page name from our pages dictionary
         page_name = None
         for name, widget in self.pages.items():
@@ -636,10 +760,14 @@ class ClusterView(QWidget):
             page_widget.load_data()
 
     def set_active_nav_button(self, active_button):
-        """Handle sidebar navigation button clicks"""
+        """Handle sidebar navigation button clicks with detail page management"""
         # Special handling for Terminal button - don't change active state
         if active_button.item_text == "Terminal":
             return
+        
+        # Close detail page when navigating to a different section
+        if hasattr(self, 'detail_manager') and self.detail_manager.is_detail_visible():
+            self.detail_manager.hide_detail()
         
         # For dropdown buttons, don't change the active page
         # The dropdown menu will handle page changes when items are selected
@@ -664,10 +792,13 @@ class ClusterView(QWidget):
             # Make sure all buttons have updated styles
             for btn in self.sidebar.nav_buttons:
                 btn.update_style()
-    
 
     def handle_dropdown_selection(self, item_name):
-        """Handle dropdown menu selections"""
+        """Handle dropdown menu selections with detail page management"""
+        # Close detail page when navigating to a different section via dropdown
+        if hasattr(self, 'detail_manager') and self.detail_manager.is_detail_visible():
+            self.detail_manager.hide_detail()
+        
         if item_name in self.pages:
             # When a dropdown item is selected, switch to that page
             self.stacked_widget.setCurrentWidget(self.pages[item_name])
@@ -687,7 +818,6 @@ class ClusterView(QWidget):
                 if hasattr(btn, 'dropdown_open') and btn.dropdown_open:
                     btn.dropdown_open = False
                     btn.update_style()
-   
     def showEvent(self, event):
         """Handle show event - update terminal position if needed and sync sidebar state"""
         super().showEvent(event)

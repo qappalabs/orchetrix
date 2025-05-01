@@ -1,6 +1,6 @@
 from PyQt6.QtCore import QObject, pyqtSignal, QRunnable, QThreadPool, pyqtSlot, QTimer
 from utils.kubernetes_client import get_kubernetes_client
-
+import subprocess
 class WorkerSignals(QObject):
     """Signals for worker threads with proper lifecycle management"""
     finished = pyqtSignal(object)
@@ -224,29 +224,49 @@ class ClusterConnection(QObject):
         # Reset current cluster if it's the one being disconnected
         if self.kube_client.current_cluster == cluster_name:
             self.kube_client.current_cluster = None
-            
+ 
     def on_connection_complete(self, result):
         """Handle connection completion from worker thread"""
         if self._is_being_destroyed or self._shutting_down:
             return
-            
+                
         cluster_name, success = result
         # Now that we're back in the main thread, we can safely emit signals
         self.connection_complete.emit(cluster_name, success)
         
         if success:
-            # Set the current cluster in the client
-            self.kube_client.current_cluster = cluster_name
-            
-            # Initialize cache for this cluster
-            if cluster_name not in self.data_cache:
-                self.data_cache[cluster_name] = {}
-            
-            # Load initial data
-            self.load_cluster_info()
-            
-            # Start polling timers
-            self.start_polling()
+            # Test connectivity before proceeding with more operations
+            try:
+                # Simple check that should be quick
+                test_cmd = ["kubectl", "api-versions"]
+                test_result = subprocess.run(
+                    test_cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                
+                if test_result.returncode != 0:
+                    # If this simple command fails, there's a connectivity issue
+                    self.error_occurred.emit(f"Connectivity issue with cluster: {test_result.stderr}")
+                    return
+                    
+                # Set the current cluster in the client
+                self.kube_client.current_cluster = cluster_name
+                
+                # Initialize cache for this cluster
+                if cluster_name not in self.data_cache:
+                    self.data_cache[cluster_name] = {}
+                
+                # Load initial data
+                self.load_cluster_info()
+                
+                # Start polling timers
+                self.start_polling()
+                
+            except Exception as e:
+                self.error_occurred.emit(f"Error connecting to cluster: {str(e)}")
+                return
 
     def start_polling(self):
         """Start polling for metrics and issues"""

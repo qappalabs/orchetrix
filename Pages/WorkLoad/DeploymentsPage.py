@@ -581,8 +581,40 @@ class DeploymentsPage(BaseResourcePage):
         self.table.setCellWidget(row, 7, action_container)
     
 
+    # def handle_row_click(self, row, column):
+    #     """Handle row selection when a table cell is clicked"""
+    #     if column != self.table.columnCount() - 1:  # Skip action column
+    #         # Select the row
+    #         self.table.selectRow(row)
+
     def handle_row_click(self, row, column):
-        """Handle row selection when a table cell is clicked"""
         if column != self.table.columnCount() - 1:  # Skip action column
             # Select the row
             self.table.selectRow(row)
+            
+            # Get resource details
+            resource_name = None
+            namespace = None
+            
+            # Get the resource name
+            if self.table.item(row, 1) is not None:
+                resource_name = self.table.item(row, 1).text()
+            
+            # Get namespace if applicable
+            if self.table.item(row, 2) is not None:
+                namespace = self.table.item(row, 2).text()
+            
+            # Show detail view
+            if resource_name:
+                # Find the ClusterView instance
+                parent = self.parent()
+                while parent and not hasattr(parent, 'detail_manager'):
+                    parent = parent.parent()
+                
+                if parent and hasattr(parent, 'detail_manager'):
+                    # Get singular resource type
+                    resource_type = self.resource_type
+                    if resource_type.endswith('s'):
+                        resource_type = resource_type[:-1]
+                    
+                    parent.detail_manager.show_detail(resource_type, resource_name, namespace)

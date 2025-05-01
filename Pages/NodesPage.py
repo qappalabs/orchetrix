@@ -191,15 +191,17 @@ class GraphWidget(QFrame):
         self.current_value = round(new_value, 1)
         self.value_label.setText(f"{self.current_value}{self.unit}")
         self.update()
-
     def paintEvent(self, event):
         super().paintEvent(event)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         width = self.width() - 32
-        height = 60
-        bottom = self.height() - 12
+        height = 55  # Slightly reduced height to allow for spacing
+        
+        # Increase the space between graph and x-axis by setting bottom higher
+        bottom = self.height() - 25  # More space at bottom for labels (increased from 15 to 25)
         top = bottom - height
+        
         gradient = QLinearGradient(0, top, 0, bottom)
         base_color = QColor(self.color)
         gradient.setColorAt(0, QColor(base_color.red(), base_color.green(), base_color.blue(), 100))
@@ -228,7 +230,20 @@ class GraphWidget(QFrame):
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setPen(QPen(QColor(self.color), 2))
         painter.drawPath(line_path)
-        painter.setPen(QPen(QColor(AppColors.TEXT_SUBTLE), 1))
+        
+        # Draw a subtle x-axis line to visually separate the graph from labels
+        painter.setPen(QPen(QColor(AppColors.BORDER_COLOR), 1, Qt.PenStyle.DotLine))
+        painter.drawLine(16, bottom + 1, 16 + width, bottom + 1)
+        
+        # Draw time labels with simpler approach for better visibility
+        # Use a bright, contrasting color for the time labels
+        painter.setPen(QPen(QColor("#FFFFFF"), 1))  # Bright white for maximum contrast
+        
+        # Use a larger, bold font for time labels
+        font = painter.font()
+        font.setPointSize(10)
+        font.setBold(True)
+        painter.setFont(font)
         
         # Improved time label formatting for x-axis
         now = datetime.datetime.now()
@@ -238,16 +253,32 @@ class GraphWidget(QFrame):
             now
         ]
         x_positions = [16, 16 + width/2, 16 + width]
+        
+        # Position time labels below the graph with adequate spacing
+        label_y_position = self.height() - 4  # Keep close to bottom but not cut off
+        
         for i, t in enumerate(times):
             time_str = t.strftime("%H:%M")
             x = x_positions[i]
-            painter.drawText(QRectF(x - 20, bottom + 2, 40, 10),
-                             Qt.AlignmentFlag.AlignCenter, time_str)
+            
+            # Draw text directly without background
+            painter.drawText(
+                QRectF(x - 25, label_y_position - 12, 50, 16),
+                Qt.AlignmentFlag.AlignCenter, 
+                time_str
+            )
         
+        # If no node is selected, show the placeholder text
         if not self.selected_node:
             painter.setPen(QPen(QColor(AppColors.TEXT_SUBTLE)))
-            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "Select a node to view metrics")
-
+            # Draw text but avoid overlapping with the time labels
+            text_rect = QRectF(
+                0, 
+                self.rect().top(), 
+                self.rect().width(), 
+                self.rect().height() - 20  # Stay above time labels
+            )
+            painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, "Select a node to view metrics")
 # No Data Available Widget
 class NoDataWidget(QWidget):
     """Widget shown when no data is available"""
@@ -304,25 +335,23 @@ class NodesPage(BaseResourcePage):
         """Set up the main UI elements for the Nodes page"""
         # Define headers with empty first column for checkbox (it will be hidden)
         # The empty string in first position will be hidden but we need it for structure
-        headers = ["", "Name", "CPU", "Memory", "Disk", "Taints", "Roles", "Version", "Age", "Status", ""]
+        headers = ["", "Name", "CPU", "Memory", "Disk", "Taints", "Roles", "Version", "Age", "Conditions", ""]
         sortable_columns = {1, 2, 3, 4, 5, 6, 7, 8, 9}  # Adjusted for checkbox column
         
         # Set up the base UI components with styles
         layout = super().setup_ui("Nodes", headers, sortable_columns)
         
+        # Remove default checkbox header and show column name instead
+        header_widget = self._item_widgets.get("header_widget")
+        if header_widget:
+            header_widget.hide()
+        # Clear select-all functionality
+        self.select_all_checkbox = None
+        
         # Manually hide the checkbox column
         if self.table:
             self.table.hideColumn(0)
             
-            # Apply custom style to table header to hide checkbox in header
-            header = self.table.horizontalHeader()
-            custom_style = CustomHeaderStyle()
-            header.setStyle(custom_style)
-            
-            # Remove the checkbox from header completely
-            if self.select_all_checkbox and self.select_all_checkbox.parent():
-                self.select_all_checkbox.setVisible(False)
-        
         # Now that we have a layout, set margins and spacing
         self.layout().setContentsMargins(16, 16, 16, 16)
         self.layout().setSpacing(16)
@@ -633,12 +662,43 @@ class NodesPage(BaseResourcePage):
         self.disk_graph.set_selected_node(node_data, node_name)
     
     def handle_row_click(self, row, column):
-        """Handle row selection when a table cell is clicked"""
         if column != self.table.columnCount() - 1:  # Skip action column
             # Select the row
             self.table.selectRow(row)
-            # Also select this node for graphs
             self.select_node_for_graphs(row)
+            # Get resource details
+            resource_name = None
+            namespace = None
+            
+            # Get the resource name
+            if self.table.item(row, 1) is not None:
+                resource_name = self.table.item(row, 1).text()
+            
+            # Get namespace if applicable
+            if self.table.item(row, 2) is not None:
+                namespace = self.table.item(row, 2).text()
+            
+            # Show detail view
+            if resource_name:
+                # Find the ClusterView instance
+                parent = self.parent()
+                while parent and not hasattr(parent, 'detail_manager'):
+                    parent = parent.parent()
+                
+                if parent and hasattr(parent, 'detail_manager'):
+                    # Get singular resource type
+                    resource_type = self.resource_type
+                    if resource_type.endswith('s'):
+                        resource_type = resource_type[:-1]
+                    
+                    parent.detail_manager.show_detail(resource_type, resource_name, namespace)
+    # def handle_row_click(self, row, column):
+    #     """Handle row selection when a table cell is clicked"""
+    #     if column != self.table.columnCount() - 1:  # Skip action column
+    #         # Select the row
+    #         self.table.selectRow(row)
+    #         # Also select this node for graphs
+    #         self.select_node_for_graphs(row)
             
     def load_data(self):
         """Override to not use the base implementation"""

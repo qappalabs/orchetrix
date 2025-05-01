@@ -124,7 +124,24 @@ class StorageClassesPage(BaseResourcePage):
         self.table.setCellWidget(row, len(columns) + 1, action_container)
     
     def handle_row_click(self, row, column):
-        """Handle row selection when a table cell is clicked"""
         if column != self.table.columnCount() - 1:  # Skip action column
             # Select the row
             self.table.selectRow(row)
+            
+            # Get resource details
+            resource_name = None
+            
+            # Get the resource name
+            if self.table.item(row, 1) is not None:
+                resource_name = self.table.item(row, 1).text()
+            
+            # Show detail view
+            if resource_name:
+                # Find the ClusterView instance
+                parent = self.parent()
+                while parent and not hasattr(parent, 'detail_manager'):
+                    parent = parent.parent()
+                
+                if parent and hasattr(parent, 'detail_manager'):
+                    # StorageClasses are cluster-wide resources, no namespace needed
+                    parent.detail_manager.show_detail("storageclass", resource_name)
