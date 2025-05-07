@@ -6,24 +6,22 @@ Includes icon detection, better error handling, and more metadata from the API.
 from PyQt6.QtWidgets import (
     QHeaderView, QWidget, QLabel, QHBoxLayout,
     QToolButton, QMenu, QVBoxLayout, QTableWidgetItem, 
-    QProgressBar, QScrollBar, QAbstractSlider
+    QProgressBar, QAbstractSlider, QPushButton,QMessageBox,QDialog
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt6.QtGui import QColor, QIcon, QPixmap
+from PyQt6.QtGui import QColor, QPixmap
 
 import requests
 import json
 import os
 import re
 import hashlib
-import time
-import shutil
 from urllib.parse import urljoin
-from datetime import datetime
 
 from base_components.base_components import SortableTableWidgetItem
 from base_components.base_resource_page import BaseResourcePage
 from UI.Styles import AppColors, AppStyles
+from utils.helm_utils import ChartInstallDialog, install_helm_chart
 
 
 class ChartDataThread(QThread):
@@ -44,10 +42,6 @@ class ChartDataThread(QThread):
         # Repository icons cache (repo_name -> icon_path)
         self.repository_icons = {}
         
-    def __del__(self):
-        """Clean up resources when object is deleted"""
-        self.cleanup_threads()
-    
     def setup_directories(self):
         """Set up directories for storing icons and cache"""
         # Create directory for icons
@@ -65,7 +59,7 @@ class ChartDataThread(QThread):
                 # Create a session for cookies and headers
                 session = requests.Session()
                 headers = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                     'Accept': 'application/json'
                 }
                 
@@ -78,18 +72,6 @@ class ChartDataThread(QThread):
                     print(f"Downloaded default Helm icon to {self.default_helm_icon_path}")
             except Exception as e:
                 print(f"Error downloading default Helm icon: {e}")
-        
-    def cleanup_threads(self):
-        """Safely clean up any running threads"""
-        # List of thread attributes to clean up
-        thread_attrs = ['api_thread', 'download_thread']
-        
-        # Stop each thread safely
-        for attr in thread_attrs:
-            if hasattr(self, attr):
-                thread = getattr(self, attr)
-                if thread and thread.isRunning():
-                    thread.wait(300)  # Wait up to 300ms for thread to finish
 
     def run(self):
         """Execute the API request and emit results."""
@@ -99,21 +81,21 @@ class ChartDataThread(QThread):
             
             # Use a more browser-like user agent
             headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 'Accept': 'application/json',
                 'Content-Type': 'application/json'
             }
             
-            # Try different API methods: POST first (seems more reliable based on paste.txt)
+            # Try different API methods: POST first (seems more reliable)
             charts_data = []
-            is_more_available = True  # ALWAYS assume more data is available for pagination
+            is_more_available = True
             
             # First try POST method
             try:
                 post_endpoint = 'https://artifacthub.io/api/v1/packages/search'
                 
                 # Build search parameters
-                search_query = "apache -solr -hadoop"  # Default query from paste.txt
+                search_query = "apache -solr -hadoop"  # Default query
                 if self.use_search and self.search_term:
                     search_query = self.search_term
                 
@@ -157,7 +139,7 @@ class ChartDataThread(QThread):
                     
                     for endpoint in possible_api_endpoints:
                         # Parameters for the search
-                        search_query = "apache -solr -hadoop"  # Default query from paste.txt
+                        search_query = "apache -solr -hadoop"  # Default query
                         if self.use_search and self.search_term:
                             search_query = self.search_term
                             
@@ -186,54 +168,7 @@ class ChartDataThread(QThread):
                 except Exception as e:
                     print(f"Error with GET method: {e}")
             
-            # If both API methods failed, try the old endpoint as a fallback
-            if not charts_data:
-                try:
-                    legacy_endpoint = "https://artifacthub.io/api/v1/helm-exporter"
-                    print(f"Trying legacy endpoint: {legacy_endpoint}")
-                    
-                    response = session.get(legacy_endpoint, headers=headers, timeout=15)
-                    
-                    if response.status_code == 200:
-                        all_data = response.json()
-                        
-                        # Calculate available data slice
-                        start = self.offset
-                        end = min(start + self.limit, len(all_data))
-                        
-                        # Check if more data is available beyond this request
-                        is_more_available = end < len(all_data)
-                        
-                        # Process requested slice of data
-                        charts_data = []
-                        for item in all_data[start:end]:
-                            # Extract data with more robust error handling
-                            chart = {
-                                "name": item.get("name", "Unknown"),
-                                "description": item.get("description", "No description available"),
-                                "version": item.get("version", "N/A"),
-                                "app_version": item.get("app_version", "N/A"),
-                                "created_at": item.get("created_at", ""),
-                                "icon_path": None
-                            }
-                            
-                            # Handle repository data with better error checking
-                            repository = item.get("repository", {})
-                            if isinstance(repository, dict):
-                                chart["repository"] = repository.get("name", "Unknown")
-                                chart["repository_url"] = repository.get("url", "")
-                            else:
-                                chart["repository"] = "Unknown"
-                                chart["repository_url"] = ""
-                            
-                            charts_data.append(chart)
-                        
-                        print(f"Legacy endpoint successful, found {len(charts_data)} charts. More available: {is_more_available}")
-                except Exception as e:
-                    print(f"Error with legacy endpoint: {e}")
-            
             # Force more data available flag to true if we got any data at all
-            # This ensures we can always try to load more data when scrolling
             if charts_data:
                 is_more_available = True
             
@@ -343,7 +278,7 @@ class ChartDataThread(QThread):
             # Get package name for debugging
             package_name = package.get('name', 'unknown')
             
-            # Specifically target logo_image_id field
+            # Check for logo_image_id first (most reliable)
             if 'logo_image_id' in package and package['logo_image_id']:
                 logo_id = package.get('logo_image_id')
                 if logo_id:
@@ -352,80 +287,58 @@ class ChartDataThread(QThread):
             # If no logo_image_id, check other possible icon fields
             if not icon_url:
                 # Check for direct logoURL or logo field
-                if 'logoURL' in package and package['logoURL']:
-                    icon_url = package.get('logoURL')
-                elif 'logo_url' in package and package['logo_url']:
-                    icon_url = package.get('logo_url')
-                elif 'logoImageId' in package and package['logoImageId']:
-                    logo_id = package.get('logoImageId')
-                    if logo_id:
-                        icon_url = f"https://artifacthub.io/image/{logo_id}"
-                elif 'logo' in package and package['logo']:
-                    icon_url = package.get('logo')
-                elif 'icon' in package and package['icon']:
-                    icon_url = package.get('icon')
-                    
-                # Check for nested structures
-                elif 'repository' in package and isinstance(package['repository'], dict):
-                    repo = package['repository']
-                    
-                    # Save repository logo for future use as fallback
-                    repo_name = repo.get('name')
-                    if repo_name:
-                        # Look for repository logo
-                        repo_logo_id = None
-                        if 'logo_image_id' in repo and repo['logo_image_id']:
-                            repo_logo_id = repo['logo_image_id']
-                        elif 'logoImageId' in repo and repo['logoImageId']:
-                            repo_logo_id = repo['logoImageId']
-                        
-                        if repo_logo_id and repo_name not in self.repository_icons:
-                            repo_icon_url = f"https://artifacthub.io/image/{repo_logo_id}"
-                            # Download the repository icon
-                            try:
-                                repo_icon_filename = f"repo_{repo_name}_{hashlib.md5(repo_icon_url.encode()).hexdigest()[:8]}.png"
-                                repo_icon_path = os.path.join(self.icons_dir, repo_icon_filename)
-                                
-                                if not os.path.exists(repo_icon_path):
-                                    repo_icon_response = session.get(repo_icon_url, headers=headers, timeout=10)
-                                    if repo_icon_response.status_code == 200:
-                                        with open(repo_icon_path, 'wb') as f:
-                                            f.write(repo_icon_response.content)
-                                        self.repository_icons[repo_name] = repo_icon_path
-                                else:
-                                    self.repository_icons[repo_name] = repo_icon_path
-                            except Exception as e:
-                                print(f"Error downloading repository icon for '{repo_name}': {e}")
-                                self.repository_icons[repo_name] = 'N/A'
-                    
-                    # Try to use repo logo fields for the package icon if not found elsewhere
-                    if not icon_url:
-                        if 'logoURL' in repo and repo['logoURL']:
-                            icon_url = repo.get('logoURL')
-                        elif 'logo_url' in repo and repo['logo_url']:
-                            icon_url = repo.get('logo_url')
-                        elif 'logo_image_id' in repo and repo['logo_image_id']:
-                            logo_id = repo.get('logo_image_id')
+                for field in ['logoURL', 'logo_url', 'logoImageId', 'logo', 'icon']:
+                    if field in package and package[field]:
+                        if field == 'logoImageId':
+                            logo_id = package.get(field)
                             if logo_id:
                                 icon_url = f"https://artifacthub.io/image/{logo_id}"
-                        elif 'logo' in repo and repo['logo']:
-                            icon_url = repo.get('logo')
-                
-                # Check for chart metadata
-                elif 'chart' in package and isinstance(package['chart'], dict):
-                    chart = package['chart']
-                    if 'logo' in chart and chart['logo']:
-                        icon_url = chart.get('logo')
-                    elif 'icon' in chart and chart['icon']:
-                        icon_url = chart.get('icon')
-                
-                # Try additional nested paths (based on actual API structure)
-                elif 'content' in package and isinstance(package['content'], dict):
-                    content = package['content']
-                    if 'logo' in content and content['logo']:
-                        icon_url = content.get('logo')
-                    elif 'icon' in content and content['icon']:
-                        icon_url = content.get('icon')
+                        else:
+                            icon_url = package.get(field)
+                        break
+                    
+                # Check for nested structures if still no icon
+                if not icon_url:
+                    # Check repository
+                    if 'repository' in package and isinstance(package['repository'], dict):
+                        repo = package['repository']
+                        
+                        # Save repository logo for future use as fallback
+                        repo_name = repo.get('name')
+                        if repo_name:
+                            # Look for repository logo
+                            repo_logo_id = repo.get('logo_image_id') or repo.get('logoImageId')
+                            
+                            if repo_logo_id and repo_name not in self.repository_icons:
+                                repo_icon_url = f"https://artifacthub.io/image/{repo_logo_id}"
+                                # Download the repository icon
+                                try:
+                                    repo_icon_filename = f"repo_{repo_name}_{hashlib.md5(repo_icon_url.encode()).hexdigest()[:8]}.png"
+                                    repo_icon_path = os.path.join(self.icons_dir, repo_icon_filename)
+                                    
+                                    if not os.path.exists(repo_icon_path):
+                                        repo_icon_response = session.get(repo_icon_url, headers=headers, timeout=10)
+                                        if repo_icon_response.status_code == 200:
+                                            with open(repo_icon_path, 'wb') as f:
+                                                f.write(repo_icon_response.content)
+                                            self.repository_icons[repo_name] = repo_icon_path
+                                    else:
+                                        self.repository_icons[repo_name] = repo_icon_path
+                                except Exception as e:
+                                    print(f"Error downloading repository icon for '{repo_name}': {e}")
+                                    self.repository_icons[repo_name] = 'N/A'
+                        
+                        # Try to use repo logo fields for the package icon if not found elsewhere
+                        if not icon_url:
+                            for field in ['logoURL', 'logo_url', 'logo_image_id', 'logo']:
+                                if field in repo and repo[field]:
+                                    if field == 'logo_image_id':
+                                        logo_id = repo.get(field)
+                                        if logo_id:
+                                            icon_url = f"https://artifacthub.io/image/{logo_id}"
+                                    else:
+                                        icon_url = repo.get(field)
+                                    break
             
             # If icon URL starts with /, it's a relative URL
             if icon_url and icon_url.startswith('/'):
@@ -493,7 +406,6 @@ class ChartsPage(BaseResourcePage):
     """
     Displays Helm charts with enhanced data from ArtifactHub API.
     """
-    
     def __init__(self, parent=None):
         super().__init__(parent)
         self.resource_type = "charts"  # Set resource type for detail page
@@ -508,14 +420,9 @@ class ChartsPage(BaseResourcePage):
         self._loading_timer.timeout.connect(self._reset_loading_state)
         self._loading_timer.setSingleShot(True)
         
-        # Track total items available (for pagination)
-        self.total_items = 1000  # Force a large number to ensure pagination works
-        
         # Initialize the UI
         self.setup_page_ui()
         
-    # Removed Helm installation check since it's not needed for charts browser
-    
     def _reset_loading_state(self):
         """Reset loading state if it gets stuck"""
         if hasattr(self, 'is_loading') and self.is_loading:
@@ -580,40 +487,38 @@ class ChartsPage(BaseResourcePage):
         if hasattr(self, 'search_bar'):
             search_text = self.search_bar.text().lower()
         
+        if not search_text:
+            # If no search text, show all rows
+            for row in range(self.table.rowCount()):
+                self.table.setRowHidden(row, False)
+            return
+            
         # Hide rows that don't match the filters
         for row in range(self.table.rowCount()):
-            show_row = True
+            row_matches = False
             
-            # Apply search filter if text is entered
-            if search_text:
-                row_matches = False
+            # Search through all displayed columns, skipping icon and actions columns
+            for col in range(1, self.table.columnCount() - 1):
+                # Check regular table items
+                item = self.table.item(row, col)
+                if item and search_text in item.text().lower():
+                    row_matches = True
+                    break
                 
-                # Search through all displayed columns, including the name column (column 0)
-                # Skip only the actions column (the last column)
-                for col in range(1, self.table.columnCount() - 1):  # Skip icon and actions columns
-                    # Check regular table items
-                    item = self.table.item(row, col)
-                    if item and search_text in item.text().lower():
+                # Check for cell widgets (like status labels)
+                cell_widget = self.table.cellWidget(row, col)
+                if cell_widget:
+                    widget_text = ""
+                    # Handle widgets which contain QLabels
+                    for label in cell_widget.findChildren(QLabel):
+                        widget_text += label.text() + " "
+                    
+                    if search_text in widget_text.lower():
                         row_matches = True
                         break
-                    
-                    # Check for cell widgets (like status labels)
-                    cell_widget = self.table.cellWidget(row, col)
-                    if cell_widget:
-                        widget_text = ""
-                        # Handle widgets which contain QLabels
-                        for label in cell_widget.findChildren(QLabel):
-                            widget_text += label.text() + " "
-                        
-                        if search_text in widget_text.lower():
-                            row_matches = True
-                            break
-                
-                if not row_matches:
-                    show_row = False
             
-            # Show or hide the row based on filters
-            self.table.setRowHidden(row, not show_row)
+            # Show or hide the row based on matches
+            self.table.setRowHidden(row, not row_matches)
 
     def check_scroll_position(self, value):
         """Check if user has scrolled to the bottom and load more data if needed"""
@@ -625,7 +530,6 @@ class ChartsPage(BaseResourcePage):
         
         # Get scrollbar values
         max_value = scrollbar.maximum()
-        page_step = scrollbar.pageStep()
         current_value = value
         
         # Calculate how far we've scrolled as a percentage (0.0 to 1.0)
@@ -635,24 +539,13 @@ class ChartsPage(BaseResourcePage):
             
         scroll_percentage = current_value / max_value
         
-        # Print debugging info occasionally when scroll_percentage changes significantly
-        if int(scroll_percentage * 10) != getattr(self, '_last_scroll_debug', -1):
-            self._last_scroll_debug = int(scroll_percentage * 10)
-            print(f"Scroll position: {scroll_percentage:.2%}, current={current_value}, max={max_value}")
-            print(f"Loading state: is_loading={self.is_loading}, is_loading_more={self.is_loading_more}")
-            print(f"Data state: items={len(self.resources)}, offset={self.offset}, more_available={self.is_more_available}")
-        
-        # ALWAYS try to load more data when we're over 70% scrolled
-        # This is the key fix - even if is_more_available is False, we try anyway
+        # ALWAYS try to load more data when we're over 65% scrolled
         if scroll_percentage >= 0.65:
-            print(f"Reached 65% scroll threshold, forcing load more data (even if API says no more)...")
-            
             # Force is_more_available to True to ensure we try loading more
             self.is_more_available = True
             
             # Call load_more_data if we're not already loading
             if not self.is_loading_more and not self.is_loading:
-                print("Calling load_more_data()...")
                 self.load_more_data()
     
     def configure_columns(self):
@@ -811,8 +704,7 @@ class ChartsPage(BaseResourcePage):
         self.table.setSortingEnabled(True)
         
         # Apply any existing filters
-        if hasattr(self, '_apply_filters'):
-            self._apply_filters()
+        self._apply_filters()
     
     def on_more_data_loaded(self, data, is_more_available):
         """Handle loaded chart data for load-more operation"""
@@ -862,6 +754,9 @@ class ChartsPage(BaseResourcePage):
             # Update the item count without pagination indication
             self.items_count.setText(f"{len(self.resources)} items (end of results)")
         
+        # Apply any existing filters
+        self._apply_filters()
+    
     def on_search_completed(self, search_results, search_term):
         """Handle search results"""
         # Clear the search indicator
@@ -869,6 +764,7 @@ class ChartsPage(BaseResourcePage):
         
         # Store results
         self.resources = search_results
+        self.is_searching = False
         
         # Display results
         self.table.setSortingEnabled(False)
@@ -882,6 +778,7 @@ class ChartsPage(BaseResourcePage):
         """Handle search error"""
         # Clear the loading indicator
         self.table.setRowCount(0)
+        self.is_searching = False
         
         # Show error message
         error_row = 0
@@ -988,7 +885,7 @@ class ChartsPage(BaseResourcePage):
             chart: Chart data dictionary
         """
         # Set row height
-        self.table.setRowHeight(row, 42)  # Further reduced from 45
+        self.table.setRowHeight(row, 42)
         
         # Extract chart data with proper defaults
         chart_name = chart.get("name", "Unknown")
@@ -1004,13 +901,13 @@ class ChartsPage(BaseResourcePage):
         # Create icon widget for column 0
         icon_widget = QWidget()
         icon_layout = QHBoxLayout(icon_widget)
-        icon_layout.setContentsMargins(0, 0, 0, 0)  # Zero padding
-        icon_layout.setSpacing(0)  # No spacing
+        icon_layout.setContentsMargins(0, 0, 0, 0)
+        icon_layout.setSpacing(0)
         icon_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         # Add icon if available
         icon_label = QLabel()
-        icon_label.setFixedSize(28, 28)  # Further reduced from 32x32
+        icon_label.setFixedSize(28, 28)
         icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         icon_label.setStyleSheet("""
             QLabel {
@@ -1027,7 +924,7 @@ class ChartsPage(BaseResourcePage):
             try:
                 pixmap = QPixmap(icon_path)
                 if not pixmap.isNull():
-                    pixmap = pixmap.scaled(24, 24, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)  # Further reduced from 28x28
+                    pixmap = pixmap.scaled(24, 24, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
                     icon_label.setPixmap(pixmap)
                 else:
                     # If pixmap is null, show a placeholder text
@@ -1035,7 +932,7 @@ class ChartsPage(BaseResourcePage):
                     icon_label.setStyleSheet("""
                         QLabel {
                             color: #aaaaaa;
-                            font-size: 14px;  /* Further decreased */
+                            font-size: 14px;
                             border-radius: 3px;
                             background-color: rgba(255, 255, 255, 0.05);
                             border: none;
@@ -1049,7 +946,7 @@ class ChartsPage(BaseResourcePage):
                 icon_label.setStyleSheet("""
                     QLabel {
                         color: #aaaaaa;
-                        font-size: 14px;  /* Further decreased */
+                        font-size: 14px;
                         border-radius: 3px;
                         background-color: rgba(255, 255, 255, 0.05);
                         border: none;
@@ -1063,7 +960,7 @@ class ChartsPage(BaseResourcePage):
             icon_label.setStyleSheet("""
                 QLabel {
                     color: #aaaaaa;
-                    font-size: 14px;  /* Further decreased */
+                    font-size: 14px;
                     border-radius: 3px;
                     background-color: rgba(255, 255, 255, 0.05);
                     border: none;
@@ -1104,18 +1001,18 @@ class ChartsPage(BaseResourcePage):
         action_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         action_layout.addWidget(action_button)
         action_container.setStyleSheet("background-color: transparent;")
-        self.table.setCellWidget(row, len(columns) + 1, action_container)  # +1 for icon column
-    
+        self.table.setCellWidget(row, len(columns) + 1, action_container)
+   
     def _create_action_button(self, row, chart_name):
-        """Create an action button with view details action"""
+        """Create an action button with view details and install options"""
         button = QToolButton()
         button.setText("⋮")
-        button.setFixedWidth(20)  # Further decreased from 24
+        button.setFixedWidth(20)
         button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         button.setStyleSheet("""
             QToolButton {
                 color: #888888;
-                font-size: 14px;  /* Further decreased from 16px */
+                font-size: 14px;
                 background: transparent;
                 padding: 0px;
                 margin: 0;
@@ -1145,9 +1042,9 @@ class ChartsPage(BaseResourcePage):
             }
             QMenu::item {
                 color: #ffffff;
-                padding: 6px 20px 6px 24px;  /* Reduced padding */
+                padding: 6px 20px 6px 24px;
                 border-radius: 3px;
-                font-size: 12px;  /* Reduced font size */
+                font-size: 12px;
             }
             QMenu::item:selected {
                 background-color: rgba(33, 150, 243, 0.2);
@@ -1159,11 +1056,63 @@ class ChartsPage(BaseResourcePage):
         view_action = menu.addAction("View Details")
         view_action.triggered.connect(lambda: self._handle_view_details(row))
         
+        # Add install action
+        install_action = menu.addAction("Install")
+        install_action.triggered.connect(lambda: self._handle_action("Install", row))
+    
+        
         button.setMenu(menu)
         return button
     
+    # Update the _handle_action method
+    def _handle_action(self, action, row):
+        """Handle action button clicks in the charts page"""
+        if row >= len(self.resources):
+            return
+            
+        chart = self.resources[row]
+        chart_name = chart.get("name", "Unknown")
+        
+        if action == "View Details":
+            self._handle_view_details(row)
+        elif action == "Install":
+            self._install_chart(chart)
+
+    # Add the installation method
+    def _install_chart(self, chart):
+        """Display installation dialog and install the chart"""
+        chart_name = chart.get("name", "Unknown")
+        repository = chart.get("repository", "")
+        
+        # Create and show the installation dialog
+        dialog = ChartInstallDialog(chart_name, repository, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # Get installation options
+            options = dialog.get_values()
+            
+            # Install the chart
+            success, message = install_helm_chart(chart_name, repository, options, self)
+            
+            # Show result message
+            if success:
+                QMessageBox.information(self, "Installation Successful", message)
+                
+                # Try to find the parent ClusterView to refresh releases page
+                parent = self.parent()
+                while parent and not hasattr(parent, 'stacked_widget'):
+                    parent = parent.parent()
+                    
+                if parent and hasattr(parent, 'pages') and "Releases" in parent.pages:
+                    releases_page = parent.pages["Releases"]
+                    if hasattr(releases_page, 'load_data'):
+                        # Schedule refresh to give the cluster time to register the release
+                        from PyQt6.QtCore import QTimer
+                        QTimer.singleShot(1000, releases_page.load_data)
+            else:
+                QMessageBox.critical(self, "Installation Failed", message)
+    
     def _handle_view_details(self, row):
-        """Handle view details action, showing detail page"""
+        """Handle view details action with robust file path handling for Windows compatibility"""
         if row >= len(self.resources):
             return
             
@@ -1176,10 +1125,9 @@ class ChartsPage(BaseResourcePage):
             parent = parent.parent()
         
         if parent and hasattr(parent, 'detail_manager'):
-            # Prepare data for the detail page
-            # Include more metadata from the enhanced API
+            # Prepare enhanced data for the detail page with more careful file handling
             resource_data = {
-                "kind": "Chart",
+                "kind": "HelmChart",
                 "apiVersion": "helm.sh/v1",
                 "metadata": {
                     "name": chart_name,
@@ -1187,13 +1135,14 @@ class ChartsPage(BaseResourcePage):
                     "labels": {
                         "repository": chart.get("repository", "Unknown"),
                         "version": chart.get("version", ""),
-                        "app_version": chart.get("app_version", ""),
+                        "appVersion": chart.get("app_version", ""),
                         "stars": chart.get("stars", "0")
                     },
                     "annotations": {
-                        "description": chart.get("description", "")[:200],  # Limit description length
+                        "description": chart.get("description", ""),
                         "repository_url": chart.get("repository_url", ""),
-                        "package_id": chart.get("package_id", "")
+                        "package_id": chart.get("package_id", ""),
+                        "source": "ArtifactHub"
                     }
                 },
                 "spec": {
@@ -1206,10 +1155,13 @@ class ChartsPage(BaseResourcePage):
                 }
             }
             
-            # Add icon data if available
-            icon_path = chart.get("icon_path")
-            if icon_path and os.path.exists(icon_path):
-                resource_data["metadata"]["annotations"]["icon_path"] = icon_path
+            # Add icon data only if file exists to prevent file not found errors
+            try:
+                icon_path = chart.get("icon_path")
+                if icon_path and isinstance(icon_path, str) and os.path.exists(icon_path):
+                    resource_data["metadata"]["annotations"]["icon_path"] = icon_path
+            except Exception as e:
+                print(f"Error checking icon path: {e}")
             
             # Create a global reference to the current chart data for detail page
             import json

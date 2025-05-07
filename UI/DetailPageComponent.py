@@ -9,7 +9,8 @@ from PyQt6.QtWidgets import (
     QTextEdit, QFrame, QScrollArea, QTableWidget, QTableWidgetItem, 
     QHeaderView, QSplitter, QGraphicsDropShadowEffect, QToolButton,
     QListWidget, QListWidgetItem, QSizePolicy, QApplication, QStyleOption,
-    QStyle
+    QStyle, QMessageBox, QDialog, QDialogButtonBox, QComboBox, QLineEdit,
+    QFormLayout, QProgressDialog
 )
 from PyQt6.QtCore import (
     Qt, QPropertyAnimation, QRect, QEasingCurve, QSize, QTimer, pyqtSignal,
@@ -21,10 +22,20 @@ from PyQt6.QtGui import (
     QTextCursor, QPainter, QBrush, QPen, QLinearGradient, QPainterPath
 )
 
+from utils.helm_utils import ChartInstallDialog, install_helm_chart
+
 from UI.Styles import AppStyles, AppColors, AppConstants
 import yaml
 import json
 import difflib
+import subprocess
+import os
+import tempfile
+import platform
+import time
+import base64
+import shutil
+from datetime import datetime
 
 
 class YamlHighlighter(QSyntaxHighlighter):
@@ -217,10 +228,10 @@ class ModernBackButton(QToolButton):
         painter.drawText(QRect(0, 0, self.width(), self.height()), 
                         Qt.AlignmentFlag.AlignCenter, self.text())
 
+
 class DetailPage(QWidget):
     back_signal = pyqtSignal()
     resource_updated_signal = pyqtSignal(str, str, str)
-    
     def __init__(self, parent=None):
         super().__init__(parent)
         self.parent_window = parent
@@ -293,7 +304,7 @@ class DetailPage(QWidget):
         self.animation_in_progress = False
         if self.slide_animation.direction() == QAbstractAnimation.Direction.Backward and not self.is_minimized:
             self.hide()
-    
+
     def create_header(self):
         self.header = QWidget()
         self.header.setFixedHeight(60)
@@ -317,6 +328,8 @@ class DetailPage(QWidget):
             font-weight: bold;
             margin-left: 10px;
         """)
+        
+        # Remove the action button from header
         
         self.loading_indicator = QFrame()
         self.loading_indicator.setFixedWidth(100)
@@ -375,7 +388,6 @@ class DetailPage(QWidget):
         header_layout.addWidget(self.loading_indicator)
         
         self.main_layout.addWidget(self.header)
-    
     def create_resize_handle(self):
         self.resize_handle = ModernResizeHandle(self)
         self.resize_handle.show()
@@ -508,6 +520,7 @@ class DetailPage(QWidget):
         self.tab_widget.currentChanged.connect(self.handle_tab_changed)
     
     def create_overview_summary(self):
+        """Create the overview summary with install/upgrade button"""
         self.resource_name_label = QLabel("Resource Name")
         self.resource_name_label.setStyleSheet(f"""
             font-size: 20px;
@@ -528,9 +541,48 @@ class DetailPage(QWidget):
             color: {AppColors.TEXT_SUBTLE};
         """)
         
-        self.overview_layout.addWidget(self.resource_name_label)
-        self.overview_layout.addWidget(self.resource_info_label)
-        self.overview_layout.addWidget(self.creation_time_label)
+        # Create a container for header info and action button
+        header_container = QWidget()
+        header_layout = QHBoxLayout(header_container)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Create a vertical layout for the left side (name, info, creation time)
+        left_layout = QVBoxLayout()
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(5)
+        
+        left_layout.addWidget(self.resource_name_label)
+        left_layout.addWidget(self.resource_info_label)
+        left_layout.addWidget(self.creation_time_label)
+        
+        header_layout.addLayout(left_layout)
+        header_layout.addStretch()
+        
+        # Add action button (Install/Upgrade)
+        self.action_button = QPushButton("Install")
+        self.action_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {AppColors.ACCENT_GREEN};
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 20px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: #45a049;
+            }}
+            QPushButton:pressed {{
+                background-color: #3d8b40;
+            }}
+        """)
+        self.action_button.clicked.connect(self.handle_action_button)
+        self.action_button.hide()  # Hidden by default
+        
+        header_layout.addWidget(self.action_button)
+        
+        # Add the header container to the main layout
+        self.overview_layout.addWidget(header_container)
         
         divider = QFrame()
         divider.setFrameShape(QFrame.Shape.HLine)
@@ -542,6 +594,7 @@ class DetailPage(QWidget):
         """)
         self.overview_layout.addWidget(divider)
         
+        # Continue with the rest of your existing code...
         self.status_section = QWidget()
         self.status_layout = QVBoxLayout(self.status_section)
         self.status_layout.setContentsMargins(0, 0, 0, 0)
@@ -660,6 +713,7 @@ class DetailPage(QWidget):
         self.overview_layout.addWidget(self.specific_section)
         self.overview_layout.addStretch()
     
+    
     def create_yaml_editor(self):
         yaml_toolbar = QWidget()
         yaml_toolbar.setFixedHeight(40)
@@ -757,8 +811,10 @@ class DetailPage(QWidget):
         
         self.events_layout.addWidget(self.events_list)
     
+
+    
     def show_detail(self, resource_type, resource_name, namespace=None):
-        """Show detail for resource with improved event handling"""
+        """Show detail for resource with action button in overview"""
         self.resource_type = resource_type
         self.resource_name = resource_name
         self.resource_namespace = namespace
@@ -769,6 +825,48 @@ class DetailPage(QWidget):
         self.title_label.setText(title_text)
         
         self.clear_content()
+        
+        # Show/Hide action button based on resource type
+        if resource_type == "chart":
+            self.action_button.setText("Install")
+            self.action_button.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {AppColors.ACCENT_GREEN};
+                    color: white;
+                    border: none;
+                    border-radius: 4px;
+                    padding: 8px 20px;
+                    font-weight: bold;
+                }}
+                QPushButton:hover {{
+                    background-color: #45a049;
+                }}
+                QPushButton:pressed {{
+                    background-color: #3d8b40;
+                }}
+            """)
+            self.action_button.show()
+        elif resource_type == "helmrelease":
+            self.action_button.setText("Upgrade")
+            self.action_button.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {AppColors.ACCENT_BLUE};
+                    color: white;
+                    border: none;
+                    border-radius: 4px;
+                    padding: 8px 20px;
+                    font-weight: bold;
+                }}
+                QPushButton:hover {{
+                    background-color: #0078e7;
+                }}
+                QPushButton:pressed {{
+                    background-color: #0063b1;
+                }}
+            """)
+            self.action_button.show()
+        else:
+            self.action_button.hide()
         
         self.loading_indicator.show()
         self.loading_animation.start()
@@ -784,6 +882,74 @@ class DetailPage(QWidget):
                 self.parent_window.removeEventFilter(self)
                 # Install our event filter
                 self.parent_window.installEventFilter(self)
+    def handle_action_button(self):
+        """Handle install/upgrade button click based on resource type"""
+        if self.resource_type == "chart":
+            self._install_chart()
+            # pass
+        elif self.resource_type == "helmrelease":
+            self._upgrade_chart()
+            # pass
+
+    def _install_chart(self):
+        """Display installation dialog and install the chart"""
+        # Get chart info
+        chart_name = self.resource_name
+        repository = None
+        
+        # Try to get repository from current_data
+        if self.current_data:
+            spec = self.current_data.get("spec", {})
+            metadata = self.current_data.get("metadata", {})
+            labels = metadata.get("labels", {})
+            
+            repository = spec.get("repository") or labels.get("repository")
+        
+        # Create and show the installation dialog
+        dialog = ChartInstallDialog(chart_name, repository, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # Get installation options
+            options = dialog.get_values()
+            
+            # Install the chart
+            success, message = install_helm_chart(chart_name, repository, options, self)
+            
+            # Show result message
+            if success:
+                QMessageBox.information(self, "Installation Successful", message)
+                
+                # Emit signal to refresh the Releases page
+                self.resource_updated_signal.emit(
+                    "helmrelease",
+                    options["release_name"],
+                    options["namespace"]
+                )
+            else:
+                QMessageBox.critical(self, "Installation Failed", message)
+
+    def _upgrade_chart(self):
+        """Display upgrade dialog and upgrade the release"""
+        # Find the Releases page instance first
+        releases_page = None
+        for widget in QApplication.allWidgets():
+            if isinstance(widget, QWidget) and hasattr(widget, 'upgrade_release') and hasattr(widget, 'resource_type'):
+                if getattr(widget, 'resource_type', None) == "helmreleases":
+                    releases_page = widget
+                    break
+        
+        if not releases_page:
+            QMessageBox.information(
+                self,
+                "Upgrade",
+                "Could not find releases manager. Chart upgrade functionality is currently unavailable."
+            )
+            return
+        
+        # Now call the upgrade_release method from the ReleasesPage
+        releases_page.upgrade_release(self.resource_name, self.resource_namespace)
+        
+        # After upgrading, reload the details
+        QTimer.singleShot(500, self.load_resource_details)
     def handle_tab_changed(self, index):
         tab_name = self.tab_widget.tabText(index)
         
@@ -928,8 +1094,304 @@ class DetailPage(QWidget):
         self.events_list.clear()
         self.current_data = None
     
+
     def load_resource_details(self):
+        """Load detailed information about a specific resource with robust chart support"""
+        if not self.resource_type or not self.resource_name:
+            return
+        
         try:
+            # Special handling for Helm releases
+            if self.resource_type == "helmrelease":
+                import subprocess
+                import json
+                import platform
+                import os
+                import shutil
+                
+                # Find the helm binary
+                helm_exe = "helm.exe" if platform.system() == "Windows" else "helm"
+                helm_path = shutil.which(helm_exe)
+                
+                # Check common installation locations if not found in PATH
+                if not helm_path:
+                    common_paths = []
+                    if platform.system() == "Windows":
+                        common_paths = [
+                            os.path.expanduser("~\\helm\\helm.exe"),
+                            "C:\\Program Files\\Helm\\helm.exe",
+                            "C:\\helm\\helm.exe",
+                            os.path.expanduser("~\\.windows-package-manager\\helm\\helm.exe"),
+                            os.path.expanduser("~\\AppData\\Local\\Programs\\Helm\\helm.exe")
+                        ]
+                    else:
+                        common_paths = [
+                            "/usr/local/bin/helm",
+                            "/usr/bin/helm",
+                            os.path.expanduser("~/bin/helm"),
+                            "/opt/homebrew/bin/helm"  # Common on macOS with Homebrew
+                        ]
+                    
+                    for path in common_paths:
+                        if os.path.isfile(path):
+                            helm_path = path
+                            break
+                
+                if not helm_path:
+                    raise Exception("Helm executable not found. Please install Helm to view release details.")
+                
+                # Build the command to get release details
+                cmd = [
+                    helm_path, "status", 
+                    self.resource_name, 
+                    "-o", "json"
+                ]
+                
+                if self.resource_namespace:
+                    cmd.extend(["-n", self.resource_namespace])
+                    
+                # Execute the command with increased timeout
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    timeout=15  # Increased timeout for slow clusters
+                )
+                
+                # Parse the JSON response
+                release_data = json.loads(result.stdout)
+                
+                # Additional command to get values
+                values_cmd = [
+                    helm_path, "get", "values",
+                    self.resource_name,
+                    "-o", "json"
+                ]
+                
+                if self.resource_namespace:
+                    values_cmd.extend(["-n", self.resource_namespace])
+                    
+                try:
+                    values_result = subprocess.run(
+                        values_cmd,
+                        capture_output=True,
+                        text=True,
+                        check=True,
+                        timeout=10
+                    )
+                    
+                    # Add values to the data
+                    values_data = json.loads(values_result.stdout)
+                    release_data["values"] = values_data
+                except Exception as values_err:
+                    print(f"Warning: Unable to get values: {values_err}")
+                    release_data["values"] = {}
+                
+                # Format the data in Kubernetes-like structure
+                # This makes it compatible with the rest of the UI
+                self.current_data = {
+                    "kind": "HelmRelease",
+                    "apiVersion": "helm.sh/v1",
+                    "metadata": {
+                        "name": self.resource_name,
+                        "namespace": self.resource_namespace or "default",
+                        "creationTimestamp": release_data.get("info", {}).get("first_deployed", ""),
+                        "annotations": {
+                            "description": release_data.get("info", {}).get("description", ""),
+                            "last_deployed": release_data.get("info", {}).get("last_deployed", "")
+                        },
+                        "labels": {}
+                    },
+                    "spec": {
+                        "chart": release_data.get("chart", {}).get("metadata", {}).get("name", ""),
+                        "version": release_data.get("chart", {}).get("metadata", {}).get("version", ""),
+                        "values": release_data.get("values", {})
+                    },
+                    "status": {
+                        "status": release_data.get("info", {}).get("status", ""),
+                        "revision": release_data.get("version", 0),
+                        "app_version": release_data.get("chart", {}).get("metadata", {}).get("appVersion", ""),
+                        "last_deployed": release_data.get("info", {}).get("last_deployed", "")
+                    },
+                    # Store the original data for YAML view
+                    "helmOutput": json.dumps(release_data, indent=2)
+                }
+                
+                self.update_ui_with_data()
+                self.loading_indicator.hide()
+                self.loading_animation.stop()
+                return
+                
+            elif self.resource_type == "chart":
+                import json
+                
+                # Create a basic chart structure with the available information
+                # This ensures we have something to display even if file access fails
+                fallback_data = {
+                    "kind": "HelmChart",
+                    "apiVersion": "helm.sh/v1",
+                    "metadata": {
+                        "name": self.resource_name,
+                        "namespace": self.resource_namespace,
+                        "annotations": {
+                            "description": f"Chart details for {self.resource_name}"
+                        },
+                        "labels": {}
+                    },
+                    "spec": {
+                        "version": "Unknown",
+                        "appVersion": "Unknown",
+                        "repository": "Unknown"
+                    },
+                    "status": {
+                        "phase": "Available"
+                    }
+                }
+                
+                # Try different methods to get chart data
+                
+                # Method 1: Try global variable from ChartsPage
+                try:
+                    if 'current_chart_data' in globals() and globals()['current_chart_data']:
+                        chart_data = json.loads(globals()['current_chart_data'])
+                        if chart_data.get("metadata", {}).get("name") == self.resource_name:
+                            self.current_data = chart_data
+                            self.update_ui_with_data()
+                            self.loading_indicator.hide()
+                            self.loading_animation.stop()
+                            return
+                except (json.JSONDecodeError, Exception) as e:
+                    print(f"Error using global chart data: {e}")
+                
+                # Method 2: Try to get the chart info from the resources list
+                try:
+                    from PyQt6.QtWidgets import QApplication
+                    for widget in QApplication.allWidgets():
+                        if hasattr(widget, 'resources') and isinstance(widget.resources, list):
+                            for chart in widget.resources:
+                                if isinstance(chart, dict) and chart.get("name") == self.resource_name:
+                                    # Found matching chart data, create a structured object
+                                    chart_data = {
+                                        "kind": "HelmChart",
+                                        "apiVersion": "helm.sh/v1",
+                                        "metadata": {
+                                            "name": chart.get("name", self.resource_name),
+                                            "creationTimestamp": chart.get("last_updated", ""),
+                                            "annotations": {
+                                                "description": chart.get("description", "No description available"),
+                                                "repository_url": chart.get("repository_url", ""),
+                                                "source": "ArtifactHub"
+                                            },
+                                            "labels": {
+                                                "repository": chart.get("repository", "Unknown"),
+                                                "version": chart.get("version", ""),
+                                                "appVersion": chart.get("app_version", "")
+                                            }
+                                        },
+                                        "spec": {
+                                            "version": chart.get("version", "Unknown"),
+                                            "appVersion": chart.get("app_version", "Unknown"),
+                                            "repository": chart.get("repository", "Unknown")
+                                        },
+                                        "status": {
+                                            "phase": "Available"
+                                        }
+                                    }
+                                    
+                                    # Add icon data if available, but check if it exists to avoid WinError 2
+                                    icon_path = chart.get("icon_path")
+                                    if icon_path and isinstance(icon_path, str):
+                                        import os
+                                        if os.path.exists(icon_path):
+                                            chart_data["metadata"]["annotations"]["icon_path"] = icon_path
+                                    
+                                    self.current_data = chart_data
+                                    self.update_ui_with_data()
+                                    self.loading_indicator.hide()
+                                    self.loading_animation.stop()
+                                    return
+                except Exception as e:
+                    print(f"Error searching for chart in widgets: {e}")
+                
+                # Method 3: Try using helm command
+                try:
+                    import subprocess
+                    import os
+                    
+                    # Check if helm is installed and available
+                    try:
+                        # Use a simple command that should work on both Windows and Unix
+                        subprocess.run(
+                            ["helm", "version", "--short"],
+                            capture_output=True,
+                            text=True,
+                            check=True,
+                            timeout=5
+                        )
+                        
+                        # Now try to get chart info
+                        cmd = ["helm", "list", "--filter", self.resource_name, "--output", "json"]
+                        if self.resource_namespace:
+                            cmd.extend(["-n", self.resource_namespace])
+                        
+                        result = subprocess.run(
+                            cmd,
+                            capture_output=True,
+                            text=True,
+                            check=True,
+                            timeout=10
+                        )
+                        
+                        chart_list = json.loads(result.stdout)
+                        if chart_list and len(chart_list) > 0:
+                            chart_info = chart_list[0]
+                            
+                            # Create structured data from helm output
+                            chart_data = {
+                                "kind": "HelmChart",
+                                "apiVersion": "helm.sh/v1",
+                                "metadata": {
+                                    "name": chart_info.get("name", self.resource_name),
+                                    "namespace": chart_info.get("namespace", self.resource_namespace),
+                                    "creationTimestamp": chart_info.get("updated", ""),
+                                    "annotations": {
+                                        "description": f"Helm release: {self.resource_name}",
+                                        "status": chart_info.get("status", "unknown"),
+                                        "source": "Helm"
+                                    },
+                                    "labels": {}
+                                },
+                                "spec": {
+                                    "version": chart_info.get("chart", "").split("-")[-1] if chart_info.get("chart", "") else "Unknown",
+                                    "appVersion": chart_info.get("app_version", "Unknown"),
+                                    "repository": chart_info.get("chart", "").split("-")[0] if chart_info.get("chart", "") else "Unknown"
+                                },
+                                "status": {
+                                    "phase": chart_info.get("status", "Unknown")
+                                },
+                                "helmData": chart_info
+                            }
+                            
+                            self.current_data = chart_data
+                            self.update_ui_with_data()
+                            self.loading_indicator.hide()
+                            self.loading_animation.stop()
+                            return
+                    except (subprocess.SubprocessError, json.JSONDecodeError, Exception) as e:
+                        print(f"Error using helm command: {e}")
+                except Exception as e:
+                    print(f"Error in helm method: {e}")
+                    
+                # Fallback: Use basic chart information we created
+                print(f"Using fallback data for chart {self.resource_name}")
+                self.current_data = fallback_data
+                self.update_ui_with_data()
+                self.loading_indicator.hide()
+                self.loading_animation.stop()
+                return
+                
+            # Standard behavior for other Kubernetes resources using kubectl
             import subprocess
             import json
             
@@ -962,6 +1424,212 @@ class DetailPage(QWidget):
                 f"Failed to load details for {self.resource_type}/{self.resource_name}:\n\n{str(e)}"
             )
     
+    # Add a method to enhance the update_overview_tab method to handle helm charts
+    def update_overview_tab(self):
+        """Update the overview tab with resource-specific data and helm chart support"""
+        metadata = self.current_data.get("metadata", {})
+        
+        self.resource_name_label.setText(metadata.get("name", "Unnamed"))
+        
+        resource_info = f"{self.resource_type.capitalize()}"
+        if "namespace" in metadata:
+            resource_info += f" / {metadata.get('namespace')}"
+        self.resource_info_label.setText(resource_info)
+        
+        creation_timestamp = metadata.get("creationTimestamp", "")
+        if creation_timestamp:
+            import datetime
+            from dateutil import parser
+            try:
+                creation_time = parser.parse(creation_timestamp)
+                formatted_time = creation_time.strftime("%Y-%m-%d %H:%M:%S")
+                self.creation_time_label.setText(f"Created: {formatted_time}")
+            except Exception:
+                self.creation_time_label.setText("Created: unknown")
+        
+        # Special handling for helm charts
+        if self.resource_type == "chart":
+            self.add_helm_chart_fields()
+        else:
+            self.update_resource_status()
+            self.update_conditions()
+            self.update_labels()
+            self.add_resource_specific_fields()
+
+    # Add a new method for Helm chart-specific fields
+    def add_helm_chart_fields(self):
+        """Add Helm chart specific fields to the overview tab with robust error handling"""
+        # Clear existing status indicators first
+        for i in reversed(range(self.conditions_container_layout.count())):
+            item = self.conditions_container_layout.itemAt(i)
+            if item.widget():
+                item.widget().deleteLater()
+        
+        # Clear specific section and prepare it for chart data
+        for i in reversed(range(self.specific_layout.count())):
+            item = self.specific_layout.itemAt(i)
+            if item.widget():
+                item.widget().deleteLater()
+        
+        # Set a fixed status for charts
+        self.status_value_label.setText("Available")
+        self.status_value_label.setStyleSheet("""
+            background-color: rgba(76, 175, 80, 0.1);
+            color: #4CAF50;
+            border-radius: 4px;
+            padding: 2px 8px;
+            font-weight: bold;
+        """)
+        self.status_text_label.setText("Chart is available")
+        
+        # Get chart metadata
+        annotations = self.current_data.get("metadata", {}).get("annotations", {})
+        labels = self.current_data.get("metadata", {}).get("labels", {})
+        spec = self.current_data.get("spec", {})
+        
+        # Add chart version info if available
+        no_conditions_label = QLabel("No chart conditions available")
+        no_conditions_label.setStyleSheet("""
+            color: #888888;
+            font-style: italic;
+            padding: 5px;
+        """)
+        self.conditions_container_layout.addWidget(no_conditions_label)
+        
+        # Set up the specific section for chart details
+        section_header = QLabel("CHART DETAILS")
+        section_header.setStyleSheet("""
+            font-size: 14px;
+            font-weight: bold;
+            color: #aaaaaa;
+            text-transform: uppercase;
+            margin-top: 10px;
+        """)
+        self.specific_layout.addWidget(section_header)
+        
+        # Add version info from either spec or labels (support both structures)
+        version = spec.get("version") or labels.get("version") or "Unknown"
+        version_info = QLabel(f"Chart Version: {version}")
+        version_info.setStyleSheet("""
+            font-size: 13px;
+            color: #ffffff;
+            margin-top: 5px;
+        """)
+        self.specific_layout.addWidget(version_info)
+        
+        app_version = spec.get("appVersion") or labels.get("appVersion") or "Unknown"
+        app_version_info = QLabel(f"App Version: {app_version}")
+        app_version_info.setStyleSheet("""
+            font-size: 13px;
+            color: #ffffff;
+            margin-top: 5px;
+        """)
+        self.specific_layout.addWidget(app_version_info)
+        
+        # Add description if available
+        description = annotations.get("description", "No description available")
+        desc_label = QLabel("Description:")
+        desc_label.setStyleSheet("""
+            font-size: 13px;
+            font-weight: bold;
+            color: #aaaaaa;
+            margin-top: 10px;
+        """)
+        self.specific_layout.addWidget(desc_label)
+        
+        desc_text = QLabel(description)
+        desc_text.setWordWrap(True)
+        desc_text.setStyleSheet("""
+            font-size: 13px;
+            color: #ffffff;
+            margin-top: 2px;
+            margin-left: 10px;
+        """)
+        self.specific_layout.addWidget(desc_text)
+        
+        # Add repository info
+        repository = spec.get("repository") or labels.get("repository") or "Unknown"
+        repo_label = QLabel("Repository:")
+        repo_label.setStyleSheet("""
+            font-size: 13px;
+            font-weight: bold;
+            color: #aaaaaa;
+            margin-top: 10px;
+        """)
+        self.specific_layout.addWidget(repo_label)
+        
+        repo_text = QLabel(repository)
+        repo_text.setWordWrap(True)
+        repo_text.setStyleSheet("""
+            font-size: 13px;
+            color: #ffffff;
+            margin-top: 2px;
+            margin-left: 10px;
+        """)
+        self.specific_layout.addWidget(repo_text)
+        
+        # Add source information
+        source = annotations.get("source", "Unknown")
+        source_label = QLabel("Source:")
+        source_label.setStyleSheet("""
+            font-size: 13px;
+            font-weight: bold;
+            color: #aaaaaa;
+            margin-top: 10px;
+        """)
+        self.specific_layout.addWidget(source_label)
+        
+        source_text = QLabel(source)
+        source_text.setStyleSheet("""
+            font-size: 13px;
+            color: #ffffff;
+            margin-top: 2px;
+            margin-left: 10px;
+        """)
+        self.specific_layout.addWidget(source_text)
+        
+        # Add icon if available - with robust error handling
+        try:
+            icon_path = annotations.get("icon_path")
+            if icon_path:
+                import os
+                if os.path.exists(icon_path):  # Check that file exists first
+                    from PyQt6.QtGui import QPixmap
+                    from PyQt6.QtWidgets import QLabel
+                    
+                    icon_label = QLabel("Icon:")
+                    icon_label.setStyleSheet("""
+                        font-size: 13px;
+                        font-weight: bold;
+                        color: #aaaaaa;
+                        margin-top: 10px;
+                    """)
+                    self.specific_layout.addWidget(icon_label)
+                    
+                    icon_widget = QLabel()
+                    pixmap = QPixmap(icon_path)
+                    if not pixmap.isNull():
+                        pixmap = pixmap.scaled(64, 64, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                        icon_widget.setPixmap(pixmap)
+                        icon_widget.setStyleSheet("""
+                            margin-left: 10px;
+                            margin-top: 5px;
+                        """)
+                        self.specific_layout.addWidget(icon_widget)
+        except Exception as e:
+            # Just skip icon display on error
+            print(f"Error displaying chart icon: {e}")
+        
+        # Show the specific section
+        self.specific_section.show()
+        
+        # Update the labels section
+        chart_labels = self.current_data.get("metadata", {}).get("labels", {})
+        if chart_labels:
+            labels_text = "\n".join([f"{k}={v}" for k, v in chart_labels.items()])
+            self.labels_content.setText(labels_text)
+        else:
+            self.labels_content.setText("No labels")
     def update_ui_with_data(self):
         if not self.current_data:
             return
@@ -1000,12 +1668,61 @@ class DetailPage(QWidget):
         self.update_labels()
         self.add_resource_specific_fields()
     
+
     def update_resource_status(self):
         status = self.current_data.get("status", {})
         status_value = "Unknown"
         status_text = "Status not available"
+
+        # Special case for Helm releases
+        if self.resource_type == "helmrelease":
+            # Check if status is directly in the status field
+            if isinstance(status, dict) and "status" in status:
+                status_value = status.get("status", "Unknown")
+                
+                # Map status to text
+                if status_value.lower() == "deployed":
+                    status_text = "Release is successfully deployed"
+                elif status_value.lower() == "failed":
+                    status_text = "Release deployment failed"
+                elif status_value.lower() == "pending":
+                    status_text = "Release is being deployed"
+                elif status_value.lower() == "superseded":
+                    status_text = "Release has been upgraded or replaced"
+                elif status_value.lower() == "uninstalled":
+                    status_text = "Release has been uninstalled but retained"
+                elif status_value.lower() == "uninstalling":
+                    status_text = "Release is being uninstalled"
+                else:
+                    status_text = f"Release status: {status_value}"
+            
+            # For helmOutput, parse the JSON and look for status
+            elif "helmOutput" in self.current_data:
+                try:
+                    import json
+                    helm_data = json.loads(self.current_data["helmOutput"])
+                    info = helm_data.get("info", {})
+                    status_value = info.get("status", "Unknown")
+                    status_text = f"Release status: {status_value}"
+                    
+                    # Same mapping as above
+                    if status_value.lower() == "deployed":
+                        status_text = "Release is successfully deployed"
+                    elif status_value.lower() == "failed":
+                        status_text = "Release deployment failed"
+                    elif status_value.lower() == "pending":
+                        status_text = "Release is being deployed"
+                    elif status_value.lower() == "superseded":
+                        status_text = "Release has been upgraded or replaced"
+                    elif status_value.lower() == "uninstalled":
+                        status_text = "Release has been uninstalled but retained"
+                    elif status_value.lower() == "uninstalling":
+                        status_text = "Release is being uninstalled"
+                except:
+                    pass
         
-        if self.resource_type == "pods":
+        # For pods (unchanged existing code)
+        elif self.resource_type == "pods":
             phase = status.get("phase", "Unknown")
             status_value = phase
             
@@ -1036,6 +1753,7 @@ class DetailPage(QWidget):
             elif status_value == "Failed":
                 status_text = "Pod has failed"
         
+        # Rest of the original method stays the same for other resource types
         elif self.resource_type == "deployments":
             available_replicas = status.get("availableReplicas", 0)
             replicas = status.get("replicas", 0)
@@ -1144,15 +1862,15 @@ class DetailPage(QWidget):
         self.status_value_label.setText(status_value)
         self.status_text_label.setText(status_text)
         
-        if status_value in ["Running", "Ready", "Active", "Available", "Bound", "Succeeded"]:
+        # Set style based on status value
+        if status_value.lower() in ["running", "ready", "active", "available", "bound", "succeeded", "deployed"]:
             self.status_value_label.setStyleSheet(AppStyles.DETAIL_PAGE_STATUS_VALUE_RUNNING_STYLE)
-        elif status_value in ["Pending", "Progressing", "Updating", "Released"]:
+        elif status_value.lower() in ["pending", "progressing", "updating", "released", "superseded"]:
             self.status_value_label.setStyleSheet(AppStyles.DETAIL_PAGE_STATUS_VALUE_PENDING_STYLE)
-        elif status_value in ["Succeeded", "Completed", "Complete"]:
+        elif status_value.lower() in ["succeeded", "completed", "complete"]:
             self.status_value_label.setStyleSheet(AppStyles.DETAIL_PAGE_STATUS_VALUE_SUCCEEDED_STYLE)
         else:
             self.status_value_label.setStyleSheet(AppStyles.DETAIL_PAGE_STATUS_VALUE_FAILED_STYLE)
-    
     def update_conditions(self):
         for i in reversed(range(self.conditions_container_layout.count())):
             item = self.conditions_container_layout.itemAt(i)
@@ -1757,19 +2475,27 @@ class DetailPage(QWidget):
                 field_layout.addWidget(value_label, 1)
                 
                 parent_layout.addWidget(field_container)
-    
+
     def update_yaml_tab(self):
+        """Update the YAML tab with resource data including helm charts"""
         if not self.current_data:
             return
         
         try:
-            yaml_text = yaml.dump(self.current_data, default_flow_style=False)
-            self.yaml_editor.setPlainText(yaml_text)
-            self.original_yaml = yaml_text
-            
+            # Special handling for helm charts - check if helmOutput exists
+            if "helmOutput" in self.current_data:
+                # Display the raw helm output
+                self.yaml_editor.setPlainText(self.current_data["helmOutput"])
+                self.original_yaml = self.current_data["helmOutput"]
+            else:
+                # Normal YAML display for other resources
+                import yaml
+                yaml_text = yaml.dump(self.current_data, default_flow_style=False)
+                self.yaml_editor.setPlainText(yaml_text)
+                self.original_yaml = yaml_text
+                
         except Exception as e:
             self.yaml_editor.setPlainText(f"Error rendering YAML: {str(e)}")
-
     def load_events(self):
         """Load events for the current resource with improved error handling"""
         if not self.resource_type or not self.resource_name:

@@ -215,10 +215,17 @@ class ClusterView(QWidget):
         # Connect signals
         self.detail_manager.resource_updated.connect(self.handle_resource_updated)
     
-    # Add to ClusterView.show_detail_for_table_item method (replace the existing method)
+   
     def show_detail_for_table_item(self, row, col, page, page_name):
-        """Show detail page for clicked table item with improved handling"""
-        resource_type = page_name.rstrip('s')  # Remove trailing 's' to get singular form
+        """Show detail page for clicked table item with improved chart handling"""
+        # Determine resource type based on page name
+        if page_name == "Charts":
+            resource_type = "chart"  # Use chart type for Helm charts
+        elif page_name == "Releases":
+            resource_type = "helmrelease"  # Use helmrelease instead of Release
+        else:
+            resource_type = page_name.rstrip('s')  # Remove trailing 's' for regular resources
+        
         resource_name = None
         namespace = None
 
@@ -246,14 +253,18 @@ class ClusterView(QWidget):
                     namespace = label.text()
                     break
         
-        # Handle special case for cluster-scoped resources
-        if resource_type in ['node', 'persistentvolume', 'clusterrole', 'clusterrolebinding']:
+        # Handle special case for cluster-scoped resources and charts
+        if resource_type in ['node', 'persistentvolume', 'clusterrole', 'clusterrolebinding', 'chart']:
             namespace = None
         
-        # Show the detail page
+        # If this is a Charts page, call its specific view_details method instead
+        if page_name == "Charts" and hasattr(page, '_handle_view_details'):
+            page._handle_view_details(row)
+            return
+        
+        # Show the detail page for non-chart resources
         if resource_name:
             self.detail_manager.show_detail(resource_type, resource_name, namespace)
-
     # Add to ClusterView.handle_resource_updated method
     def handle_resource_updated(self, resource_type, resource_name, namespace):
         """Handle when a resource is updated in the detail view"""
@@ -274,9 +285,6 @@ class ClusterView(QWidget):
                 events_page.force_load_data()
             elif hasattr(events_page, 'load_data'):
                 events_page.load_data()
-
-
-    # Add to ClusterView.resizeEvent and moveEvent methods
     def update_detail_on_resize(self, event):
         """Update detail page position when window is resized"""
         super().resizeEvent(event)

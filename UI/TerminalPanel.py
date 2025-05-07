@@ -99,7 +99,7 @@ class UnifiedTerminalWidget(QTextEdit):
         self.command_history = []
         self.history_index = -1
         self.is_valid = True  # Flag to track widget validity
-        self.current_prompt = "$ "
+        self.current_prompt = "PS > "
         self.input_position = 0  # Tracks where user input begins
 
         # Set initial prompt
@@ -717,18 +717,6 @@ class TerminalPanel(QWidget):
         """Clean up processes when the panel is destroyed"""
         self.terminate_all_processes()
 
-    # def terminate_all_processes(self):
-    #     """Terminate all running processes"""
-    #     for terminal_data in self.terminal_tabs:
-    #         process = terminal_data.get('process')
-    #         if process and process.state() == QProcess.ProcessState.Running:
-    #             try:
-    #                 process.terminate()
-    #                 if not process.waitForFinished(500):
-    #                     process.kill()
-    #             except Exception:
-    #                 # Process might already be gone
-    #                 pass
 
     def terminate_all_processes(self):
         """Terminate all running processes with a clean shutdown sequence"""
@@ -950,7 +938,7 @@ class TerminalPanel(QWidget):
             # Use system shell
             if sys.platform == 'win32':
                 # Windows
-                shell = 'cmd.exe'
+                shell = 'powershell.exe'
                 process.start(shell)
             else:
                 # Unix-like systems
@@ -978,8 +966,9 @@ class TerminalPanel(QWidget):
 
         # Special case for 'clear' command
         if command.strip().lower() == "clear":
-            terminal_widget.clear_output()
+            process.write("Clear-Host\n".encode())
             return
+            
 
         # Special case for 'exit' command
         if command.strip().lower() in ["exit", "quit"]:

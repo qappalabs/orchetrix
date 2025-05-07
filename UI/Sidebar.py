@@ -2,7 +2,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QToolButton, QLa
                             QGraphicsDropShadowEffect, QMenu, QToolTip, QSizePolicy,
                             QFrame)
 from PyQt6.QtCore import Qt, QSize, QPropertyAnimation, QEasingCurve, QEvent, QTimer, QPoint, QRect
-from PyQt6.QtGui import QIcon, QFont, QColor, QAction
+from PyQt6.QtGui import QIcon, QFont, QColor, QAction, QPixmap
 
 from UI.Styles import AppColors, AppStyles
 from UI.Icons import Icons
@@ -70,7 +70,7 @@ class SidebarToggleButton(QToolButton):
 
 
 class NavIconButton(QToolButton):
-    def __init__(self, icon_id, text, active=False, has_dropdown=False, parent=None, expanded=True):
+    def __init__(self, icon_id, text, active=False, has_dropdown=False, parent=None, expanded=True, coming_soon=False):
         super().__init__(parent)
         self.parent_window = parent
         self.icon_id = icon_id  # Store the icon ID to load icon from local file
@@ -80,10 +80,11 @@ class NavIconButton(QToolButton):
         self.dropdown_open = False
         self.dropdown_menu = None
         self.expanded = expanded  # Track if sidebar is expanded
-        
+        self.coming_soon = coming_soon  # New flag for coming soon features
+
         # Store the fallback icon text (emoji)
         self.icon_text = getattr(Icons, icon_id.upper(), "⚙️") if isinstance(icon_id, str) else "⚙️"
-        
+
         # Try to load the icon
         self.icon = Icons.get_icon(icon_id)
         self.icon_loaded = not self.icon.isNull()
@@ -94,7 +95,7 @@ class NavIconButton(QToolButton):
 
     def setup_ui(self):
         self.setFixedHeight(40)
-        
+
         # Clear any existing layout first
         if self.layout():
             # Remove all widgets from layout
@@ -104,39 +105,58 @@ class NavIconButton(QToolButton):
                     item.widget().deleteLater()
             # Delete the layout
             QWidget().setLayout(self.layout())
-        
+
         if self.expanded:
             # Expanded state with text and icon
             self.setFixedWidth(180)
-            
+
             # Create a custom layout for better alignment
             layout = QHBoxLayout(self)
             layout.setContentsMargins(12, 0, 10, 0)  # Left padding for icon and text
             layout.setSpacing(8)  # Space between icon and text
-            
+
             # Create icon label
             icon_label = QLabel()
             icon_label.setFixedWidth(20)
             icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            
+
             # Set icon if loaded, otherwise set emoji text
             if self.icon_loaded:
                 pixmap = self.icon.pixmap(QSize(20, 20))
                 icon_label.setPixmap(pixmap)
             else:
                 icon_label.setText(self.icon_text)
-            
+
             # Add text label
             text_label = QLabel(self.item_text)
             text_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
             text_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-            
+
             # Apply styles to labels
             icon_label.setStyleSheet(AppStyles.NAV_ICON_BUTTON_ICON_LABEL_STYLE)
             text_label.setStyleSheet(AppStyles.NAV_ICON_BUTTON_TEXT_LABEL_STYLE)
-            
-            # Add dropdown indicator if needed
-            if self.has_dropdown:
+
+            # Add coming soon indicator if needed
+            if self.coming_soon:
+                coming_soon_label = QLabel()
+                coming_soon_label.setFixedWidth(15)
+                coming_soon_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+                # Load exclamation icon
+                exclamation_pixmap = QPixmap("icons/exclamation.png")
+                if not exclamation_pixmap.isNull():
+                    coming_soon_label.setPixmap(exclamation_pixmap.scaled(15, 15, Qt.AspectRatioMode.KeepAspectRatio))
+                else:
+                    # Fallback to text if image can't be loaded
+                    coming_soon_label.setText("!")
+                    coming_soon_label.setStyleSheet("color: #FF4500; font-weight: bold;")
+
+                # Add all widgets to layout
+                layout.addWidget(icon_label)
+                layout.addWidget(text_label)
+                layout.addWidget(coming_soon_label)
+            elif self.has_dropdown:
+                # Add dropdown indicator if needed
                 dropdown_label = QLabel(Icons.RIGHT_ARROW)
                 dropdown_label.setFixedWidth(15)
                 dropdown_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -148,7 +168,7 @@ class NavIconButton(QToolButton):
                 layout.addWidget(icon_label)
                 layout.addWidget(text_label)
                 layout.addStretch()  # Push content to the left
-                
+
             # Set empty text so the layout manages the content
             self.setText("")
             # Don't set any icon for the button itself when expanded
@@ -157,30 +177,74 @@ class NavIconButton(QToolButton):
         else:
             # Collapsed state with icon only
             self.setFixedWidth(40)
-            
-            # If icon is loaded, set it; otherwise use text/emoji
+
+            # For collapsed state, center the icon/text in the button
+            layout = QHBoxLayout(self)
+            layout.setContentsMargins(0, 0, 0, 0)  # No margins for better centering
+            layout.setSpacing(0)
+
+            # Create centered icon label
+            icon_label = QLabel()
+            icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+            # Set icon if loaded, otherwise set emoji text
             if self.icon_loaded:
-                self.setIcon(self.icon)
-                self.setIconSize(QSize(20, 20))
-                self.setText("")
+                pixmap = self.icon.pixmap(QSize(20, 20))
+                icon_label.setPixmap(pixmap)
             else:
-                self.setText(self.icon_text)
-                self.setIcon(QIcon())  # Clear any icon
-                
+                icon_label.setText(self.icon_text)
+
+            icon_label.setStyleSheet(AppStyles.NAV_ICON_BUTTON_ICON_LABEL_STYLE)
+
+            # Add the icon label to the centered layout
+            layout.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignCenter)
+
+            # Add coming soon indicator in collapsed state
+            if self.coming_soon:
+                # Add exclamation icon to corner
+                corner_label = QLabel(self)
+                exclamation_pixmap = QPixmap("icons/exclamation.png")
+                if not exclamation_pixmap.isNull():
+                    corner_label.setPixmap(exclamation_pixmap.scaled(12, 12, Qt.AspectRatioMode.KeepAspectRatio))
+                else:
+                    corner_label.setText("!")
+                    corner_label.setStyleSheet("color: #FF4500; font-weight: bold;")
+
+                corner_label.move(25, 5)  # Position in top-right corner
+                corner_label.show()
+
+            # Clear button's own icon/text since we're using a layout
+            self.setText("")
+            self.setIcon(QIcon())
             self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
 
-        self.setToolTip(self.item_text)
+        # Set tooltip - include coming soon message if applicable
+        if self.coming_soon:
+            self.setToolTip("**Coming Soon**\nThis feature will be available in a future update.")
+        else:
+            self.setToolTip(self.item_text)
+
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFont(QFont("Segoe UI", 12))
         self.setAutoRaise(True)
         self.update_style()
-        
+
         # Connect signals
-        self.clicked.connect(self.activate)
-        if self.has_dropdown:
-            self.clicked.connect(self.show_dropdown)
+        if self.coming_soon:
+            # For coming soon features, disconnect existing click handlers
+            try:
+                self.clicked.disconnect()
+            except TypeError:
+                pass  # No connections to disconnect
+        else:
+            # Regular buttons get normal functionality
+            self.clicked.connect(self.activate)
+            if self.has_dropdown:
+                self.clicked.connect(self.show_dropdown)
+
         self.installEventFilter(self)
 
+    # The rest of the class methods remain unchanged
     def set_expanded(self, expanded):
         if self.expanded != expanded:  # Only update if state actually changed
             self.expanded = expanded
@@ -189,7 +253,7 @@ class NavIconButton(QToolButton):
 
     def setup_dropdown(self):
         self.dropdown_menu = NavMenuDropdown(self.parent_window)
-        
+
         title_action = QAction(f"{self.icon_text} {self.item_text}", self)
         title_action.setEnabled(False)
         self.dropdown_menu.addAction(title_action)
@@ -261,21 +325,32 @@ class NavIconButton(QToolButton):
         if self.is_active:
             return AppColors.HOVER_BG
         return "transparent"
-        
+
     def get_text_color(self):
         if self.is_active:
             return AppColors.TEXT_LIGHT
         return AppColors.TEXT_SECONDARY
 
     def eventFilter(self, obj, event):
-        if event.type() == QEvent.Type.Enter and not self.expanded:
-            QToolTip.showText(
-                self.mapToGlobal(QPoint(self.width() + 5, self.height() // 2)),
-                self.item_text,
-                self,
-                QRect(),
-                2000
-            )
+        if event.type() == QEvent.Type.Enter:
+            if self.coming_soon:
+                # Show custom tooltip for coming soon features
+                QToolTip.showText(
+                    self.mapToGlobal(QPoint(self.width() + 5, self.height() // 2)),
+                    "**Coming Soon**\nThis feature will be available in a future update.",
+                    self,
+                    QRect(),
+                    3000
+                )
+            elif not self.expanded:
+                # Show regular tooltip for collapsed items
+                QToolTip.showText(
+                    self.mapToGlobal(QPoint(self.width() + 5, self.height() // 2)),
+                    self.item_text,
+                    self,
+                    QRect(),
+                    2000
+                )
         return super().eventFilter(obj, event)
 
 
@@ -358,10 +433,10 @@ class Sidebar(QWidget):
         controls_layout.addWidget(self.toggle_btn)
         
         self.sidebar_layout.addWidget(sidebar_controls)
-    
+
     def create_nav_buttons(self):
         self.nav_buttons = []
-        
+
         # Define navigation items with icon ID, name, is_active, has_dropdown
         nav_items = [
             ("cluster", "Cluster", False),
@@ -377,7 +452,7 @@ class Sidebar(QWidget):
             ("events", "Events", False),
             ("apps", "Apps", False)
         ]
-        
+
         for item in nav_items:
             nav_btn = NavIconButton(
                 item[0],                 # icon_id
@@ -433,40 +508,49 @@ class Sidebar(QWidget):
                         parent_cluster_view.terminal_panel.reposition()
 
             QTimer.singleShot(250, update_terminal)
-        
+
     def create_utility_buttons(self):
         """Create utility buttons at the bottom of the sidebar"""
+        # Add a horizontal divider line before utility buttons
+        divider = QFrame()
+        divider.setFrameShape(QFrame.Shape.HLine)
+        divider.setFrameShadow(QFrame.Shadow.Sunken)
+        divider.setLineWidth(1)
+        divider.setStyleSheet(f"background-color: {AppColors.BORDER_LIGHT}; margin: 8px 10px;")
+        self.sidebar_layout.addWidget(divider)
+
         # Create utility buttons
         compare_btn = NavIconButton(
-            "compare", "Compare", False, False, 
+            "compare", "Compare", False, False,
             self.parent_window, self.sidebar_expanded
         )
 
         # Terminal button - special handling
         terminal_btn = NavIconButton(
-            "terminal", "Terminal", False, False, 
+            "terminal", "Terminal", False, False,
             self.parent_window, self.sidebar_expanded
         )
-        
+
         # We don't want the terminal button to behave like other navigation buttons
         # So we prevent it from calling activate() which would mark it as the active button
         try:
             terminal_btn.clicked.disconnect(terminal_btn.activate)
         except TypeError:
             pass  # No connections to disconnect
-        
+
         chat_btn = NavIconButton(
-            "chat", "Chat", False, False, 
+            "chat", "Chat", False, False,
             self.parent_window, self.sidebar_expanded
         )
-        
+
         self.nav_buttons.append(compare_btn)
         self.nav_buttons.append(terminal_btn)
         self.nav_buttons.append(chat_btn)
-        
+
         self.sidebar_layout.addWidget(compare_btn)
         self.sidebar_layout.addWidget(terminal_btn)
         self.sidebar_layout.addWidget(chat_btn)
+
     def update_sidebar_state(self):
         # Create animation for smooth transition
         self.sidebar_animation = QPropertyAnimation(self.content_widget, b"minimumWidth")

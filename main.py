@@ -7,16 +7,11 @@ try:
     # Import splash screen
     from UI.SplashScreen import SplashScreen
 
-    # Import the welcome screen
-    from UI.SignupScreen import SignupScreen
-
     # Import the original Home Page
     from Pages.HomePage import OrchestrixGUI
     from Pages.Preferences import PreferencesWidget
     from UI.TitleBar import TitleBar
     from UI.ClusterView import ClusterView
-
-
 
     # Import style definitions
     from UI.Styles import AppColors, AppStyles
@@ -280,25 +275,16 @@ try:
         splash = SplashScreen()
         splash.show()
 
-        # Create welcome screen (but don't show it yet)
-        signup_screen = SignupScreen()
-
         # Create main window (but don't show it yet)
         window = MainWindow()
 
-        # Connect the splash screen finish to show welcome screen
-        def show_signup_screen():
-            signup_screen.show()
-            splash.close()
-
-        # Connect welcome screen completion to show main window
+        # Connect the splash screen finish to show main window directly
         def show_main_window():
             window.show()
-            signup_screen.close()
+            splash.close()
 
-        # Set up the signal chain
-        splash.finished.connect(show_signup_screen)
-        signup_screen.welcome_completed.connect(show_main_window)
+        # Connect splash screen directly to main window
+        splash.finished.connect(show_main_window)
 
         sys.exit(app.exec())
 
