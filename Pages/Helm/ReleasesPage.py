@@ -482,7 +482,7 @@ class ReleaseUpgradeDialog(QDialog):
                         if chart:
                             self.chart_input.setPlaceholderText(f"Current: {chart}")
                 except json.JSONDecodeError:
-                    print("Error parsing Helm list JSON output")
+                    pass
             
             # Get current values
             values_cmd = [helm_path, "get", "values", self.release_name, "-n", self.namespace, "-o", "yaml"]
@@ -503,10 +503,10 @@ class ReleaseUpgradeDialog(QDialog):
             else:
                 # Failed to get values
                 self.values_editor.setPlainText("# Could not retrieve current values")
-                print(f"Error getting values: {result.stderr}")
+                
                 
         except Exception as e:
-            print(f"Error loading current values: {e}")
+            pass
             self.values_editor.setPlainText("# Error loading current values")
     
     def get_values(self):
@@ -680,7 +680,7 @@ class ReleasesPage(BaseResourcePage):
                                 if not existing:
                                     self._fetch_release_directly(release_name, secret_namespace)
         except Exception as e:
-            print(f"Error finding partial installations: {e}")
+            pass
 
     def on_resources_loaded(self, resources, resource_type):
         """Handle loaded resources with improved focus handling"""
@@ -742,7 +742,7 @@ class ReleasesPage(BaseResourcePage):
                         self._process_direct_release(releases[0], namespace)
                         return True
             except Exception as e:
-                print(f"Error in helm list: {e}")
+                pass
         
         # Method 2: Check for Helm secrets directly
         try:
@@ -761,7 +761,7 @@ class ReleasesPage(BaseResourcePage):
                 self._create_minimal_release(release_name, namespace, "failed/partial")
                 return True
         except Exception as e:
-            print(f"Error checking for Helm secrets: {e}")
+            pass
         
         # Method 3: Check with kubectl get all resources by common labels
         try:
@@ -779,7 +779,7 @@ class ReleasesPage(BaseResourcePage):
                 self._create_minimal_release(release_name, namespace, "deployed")
                 return True
         except Exception as e:
-            print(f"Error checking with kubectl labels: {e}")
+            pass
         
         return False
 
@@ -1525,7 +1525,7 @@ class ReleasesPage(BaseResourcePage):
                     chart = f"{repo_prefix}/{chart}"
                     
                     # Log the chart reference for debugging
-                    print(f"Using chart reference: {chart}")
+                    
                     
                 # Add chart to command
                 cmd.append(chart)
@@ -1555,8 +1555,8 @@ class ReleasesPage(BaseResourcePage):
                 progress.setLabelText("Executing upgrade command...")
                 QApplication.processEvents()
                 
-                # Print the command for debugging
-                print(f"Upgrade command: {' '.join(cmd)}")
+                #  the command for debugging
+              
                 
                 # Execute the command
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)

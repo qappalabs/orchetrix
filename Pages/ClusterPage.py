@@ -933,7 +933,7 @@ class ClusterPage(QWidget):
             # Storage metrics remain the same...
                 
         except Exception as e:
-            print(f"Error updating metrics: {e}")    
+            pass    
     def format_memory(self, memory_value):
         """Format memory values to human-readable format"""
         if memory_value < 1024:
@@ -958,8 +958,7 @@ class ClusterPage(QWidget):
                     # No issues, show the success panel
                     self.stacked_layout.setCurrentIndex(0)
         except Exception as e:
-            print(f"Error updating issues: {e}")
-    
+            pass
     def generate_time_points(self, count):
         """Generate time points for charts with even spacing"""
         import datetime

@@ -69,9 +69,9 @@ class ChartDataThread(QThread):
                 if icon_response.status_code == 200:
                     with open(self.default_helm_icon_path, 'wb') as f:
                         f.write(icon_response.content)
-                    print(f"Downloaded default Helm icon to {self.default_helm_icon_path}")
+
             except Exception as e:
-                print(f"Error downloading default Helm icon: {e}")
+                pass
 
     def run(self):
         """Execute the API request and emit results."""
@@ -109,7 +109,7 @@ class ChartDataThread(QThread):
                     "ts_query_web": search_query
                 }
                 
-                print(f"Fetching data with offset {self.offset}, limit {self.limit}...")
+
                 response = session.post(post_endpoint, json=post_data, headers=headers, timeout=30)
                 
                 if response.status_code == 200:
@@ -121,11 +121,11 @@ class ChartDataThread(QThread):
                     # We'll assume more data is available if we got a full page
                     is_more_available = len(charts_data) >= self.limit
                     
-                    print(f"POST method successful, found {len(charts_data)} charts. More available: {is_more_available}")
+
                 else:
-                    print(f"POST request failed with status code {response.status_code}")
+                    pass
             except Exception as e:
-                print(f"Error with POST method: {e}")
+                pass
             
             # If POST failed and we have no data, try GET method
             if not charts_data:
@@ -151,7 +151,7 @@ class ChartDataThread(QThread):
                             'limit': self.limit
                         }
                         
-                        print(f"Trying GET with endpoint: {endpoint}")
+                       
                         response = session.get(endpoint, params=params, headers=headers, timeout=30)
                         
                         if response.status_code == 200:
@@ -162,11 +162,10 @@ class ChartDataThread(QThread):
                             
                             # We'll assume more data is available if we got a full page
                             is_more_available = len(charts_data) >= self.limit
-                            
-                            print(f"GET method successful with {endpoint}, found {len(charts_data)} charts. More available: {is_more_available}")
+
                             break  # Exit the loop if we got data
                 except Exception as e:
-                    print(f"Error with GET method: {e}")
+                    pass
             
             # Force more data available flag to true if we got any data at all
             if charts_data:
@@ -175,7 +174,7 @@ class ChartDataThread(QThread):
             # Do a second pass to add default icons for charts missing them
             charts_missing_icons = [chart for chart in charts_data if not chart.get('icon_path')]
             if charts_missing_icons:
-                print(f"Adding default icons for {len(charts_missing_icons)} charts")
+                pass
                 
                 for chart in charts_missing_icons:
                     # First try repository icon
@@ -188,7 +187,7 @@ class ChartDataThread(QThread):
                             chart['icon_path'] = self.default_helm_icon_path
             
             # Emit the result with more data available flag
-            print(f"Emitting {len(charts_data)} charts with is_more_available={is_more_available}")
+            
             self.data_loaded.emit(charts_data, is_more_available)
             
         except Exception as e:
@@ -265,7 +264,7 @@ class ChartDataThread(QThread):
                     'icon_path': icon_path
                 })
             except Exception as e:
-                print(f"Error processing package: {e}")
+                pass
         
         return helm_charts
     
@@ -325,7 +324,7 @@ class ChartDataThread(QThread):
                                     else:
                                         self.repository_icons[repo_name] = repo_icon_path
                                 except Exception as e:
-                                    print(f"Error downloading repository icon for '{repo_name}': {e}")
+                                    
                                     self.repository_icons[repo_name] = 'N/A'
                         
                         # Try to use repo logo fields for the package icon if not found elsewhere
@@ -368,16 +367,14 @@ class ChartDataThread(QThread):
                             with open(icon_path, 'wb') as f:
                                 f.write(icon_response.content)
                         else:
-                            print(f"Failed to download icon for '{package_name}': HTTP {icon_response.status_code}")
+                            
                             icon_path = None
                     except Exception as e:
-                        print(f"Error downloading icon for '{package_name}': {e}")
                         icon_path = None
             else:
                 icon_path = None
         
         except Exception as e:
-            print(f"Error in download_icon: {e}")
             icon_path = None
         
         return icon_url, icon_path
@@ -426,11 +423,9 @@ class ChartsPage(BaseResourcePage):
     def _reset_loading_state(self):
         """Reset loading state if it gets stuck"""
         if hasattr(self, 'is_loading') and self.is_loading:
-            print("Loading state was stuck, resetting...")
             self.is_loading = False
             
         if hasattr(self, 'is_loading_more') and self.is_loading_more:
-            print("Loading more state was stuck, resetting...")
             self.is_loading_more = False
             
         # Always ensure is_more_available is True to allow trying to load more
@@ -571,7 +566,6 @@ class ChartsPage(BaseResourcePage):
     def load_data(self):
         """Load initial chart data from ArtifactHub API"""
         if hasattr(self, 'is_loading') and self.is_loading:
-            print("Already loading data, skipping request")
             return
             
         self.is_loading = True
@@ -628,11 +622,8 @@ class ChartsPage(BaseResourcePage):
     def load_more_data(self):
         """Load more chart data when user scrolls to bottom"""
         if not self.is_more_available or self.is_loading_more:
-            print("Not loading more: is_more_available =", self.is_more_available, 
-                  "is_loading_more =", self.is_loading_more)
             return
             
-        print("Loading more data from offset", self.offset)
         self.is_loading_more = True
         
         # Start the safety timer to recover from potential stuck states
@@ -691,7 +682,6 @@ class ChartsPage(BaseResourcePage):
         # Force is_more_available to True for better UX until we reach the true end
         self.is_more_available = True if data else False
         
-        print(f"Initial data loaded: {len(data)} items, more available set to TRUE for pagination")
         
         # Update the item count
         self.items_count.setText(f"{len(data)} items (scroll for more)")
@@ -717,7 +707,6 @@ class ChartsPage(BaseResourcePage):
         # Update tracking variables
         self.is_loading_more = False
         
-        print(f"More data loaded: {len(data)} additional items")
         
         if data:
             # Keep trying to load more as long as we get some data
@@ -749,7 +738,6 @@ class ChartsPage(BaseResourcePage):
         else:
             # No data returned means we've likely reached the end
             self.is_more_available = False
-            print("No additional data returned, setting is_more_available to False")
             
             # Update the item count without pagination indication
             self.items_count.setText(f"{len(self.resources)} items (end of results)")
@@ -799,8 +787,7 @@ class ChartsPage(BaseResourcePage):
         
         self.table.setCellWidget(error_row, 0, error_widget)
         
-        # Log the error
-        print(f"Error searching charts: {error_message}")
+        # Log 
     
     def on_load_error(self, error_message):
         """Handle error loading data"""
@@ -832,7 +819,6 @@ class ChartsPage(BaseResourcePage):
         self.table.setCellWidget(error_row, 0, error_widget)
         
         # Log the error
-        print(f"Error loading charts: {error_message}")
     
     def on_load_more_error(self, error_message):
         """Handle error when loading more data"""
@@ -862,7 +848,6 @@ class ChartsPage(BaseResourcePage):
         self.table.setCellWidget(row, 0, error_widget)
         
         # Log the error
-        print(f"Error loading more charts: {error_message}")
         
         # Remove the error message after 5 seconds
         QTimer.singleShot(5000, lambda: self.table.setRowCount(self.table.rowCount() - 1))
@@ -941,7 +926,6 @@ class ChartsPage(BaseResourcePage):
                         }
                     """)
             except Exception as e:
-                print(f"Error loading icon for {chart_name}: {e}")
                 icon_label.setText("📦")
                 icon_label.setStyleSheet("""
                     QLabel {
@@ -1161,7 +1145,7 @@ class ChartsPage(BaseResourcePage):
                 if icon_path and isinstance(icon_path, str) and os.path.exists(icon_path):
                     resource_data["metadata"]["annotations"]["icon_path"] = icon_path
             except Exception as e:
-                print(f"Error checking icon path: {e}")
+                pass
             
             # Create a global reference to the current chart data for detail page
             import json

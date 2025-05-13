@@ -408,9 +408,16 @@ class NodesPage(BaseResourcePage):
         """Show the table and hide no data message"""
         self.no_data_widget.hide()
         self.table.show()
-    
     def update_nodes(self, nodes_data):
         """Update with real node data from the cluster"""
+        # Stop skeleton animation and reset loading state
+        self.is_loading = False
+        self.is_showing_skeleton = False
+        
+        # Stop skeleton animation if running
+        if hasattr(self, 'skeleton_timer') and self.skeleton_timer.isActive():
+            self.skeleton_timer.stop()
+        
         if not nodes_data:
             self.nodes_data = []
             self.resources = []
@@ -692,18 +699,25 @@ class NodesPage(BaseResourcePage):
                         resource_type = resource_type[:-1]
                     
                     parent.detail_manager.show_detail(resource_type, resource_name, namespace)
-    # def handle_row_click(self, row, column):
-    #     """Handle row selection when a table cell is clicked"""
-    #     if column != self.table.columnCount() - 1:  # Skip action column
-    #         # Select the row
-    #         self.table.selectRow(row)
-    #         # Also select this node for graphs
-    #         self.select_node_for_graphs(row)
             
     def load_data(self):
-        """Override to not use the base implementation"""
-        # This will be triggered by the cluster connector instead
-        pass
+        """Override to fetch node data from cluster connector"""
+        # Skip if already loading
+        if self.is_loading:
+            return
+            
+        self.is_loading = True
+        
+        # If we have a cluster connector, ask it to load node data
+        if hasattr(self, 'cluster_connector') and self.cluster_connector:
+            self.cluster_connector.load_nodes()
+        else:
+            # If no connector, hide loading and show error
+            self.is_loading = False
+            self.is_showing_skeleton = False
+            if hasattr(self, 'skeleton_timer') and self.skeleton_timer.isActive():
+                self.skeleton_timer.stop()
+            self.show_no_data_message()
         
     def _add_delete_selected_button(self):
         """Override to not add the delete selected button for nodes"""

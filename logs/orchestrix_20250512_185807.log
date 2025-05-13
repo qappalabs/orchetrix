@@ -1,0 +1,57 @@
+2025-05-12 18:58:07,633 [INFO] Application started. Log file: C:\Users\USER\Music\OX\product_ox\logs\orchestrix_20250512_185807.log
+2025-05-12 18:58:07,644 [INFO] Subprocess module patched to hide console windows
+2025-05-12 18:58:07,644 [INFO] Subprocess.Popen patched to hide console windows
+2025-05-12 18:58:07,645 [INFO] Initializing application...
+2025-05-12 18:58:08,775 [INFO] All modules imported successfully
+2025-05-12 18:58:08,775 [INFO] Running in normal Python environment
+2025-05-12 18:58:08,775 [INFO] Python version: 3.13.1 (tags/v3.13.1:0671451, Dec  3 2024, 19:06:28) [MSC v.1942 64 bit (AMD64)]
+2025-05-12 18:58:08,810 [INFO] PyQt version: Unknown
+2025-05-12 18:58:08,810 [INFO] Working directory: C:\Users\USER\Music\OX\product_ox
+2025-05-12 18:58:08,810 [INFO] Creating QApplication
+2025-05-12 18:58:08,893 [INFO] Application icon set from: C:\Users\USER\Music\OX\product_ox\icons/logoIcon.ico
+2025-05-12 18:58:08,901 [INFO] Windows taskbar app ID set
+2025-05-12 18:58:08,902 [INFO] Creating splash screen
+2025-05-12 18:58:09,073 [INFO] Creating main window
+2025-05-12 18:58:18,605 [INFO] Starting application main loop
+2025-05-12 18:58:23,453 [INFO] Main window shown successfully
+2025-05-12 18:58:28,855 [ERROR] Uncaught exception
+Traceback (most recent call last):
+  File "C:\Users\USER\Music\OX\product_ox\Pages\NodesPage.py", line 478, in update_nodes
+    self.populate_table(nodes_data)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "C:\Users\USER\Music\OX\product_ox\base_components\base_resource_page.py", line 950, in populate_table
+    self.populate_resource_row(row, resource)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "C:\Users\USER\Music\OX\product_ox\Pages\NodesPage.py", line 504, in populate_resource_row
+    cpu_util = self.cpu_graph.get_node_utilization(node_name)
+  File "C:\Users\USER\Music\OX\product_ox\Pages\NodesPage.py", line 161, in get_node_utilization
+    return node_data.get('utilization', 0)
+           ^^^^^^^^^^^^^
+AttributeError: 'float' object has no attribute 'get'
+2025-05-12 18:58:49,852 [ERROR] Uncaught exception
+Traceback (most recent call last):
+  File "C:\Users\USER\Music\OX\product_ox\base_components\base_resource_page.py", line 782, in <lambda>
+    lambda resources, resource_type: self.on_resources_loaded(resources, resource_type, cache_key))
+                                     ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\Music\OX\product_ox\base_components\base_resource_page.py", line 852, in on_resources_loaded
+    self.populate_table(resources)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "C:\Users\USER\Music\OX\product_ox\base_components\base_resource_page.py", line 950, in populate_table
+    self.populate_resource_row(row, resource)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "C:\Users\USER\Music\OX\product_ox\Pages\NodesPage.py", line 504, in populate_resource_row
+    cpu_util = self.cpu_graph.get_node_utilization(node_name)
+  File "C:\Users\USER\Music\OX\product_ox\Pages\NodesPage.py", line 161, in get_node_utilization
+    return node_data.get('utilization', 0)
+           ^^^^^^^^^^^^^
+AttributeError: 'float' object has no attribute 'get'
+2025-05-12 18:59:22,818 [ERROR] Uncaught exception
+Traceback (most recent call last):
+  File "C:\Users\USER\Music\OX\product_ox\Pages\NodesPage.py", line 713, in handle_row_click
+    self.select_node_for_graphs(row)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\USER\Music\OX\product_ox\Pages\NodesPage.py", line 692, in select_node_for_graphs
+    node_name = self.table.item(row, 1).text()  # Name is at column 1 (after checkbox column)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'text'
+2025-05-12 18:59:27,442 [INFO] Application exited with code: 0

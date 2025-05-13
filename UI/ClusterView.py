@@ -226,6 +226,29 @@ class ClusterView(QWidget):
         else:
             resource_type = page_name.rstrip('s')  # Remove trailing 's' for regular resources
         
+        # Special handling for Events
+        if page_name == "Events" and hasattr(page, 'resources') and row < len(page.resources):
+            event = page.resources[row]
+            raw_data = event.get("raw_data", {})
+            
+            # Get a proper name identifier for the event
+            resource_name = raw_data.get("metadata", {}).get("name", "")
+            if not resource_name:
+                # Fallback: combine involved object and reason
+                involved_obj = raw_data.get("involvedObject", {})
+                kind = involved_obj.get("kind", "")
+                name = involved_obj.get("name", "")
+                reason = raw_data.get("reason", "event")
+                resource_name = f"{kind}-{name}-{reason}"
+            
+            # Get namespace
+            namespace = event.get("namespace", "")
+            
+            # Show the detail using all available information
+            if resource_name:
+                # Pass the raw data to help with event lookup
+                self.detail_manager.show_detail(resource_type, resource_name, namespace, raw_data)
+            return
         resource_name = None
         namespace = None
 
@@ -760,15 +783,28 @@ class ClusterView(QWidget):
         # Update the visual appearance of all buttons
         for btn in self.sidebar.nav_buttons:
             btn.update_style()
+
+        QTimer.singleShot(50, lambda: self._delayed_load_data(page_widget))
         
-        # Force data loading when switching to a page - call load_data if available
-        if hasattr(page_widget, 'force_load_data'):
+
+    def _delayed_load_data(self, page_widget, active_button=None):
+        """Helper method to delay data loading to allow UI to update first"""
+        # Check if this is a resource page with skeleton loading capability
+        if hasattr(page_widget, '_show_skeleton_loader') and hasattr(page_widget, 'force_load_data'):
             page_widget.force_load_data()
+        # For other page types with force_load_data
+        elif hasattr(page_widget, 'force_load_data'):
+            page_widget.force_load_data()
+        # For page types with regular load_data
         elif hasattr(page_widget, 'load_data'):
             page_widget.load_data()
+            
+        # Hide loading indicator after a delay
+        if active_button and hasattr(active_button, 'hide_loading_state'):
+            QTimer.singleShot(1000, active_button.hide_loading_state)
 
     def set_active_nav_button(self, active_button):
-        """Handle sidebar navigation button clicks with detail page management"""
+        """Handle sidebar navigation button clicks with loading indication"""
         # Special handling for Terminal button - don't change active state
         if active_button.item_text == "Terminal":
             return
@@ -777,15 +813,21 @@ class ClusterView(QWidget):
         if hasattr(self, 'detail_manager') and self.detail_manager.is_detail_visible():
             self.detail_manager.hide_detail()
         
-        # For dropdown buttons, don't change the active page
-        # The dropdown menu will handle page changes when items are selected
-        if not active_button.has_dropdown and active_button.item_text in self.pages:
-            # Only switch pages for non-dropdown buttons
-            self.stacked_widget.setCurrentWidget(self.pages[active_button.item_text])
+        # Important: Don't modify active_button.item_text! Keep it as the original key
+        button_text = active_button.item_text  # Get clean text without loading symbols
+        
+        # For non-dropdown buttons, switch to the page
+        if not active_button.has_dropdown and button_text in self.pages:
+            # Show loading state in the button
+            # if hasattr(active_button, 'show_loading_state'):
+            #     active_button.show_loading_state()
             
-            # Since we've changed the page, update all sidebar buttons
-            # This will be handled by the stacked_widget.currentChanged signal
-            # which will call handle_page_change
+            # Switch to the page - use original text as key
+            self.stacked_widget.setCurrentWidget(self.pages[button_text])
+            
+            # Force data loading with skeleton for resource pages
+            page_widget = self.pages[button_text]
+            QTimer.singleShot(50, lambda: self._delayed_load_data(page_widget, active_button))
         else:
             # For dropdown buttons, just update their visual state
             # but don't consider them "active" in terms of navigation
@@ -794,13 +836,9 @@ class ClusterView(QWidget):
                 if btn != active_button and btn.has_dropdown and hasattr(btn, 'dropdown_open'):
                     btn.dropdown_open = False
             
-            # The click itself will trigger show_dropdown which sets dropdown_open
-            # We don't need to change is_active here since handle_page_change manages that
-            
             # Make sure all buttons have updated styles
             for btn in self.sidebar.nav_buttons:
                 btn.update_style()
-
     def handle_dropdown_selection(self, item_name):
         """Handle dropdown menu selections with detail page management"""
         # Close detail page when navigating to a different section via dropdown

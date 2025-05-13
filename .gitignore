@@ -9,6 +9,12 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+build_enhanced.py
+console_launcher.py
+debug_launcher.py
+Orchestrix_Enhanced.spec
+version.txt
+
 # Distribution / packaging
 dist/
 build/

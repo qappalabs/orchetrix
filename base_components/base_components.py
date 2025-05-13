@@ -420,7 +420,7 @@ class BaseTablePage(QWidget):
     def _handle_action(self, action, row):
         """Base implementation for handling action button clicks"""
         item_name = self.table.item(row, 1).text() if self.table.item(row, 1) else f"Item {row}"
-        print(f"{action} {item_name}")
+        
     
     def _create_action_container(self, row, button):
         """Create a container for an action button"""

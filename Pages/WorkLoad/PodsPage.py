@@ -288,14 +288,6 @@ class PodsPage(BaseResourcePage):
         action_container = self._create_action_container(row, action_btn)
         action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
         self.table.setCellWidget(row, status_col + 1, action_container)
-
-        
-    # def handle_row_click(self, row, column):
-    #     """Handle row selection when a table cell is clicked"""
-    #     if column != self.table.columnCount() - 1:  # Skip action column
-    #         # Select the row
-    #         self.table.selectRow(row)
-
     def handle_row_click(self, row, column):
         if column != self.table.columnCount() - 1:  # Skip action column
             # Select the row

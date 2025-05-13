@@ -1,6 +1,6 @@
 import sys
 import os
-
+import logging
 # Add the project root directory to sys.path
 project_root = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(project_root)
@@ -59,19 +59,30 @@ class TitleBar(QWidget):
         self.logo_label.setFixedSize(self.logo_icon_size)
 
         # Try to load app logo from file first
+        # try:
+        #     pixmap = QPixmap("icons/logoIcon.png")
+        #     if not pixmap.isNull():
+        #         self.logo_label.setPixmap(pixmap.scaled(self.logo_icon_size, Qt.AspectRatioMode.KeepAspectRatio,
+        #                                                 Qt.TransformationMode.SmoothTransformation))
+        #     else:
+        #         # Create a fallback logo
+        #         self.create_fallback_logo()
+        # except Exception as e:
+           
+        #     self.create_fallback_logo()
         try:
-            logo_path = Icons.resource_path("icons/logoIcon.png")
+            from UI.Icons import resource_path  # Import the resource_path function
+            logo_path = resource_path("icons/logoIcon.png")
             pixmap = QPixmap(logo_path)
             if not pixmap.isNull():
                 self.logo_label.setPixmap(pixmap.scaled(self.logo_icon_size, Qt.AspectRatioMode.KeepAspectRatio,
-                                                        Qt.TransformationMode.SmoothTransformation))
+                                                    Qt.TransformationMode.SmoothTransformation))
             else:
                 # Create a fallback logo
                 self.create_fallback_logo()
         except Exception as e:
-            print(f"Error loading logo: {e}")
+            logging.debug(f"Failed to load logo: {e}")
             self.create_fallback_logo()
-
         # Home icon button
         self.home_btn = self.create_icon_button("home", "Home")
         self.home_btn.clicked.connect(self.navigate_to_home)
@@ -182,7 +193,7 @@ class TitleBar(QWidget):
             except Exception:
                 pass
             self.update_pinned_items_signal.connect(self.update_pinned_dropdown)
-            print("Connected update_pinned_items_signal to update_pinned_dropdown")
+           
 
     def create_down_arrow_icon(self):
         """Create a downward arrow icon for the dropdown"""
@@ -210,10 +221,10 @@ class TitleBar(QWidget):
     def toggle_pinned_clusters_dropdown(self):
         """Toggle the visibility of the pinned clusters dropdown"""
         if self.dropdown_menu and self.dropdown_menu.isVisible():
-            print("Dropdown is visible, hiding it")
+           
             self.dropdown_menu.hide()
         else:
-            print("Dropdown is hidden, showing it")
+         
             self.create_or_update_dropdown()
             if self.search_input:
                 self.search_input.setFocus()  # Set focus to the search input when opening
@@ -282,7 +293,7 @@ class TitleBar(QWidget):
 
     def filter_pinned_items(self, text):
         """Filter the dropdown items based on the search input with Elasticsearch-like matching"""
-        print(f"Filtering pinned items with text: '{text}'")
+       
         if not self.pinned_items or not self.dropdown_menu:
             return
 
@@ -310,13 +321,13 @@ class TitleBar(QWidget):
 
     def handle_item_selection(self, item):
         """Handle the selection of a pinned item"""
-        print(f"Selected: {item}")
+      
         # Do not update the button text, keep it as "Pinned Clusters"
         if self.open_cluster_signal and hasattr(self.parent.home_page, 'all_data'):
             for view_type in self.parent.home_page.all_data:
                 for data_item in self.parent.home_page.all_data[view_type]:
                     if data_item.get("name") == item and "Cluster" in data_item.get("kind", ""):
-                        print(f"Navigating to cluster: {item}")
+                     
                         self.open_cluster_signal.emit(item)
                         break
         self.dropdown_menu.hide()
@@ -572,9 +583,9 @@ class TitleBar(QWidget):
 
     def update_pinned_dropdown(self, pinned_items):
         """Update the pinned items list from HomePage"""
-        print(f"Received pinned items in TitleBar: {pinned_items}")
+     
         if not isinstance(pinned_items, list):
-            print(f"Invalid pinned_items type: {type(pinned_items)}. Expected list.")
+    
             pinned_items = []
         
         self.pinned_items = pinned_items

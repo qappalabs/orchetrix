@@ -1,0 +1,17 @@
+2025-05-12 18:43:15,751 [INFO] Application started. Log file: C:\Users\USER\Music\OX\product_ox\logs\orchestrix_20250512_184315.log
+2025-05-12 18:43:15,760 [INFO] Subprocess module patched to hide console windows
+2025-05-12 18:43:15,760 [INFO] Subprocess.Popen patched to hide console windows
+2025-05-12 18:43:15,760 [INFO] Initializing application...
+2025-05-12 18:43:16,976 [INFO] All modules imported successfully
+2025-05-12 18:43:16,976 [INFO] Running in normal Python environment
+2025-05-12 18:43:16,976 [INFO] Python version: 3.13.1 (tags/v3.13.1:0671451, Dec  3 2024, 19:06:28) [MSC v.1942 64 bit (AMD64)]
+2025-05-12 18:43:17,010 [INFO] PyQt version: Unknown
+2025-05-12 18:43:17,010 [INFO] Working directory: C:\Users\USER\Music\OX\product_ox
+2025-05-12 18:43:17,010 [INFO] Creating QApplication
+2025-05-12 18:43:17,146 [INFO] Application icon set from: C:\Users\USER\Music\OX\product_ox\icons/logoIcon.ico
+2025-05-12 18:43:17,161 [INFO] Windows taskbar app ID set
+2025-05-12 18:43:17,161 [INFO] Creating splash screen
+2025-05-12 18:43:17,346 [INFO] Creating main window
+2025-05-12 18:43:27,180 [INFO] Starting application main loop
+2025-05-12 18:43:32,167 [INFO] Main window shown successfully
+2025-05-12 18:47:38,440 [INFO] Application exited with code: 0

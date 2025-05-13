@@ -2,6 +2,8 @@ from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QRectF
 from PyQt6.QtGui import QPixmap, QColor, QPainter, QPen, QBrush, QConicalGradient
 from UI.Styles import AppStyles
+from UI.Icons import resource_path
+import logging
 import math
 import os
 import sys
@@ -118,40 +120,38 @@ class SplashScreen(QWidget):
         self.setup_ui()
 
     # Resource path helper - same as in Icons.py
-    def resource_path(self, relative_path):
-        """Get absolute path to resource, works for dev and for PyInstaller"""
-        try:
-            # PyInstaller creates a temp folder and stores path in _MEIPASS
-            if getattr(sys, 'frozen', False):
-                # Running in a bundle
-                base_path = sys._MEIPASS
-                print(f"SplashScreen: Running in bundled mode, MEIPASS: {base_path}")
-            else:
-                # Running in normal Python environment
-                base_path = os.path.abspath(".")
-                print(f"SplashScreen: Running in development mode, base path: {base_path}")
+    # def resource_path(self, relative_path):
+    #     """Get absolute path to resource, works for dev and for PyInstaller"""
+    #     try:
+    #         # PyInstaller creates a temp folder and stores path in _MEIPASS
+    #         if getattr(sys, 'frozen', False):
+    #             # Running in a bundle
+    #             base_path = sys._MEIPASS
+    #         else:
+    #             # Running in normal Python environment
+    #             base_path = os.path.abspath(".")
+
             
-            full_path = os.path.join(base_path, relative_path)
-            print(f"SplashScreen: Resource path for {relative_path}: {full_path}")
+    #         full_path = os.path.join(base_path, relative_path)
+
             
-            # Check if the file exists
-            if os.path.exists(full_path):
-                print(f"SplashScreen: Resource file exists: {full_path}")
-            else:
-                print(f"SplashScreen: Warning - Resource file does not exist: {full_path}")
-                # List directory contents for debugging
-                parent_dir = os.path.dirname(full_path)
-                if os.path.exists(parent_dir):
-                    print(f"SplashScreen: Directory contents of {parent_dir}:")
-                    for f in os.listdir(parent_dir):
-                        print(f"  - {f}")
-                else:
-                    print(f"SplashScreen: Parent directory does not exist: {parent_dir}")
-            
-            return full_path
-        except Exception as e:
-            print(f"SplashScreen: Error in resource_path: {e}")
-            return relative_path
+    #         # Check if the file exists
+    #         if os.path.exists(full_path):
+    #             pass
+    #         else:
+               
+    #             # List directory contents for debugging
+    #             parent_dir = os.path.dirname(full_path)
+    #             if os.path.exists(parent_dir):
+                    
+    #                 for f in os.listdir(parent_dir):
+    #                     pass
+    #             else:
+    #                 pass
+    #         return full_path
+    #     except Exception as e:
+
+    #         return relative_path
 
     def setup_ui(self):
         # Create main layout
@@ -174,27 +174,47 @@ class SplashScreen(QWidget):
         self.bg_container.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.bg_container.setFixedSize(680, 380)  # Make it fit the container
 
+        # try:
+        #     # Load the splash screen image with resource_path
+        #     splash_path = self.resource_path("images/orchetrix_splash.png")
+        #     bg_pixmap = QPixmap(splash_path)
+            
+        #     if not bg_pixmap.isNull():
+                
+        #         self.bg_container.setPixmap(bg_pixmap.scaled(
+        #             self.bg_container.size(),
+        #             Qt.AspectRatioMode.IgnoreAspectRatio,
+        #             Qt.TransformationMode.SmoothTransformation
+        #         ))
+        #     else:
+               
+        #         # Fallback to a static color if image isn't available
+        #         self.bg_container.setStyleSheet(AppStyles.SPLASH_ANIMATION_FALLBACK_STYLE)
+        # except Exception as e:
+            
+        #     # Fallback to static color
+        #     self.bg_container.setStyleSheet(AppStyles.SPLASH_ANIMATION_FALLBACK_STYLE)
+
         try:
             # Load the splash screen image with resource_path
-            splash_path = self.resource_path("images/orchetrix_splash.png")
+            splash_path = resource_path("images/orchetrix_splash.png")
             bg_pixmap = QPixmap(splash_path)
             
             if not bg_pixmap.isNull():
-                print(f"SplashScreen: Successfully loaded splash image: {splash_path}")
+                logging.debug("Successfully loaded splash screen image")
                 self.bg_container.setPixmap(bg_pixmap.scaled(
                     self.bg_container.size(),
                     Qt.AspectRatioMode.IgnoreAspectRatio,
                     Qt.TransformationMode.SmoothTransformation
                 ))
             else:
-                print(f"SplashScreen: Loaded pixmap is null for: {splash_path}")
+                logging.debug("Failed to load splash screen image - pixmap is null")
                 # Fallback to a static color if image isn't available
                 self.bg_container.setStyleSheet(AppStyles.SPLASH_ANIMATION_FALLBACK_STYLE)
         except Exception as e:
-            print(f"SplashScreen: Error loading splash image: {e}")
+            logging.debug(f"Error loading splash screen image: {e}")
             # Fallback to static color
             self.bg_container.setStyleSheet(AppStyles.SPLASH_ANIMATION_FALLBACK_STYLE)
-
         # Create and position the spinner
         self.spinner = PulsatingSpinner(self.bg_container)
         # Position at bottom center - adjust these values as needed

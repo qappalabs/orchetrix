@@ -378,7 +378,7 @@ class PortForwardingPage(BaseResourcePage):
                 process = psutil.Process(resource["pid"])
                 process.terminate()
             except Exception as e:
-                print(f"Error terminating process: {e}")
+                pass
             
             # Mark as disconnected
             resource["status"] = "Disconnected"
@@ -431,7 +431,7 @@ class PortForwardingPage(BaseResourcePage):
                 process = psutil.Process(resource["pid"])
                 process.terminate()
             except Exception as e:
-                print(f"Error terminating process: {e}")
+                pass
             
         # Remove from our internal tracking
         key = (resource_name, resource_namespace)
@@ -497,7 +497,7 @@ class PortForwardingPage(BaseResourcePage):
                     process = psutil.Process(port_forward["pid"])
                     process.terminate()
                 except Exception as e:
-                    print(f"Error terminating process: {e}")
+                    pass
             
             # Remove from our internal tracking
             key = (port_forward["name"], port_forward["namespace"])

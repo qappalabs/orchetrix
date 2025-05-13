@@ -39,13 +39,17 @@ class DetailManager(QObject):
         if self.parent_window:
             # Set the detail page height to match parent window
             self.detail_page.setFixedHeight(self.parent_window.height())
-    def show_detail(self, resource_type, resource_name, namespace=None):
+    def show_detail(self, resource_type, resource_name, namespace=None, raw_data=None):
         """Show detail view for the specified resource with improved click handling"""
         # Store current resource info
         self.current_resource_type = resource_type
         self.current_resource_name = resource_name
         self.current_resource_namespace = namespace
         
+        # Store raw data for event lookup if provided
+        if raw_data and resource_type.lower() == "event":
+            self.detail_page.event_raw_data = raw_data
+
         # Check if we're viewing the same resource
         if (self.detail_page.resource_type == resource_type and 
             self.detail_page.resource_name == resource_name and

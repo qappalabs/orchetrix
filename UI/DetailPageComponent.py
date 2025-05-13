@@ -1101,6 +1101,69 @@ class DetailPage(QWidget):
             return
         
         try:
+             # Special handling for event type
+            if self.resource_type.lower() == "event":
+                import subprocess
+                import json
+                
+                # If we have raw event data, use it directly
+                if hasattr(self, 'event_raw_data') and self.event_raw_data:
+                    self.current_data = self.event_raw_data
+                    self.update_ui_with_data()
+                    self.loading_indicator.hide()
+                    self.loading_animation.stop()
+                    return
+                
+                # Otherwise, build a field selector to find the event
+                cmd = ["kubectl", "get", "events"]
+                
+                if self.resource_namespace:
+                    cmd.extend(["-n", self.resource_namespace])
+                
+                # For events, use field selectors to narrow down the search
+                field_selectors = []
+                if '/' in self.resource_name:
+                    # If name has format "kind/name-reason", parse it
+                    parts = self.resource_name.split('/', 1)
+                    if len(parts) > 1:
+                        kind, name_parts = parts
+                        field_selectors.append(f"involvedObject.kind={kind}")
+                        
+                        # Further split name if it contains reason
+                        if '-' in name_parts:
+                            name, reason = name_parts.rsplit('-', 1)
+                            field_selectors.append(f"involvedObject.name={name}")
+                            field_selectors.append(f"reason={reason}")
+                        else:
+                            field_selectors.append(f"involvedObject.name={name_parts}")
+                else:
+                    # Try direct name match
+                    field_selectors.append(f"metadata.name={self.resource_name}")
+                
+                if field_selectors:
+                    cmd.extend(["--field-selector", ",".join(field_selectors)])
+                
+                cmd.extend(["-o", "json"])
+                
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    timeout=10
+                )
+                
+                events_data = json.loads(result.stdout)
+                if "items" in events_data and events_data["items"]:
+                    # Use the first matching event
+                    self.current_data = events_data["items"][0]
+                else:
+                    self.current_data = {}
+                
+                self.update_ui_with_data()
+                self.loading_indicator.hide()
+                self.loading_animation.stop()
+                return
             # Special handling for Helm releases
             if self.resource_type == "helmrelease":
                 import subprocess
@@ -1185,7 +1248,7 @@ class DetailPage(QWidget):
                     values_data = json.loads(values_result.stdout)
                     release_data["values"] = values_data
                 except Exception as values_err:
-                    print(f"Warning: Unable to get values: {values_err}")
+                    
                     release_data["values"] = {}
                 
                 # Format the data in Kubernetes-like structure
@@ -1262,7 +1325,7 @@ class DetailPage(QWidget):
                             self.loading_animation.stop()
                             return
                 except (json.JSONDecodeError, Exception) as e:
-                    print(f"Error using global chart data: {e}")
+                    pass
                 
                 # Method 2: Try to get the chart info from the resources list
                 try:
@@ -1312,7 +1375,7 @@ class DetailPage(QWidget):
                                     self.loading_animation.stop()
                                     return
                 except Exception as e:
-                    print(f"Error searching for chart in widgets: {e}")
+                    pass
                 
                 # Method 3: Try using helm command
                 try:
@@ -1379,12 +1442,12 @@ class DetailPage(QWidget):
                             self.loading_animation.stop()
                             return
                     except (subprocess.SubprocessError, json.JSONDecodeError, Exception) as e:
-                        print(f"Error using helm command: {e}")
+                        pass
                 except Exception as e:
-                    print(f"Error in helm method: {e}")
+                    pass
                     
                 # Fallback: Use basic chart information we created
-                print(f"Using fallback data for chart {self.resource_name}")
+                pass
                 self.current_data = fallback_data
                 self.update_ui_with_data()
                 self.loading_indicator.hide()
@@ -1618,7 +1681,7 @@ class DetailPage(QWidget):
                         self.specific_layout.addWidget(icon_widget)
         except Exception as e:
             # Just skip icon display on error
-            print(f"Error displaying chart icon: {e}")
+            pass
         
         # Show the specific section
         self.specific_section.show()

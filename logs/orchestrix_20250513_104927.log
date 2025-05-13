@@ -1,0 +1,18 @@
+2025-05-13 10:49:27,003 [INFO] Application started. Log file: C:\Users\USER\Music\OX\product_ox\logs\orchestrix_20250513_104927.log
+2025-05-13 10:49:27,010 [INFO] Subprocess module patched to hide console windows
+2025-05-13 10:49:27,010 [INFO] Subprocess.Popen patched to hide console windows
+2025-05-13 10:49:27,010 [INFO] Initializing application...
+2025-05-13 10:49:27,815 [INFO] All modules imported successfully
+2025-05-13 10:49:27,815 [INFO] Running in normal Python environment
+2025-05-13 10:49:27,815 [INFO] Python version: 3.13.1 (tags/v3.13.1:0671451, Dec  3 2024, 19:06:28) [MSC v.1942 64 bit (AMD64)]
+2025-05-13 10:49:27,841 [INFO] PyQt version: Unknown
+2025-05-13 10:49:27,841 [INFO] Working directory: C:\Users\USER\Music\OX\product_ox
+2025-05-13 10:49:27,841 [INFO] Creating QApplication
+2025-05-13 10:49:27,907 [INFO] Application icon set from: C:\Users\USER\Music\OX\product_ox\icons/logoIcon.ico
+2025-05-13 10:49:27,912 [INFO] Windows taskbar app ID set
+2025-05-13 10:49:27,913 [INFO] Creating splash screen
+2025-05-13 10:49:27,999 [INFO] Creating main window
+2025-05-13 10:49:50,399 [INFO] Starting application main loop
+2025-05-13 10:49:59,280 [ERROR] Error in patched subprocess.run: Command '['kubectl', 'get', 'events', '--all-namespaces', '-o', 'json']' returned non-zero exit status 1.
+2025-05-13 10:50:02,917 [INFO] Main window shown successfully
+2025-05-13 10:50:42,963 [INFO] Application exited with code: 0

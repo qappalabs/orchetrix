@@ -2,7 +2,7 @@ import sys
 import platform
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox,
-    QFrame, QLineEdit, QCheckBox, QScrollArea
+    QFrame, QLineEdit, QCheckBox, QScrollArea, QTextEdit
 )
 from PyQt6.QtGui import QFont, QIcon, QColor, QPalette, QPainter
 from PyQt6.QtCore import Qt, QSize, QPropertyAnimation, QEasingCurve, pyqtSignal
@@ -97,9 +97,18 @@ class SidebarButton(QPushButton):
 
 class PreferencesWidget(QWidget):
     back_signal = pyqtSignal()
+    font_changed = pyqtSignal(str)  # Signal for font family changes
+    font_size_changed = pyqtSignal(int)  # Signal for font size changes
+    copy_paste_changed = pyqtSignal(bool)  # Signal for copy-paste toggle changes
 
     def __init__(self):
         super().__init__()
+        self.current_font_size = 12  # Default font size, matching the UI
+        self.current_font_family = "Consolas"  # Default font family
+        self.terminal_panel = None  # Will be set by the main application
+        self.pending_font_size = None  # Store pending font size if terminal_panel is not set
+        self.copy_paste_enabled = False  # Track copy-paste state
+        print("PreferencesWidget: Initialized with terminal_panel=None")
         self.setup_ui()
 
     def setup_ui(self):
@@ -136,8 +145,7 @@ class PreferencesWidget(QWidget):
         header_layout.addStretch()
         sidebar_layout.addWidget(header_container)
 
-
-# Sidebar menu buttons
+        # Sidebar menu buttons
         self.app_btn = SidebarButton("App")
         self.proxy_btn = SidebarButton("Proxy")
         self.kubernetes_btn = SidebarButton("Kubernetes")
@@ -175,7 +183,6 @@ class PreferencesWidget(QWidget):
     def go_back(self):
         self.back_signal.emit()
 
-        # Back button with icon
     def create_back_button(self):
         back_btn = QPushButton()
         back_btn.setIcon(QIcon("icons/back_arrow.png"))
@@ -229,7 +236,7 @@ class PreferencesWidget(QWidget):
         content_layout.addWidget(theme_label)
 
         theme_combo = QComboBox()
-        theme_combo.addItems(["Select...", "Dark", "Light"])
+        theme_combo.addItems(["Select...", "Dark"])
         theme_combo.setStyleSheet(AppStyles.DROPDOWN_STYLE)
         theme_combo.setCursor(Qt.CursorShape.PointingHandCursor)
         content_layout.addWidget(theme_combo)
@@ -788,7 +795,8 @@ class PreferencesWidget(QWidget):
         copy_paste_text.setStyleSheet(AppStyles.TEXT_STYLE)
 
         copy_paste_toggle = ToggleSwitch()
-        copy_paste_toggle.setChecked(False)
+        copy_paste_toggle.setChecked(self.copy_paste_enabled)
+        copy_paste_toggle.toggled.connect(self.on_copy_paste_changed)
 
         copy_paste_layout.addWidget(copy_paste_text)
         copy_paste_layout.addStretch()
@@ -809,7 +817,7 @@ class PreferencesWidget(QWidget):
         content_layout.addWidget(theme_label)
 
         theme_combo = QComboBox()
-        theme_combo.addItems(["Light", "Dark", "System"])
+        theme_combo.addItems(["Dark"])
         theme_combo.setStyleSheet(AppStyles.DROPDOWN_STYLE)
         theme_combo.setCursor(Qt.CursorShape.PointingHandCursor)
         content_layout.addWidget(theme_combo)
@@ -826,10 +834,11 @@ class PreferencesWidget(QWidget):
         font_size_label.setStyleSheet(AppStyles.SUBSECTION_HEADER_STYLE)
         content_layout.addWidget(font_size_label)
 
-        font_size_input = QLineEdit()
-        font_size_input.setText("12")
-        font_size_input.setStyleSheet(AppStyles.INPUT_STYLE)
-        content_layout.addWidget(font_size_input)
+        self.font_size_input = QLineEdit()
+        self.font_size_input.setText(str(self.current_font_size))
+        self.font_size_input.setStyleSheet(AppStyles.INPUT_STYLE)
+        self.font_size_input.editingFinished.connect(self.on_font_size_changed)
+        content_layout.addWidget(self.font_size_input)
 
         divider4 = QFrame()
         divider4.setObjectName("divider")
@@ -843,11 +852,13 @@ class PreferencesWidget(QWidget):
         font_family_label.setStyleSheet(AppStyles.SUBSECTION_HEADER_STYLE)
         content_layout.addWidget(font_family_label)
 
-        font_family_combo = QComboBox()
-        font_family_combo.addItems(["RobotoMono", "Consolas", "Courier New"])
-        font_family_combo.setStyleSheet(AppStyles.DROPDOWN_STYLE)
-        font_family_combo.setCursor(Qt.CursorShape.PointingHandCursor)
-        content_layout.addWidget(font_family_combo)
+        self.font_family_combo = QComboBox()
+        self.font_family_combo.addItems(["RobotoMono", "Consolas", "Courier New"])
+        self.font_family_combo.setCurrentText(self.current_font_family)
+        self.font_family_combo.setStyleSheet(AppStyles.DROPDOWN_STYLE)
+        self.font_family_combo.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.font_family_combo.currentTextChanged.connect(self.on_font_changed)
+        content_layout.addWidget(self.font_family_combo)
 
         content_layout.addStretch()
 
@@ -891,3 +902,97 @@ class PreferencesWidget(QWidget):
     def change_timezone(self, index):
         timezone = self.timezone_combo.currentText()
         print(f"Timezone changed to: {timezone}")
+
+    def on_font_changed(self, font_family):
+        self.current_font_family = font_family
+        print(f"PreferencesWidget: Font family changed to {font_family}")
+        self.font_changed.emit(font_family)
+
+    def on_font_size_changed(self):
+        text = self.font_size_input.text()
+        try:
+            font_size = int(text)
+            # Validate font size within a reasonable range
+            if 6 <= font_size <= 72:
+                self.current_font_size = font_size
+                self.pending_font_size = font_size
+                print(f"PreferencesWidget: Emitting font_size_changed with size: {font_size}")
+                self.font_size_changed.emit(font_size)
+                self.apply_font_size_manually(font_size)
+            else:
+                print(f"PreferencesWidget: Font size {font_size} out of range (6-72)")
+                self.font_size_input.setText(str(self.current_font_size))
+        except ValueError:
+            print(f"PreferencesWidget: Invalid font size input: {text}")
+            self.font_size_input.setText(str(self.current_font_size))
+
+    def on_copy_paste_changed(self, checked):
+        self.copy_paste_enabled = checked
+        print(f"PreferencesWidget: Copy-paste toggle changed to {checked}")
+        self.copy_paste_changed.emit(checked)
+        try:
+            if self.terminal_panel:
+                print(f"PreferencesWidget: Applying copy-paste setting {checked} to terminal panel")
+                self.terminal_panel.apply_copy_paste_to_terminals(checked)
+            else:
+                print("PreferencesWidget: Terminal panel not set, copy-paste setting will be applied when panel is set")
+        except Exception as e:
+            print(f"PreferencesWidget: Failed to apply copy-paste setting: {e}")
+
+    def get_current_font_size(self):
+        """Return the last valid font size set by the user."""
+        return self.current_font_size
+
+    def set_terminal_panel(self, terminal_panel):
+        """Set the TerminalPanel instance for manual font size and copy-paste application."""
+        self.terminal_panel = terminal_panel
+        print(f"PreferencesWidget: Terminal panel set to {self.terminal_panel}")
+        try:
+            # Apply any pending font size changes
+            if self.pending_font_size is not None:
+                print(f"PreferencesWidget: Applying pending font size {self.pending_font_size}")
+                self.apply_font_size_manually(self.pending_font_size)
+            # Apply current copy-paste setting
+            print(f"PreferencesWidget: Applying copy-paste setting {self.copy_paste_enabled}")
+            self.terminal_panel.apply_copy_paste_to_terminals(self.copy_paste_enabled)
+        except Exception as e:
+            print(f"PreferencesWidget: Error applying settings to terminal panel: {e}")
+
+    def find_terminal_widgets(self, widget):
+        """Recursively search for QTextEdit widgets that might be used as terminals."""
+        terminal_widgets = []
+        if isinstance(widget, QTextEdit):
+            print(f"PreferencesWidget: Found QTextEdit widget: {widget}")
+            terminal_widgets.append(widget)
+        for child in widget.findChildren(QWidget):
+            terminal_widgets.extend(self.find_terminal_widgets(child))
+        return terminal_widgets
+
+    def apply_font_size_manually(self, font_size):
+        """Manually apply the font size to the terminal panel if set, or search for terminal widgets."""
+        try:
+            if self.terminal_panel:
+                print(f"PreferencesWidget: Manually applying font size {font_size} to terminal panel")
+                self.terminal_panel.apply_font_size_to_terminals(font_size)
+            else:
+                print("PreferencesWidget: Terminal panel not set, searching for terminal widgets")
+                # Start searching from the top-level parent widget
+                parent = self
+                while parent.parent():
+                    parent = parent.parent()
+                terminal_widgets = self.find_terminal_widgets(parent)
+                if terminal_widgets:
+                    print(f"PreferencesWidget: Found {len(terminal_widgets)} potential terminal widget(s)")
+                    for i, widget in enumerate(terminal_widgets):
+                        print(f"PreferencesWidget: Applying font size {font_size} to terminal widget {i}")
+                        font = QFont(self.current_font_family, font_size)
+                        widget.setFont(font)
+                        print(f"PreferencesWidget: Updated font to {self.current_font_family}, size {font_size} for widget {i}")
+                        widget.update()  # Force a repaint
+                    self.pending_font_size = None  # Clear pending font size since we've applied it
+                else:
+                    print("PreferencesWidget: No terminal widgets found, font size change is pending")
+                    print("PreferencesWidget: Font size change is pending until terminal panel is set or terminal widgets are found")
+        except Exception as e:
+            print(f"PreferencesWidget: Error applying font size: {e}")
+            

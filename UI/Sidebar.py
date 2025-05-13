@@ -1,12 +1,12 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QToolButton, QLabel, 
                             QGraphicsDropShadowEffect, QMenu, QToolTip, QSizePolicy,
-                            QFrame)
+                            QFrame, QLayout)
 from PyQt6.QtCore import Qt, QSize, QPropertyAnimation, QEasingCurve, QEvent, QTimer, QPoint, QRect
 from PyQt6.QtGui import QIcon, QFont, QColor, QAction, QPixmap
 
 from UI.Styles import AppColors, AppStyles
 from UI.Icons import Icons
-
+import logging
 class NavMenuDropdown(QMenu):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -31,20 +31,38 @@ class SidebarToggleButton(QToolButton):
         self.expanded = True
 
         # Try to load icons from files
+        # try:
+        #     self.expanded_icon = QIcon("icons/back.svg")
+        #     self.collapsed_icon = QIcon("icons/forward.svg")
+        #     # Check if icons loaded successfully
+        #     if self.expanded_icon.isNull() or self.collapsed_icon.isNull():
+        #         # Fallback to text-based icons
+        #         self.expanded_icon = None
+        #         self.collapsed_icon = None
+        # except Exception as e:
+            
+        #     # Fallback to text-based icons
+        #     self.expanded_icon = None
+        #     self.collapsed_icon = None
+        
         try:
-            self.expanded_icon = QIcon("icons/back.svg")
-            self.collapsed_icon = QIcon("icons/forward.svg")
+            from UI.Icons import resource_path  # Import the resource_path function
+            back_icon_path = resource_path("icons/back.svg")
+            forward_icon_path = resource_path("icons/forward.svg")
+            
+            self.expanded_icon = QIcon(back_icon_path)
+            self.collapsed_icon = QIcon(forward_icon_path)
+            
             # Check if icons loaded successfully
             if self.expanded_icon.isNull() or self.collapsed_icon.isNull():
                 # Fallback to text-based icons
                 self.expanded_icon = None
                 self.collapsed_icon = None
         except Exception as e:
-            print(f"Error loading sidebar toggle icons: {e}")
+            logging.debug(f"Failed to load sidebar toggle icons: {e}")
             # Fallback to text-based icons
             self.expanded_icon = None
             self.collapsed_icon = None
-        
         # Set the initial icon
         self.update_icon()
         self.setIconSize(QSize(24, 24))
@@ -245,6 +263,54 @@ class NavIconButton(QToolButton):
         self.installEventFilter(self)
 
     # The rest of the class methods remain unchanged
+
+
+    # Modify NavIconButton class in Sidebar.py
+    def show_loading_state(self):
+        """Show a loading state for the button without modifying item_text"""
+        # Create loading indicator if needed
+        if not hasattr(self, 'loading_indicator'):
+            self.loading_indicator = QLabel("⟳")
+            self.loading_indicator.setStyleSheet("color: #00A0FF;")
+            
+            # Add loading indicator to button layout without changing item_text
+            if self.expanded:
+                # Find the layout
+                for child in self.children():
+                    if isinstance(child, QLayout):
+                        child.addWidget(self.loading_indicator)
+                        break
+        
+        # Show the loading indicator
+        if hasattr(self, 'loading_indicator'):
+            self.loading_indicator.show()
+        
+        # Start animation timer
+        if not hasattr(self, 'loading_timer'):
+            self.loading_timer = QTimer(self)
+            self.loading_timer.timeout.connect(self._update_loading_animation)
+            self.loading_animation_step = 0
+            self.loading_symbols = ["⟳", "⟲", "⟳", "⟲"]
+        
+        self.loading_timer.start(200)  # Update every 200ms
+
+    def hide_loading_state(self):
+        """Hide the loading indicator"""
+        if hasattr(self, 'loading_timer') and self.loading_timer.isActive():
+            self.loading_timer.stop()
+        
+        if hasattr(self, 'loading_indicator'):
+            self.loading_indicator.hide()
+
+    def _update_loading_animation(self):
+        """Update the loading animation symbol"""
+        if not hasattr(self, 'loading_indicator'):
+            return
+            
+        # Update the loading symbol
+        symbol = self.loading_symbols[self.loading_animation_step % len(self.loading_symbols)]
+        self.loading_indicator.setText(symbol)
+        self.loading_animation_step += 1
     def set_expanded(self, expanded):
         if self.expanded != expanded:  # Only update if state actually changed
             self.expanded = expanded

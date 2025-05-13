@@ -2,7 +2,7 @@ from PyQt6.QtWidgets import (
     QHeaderView, QWidget, QLabel, QHBoxLayout,
     QToolButton, QMenu, QVBoxLayout, QTableWidgetItem
 )
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt,QTimer
 from PyQt6.QtGui import QColor, QIcon
 
 from base_components.base_components import SortableTableWidgetItem
@@ -43,27 +43,11 @@ class EventsPage(BaseResourcePage):
         
         # Configure column widths
         self.configure_columns()
+        
+        # Force load data after setup is complete
+        QTimer.singleShot(100, self.force_load_data)
+        
         return layout
-    
-    def showEvent(self, event):
-        """
-        Ensure data is loaded when the page is shown.
-        This is the key to fixing the initial load issue.
-        """
-        super().showEvent(event)
-        # Force data to load when the page is shown, bypassing any internal state checks
-        self.force_load_data()
-        
-    def force_load_data(self):
-        """
-        Override the force_load_data method to ensure it properly loads data
-        regardless of the current loading state.
-        """
-        # Reset loading state
-        self.is_loading = False
-        # Call the base class load_data method
-        super().load_data()
-        
     def configure_columns(self):
         """Configure column widths and behaviors"""
         # Configure columns with fixed widths
@@ -96,13 +80,8 @@ class EventsPage(BaseResourcePage):
         # Extract data from resource
         raw_data = resource.get("raw_data", {})
         
-        # Get event type - ensure it's case-insensitive comparison
+        # Get event type
         event_type = raw_data.get("type", "Normal")
-        is_warning = event_type.lower() == "warning"
-        
-        # Use a stronger red color for better visibility
-        warning_color = QColor("#FF0000")  # Bright red for better contrast
-        normal_color = QColor(AppColors.TEXT_TABLE)
         
         # Get event message
         message = raw_data.get("message", "")
@@ -143,17 +122,23 @@ class EventsPage(BaseResourcePage):
         else:
             last_seen_text = "Unknown"
         
-        # Type column - always normal color
+        # Type column
         type_item = SortableTableWidgetItem(event_type)
         type_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        type_item.setForeground(normal_color)  # Always use normal color for Type column
+        if event_type == "Warning":
+            type_item.setForeground(QColor("#ff4d4f"))
+        else:
+            type_item.setForeground(QColor(AppColors.TEXT_TABLE))
         type_item.setFlags(type_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
         self.table.setItem(row, 0, type_item)
         
-        # Message column - red only for warnings
+        # Message column
         message_item = SortableTableWidgetItem(message)
         message_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        message_item.setForeground(warning_color if is_warning else normal_color)  # Red only for warnings
+        if event_type == "Warning":
+            message_item.setForeground(QColor("#ff4d4f"))
+        else:
+            message_item.setForeground(QColor(AppColors.TEXT_TABLE))
         message_item.setFlags(message_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
         self.table.setItem(row, 1, message_item)
         
@@ -209,7 +194,7 @@ class EventsPage(BaseResourcePage):
         event_message = self.table.item(row, 1).text() if self.table.item(row, 1) else ""
         namespace = self.table.item(row, 2).text() if self.table.item(row, 2) else ""
         if action == "Edit":
-            print(f"Viewing event details: {event_type} in {namespace}: {event_message}")
+            pass
         elif action == "Delete":
             self.delete_resource(resource["name"], resource["namespace"])
 
@@ -225,23 +210,18 @@ class EventsPage(BaseResourcePage):
                 return int(age)
             except ValueError:
                 return 0
-            
+
+        # Add this method to EventsPage to properly handle row clicks
     def handle_row_click(self, row, column):
-        if column != self.table.columnCount() - 1:  # Skip action column
-            # Select the row
-            self.table.selectRow(row)
-            
-            # We need to use the unique event name from our resources array
-            # Rather than trying to reconstruct it from the table data
-            if row < len(self.resources):
-                resource = self.resources[row]
-                resource_name = resource["name"]
-                namespace = resource["namespace"]
+            """Handle row click event to show detail page"""
+            if column != 8:  # Not the action column
+                self.table.selectRow(row)
                 
-                # Find the ClusterView instance
+                # Get the parent view to show detail
                 parent = self.parent()
-                while parent and not hasattr(parent, 'detail_manager'):
+                while parent and not hasattr(parent, 'show_detail_for_table_item'):
                     parent = parent.parent()
-                
-                if parent and hasattr(parent, 'detail_manager'):
-                    parent.detail_manager.show_detail("event", resource_name, namespace)
+                    
+                # If we found the parent with detail function, call it
+                if parent and hasattr(parent, 'show_detail_for_table_item'):
+                    parent.show_detail_for_table_item(row, column, self, "Events")

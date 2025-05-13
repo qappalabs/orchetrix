@@ -174,40 +174,6 @@ class ClusterConnection(QObject):
             except Exception as e:
                 self.safe_emit_error(f"Error connecting to cluster: {str(e)}")
                 self.safe_emit_finished((self.cluster_name, False))
-
-    # def connect_to_cluster(self, cluster_name):
-    #     """Start the cluster connection process asynchronously"""
-    #     if self._shutting_down:
-    #         return
-            
-    #     if not cluster_name:
-    #         self.error_occurred.emit("No cluster name provided")
-    #         return
-            
-    #     self.connection_started.emit(cluster_name)
-        
-    #     # Create and start the worker
-    #     worker = self.ConnectionWorker(self.kube_client, cluster_name, self)
-        
-    #     # Track the worker
-    #     self._active_workers.add(worker)
-        
-    #     # Set up cleanup for when the worker is done
-    #     def cleanup_worker(result=None):
-    #         if worker in self._active_workers:
-    #             self._active_workers.remove(worker)
-                
-    #     worker.signals.finished.connect(cleanup_worker)
-    #     worker.signals.error.connect(lambda _: cleanup_worker())
-        
-    #     # Connect signals
-    #     worker.signals.finished.connect(self.on_connection_complete)
-    #     worker.signals.error.connect(self.handle_error)
-        
-    #     self.threadpool.start(worker)
-
-    # Add to cluster_connector.py
-
     def connect_to_cluster(self, cluster_name):
         """Start the cluster connection process asynchronously with better error handling"""
         if self._shutting_down:

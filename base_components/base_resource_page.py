@@ -7,11 +7,13 @@ import os
 import tempfile
 import yaml
 import subprocess
+import time
 from PyQt6.QtWidgets import (
      QMessageBox, QWidget, QVBoxLayout, QLineEdit, QComboBox,
-    QLabel, QProgressBar, QHBoxLayout, QPushButton
+    QLabel, QProgressBar, QHBoxLayout, QPushButton,QApplication, QWidget,QTableWidgetItem
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtGui import QColor
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from base_components.base_components import BaseTablePage
 from UI.Styles import AppStyles
 
@@ -370,6 +372,11 @@ class BaseResourcePage(BaseTablePage):
         self.is_loading = False
         self.selected_items = set()  # Track selected items by (name, namespace)
         self.reload_on_show = True  # Always reload data when page is shown
+
+        self.is_showing_skeleton = False
+        self._data_cache = {}  # Add cache dictionary
+        self._cache_timestamps = {}  # Track cache age
+        
         
     def setup_ui(self, title, headers, sortable_columns=None):
         """Set up the UI with an added refresh button and namespace selector."""
@@ -380,6 +387,83 @@ class BaseResourcePage(BaseTablePage):
         
         return layout
 
+    def _show_skeleton_loader(self, rows=5):
+        """Show a skeleton loader with empty rows while preserving table headers"""
+        self.is_showing_skeleton = True
+        
+        # Clear existing data but keep headers
+        self.table.setRowCount(0)
+        
+        # Add empty skeleton rows
+        for i in range(rows):
+            self.table.insertRow(i)
+            for j in range(self.table.columnCount()):
+                # First column (checkbox)
+                if j == 0:
+                    empty_widget = QWidget()
+                    empty_widget.setStyleSheet("background-color: #2d2d2d;")
+                    self.table.setCellWidget(i, j, empty_widget)
+                # Last column (actions)
+                elif j == self.table.columnCount() - 1:
+                    empty_widget = QWidget()
+                    empty_widget.setStyleSheet("background-color: #2d2d2d;")
+                    self.table.setCellWidget(i, j, empty_widget)
+                else:
+                    # Regular data cells
+                    item = QTableWidgetItem("")
+                    item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
+                    item.setBackground(QColor("#2d2d2d"))
+                    self.table.setItem(i, j, item)
+            
+            # Set row height
+            self.table.setRowHeight(i, 40)
+        
+        # Disable sorting during loading
+        self.table.setSortingEnabled(False)
+        
+        # Update UI immediately
+        QApplication.processEvents()
+        
+        # Start skeleton animation
+        if not hasattr(self, 'skeleton_timer'):
+            self.skeleton_timer = QTimer(self)
+            self.skeleton_timer.timeout.connect(self._animate_skeleton)
+            self.skeleton_animation_step = 0
+        
+        self.skeleton_timer.start(300)  # Update every 300ms
+   
+    def _animate_skeleton(self):
+        """Animate the skeleton cells with gradient effect"""
+        if not self.is_showing_skeleton:
+            self.skeleton_timer.stop()
+            return
+            
+        # Alternate between darker and lighter grays
+        colors = ["#2d2d2d", "#333333", "#3a3a3a", "#333333"]
+        color = QColor(colors[self.skeleton_animation_step % len(colors)])
+        
+        # Update all skeleton cells
+        for i in range(self.table.rowCount()):
+            for j in range(1, self.table.columnCount() - 1):
+                item = self.table.item(i, j)
+                if item:
+                    item.setBackground(color)
+        
+        self.skeleton_animation_step += 1
+        QApplication.processEvents()
+    def get_cached_data(self, key):
+        """Get cached data with expiration check"""
+        if key in self._data_cache and key in self._cache_timestamps:
+            # Cache expires after 5 minutes
+            cache_age = time.time() - self._cache_timestamps[key]
+            if cache_age < 300:  # 5 minutes in seconds
+                return self._data_cache[key]
+        return None
+    
+    def cache_data(self, key, data):
+        """Cache data with timestamp"""
+        self._data_cache[key] = data
+        self._cache_timestamps[key] = time.time()
     def _add_filter_controls(self, header_layout):
         """Add namespace filter dropdown and search bar to the header layout"""
         # Check if this resource has a namespace column
@@ -561,7 +645,7 @@ class BaseResourcePage(BaseTablePage):
                 if index >= 0:
                     self.namespace_combo.setCurrentIndex(index)
         except Exception as e:
-            print(f"Error loading namespaces: {str(e)}")
+           
             # If we can't load namespaces, just add default namespace
             self.namespace_combo.clear()
             self.namespace_combo.addItem("All Namespaces")
@@ -614,7 +698,14 @@ class BaseResourcePage(BaseTablePage):
         """Force reload data regardless of loading state."""
         # Reset loading state and call load_data
         self.is_loading = False
-        self.load_data()
+        
+        # Show skeleton loader first if attribute exists
+        if hasattr(self, '_show_skeleton_loader'):
+            self._show_skeleton_loader()
+            
+        # Delay loading to allow UI to update
+        QTimer.singleShot(100, self.load_data)
+        # self.load_data()
     
     def showEvent(self, event):
         """Load data when the page is shown."""
@@ -645,9 +736,10 @@ class BaseResourcePage(BaseTablePage):
         super().hideEvent(event)
         # This ensures threads are stopped when switching away from this page
         self.cleanup_threads()
-            
+
+
     def load_data(self):
-        """Load resource data from Kubernetes."""
+        """Load resource data with caching and skeleton loading"""
         if self.is_loading:
             return
         
@@ -655,63 +747,63 @@ class BaseResourcePage(BaseTablePage):
         if hasattr(self, 'loading_thread') and self.loading_thread and self.loading_thread.isRunning():
             self.loading_thread.wait(300)  # Wait for it to finish with timeout
         
-            # Reset search filter if it exists
+        # Reset search filter if it exists
         if hasattr(self, 'search_bar'):
             self.search_bar.blockSignals(True)  # Prevent triggering filter while loading
             self.search_bar.clear()
             self.search_bar.blockSignals(False)
-            
+        
+        # Check for cached data
+        cache_key = f"{self.resource_type}_{self.namespace_filter}"
+        cached_data = None
+        if hasattr(self, '_data_cache') and hasattr(self, '_cache_timestamps'):
+            if cache_key in self._data_cache and cache_key in self._cache_timestamps:
+                # Cache expires after 5 minutes
+                cache_age = time.time() - self._cache_timestamps.get(cache_key, 0)
+                if cache_age < 300:  # 5 minutes in seconds
+                    cached_data = self._data_cache[cache_key]
+        
+        if cached_data:
+            # Use cached data if available
+            self.on_resources_loaded(cached_data, self.resource_type)
+            return
+        
         self.is_loading = True
         self.resources = []
         self.selected_items.clear()
-        self.table.setRowCount(0)
-        self.table.setSortingEnabled(False)
         
-        # Show loading indicator
-        loading_row = self.table.rowCount()
-        self.table.setRowCount(loading_row + 1)
-        self.table.setSpan(loading_row, 0, 1, self.table.columnCount())
-        
-        loading_widget = QWidget()
-        loading_layout = QVBoxLayout(loading_widget)
-        loading_layout.setContentsMargins(20, 20, 20, 20)
-        
-        loading_bar = QProgressBar()
-        loading_bar.setRange(0, 0)  # Indeterminate
-        loading_bar.setTextVisible(False)
-        loading_bar.setStyleSheet("""
-            QProgressBar {
-                border: 1px solid #3d3d3d;
-                border-radius: 3px;
-                background-color: #1e1e1e;
-                height: 20px;
-            }
-            QProgressBar::chunk {
-                background-color: #0078d7;
-            }
-        """)
-        
-        loading_text = QLabel(f"Loading {self.resource_type}...")
-        loading_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        loading_text.setStyleSheet("color: #ffffff; font-size: 14px;")
-        
-        loading_layout.addWidget(loading_text)
-        loading_layout.addWidget(loading_bar)
-        
-        self.table.setCellWidget(loading_row, 0, loading_widget)
-        
+        # Show skeleton loader if attribute exists and not already shown
+        if hasattr(self, 'is_showing_skeleton') and not self.is_showing_skeleton:
+            self._show_skeleton_loader()
+            
         # Start loading thread
         self.loading_thread = KubernetesResourceLoader(self.resource_type, self.namespace_filter)
-        self.loading_thread.resources_loaded.connect(self.on_resources_loaded)
+        self.loading_thread.resources_loaded.connect(
+            lambda resources, resource_type: self.on_resources_loaded(resources, resource_type, cache_key))
         self.loading_thread.error_occurred.connect(self.on_load_error)
         self.loading_thread.start()
     
-    def on_resources_loaded(self, resources, resource_type):
+    def on_resources_loaded(self, resources, resource_type,cache_key=None):
         """Handle loaded resources with empty message overlaying the table area."""
         self.is_loading = False
+
+        self.is_showing_skeleton = False
         
+        # Stop skeleton animation if running
+        if hasattr(self, 'skeleton_timer') and self.skeleton_timer.isActive():
+            self.skeleton_timer.stop()
         # Store resources
         self.resources = resources
+
+        # Cache the data if we have a cache key
+        if cache_key and resources:
+            if not hasattr(self, '_data_cache'):
+                self._data_cache = {}
+            if not hasattr(self, '_cache_timestamps'):
+                self._cache_timestamps = {}
+                
+            self._data_cache[cache_key] = resources
+            self._cache_timestamps[cache_key] = time.time()
         
         # Update the item count
         self.items_count.setText(f"{len(resources)} items")
@@ -846,7 +938,7 @@ class BaseResourcePage(BaseTablePage):
         self.table.setCellWidget(error_row, 0, error_widget)
         
         # Log the error
-        print(f"Error loading {self.resource_type}: {error_message}")
+      
         
     def populate_table(self, resources):
         """Populate the table with resources."""
