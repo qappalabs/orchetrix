@@ -163,7 +163,7 @@ class OrchestrixGUI(QMainWindow):
         # Connect to connector signals
         self.cluster_connector.connection_started.connect(self.on_cluster_connection_started)
         self.cluster_connector.connection_complete.connect(self.on_cluster_connection_complete)
-        self.cluster_connector.error_occurred.connect(self.show_error_message)
+        # self.cluster_connector.error_occurred.connect(self.show_error_message)
         self.cluster_connector.metrics_data_loaded.connect(self.check_cluster_data_loaded)
         self.cluster_connector.issues_data_loaded.connect(self.check_cluster_data_loaded)
 

@@ -54,7 +54,7 @@ except ImportError as e:
     logging.critical(f"Failed to import application modules: {e}")
     raise
 
-# Utility functions
+
 def resource_path(relative_path):
     """Get absolute path to resource, works for dev and for PyInstaller"""
     try:
@@ -71,25 +71,6 @@ def resource_path(relative_path):
     except Exception as e:
         logging.error(f"Error in resource_path for {relative_path}: {e}")
         return relative_path
-
-# def global_exception_handler(exc_type, exc_value, exc_traceback):
-#     """Global handler for uncaught exceptions"""
-#     if issubclass(exc_type, KeyboardInterrupt):
-#         # Don't catch KeyboardInterrupt
-#         sys.__excepthook__(exc_type, exc_value, exc_traceback)
-#         return
-
-#     # Log the exception
-#     logging.error("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
-    
-#     # Show user-friendly message if possible
-#     try:
-#         if QApplication.instance():
-#             QMessageBox.critical(None, "Error", 
-#                                 f"An unexpected error occurred:\n{str(exc_value)}\n\nDetails have been logged to: {log_file}")
-#     except Exception:
-#         pass
-
 def global_exception_handler(exc_type, exc_value, exc_traceback):
     """Global handler for uncaught exceptions"""
     if issubclass(exc_type, KeyboardInterrupt):
@@ -164,6 +145,12 @@ class MainWindow(QMainWindow):
         # Initialize cluster connector before UI setup
         self.cluster_connector = get_cluster_connector()
         
+        # Make sure we are the only component showing error messages
+        if hasattr(self, 'home_page') and hasattr(self.home_page, 'show_error_message'):
+            try:
+                self.cluster_connector.error_occurred.disconnect(self.home_page.show_error_message)
+            except (TypeError, RuntimeError):
+                pass  # 
         # Initialize UI components
         self.init_ui()
         self.installEventFilter(self)
@@ -342,23 +329,29 @@ class MainWindow(QMainWindow):
         else:
             self.switch_to_home()
     
-    # def show_error_message(self, error_message):
-    #     """Display error messages from various components"""
-    #     QMessageBox.critical(self, "Error", error_message)
-
     def show_error_message(self, error_message):
         """Display error messages from various components"""
-        # Prevent multiple error dialogs during shutdown
+        # Use a class attribute to track error dialog state
+        if not hasattr(self, '_error_shown'):
+            self._error_shown = False
+        
+        # Prevent multiple error dialogs in rapid succession
         if self._error_shown:
             logging.error(f"Suppressed duplicate error dialog: {error_message}")
             return
             
+        # Set flag to prevent further dialogs
         self._error_shown = True
+        
+        # Show the dialog
         QMessageBox.critical(self, "Error", error_message)
         
-        # Reset the flag after a short delay to allow for legit new errors
-        QTimer.singleShot(1000, lambda: setattr(self, '_error_shown', False))
+        # Reset the flag after a delay
+        QTimer.singleShot(1000, self._reset_error_flag)
 
+    def _reset_error_flag(self):
+        """Reset the error dialog flag safely"""
+        self._error_shown = False
     def handle_page_change(self, index):
         """Handle page changes in the stacked widget"""
         current_widget = self.stacked_widget.widget(index)
@@ -411,7 +404,16 @@ class MainWindow(QMainWindow):
                 self.cluster_connector.error_occurred.disconnect()
             except (TypeError, RuntimeError):
                 pass
-                
+        # Ensure error messages are properly disconnected on shutdown
+        def cleanup_error_connections():
+            try:
+                self.cluster_connector.error_occurred.disconnect()
+            except (TypeError, RuntimeError):
+                pass
+
+        # Connect cleanup to app aboutToQuit signal
+        QApplication.instance().aboutToQuit.connect(cleanup_error_connections)
+        
         if hasattr(self, 'kube_client'):
             try:
                 self.kube_client.error_occurred.disconnect()

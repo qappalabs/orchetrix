@@ -169,10 +169,14 @@ class ModernBackButton(QToolButton):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedSize(36, 36)
-        self.setText("←")
-        self.setFont(QFont("Segoe UI", 14))
+
+        # Set the SVG icon
+        self.setIcon(QIcon("icons/Detailpage_Close.svg"))
+        self.setIconSize(QSize(20, 20))  # Optional: tweak for better fit
+
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        
+        self.setStyleSheet("border: none; background: transparent;")  # Optional clean look
+
         self.hovered = False
         self.pressed = False
         self.bg_normal = QColor(AppColors.BG_MEDIUM)
@@ -222,11 +226,20 @@ class ModernBackButton(QToolButton):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QBrush(bg_color))
         painter.drawEllipse(QRect(0, 0, self.width(), self.height()))
+
+        # Draw the icon (this is the missing part)
+        icon = self.icon()
+        if not icon.isNull():
+            icon_size = self.iconSize()
+            x = (self.width() - icon_size.width()) // 2
+            y = (self.height() - icon_size.height()) // 2
+            icon.paint(painter, x, y, icon_size.width(), icon_size.height(),
+                       Qt.AlignmentFlag.AlignCenter, QIcon.Mode.Normal, QIcon.State.Off)
         
-        painter.setPen(text_color)
-        painter.setFont(self.font())
-        painter.drawText(QRect(0, 0, self.width(), self.height()), 
-                        Qt.AlignmentFlag.AlignCenter, self.text())
+        # painter.setPen(text_color)
+        # painter.setFont(self.font())
+        # painter.drawText(QRect(0, 0, self.width(), self.height()),
+        #                 Qt.AlignmentFlag.AlignCenter, self.text())
 
 
 class DetailPage(QWidget):
@@ -299,10 +312,13 @@ class DetailPage(QWidget):
         self.animation_group.addAnimation(self.slide_animation)
         self.animation_group.addAnimation(self.fade_animation)
         self.animation_group.finished.connect(self.on_animation_finished)
-    
+
     def on_animation_finished(self):
         self.animation_in_progress = False
-        if self.slide_animation.direction() == QAbstractAnimation.Direction.Backward and not self.is_minimized:
+        if hasattr(self, '_closing') and self._closing:
+            self.hide()
+            self._closing = False
+        elif self.slide_animation.direction() == QAbstractAnimation.Direction.Backward and not self.is_minimized:
             self.hide()
 
     def create_header(self):
@@ -2750,33 +2766,50 @@ class DetailPage(QWidget):
         
         self.animation_group.setDirection(QAbstractAnimation.Direction.Forward)
         self.animation_group.start()
+
     def hide_with_animation(self):
-        """Hide the detail page with animation sliding to the right"""
-        if not self.isVisible():
+        """Hide the detail page with animation sliding to the right - fixed version"""
+        if not self.isVisible() or self.animation_in_progress:
             return
-            
-        # Create animation
-        self.animation = QPropertyAnimation(self, b"geometry")
-        self.animation.setDuration(AppStyles.DETAIL_PAGE_ANIMATION_DURATION)
-        self.animation.setStartValue(self.geometry())
-        
+
+        self.animation_in_progress = True
+
+        # Create a new standalone animation for hiding to avoid state conflicts
+        hide_animation = QPropertyAnimation(self, b"geometry")
+        hide_animation.setDuration(200)  # Match your current duration
+        hide_animation.setEasingCurve(QEasingCurve.Type.OutQuart)
+        hide_animation.setStartValue(self.geometry())
+
+        # Calculate end position
         if self.parent():
             end_rect = QRect(self.parent().width(), 0, self.width(), self.height())
         else:
             screen_width = QApplication.primaryScreen().geometry().width()
             end_rect = QRect(screen_width, 0, self.width(), self.height())
-            
-        self.animation.setEndValue(end_rect)
-        self.animation.setEasingCurve(QEasingCurve.Type.InQuint)
-        
-        # Connect finished signal to hide
-        self.animation.finished.connect(self.hide)
-        
-        # Start animation
-        self.animation.start()
-        
+
+        hide_animation.setEndValue(end_rect)
+
+        # Directly connect to a local function that will hide and cleanup
+        def finish_hiding():
+            self.hide()
+            self.animation_in_progress = False
+            # Ensure animation is properly deleted to prevent memory leaks
+            hide_animation.deleteLater()
+
+        hide_animation.finished.connect(finish_hiding)
+
+        # Start the animation
+        hide_animation.start()
+
         # Emit back signal
         self.back_signal.emit()
+
+    def ensure_hidden(self):
+        """Safety method to make sure the panel hides after animation"""
+        if self.animation_group.state() == QAbstractAnimation.State.Stopped and \
+                self.slide_animation.direction() == QAbstractAnimation.Direction.Backward:
+            self.hide()
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if hasattr(self, 'resize_handle'):

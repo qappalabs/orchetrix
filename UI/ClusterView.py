@@ -4,7 +4,7 @@ from PyQt6.QtGui import QColor, QPainter, QBrush
 import math
 
 from .DetailManager import DetailManager
-
+import logging
 from UI.Sidebar import Sidebar
 
 from UI.Styles import AppColors
@@ -437,9 +437,10 @@ class ClusterView(QWidget):
         """Handle error messages"""
         # Hide loading overlay
         self.loading_overlay.hide_loading()
-        # Show error message
-        if hasattr(self.parent_window, 'show_error_message'):
-            self.parent_window.show_error_message(error_message)
+        
+        # Do NOT forward the error to parent_window
+        # Just log it instead to avoid duplicate dialogs
+        logging.warning(f"ClusterView received error: {error_message}")
     
     def setup_ui(self):
         """Set up the main UI components"""
@@ -717,8 +718,7 @@ class ClusterView(QWidget):
         Called whenever a page change happens from any source.
         """
         # Close detail page when changing pages 
-        # This ensures that the detail closes even when page changes happen through
-        # other means besides direct sidebar navigation
+       
         if hasattr(self, 'detail_manager') and self.detail_manager.is_detail_visible():
             self.detail_manager.hide_detail()
         
