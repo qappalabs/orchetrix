@@ -98,6 +98,108 @@ class YamlHighlighter(QSyntaxHighlighter):
                 length = match.end() - start
                 self.setFormat(start, length, format)
 
+class LineNumberArea(QWidget):
+    def __init__(self, editor):
+        super().__init__(editor)
+        self.editor = editor
+        
+    def sizeHint(self):
+        return QSize(self.editor.lineNumberAreaWidth(), 0)
+        
+    def paintEvent(self, event):
+        self.editor.line_number_area_paint_event(event)
+
+class YamlEditorWithLineNumbers(QTextEdit):
+    """YAML editor with line numbers support"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.show_line_numbers = True
+        self.tab_size = 2  # Default tab size
+        self.line_number_area = LineNumberArea(self)
+        self.document().blockCountChanged.connect(self.update_line_number_area_width)
+        self.verticalScrollBar().valueChanged.connect(self.update_line_number_area)
+        self.textChanged.connect(lambda: self.update_line_number_area(0))
+        self.update_line_number_area_width(0)
+        
+    def lineNumberAreaWidth(self):
+        if not self.show_line_numbers:
+            return 0
+            
+        digits = 1
+        max_block = max(1, self.document().blockCount())
+        while max_block >= 10:
+            max_block /= 10
+            digits += 1
+            
+        space = 3 + self.fontMetrics().horizontalAdvance('9') * digits
+        return space
+        
+    def update_line_number_area_width(self, _):
+        self.setViewportMargins(self.lineNumberAreaWidth(), 0, 0, 0)
+        
+    def update_line_number_area(self, dy=0):
+        if dy:
+            self.line_number_area.scroll(0, dy)
+        else:
+            self.line_number_area.update(0, 0, self.line_number_area.width(), self.height())
+            
+        if self.height() != self.line_number_area.height():
+            self.line_number_area.setFixedHeight(self.height())
+        self.update_line_number_area_width(0)
+            
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        cr = self.contentsRect()
+        self.line_number_area.setGeometry(QRect(cr.left(), cr.top(), self.lineNumberAreaWidth(), cr.height()))
+        
+    def set_show_line_numbers(self, show):
+        self.show_line_numbers = show
+        self.update_line_number_area_width(0)
+        self.line_number_area.update()
+        
+    def set_tab_size(self, tab_size):
+        """Set the tab size (number of spaces per tab)"""
+        self.tab_size = tab_size
+    
+    def keyPressEvent(self, event):
+        """Override key press event to handle tab with custom size"""
+        if event.key() == Qt.Key.Key_Tab:
+            # Insert spaces instead of tab character
+            spaces = " " * self.tab_size
+            self.insertPlainText(spaces)
+        else:
+            super().keyPressEvent(event)
+            
+    def line_number_area_paint_event(self, event):
+        if not self.show_line_numbers:
+            return
+            
+        painter = QPainter(self.line_number_area)
+        painter.fillRect(event.rect(), QColor(AppColors.BG_DARK))
+        
+        # Get visible blocks
+        block = self.document().firstBlock()
+        block_number = 0
+        
+        # Get viewport offset for proper text alignment
+        viewport_offset = self.verticalScrollBar().value()
+        
+        while block.isValid():
+            # Get block position in viewport coordinates
+            block_rect = self.document().documentLayout().blockBoundingRect(block)
+            block_top = int(block_rect.translated(0, -viewport_offset).top())  # Convert to int
+            
+            # Only paint if block is visible
+            if block_top >= 0 and block_top < self.height():
+                number = str(block_number + 1)
+                painter.setPen(QColor(AppColors.TEXT_SUBTLE))
+                painter.drawText(0, block_top, self.line_number_area.width() - 5, 
+                                self.fontMetrics().height(),
+                                Qt.AlignmentFlag.AlignRight, number)
+                                
+            block = block.next()
+            block_number += 1
+
 class ModernResizeHandle(QWidget):
     """A modern resize handle with visual feedback"""
     def __init__(self, parent=None):
@@ -169,14 +271,10 @@ class ModernBackButton(QToolButton):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedSize(36, 36)
-
-        # Set the SVG icon
-        self.setIcon(QIcon("icons/Detailpage_Close.svg"))
-        self.setIconSize(QSize(20, 20))  # Optional: tweak for better fit
-
+        self.setText("←")
+        self.setFont(QFont("Segoe UI", 14))
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setStyleSheet("border: none; background: transparent;")  # Optional clean look
-
+        
         self.hovered = False
         self.pressed = False
         self.bg_normal = QColor(AppColors.BG_MEDIUM)
@@ -226,20 +324,11 @@ class ModernBackButton(QToolButton):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QBrush(bg_color))
         painter.drawEllipse(QRect(0, 0, self.width(), self.height()))
-
-        # Draw the icon (this is the missing part)
-        icon = self.icon()
-        if not icon.isNull():
-            icon_size = self.iconSize()
-            x = (self.width() - icon_size.width()) // 2
-            y = (self.height() - icon_size.height()) // 2
-            icon.paint(painter, x, y, icon_size.width(), icon_size.height(),
-                       Qt.AlignmentFlag.AlignCenter, QIcon.Mode.Normal, QIcon.State.Off)
         
-        # painter.setPen(text_color)
-        # painter.setFont(self.font())
-        # painter.drawText(QRect(0, 0, self.width(), self.height()),
-        #                 Qt.AlignmentFlag.AlignCenter, self.text())
+        painter.setPen(text_color)
+        painter.setFont(self.font())
+        painter.drawText(QRect(0, 0, self.width(), self.height()), 
+                        Qt.AlignmentFlag.AlignCenter, self.text())
 
 
 class DetailPage(QWidget):
@@ -257,6 +346,15 @@ class DetailPage(QWidget):
         self.is_minimized = False
         self.minimized_width = 0
         self.animation_in_progress = False
+        self.current_font_size = 12  # Default font size
+        self.current_font_family = "Consolas"  # Default font family
+        self.current_tab_size = 2  # Default tab size
+        self.show_line_numbers = True  # Default to showing line numbers
+        
+        # Initialize recursion prevention flags
+        self._currently_updating_font = None
+        self._currently_updating_size = None
+        self._currently_updating_tab_size = None
         
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
@@ -312,13 +410,10 @@ class DetailPage(QWidget):
         self.animation_group.addAnimation(self.slide_animation)
         self.animation_group.addAnimation(self.fade_animation)
         self.animation_group.finished.connect(self.on_animation_finished)
-
+    
     def on_animation_finished(self):
         self.animation_in_progress = False
-        if hasattr(self, '_closing') and self._closing:
-            self.hide()
-            self._closing = False
-        elif self.slide_animation.direction() == QAbstractAnimation.Direction.Backward and not self.is_minimized:
+        if self.slide_animation.direction() == QAbstractAnimation.Direction.Backward and not self.is_minimized:
             self.hide()
 
     def create_header(self):
@@ -404,6 +499,7 @@ class DetailPage(QWidget):
         header_layout.addWidget(self.loading_indicator)
         
         self.main_layout.addWidget(self.header)
+        
     def create_resize_handle(self):
         self.resize_handle = ModernResizeHandle(self)
         self.resize_handle.show()
@@ -729,7 +825,6 @@ class DetailPage(QWidget):
         self.overview_layout.addWidget(self.specific_section)
         self.overview_layout.addStretch()
     
-    
     def create_yaml_editor(self):
         yaml_toolbar = QWidget()
         yaml_toolbar.setFixedHeight(40)
@@ -805,19 +900,226 @@ class DetailPage(QWidget):
         self.yaml_cancel_button.clicked.connect(self.cancel_yaml_edit)
         self.yaml_cancel_button.hide()
         
+        # Add a font size indicator
+        self.yaml_font_size_label = QLabel(f"Font Size: {self.current_font_size}")
+        self.yaml_font_size_label.setStyleSheet("""
+            color: #aaaaaa;
+            font-size: 12px;
+            padding: 5px;
+        """)
+        
+        # Add a font family indicator 
+        self.yaml_font_family_label = QLabel(f"Font: {self.current_font_family}")
+        self.yaml_font_family_label.setStyleSheet("""
+            color: #aaaaaa;
+            font-size: 12px;
+            padding: 5px;
+        """)
+        
+        # Add a line numbers indicator
+        self.yaml_line_numbers_label = QLabel(f"Line Numbers: {'On' if self.show_line_numbers else 'Off'}")
+        self.yaml_line_numbers_label.setStyleSheet("""
+            color: #aaaaaa;
+            font-size: 12px;
+            padding: 5px;
+        """)
+        
+        # Add a tab size indicator
+        self.yaml_tab_size_label = QLabel(f"Tab Size: {self.current_tab_size}")
+        self.yaml_tab_size_label.setStyleSheet("""
+            color: #aaaaaa;
+            font-size: 12px;
+            padding: 5px;
+        """)
+        
         toolbar_layout.addWidget(self.yaml_edit_button)
         toolbar_layout.addWidget(self.yaml_save_button)
         toolbar_layout.addWidget(self.yaml_cancel_button)
         toolbar_layout.addStretch()
+        toolbar_layout.addWidget(self.yaml_font_family_label)
+        toolbar_layout.addWidget(self.yaml_font_size_label)
+        toolbar_layout.addWidget(self.yaml_line_numbers_label)
+        toolbar_layout.addWidget(self.yaml_tab_size_label)
         
-        self.yaml_editor = QTextEdit()
+        # Try to get font settings from parent window's preferences if available
+        font_size = self.current_font_size
+        font_family = self.current_font_family
+        tab_size = self.current_tab_size
+        
+        if hasattr(self, 'parent_window') and self.parent_window:
+            if hasattr(self.parent_window, 'preferences_page'):
+                prefs = self.parent_window.preferences_page
+                if hasattr(prefs, 'get_current_font_size'):
+                    font_size = prefs.get_current_font_size()
+                    self.current_font_size = font_size
+                    self.yaml_font_size_label.setText(f"Font Size: {font_size}")
+                if hasattr(prefs, 'current_font_family'):
+                    font_family = prefs.current_font_family
+                    self.current_font_family = font_family
+                    self.yaml_font_family_label.setText(f"Font: {font_family}")
+                if hasattr(prefs, 'show_line_numbers'):
+                    self.show_line_numbers = prefs.show_line_numbers
+                    self.yaml_line_numbers_label.setText(f"Line Numbers: {'On' if self.show_line_numbers else 'Off'}")
+                if hasattr(prefs, 'current_tab_size'):
+                    tab_size = prefs.current_tab_size
+                    self.current_tab_size = tab_size
+                    self.yaml_tab_size_label.setText(f"Tab Size: {tab_size}")
+        
+        # Use custom editor with line numbers support
+        self.yaml_editor = YamlEditorWithLineNumbers()
         self.yaml_editor.setReadOnly(True)
-        self.yaml_editor.setStyleSheet(AppStyles.DETAIL_PAGE_YAML_TEXT_STYLE)
+        
+        # Create a proper font with the right size and family
+        font = QFont(self.current_font_family, self.current_font_size)
+        self.yaml_editor.setFont(font)
+        
+        # Set line numbers visibility based on preference
+        self.yaml_editor.set_show_line_numbers(self.show_line_numbers)
+        
+        # Set tab size based on preference
+        self.yaml_editor.set_tab_size(self.current_tab_size)
+        
+        # Basic stylesheet without font settings (those are set directly with setFont)
+        base_yaml_style = """
+            background-color: #1E1E1E;
+            color: #D4D4D4;
+            border: none;
+            selection-background-color: #264F78;
+            selection-color: #D4D4D4;
+        """
+        self.yaml_editor.setStyleSheet(base_yaml_style)
         
         self.yaml_highlighter = YamlHighlighter(self.yaml_editor.document())
         
         self.yaml_layout.addWidget(yaml_toolbar)
         self.yaml_layout.addWidget(self.yaml_editor)
+    
+    def update_yaml_font_size(self, font_size):
+        """Update the YAML editor font size"""
+        if not hasattr(self, 'yaml_editor'):
+            return
+            
+        # Guard against recursion by checking if we're already updating with this size
+        if hasattr(self, '_currently_updating_size') and self._currently_updating_size == font_size:
+            return
+            
+        print(f"DetailPage: Updating YAML font size to {font_size}")
+        
+        # Set recursion guard
+        self._currently_updating_size = font_size
+        
+        try:
+            # Update the internal state
+            self.current_font_size = font_size
+            
+            # Update the font size label
+            if hasattr(self, 'yaml_font_size_label'):
+                self.yaml_font_size_label.setText(f"Font Size: {font_size}")
+            
+            # Get current font and update its size
+            font = self.yaml_editor.font()
+            font.setPointSize(font_size)
+            
+            # Apply the updated font
+            self.yaml_editor.setFont(font)
+        finally:
+            # Clear recursion guard
+            self._currently_updating_size = None
+    
+    def update_yaml_font_family(self, font_family):
+        """Update the YAML editor font family"""
+        if not hasattr(self, 'yaml_editor'):
+            return
+            
+        # Guard against recursion by checking if we're already updating with this font
+        if hasattr(self, '_currently_updating_font') and self._currently_updating_font == font_family:
+            return
+            
+        print(f"DetailPage: Updating YAML font family to {font_family}")
+        
+        # Set recursion guard
+        self._currently_updating_font = font_family
+        
+        try:
+            # Update the internal state
+            self.current_font_family = font_family
+            
+            # Update the font family label
+            if hasattr(self, 'yaml_font_family_label'):
+                self.yaml_font_family_label.setText(f"Font: {font_family}")
+            
+            # Get current font and update its family
+            font = self.yaml_editor.font()
+            font.setFamily(font_family)
+            
+            # Apply the updated font
+            self.yaml_editor.setFont(font)
+            
+            print(f"DetailPage: Applied font family {font_family} to YAML editor")
+        finally:
+            # Clear recursion guard
+            self._currently_updating_font = None
+    
+    def update_yaml_line_numbers(self, show_line_numbers):
+        """Update the YAML editor line numbers visibility"""
+        if not hasattr(self, 'yaml_editor'):
+            return
+            
+        print(f"DetailPage: Updating YAML line numbers to {show_line_numbers}")
+        
+        # Update property and apply to editor
+        self.show_line_numbers = show_line_numbers
+        self.yaml_editor.set_show_line_numbers(show_line_numbers)
+        
+        # Update the line numbers label
+        if hasattr(self, 'yaml_line_numbers_label'):
+            self.yaml_line_numbers_label.setText(f"Line Numbers: {'On' if show_line_numbers else 'Off'}")
+    
+    def update_yaml_tab_size(self, tab_size):
+        """Update the YAML editor tab size"""
+        if not hasattr(self, 'yaml_editor'):
+            return
+            
+        # Guard against recursion by checking if we're already updating with this size
+        if hasattr(self, '_currently_updating_tab_size') and self._currently_updating_tab_size == tab_size:
+            return
+            
+        print(f"DetailPage: Updating YAML tab size to {tab_size}")
+        
+        # Set recursion guard
+        self._currently_updating_tab_size = tab_size
+        
+        try:
+            # Update the internal state
+            self.current_tab_size = tab_size
+            
+            # Update the tab size in the editor
+            self.yaml_editor.set_tab_size(tab_size)
+            
+            # Update the tab size label
+            if hasattr(self, 'yaml_tab_size_label'):
+                self.yaml_tab_size_label.setText(f"Tab Size: {tab_size}")
+        finally:
+            # Clear recursion guard
+            self._currently_updating_tab_size = None
+    
+    # Add an alias method to ensure compatibility with MainWindow's lookup
+    def update_yaml_editor_font_family(self, font_family):
+        """Alias method to ensure compatibility with MainWindow's font family update mechanism"""
+        print(f"DetailPage: Called update_yaml_editor_font_family with {font_family}")
+        self.update_yaml_font_family(font_family)
+    
+    # Add an alias method to ensure compatibility with MainWindow's lookup
+    def update_yaml_editor_font_size(self, font_size):
+        """Alias method to ensure compatibility with MainWindow's font size update mechanism"""
+        print(f"DetailPage: Called update_yaml_editor_font_size with {font_size}")
+        self.update_yaml_font_size(font_size)
+    
+    # Add an alias method to ensure compatibility with MainWindow's lookup
+    def update_yaml_editor_tab_size(self, tab_size):
+        """Alias method to ensure compatibility with MainWindow's tab size update mechanism"""
+        print(f"DetailPage: Called update_yaml_editor_tab_size with {tab_size}")
+        self.update_yaml_tab_size(tab_size)
     
     def create_events_list(self):
         self.events_list = QListWidget()
@@ -826,8 +1128,6 @@ class DetailPage(QWidget):
         self.events_list.setSelectionMode(QListWidget.SelectionMode.NoSelection)
         
         self.events_layout.addWidget(self.events_list)
-    
-
     
     def show_detail(self, resource_type, resource_name, namespace=None):
         """Show detail for resource with action button in overview"""
@@ -898,14 +1198,13 @@ class DetailPage(QWidget):
                 self.parent_window.removeEventFilter(self)
                 # Install our event filter
                 self.parent_window.installEventFilter(self)
+                
     def handle_action_button(self):
         """Handle install/upgrade button click based on resource type"""
         if self.resource_type == "chart":
             self._install_chart()
-            # pass
         elif self.resource_type == "helmrelease":
             self._upgrade_chart()
-            # pass
 
     def _install_chart(self):
         """Display installation dialog and install the chart"""
@@ -966,6 +1265,7 @@ class DetailPage(QWidget):
         
         # After upgrading, reload the details
         QTimer.singleShot(500, self.load_resource_details)
+        
     def handle_tab_changed(self, index):
         tab_name = self.tab_widget.tabText(index)
         
@@ -981,9 +1281,13 @@ class DetailPage(QWidget):
             self.yaml_save_button.show()
             self.yaml_cancel_button.show()
             
-            self.yaml_editor.setStyleSheet(AppStyles.DETAIL_PAGE_YAML_TEXT_STYLE + """
+            # Don't change the font when toggling edit mode
+            self.yaml_editor.setStyleSheet("""
                 background-color: #1E1E1E;
+                color: #D4D4D4;
                 border: 1px solid #0078d7;
+                selection-background-color: #264F78;
+                selection-color: #D4D4D4;
             """)
             
             self.original_yaml = self.yaml_editor.toPlainText()
@@ -993,7 +1297,14 @@ class DetailPage(QWidget):
             self.yaml_save_button.hide()
             self.yaml_cancel_button.hide()
             
-            self.yaml_editor.setStyleSheet(AppStyles.DETAIL_PAGE_YAML_TEXT_STYLE)
+            # Reset to the basic style without changing the font
+            self.yaml_editor.setStyleSheet("""
+                background-color: #1E1E1E;
+                color: #D4D4D4;
+                border: none;
+                selection-background-color: #264F78;
+                selection-color: #D4D4D4;
+            """)
     
     def save_yaml_changes(self):
         yaml_text = self.yaml_editor.toPlainText()
@@ -1110,7 +1421,6 @@ class DetailPage(QWidget):
         self.events_list.clear()
         self.current_data = None
     
-
     def load_resource_details(self):
         """Load detailed information about a specific resource with robust chart support"""
         if not self.resource_type or not self.resource_name:
@@ -1747,7 +2057,6 @@ class DetailPage(QWidget):
         self.update_labels()
         self.add_resource_specific_fields()
     
-
     def update_resource_status(self):
         status = self.current_data.get("status", {})
         status_value = "Unknown"
@@ -1950,6 +2259,7 @@ class DetailPage(QWidget):
             self.status_value_label.setStyleSheet(AppStyles.DETAIL_PAGE_STATUS_VALUE_SUCCEEDED_STYLE)
         else:
             self.status_value_label.setStyleSheet(AppStyles.DETAIL_PAGE_STATUS_VALUE_FAILED_STYLE)
+            
     def update_conditions(self):
         for i in reversed(range(self.conditions_container_layout.count())):
             item = self.conditions_container_layout.itemAt(i)
@@ -2554,7 +2864,7 @@ class DetailPage(QWidget):
                 field_layout.addWidget(value_label, 1)
                 
                 parent_layout.addWidget(field_container)
-
+    
     def update_yaml_tab(self):
         """Update the YAML tab with resource data including helm charts"""
         if not self.current_data:
@@ -2575,6 +2885,7 @@ class DetailPage(QWidget):
                 
         except Exception as e:
             self.yaml_editor.setPlainText(f"Error rendering YAML: {str(e)}")
+    
     def load_events(self):
         """Load events for the current resource with improved error handling"""
         if not self.resource_type or not self.resource_name:
@@ -2766,50 +3077,35 @@ class DetailPage(QWidget):
         
         self.animation_group.setDirection(QAbstractAnimation.Direction.Forward)
         self.animation_group.start()
-
+    
     def hide_with_animation(self):
-        """Hide the detail page with animation sliding to the right - fixed version"""
-        if not self.isVisible() or self.animation_in_progress:
+        """Hide the detail page with animation sliding to the right"""
+        if not self.isVisible():
             return
-
-        self.animation_in_progress = True
-
-        # Create a new standalone animation for hiding to avoid state conflicts
-        hide_animation = QPropertyAnimation(self, b"geometry")
-        hide_animation.setDuration(200)  # Match your current duration
-        hide_animation.setEasingCurve(QEasingCurve.Type.OutQuart)
-        hide_animation.setStartValue(self.geometry())
-
-        # Calculate end position
+            
+        # Create animation
+        self.animation = QPropertyAnimation(self, b"geometry")
+        self.animation.setDuration(AppStyles.DETAIL_PAGE_ANIMATION_DURATION)
+        self.animation.setStartValue(self.geometry())
+        
         if self.parent():
             end_rect = QRect(self.parent().width(), 0, self.width(), self.height())
         else:
             screen_width = QApplication.primaryScreen().geometry().width()
             end_rect = QRect(screen_width, 0, self.width(), self.height())
-
-        hide_animation.setEndValue(end_rect)
-
-        # Directly connect to a local function that will hide and cleanup
-        def finish_hiding():
-            self.hide()
-            self.animation_in_progress = False
-            # Ensure animation is properly deleted to prevent memory leaks
-            hide_animation.deleteLater()
-
-        hide_animation.finished.connect(finish_hiding)
-
-        # Start the animation
-        hide_animation.start()
-
+            
+        self.animation.setEndValue(end_rect)
+        self.animation.setEasingCurve(QEasingCurve.Type.InQuint)
+        
+        # Connect finished signal to hide
+        self.animation.finished.connect(self.hide)
+        
+        # Start animation
+        self.animation.start()
+        
         # Emit back signal
         self.back_signal.emit()
-
-    def ensure_hidden(self):
-        """Safety method to make sure the panel hides after animation"""
-        if self.animation_group.state() == QAbstractAnimation.State.Stopped and \
-                self.slide_animation.direction() == QAbstractAnimation.Direction.Backward:
-            self.hide()
-
+    
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if hasattr(self, 'resize_handle'):
@@ -2833,6 +3129,7 @@ class DetailPage(QWidget):
         """Handle close event - hide with animation"""
         self.hide_with_animation()
         event.accept()
+    
     def eventFilter(self, obj, event):
         """Filter events to close detail page when clicking outside"""
         if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:

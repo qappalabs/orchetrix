@@ -1,11 +1,16 @@
 import sys
 import platform
+import os
+import time
+import json
+import requests
+from datetime import datetime
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox,
-    QFrame, QLineEdit, QCheckBox, QScrollArea, QTextEdit
+    QFrame, QLineEdit, QCheckBox, QScrollArea, QTextEdit, QMessageBox
 )
 from PyQt6.QtGui import QFont, QIcon, QColor, QPalette, QPainter
-from PyQt6.QtCore import Qt, QSize, QPropertyAnimation, QEasingCurve, pyqtSignal
+from PyQt6.QtCore import Qt, QSize, QPropertyAnimation, QEasingCurve, pyqtSignal, QTimer
 
 from UI.Styles import AppStyles, AppColors
 
@@ -100,16 +105,45 @@ class PreferencesWidget(QWidget):
     font_changed = pyqtSignal(str)  # Signal for font family changes
     font_size_changed = pyqtSignal(int)  # Signal for font size changes
     copy_paste_changed = pyqtSignal(bool)  # Signal for copy-paste toggle changes
+    line_numbers_changed = pyqtSignal(bool)  # Signal for line numbers toggle changes
+    tab_size_changed = pyqtSignal(int)  # Signal for tab size changes
+    timezone_changed = pyqtSignal(str)  # Signal for timezone changes
+    update_channel_changed = pyqtSignal(str)  # Signal for update channel changes
 
     def __init__(self):
         super().__init__()
-        self.current_font_size = 12  # Default font size, matching the UI
+        self.current_font_size = 9  # Changed from 12 to 9 - Default font size for all editors
         self.current_font_family = "Consolas"  # Default font family
+        self.current_tab_size = 2  # Default tab size
         self.terminal_panel = None  # Will be set by the main application
         self.pending_font_size = None  # Store pending font size if terminal_panel is not set
         self.copy_paste_enabled = False  # Track copy-paste state
+        self.show_line_numbers = True  # Default to showing line numbers
+        self.last_emitted_size = self.current_font_size  # Keep track of last emitted size to avoid duplicates
+        self._current_update_dialog = None  # Track current update dialog
+        
+        # Initialize timezone
+        self.current_timezone = self.get_system_timezone()
+        
+        # Initialize update channel
+        self.current_update_channel = "Stable"  # Default to Stable
+        
         print("PreferencesWidget: Initialized with terminal_panel=None")
         self.setup_ui()
+        
+        # Set timer to update the timezone display every second
+        self.timezone_timer = QTimer(self)
+        self.timezone_timer.timeout.connect(self.update_timezone_display)
+        self.timezone_timer.start(1000)  # Update every second
+
+    def get_system_timezone(self):
+        """Get the current system timezone"""
+        try:
+            # Try to get from time module
+            return time.tzname[0]
+        except Exception:
+            # Fallback
+            return "Asia/Calcutta"  # Default timezone
 
     def setup_ui(self):
         self.setStyleSheet(AppStyles.PREFERENCES_MAIN_STYLE)
@@ -317,11 +351,23 @@ class PreferencesWidget(QWidget):
         update_label.setStyleSheet(AppStyles.SUBSECTION_HEADER_STYLE)
         content_layout.addWidget(update_label)
 
-        update_combo = QComboBox()
-        update_combo.addItems(["Stable", "Beta", "Alpha"])
-        update_combo.setStyleSheet(AppStyles.DROPDOWN_STYLE)
-        update_combo.setCursor(Qt.CursorShape.PointingHandCursor)
-        content_layout.addWidget(update_combo)
+        # Update channel combo box
+        self.update_channel_combo = QComboBox()
+        self.update_channel_combo.addItems(["Stable", "Beta", "Alpha"])
+        
+        # Set current value from settings if available
+        try:
+            # Try to set the combo box to the current update channel
+            index = self.update_channel_combo.findText(self.current_update_channel)
+            if index >= 0:
+                self.update_channel_combo.setCurrentIndex(index)
+        except Exception as e:
+            print(f"Error setting current update channel: {e}")
+            
+        self.update_channel_combo.setStyleSheet(AppStyles.DROPDOWN_STYLE)
+        self.update_channel_combo.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.update_channel_combo.currentTextChanged.connect(self.on_update_channel_changed)
+        content_layout.addWidget(self.update_channel_combo)
 
         divider4 = QFrame()
         divider4.setObjectName("divider")
@@ -335,6 +381,7 @@ class PreferencesWidget(QWidget):
         timezone_label.setStyleSheet(AppStyles.SUBSECTION_HEADER_STYLE)
         content_layout.addWidget(timezone_label)
 
+        # Timezone combo box
         self.timezone_combo = QComboBox()
         self.timezone_combo.addItems([
             "Asia/Calcutta", "America/New_York", "Europe/London",
@@ -343,12 +390,406 @@ class PreferencesWidget(QWidget):
         ])
         self.timezone_combo.setStyleSheet(AppStyles.DROPDOWN_STYLE)
         self.timezone_combo.setCursor(Qt.CursorShape.PointingHandCursor)
+        
+        # Try to set the current timezone in the combo box
+        try:
+            index = self.timezone_combo.findText(self.current_timezone)
+            if index >= 0:
+                self.timezone_combo.setCurrentIndex(index)
+        except Exception as e:
+            print(f"Error setting current timezone: {e}")
+            
         self.timezone_combo.currentIndexChanged.connect(self.change_timezone)
         content_layout.addWidget(self.timezone_combo)
+        
+        # Add current time display
+        self.timezone_info = QLabel()
+        self.timezone_info.setStyleSheet(AppStyles.DESCRIPTION_STYLE)
+        self.update_timezone_display()  # Initialize with current time
+        content_layout.addWidget(self.timezone_info)
+
+        # Add apply button
+        timezone_apply_container = QWidget()
+        timezone_apply_layout = QHBoxLayout(timezone_apply_container)
+        timezone_apply_layout.setContentsMargins(0, 10, 0, 10)
+        
+        timezone_apply_btn = QPushButton("Apply Timezone")
+        timezone_apply_btn.setStyleSheet(AppStyles.BUTTON_PRIMARY_STYLE)
+        timezone_apply_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        timezone_apply_btn.clicked.connect(self.apply_timezone)
+        
+        timezone_apply_layout.addStretch()
+        timezone_apply_layout.addWidget(timezone_apply_btn)
+        
+        content_layout.addWidget(timezone_apply_container)
 
         content_layout.addStretch()
 
         self.content_scroll.setWidget(content_widget)
+
+    def on_update_channel_changed(self, channel):
+        """Handle update channel selection change - apply changes immediately"""
+        if channel != self.current_update_channel:
+            old_channel = self.current_update_channel
+            self.current_update_channel = channel
+            print(f"Update channel selection changed from {old_channel} to: {channel}")
+            
+            # Apply the channel change immediately
+            self.apply_update_channel(channel)
+            
+            # Check for updates automatically
+            QTimer.singleShot(300, self.check_for_updates)
+
+    def apply_update_channel(self, channel):
+        """Apply the selected update channel"""
+        try:
+            print(f"Applying update channel change to {channel}")
+            
+            # Emit signal to notify application of update channel change
+            self.update_channel_changed.emit(channel)
+            
+            # Show notification message with appropriate warning based on channel
+            if channel == "Stable":
+                message = f"Update channel has been changed to {channel}.\nYou are now using the production-ready stable version."
+            elif channel == "Beta":
+                message = f"Update channel has been changed to {channel}.\nYou may encounter some minor issues. Use for testing."
+            elif channel == "Alpha":
+                message = f"Update channel has been changed to {channel}.\nWARNING: Alpha version may have significant bugs. Use with caution!"
+            else:
+                message = f"Update channel has been changed to {channel}."
+            
+            # Show a notification toast instead of a modal dialog to be less intrusive
+            # For now, we'll show a small, non-modal message box
+            msg = QMessageBox(self)
+            msg.setWindowTitle("Update Channel Changed")
+            msg.setText(message)
+            msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+            msg.setWindowFlags(Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
+            msg.setWindowOpacity(0.9)
+            
+            # Position it in the bottom right corner of the app section
+            QTimer.singleShot(0, lambda: self.position_notification(msg))
+            
+            # Automatically close after 3 seconds
+            QTimer.singleShot(3000, msg.close)
+            
+            # Show the notification
+            msg.show()
+            
+            # Save the preference to settings
+            self.save_update_channel_preference(channel)
+            
+        except Exception as e:
+            print(f"Error applying update channel: {e}")
+            QMessageBox.warning(self, "Update Channel Error", 
+                               f"Failed to change update channel: {str(e)}")
+
+    def position_notification(self, msg):
+        """Position the notification in the bottom right of the app section"""
+        if hasattr(self, 'content_scroll') and self.content_scroll:
+            # Calculate position
+            pos = self.content_scroll.mapToGlobal(self.content_scroll.rect().bottomRight())
+            pos.setX(pos.x() - msg.width() - 20)
+            pos.setY(pos.y() - msg.height() - 20)
+            msg.move(pos)
+
+    def check_for_updates(self):
+        """Check for updates based on the selected channel"""
+        try:
+            channel = self.current_update_channel
+            print(f"Checking for updates on {channel} channel")
+            
+            # Create a progress message with a Cancel button
+            checking_msg = QMessageBox(self)
+            checking_msg.setWindowTitle("Checking for Updates")
+            checking_msg.setText(f"Checking for updates on {channel} channel...")
+            checking_msg.setStandardButtons(QMessageBox.StandardButton.Cancel)
+            checking_msg.setModal(True)  # Make it modal to ensure it stays in focus
+            
+            # Connect the rejected signal (triggered when Cancel is clicked or dialog is closed)
+            checking_msg.rejected.connect(checking_msg.close)
+            
+            # Store the message box reference
+            self._current_update_dialog = checking_msg
+            
+            # Show the message and process events to update UI
+            checking_msg.show()
+            
+            # Simulate a network request here
+            QTimer.singleShot(1500, lambda: self.handle_update_check_result(checking_msg, channel))
+            
+        except Exception as e:
+            print(f"Error checking for updates: {e}")
+            QMessageBox.warning(self, "Update Check Error", 
+                               f"Failed to check for updates: {str(e)}")
+            # Ensure any open dialog is closed
+            if hasattr(self, '_current_update_dialog') and self._current_update_dialog:
+                try:
+                    self._current_update_dialog.close()
+                except:
+                    pass
+
+    def handle_update_check_result(self, message_box, channel):
+        """Handle the result of the update check"""
+        # Check if the message box is still valid and open
+        try:
+            if message_box and message_box.isVisible():
+                message_box.close()
+        except RuntimeError:
+            # Widget might have been deleted
+            pass
+        
+        # Clear the reference
+        if hasattr(self, '_current_update_dialog'):
+            self._current_update_dialog = None
+        
+        # Simulate different results based on channel
+        update_available = False
+        
+        if channel == "Alpha":
+            # Alpha has frequent updates
+            update_available = True
+            version = "2.1.0-alpha.3"
+            notes = "New experimental features added:\n- Cloud synchronization\n- Advanced terminal capabilities\n- Extended API support\n\nWarning: This is an alpha build with known issues."
+        elif channel == "Beta":
+            # Beta has occasional updates
+            update_available = True
+            version = "2.0.5-beta"
+            notes = "Beta features ready for testing:\n- Performance improvements\n- Bug fixes for recent issues\n- UI enhancements\n\nThis version has been tested but may have minor issues."
+        else:  # Stable
+            # Stable has rare updates
+            update_available = False
+            version = "2.0.0"
+            notes = "You are running the latest stable version."
+        
+        if update_available:
+            # Show update available message with details
+            update_msg = QMessageBox(self)
+            update_msg.setWindowTitle("Update Available")
+            update_msg.setText(f"A new {channel} update is available!")
+            update_msg.setInformativeText(f"Version: {version}\n\nRelease notes:\n{notes}")
+            update_msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            update_msg.setDefaultButton(QMessageBox.StandardButton.Yes)
+            update_msg.button(QMessageBox.StandardButton.Yes).setText("Download and Install")
+            update_msg.button(QMessageBox.StandardButton.No).setText("Not Now")
+            update_msg.setModal(True)  # Make it modal
+            
+            # Store reference to the dialog
+            self._current_update_dialog = update_msg
+            
+            result = update_msg.exec()
+            
+            # Clear the reference after dialog is closed
+            self._current_update_dialog = None
+            
+            if result == QMessageBox.StandardButton.Yes:
+                # User chose to download and install
+                self.download_and_install_update(version, channel)
+        else:
+            # No update available - just show a brief notification
+            msg = QMessageBox(self)
+            msg.setWindowTitle("No Updates Available")
+            msg.setText(f"You're running the latest {channel} version: {version}")
+            msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+            msg.setWindowFlags(Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
+            msg.setWindowOpacity(0.9)
+            
+            # Position it in the bottom right corner of the app section
+            QTimer.singleShot(0, lambda: self.position_notification(msg))
+            
+            # Automatically close after 2 seconds
+            QTimer.singleShot(2000, msg.close)
+            
+            # Show the notification
+            msg.show()
+
+    def download_and_install_update(self, version, channel):
+        """Download and install the update"""
+        try:
+            # Show download progress
+            progress_msg = QMessageBox(self)
+            progress_msg.setWindowTitle("Downloading Update")
+            progress_msg.setText(f"Downloading {channel} version {version}...")
+            progress_msg.setStandardButtons(QMessageBox.StandardButton.Cancel)
+            progress_msg.setModal(True)  # Make it modal
+            
+            # Store reference
+            self._current_update_dialog = progress_msg
+            
+            # Show the message and process events to update UI
+            progress_msg.show()
+            
+            # Simulate download and installation process
+            QTimer.singleShot(3000, lambda: self.finish_update_installation(progress_msg, version, channel))
+            
+        except Exception as e:
+            print(f"Error downloading update: {e}")
+            QMessageBox.warning(self, "Update Error", 
+                               f"Failed to download and install update: {str(e)}")
+            # Ensure any open dialog is closed
+            if hasattr(self, '_current_update_dialog') and self._current_update_dialog:
+                try:
+                    self._current_update_dialog.close()
+                except:
+                    pass
+
+    def finish_update_installation(self, progress_msg, version, channel):
+        """Finish the update installation process"""
+        # Close the progress message if it's still valid
+        try:
+            if progress_msg and progress_msg.isVisible():
+                progress_msg.close()
+        except RuntimeError:
+            # Widget might have been deleted
+            pass
+        
+        # Clear the reference
+        self._current_update_dialog = None
+        
+        # Show completion message
+        completion_msg = QMessageBox(self)
+        completion_msg.setWindowTitle("Update Complete")
+        completion_msg.setText(f"Successfully updated to {channel} version {version}!\n\nThe application will restart to apply changes.")
+        completion_msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+        completion_msg.setModal(True)
+        completion_msg.exec()
+        
+        # In a real implementation, you would restart the application here
+        # For this demo, we'll just print a message
+        print(f"Application would restart now to apply {channel} version {version}")
+
+    def save_update_channel_preference(self, channel):
+        """Save the update channel preference to settings file"""
+        try:
+            # Determine settings file path
+            if getattr(sys, 'frozen', False):
+                # Running in PyInstaller bundle
+                base_dir = os.path.dirname(sys.executable)
+            else:
+                # Running in normal Python environment
+                base_dir = os.path.dirname(os.path.abspath(__file__))
+                
+            settings_dir = os.path.join(base_dir, "settings")
+            os.makedirs(settings_dir, exist_ok=True)
+            
+            settings_file = os.path.join(settings_dir, "app_settings.txt")
+            
+            # Read existing settings
+            settings = {}
+            if os.path.exists(settings_file):
+                with open(settings_file, 'r') as f:
+                    for line in f:
+                        if '=' in line:
+                            key, value = line.strip().split('=', 1)
+                            settings[key] = value
+            
+            # Update update channel
+            settings['update_channel'] = channel
+            
+            # Write back all settings
+            with open(settings_file, 'w') as f:
+                for key, value in settings.items():
+                    f.write(f"{key}={value}\n")
+                    
+            print(f"Saved update channel preference to {settings_file}")
+            
+        except Exception as e:
+            print(f"Failed to save update channel preference: {e}")
+
+    def update_timezone_display(self):
+        """Update the timezone info label with current time in selected timezone"""
+        try:
+            # Use the current selected timezone
+            timezone = self.timezone_combo.currentText() if hasattr(self, 'timezone_combo') else self.current_timezone
+            
+            # Get current time in UTC
+            now_utc = datetime.utcnow()
+            
+            # Format the time display
+            time_str = now_utc.strftime("%Y-%m-%d %H:%M:%S UTC")
+            
+            # Try to get local time in the selected timezone
+            # Note: This is simplified and would need proper timezone handling in a real app
+            if timezone == "Asia/Calcutta":
+                local_time = now_utc.replace(hour=(now_utc.hour + 5) % 24)
+                local_time_str = local_time.strftime("%Y-%m-%d %H:%M:%S")
+                time_str += f" | {local_time_str} IST (+5:30)"
+            elif timezone == "America/New_York":
+                local_time = now_utc.replace(hour=(now_utc.hour - 5) % 24)
+                local_time_str = local_time.strftime("%Y-%m-%d %H:%M:%S")
+                time_str += f" | {local_time_str} EST (-5:00)"
+            elif timezone == "Europe/London":
+                local_time = now_utc.replace(hour=(now_utc.hour + 0) % 24)
+                local_time_str = local_time.strftime("%Y-%m-%d %H:%M:%S")
+                time_str += f" | {local_time_str} GMT (+0:00)"
+            elif timezone == "Europe/Berlin":
+                local_time = now_utc.replace(hour=(now_utc.hour + 1) % 24)
+                local_time_str = local_time.strftime("%Y-%m-%d %H:%M:%S")
+                time_str += f" | {local_time_str} CET (+1:00)"
+            elif timezone == "Asia/Tokyo":
+                local_time = now_utc.replace(hour=(now_utc.hour + 9) % 24)
+                local_time_str = local_time.strftime("%Y-%m-%d %H:%M:%S")
+                time_str += f" | {local_time_str} JST (+9:00)"
+            elif timezone == "Asia/Singapore":
+                local_time = now_utc.replace(hour=(now_utc.hour + 8) % 24)
+                local_time_str = local_time.strftime("%Y-%m-%d %H:%M:%S")
+                time_str += f" | {local_time_str} SGT (+8:00)"
+            elif timezone == "Australia/Sydney":
+                local_time = now_utc.replace(hour=(now_utc.hour + 10) % 24)
+                local_time_str = local_time.strftime("%Y-%m-%d %H:%M:%S")
+                time_str += f" | {local_time_str} AEST (+10:00)"
+            elif timezone == "Pacific/Auckland":
+                local_time = now_utc.replace(hour=(now_utc.hour + 12) % 24)
+                local_time_str = local_time.strftime("%Y-%m-%d %H:%M:%S")
+                time_str += f" | {local_time_str} NZST (+12:00)"
+            
+            if hasattr(self, 'timezone_info'):
+                self.timezone_info.setText(time_str)
+        except Exception as e:
+            print(f"Error updating timezone display: {e}")
+            if hasattr(self, 'timezone_info'):
+                self.timezone_info.setText(f"Current time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+    def change_timezone(self, index):
+        """Handle timezone selection change"""
+        self.pending_timezone = self.timezone_combo.currentText()
+        print(f"Timezone selection changed to: {self.pending_timezone}")
+        self.update_timezone_display()  # Update time display immediately
+
+    def apply_timezone(self):
+        """Apply the selected timezone"""
+        if hasattr(self, 'pending_timezone'):
+            try:
+                timezone = self.pending_timezone
+                self.current_timezone = timezone
+                print(f"Applying timezone change to: {timezone}")
+                
+                # Emit signal to notify application of timezone change
+                self.timezone_changed.emit(timezone)
+                
+                # Show confirmation message
+                QMessageBox.information(self, "Timezone Changed", 
+                                      f"Timezone has been changed to {timezone}.\nApplication display times will use this timezone.")
+                
+                # Update environment variable if needed
+                if platform.system() == "Linux" or platform.system() == "Darwin":
+                    os.environ["TZ"] = timezone
+                    time.tzset()  # Apply the timezone change
+                
+                # In a real app, you might also want to:
+                # 1. Save this preference to settings
+                # 2. Update any time displays throughout the app
+                # 3. Handle Windows timezone changes differently
+                
+                # Clear pending timezone
+                del self.pending_timezone
+            except Exception as e:
+                print(f"Error applying timezone: {e}")
+                QMessageBox.warning(self, "Timezone Error", 
+                                   f"Failed to change timezone: {str(e)}")
+        else:
+            QMessageBox.information(self, "No Change", 
+                                  "No timezone change was pending.")
 
     def show_proxy_section(self):
         content_widget = QWidget()
@@ -364,7 +805,7 @@ class PreferencesWidget(QWidget):
         proxy_header.setObjectName("header")
         proxy_header.setStyleSheet(AppStyles.SECTION_HEADER_STYLE)
         header_layout.addWidget(proxy_header)
-        header_layout.addWidget(self.create_back_button(), 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
+        # header_layout.addWidget(self.create_back_button(), 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
 
         content_layout.addWidget(header_container)
 
@@ -437,7 +878,7 @@ class PreferencesWidget(QWidget):
         kubernetes_header.setObjectName("header")
         kubernetes_header.setStyleSheet(AppStyles.SECTION_HEADER_STYLE)
         header_layout.addWidget(kubernetes_header)
-        header_layout.addWidget(self.create_back_button(), 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
+        # header_layout.addWidget(self.create_back_button(), 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
 
         content_layout.addWidget(header_container)
 
@@ -641,43 +1082,9 @@ class PreferencesWidget(QWidget):
         editor_header.setObjectName("header")
         editor_header.setStyleSheet(AppStyles.SECTION_HEADER_STYLE)
         header_layout.addWidget(editor_header)
-        header_layout.addWidget(self.create_back_button(), 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
+        # header_layout.addWidget(self.create_back_button(), 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
 
         content_layout.addWidget(header_container)
-
-        # Minimap section
-        minimap_label = QLabel("MINIMAP")
-        minimap_label.setObjectName("sectionHeader")
-        minimap_label.setStyleSheet(AppStyles.SUBSECTION_HEADER_STYLE)
-        content_layout.addWidget(minimap_label)
-
-        minimap_container = QWidget()
-        minimap_layout = QHBoxLayout(minimap_container)
-        minimap_layout.setContentsMargins(0, 10, 0, 10)
-
-        minimap_text = QLabel("Show minimap")
-        minimap_text.setStyleSheet(AppStyles.TEXT_STYLE)
-
-        minimap_toggle = ToggleSwitch()
-        minimap_toggle.setChecked(True)
-
-        minimap_position = QComboBox()
-        minimap_position.addItems(["right", "left"])
-        minimap_position.setStyleSheet(AppStyles.DROPDOWN_STYLE)
-        minimap_position.setCursor(Qt.CursorShape.PointingHandCursor)
-
-        minimap_layout.addWidget(minimap_text)
-        minimap_layout.addStretch()
-        minimap_layout.addWidget(minimap_position)
-        minimap_layout.addWidget(minimap_toggle)
-
-        content_layout.addWidget(minimap_container)
-
-        divider1 = QFrame()
-        divider1.setObjectName("divider")
-        divider1.setFrameShape(QFrame.Shape.HLine)
-        divider1.setStyleSheet(AppStyles.DIVIDER_STYLE)
-        content_layout.addWidget(divider1)
 
         # Line Numbers section
         line_numbers_label = QLabel("LINE NUMBERS")
@@ -685,11 +1092,19 @@ class PreferencesWidget(QWidget):
         line_numbers_label.setStyleSheet(AppStyles.SUBSECTION_HEADER_STYLE)
         content_layout.addWidget(line_numbers_label)
 
-        line_numbers_combo = QComboBox()
-        line_numbers_combo.addItems(["On", "Off"])
-        line_numbers_combo.setStyleSheet(AppStyles.DROPDOWN_STYLE)
-        line_numbers_combo.setCursor(Qt.CursorShape.PointingHandCursor)
-        content_layout.addWidget(line_numbers_combo)
+        self.line_numbers_combo = QComboBox()
+        self.line_numbers_combo.addItems(["On", "Off"])
+        self.line_numbers_combo.setCurrentText("On" if self.show_line_numbers else "Off")
+        self.line_numbers_combo.setStyleSheet(AppStyles.DROPDOWN_STYLE)
+        self.line_numbers_combo.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.line_numbers_combo.currentTextChanged.connect(self.on_line_numbers_changed)
+        content_layout.addWidget(self.line_numbers_combo)
+
+        # Help text for line numbers
+        line_numbers_help = QLabel("Show or hide line numbers in editor")
+        line_numbers_help.setStyleSheet(AppStyles.DESCRIPTION_STYLE)
+        line_numbers_help.setWordWrap(True)
+        content_layout.addWidget(line_numbers_help)
 
         divider2 = QFrame()
         divider2.setObjectName("divider")
@@ -703,10 +1118,18 @@ class PreferencesWidget(QWidget):
         tab_size_label.setStyleSheet(AppStyles.SUBSECTION_HEADER_STYLE)
         content_layout.addWidget(tab_size_label)
 
-        tab_size_input = QLineEdit()
-        tab_size_input.setText("2")
-        tab_size_input.setStyleSheet(AppStyles.INPUT_STYLE)
-        content_layout.addWidget(tab_size_input)
+        # Modified to use self.tab_size_input and connect signal
+        self.tab_size_input = QLineEdit()
+        self.tab_size_input.setText(str(self.current_tab_size))
+        self.tab_size_input.setStyleSheet(AppStyles.INPUT_STYLE)
+        self.tab_size_input.editingFinished.connect(self.on_tab_size_changed)
+        content_layout.addWidget(self.tab_size_input)
+
+        # Help text for Tab Size
+        tab_size_help = QLabel("Number of spaces per tab in the editor")
+        tab_size_help.setStyleSheet(AppStyles.DESCRIPTION_STYLE)
+        tab_size_help.setWordWrap(True)
+        content_layout.addWidget(tab_size_help)
 
         divider3 = QFrame()
         divider3.setObjectName("divider")
@@ -720,10 +1143,18 @@ class PreferencesWidget(QWidget):
         font_size_label.setStyleSheet(AppStyles.SUBSECTION_HEADER_STYLE)
         content_layout.addWidget(font_size_label)
 
-        font_size_input = QLineEdit()
-        font_size_input.setText("12")
-        font_size_input.setStyleSheet(AppStyles.INPUT_STYLE)
-        content_layout.addWidget(font_size_input)
+        # This now affects the YAML editor too
+        self.editor_font_size_input = QLineEdit()
+        self.editor_font_size_input.setText(str(self.current_font_size))
+        self.editor_font_size_input.setStyleSheet(AppStyles.INPUT_STYLE)
+        self.editor_font_size_input.editingFinished.connect(self.on_editor_font_size_changed)
+        content_layout.addWidget(self.editor_font_size_input)
+
+        # Help text for Editor font size
+        editor_font_help = QLabel("This font size applies to all editors including the YAML editor")
+        editor_font_help.setStyleSheet(AppStyles.DESCRIPTION_STYLE)
+        editor_font_help.setWordWrap(True)
+        content_layout.addWidget(editor_font_help)
 
         divider4 = QFrame()
         divider4.setObjectName("divider")
@@ -737,10 +1168,20 @@ class PreferencesWidget(QWidget):
         font_family_label.setStyleSheet(AppStyles.SUBSECTION_HEADER_STYLE)
         content_layout.addWidget(font_family_label)
 
-        font_family_input = QLineEdit()
-        font_family_input.setText("RobotoMono")
-        font_family_input.setStyleSheet(AppStyles.INPUT_STYLE)
-        content_layout.addWidget(font_family_input)
+        # This affects editors including YAML
+        self.editor_font_family_combo = QComboBox()
+        self.editor_font_family_combo.addItems(["Consolas", "RobotoMono", "Courier New", "Monospace"])
+        self.editor_font_family_combo.setCurrentText(self.current_font_family)
+        self.editor_font_family_combo.setStyleSheet(AppStyles.DROPDOWN_STYLE)
+        self.editor_font_family_combo.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.editor_font_family_combo.currentTextChanged.connect(self.on_editor_font_changed)
+        content_layout.addWidget(self.editor_font_family_combo)
+
+        # Help text for editor font family
+        editor_font_family_help = QLabel("This font family applies to all editors including the YAML editor")
+        editor_font_family_help.setStyleSheet(AppStyles.DESCRIPTION_STYLE)
+        editor_font_family_help.setWordWrap(True)
+        content_layout.addWidget(editor_font_family_help)
 
         content_layout.addStretch()
 
@@ -760,7 +1201,7 @@ class PreferencesWidget(QWidget):
         terminal_header.setObjectName("header")
         terminal_header.setStyleSheet(AppStyles.SECTION_HEADER_STYLE)
         header_layout.addWidget(terminal_header)
-        header_layout.addWidget(self.create_back_button(), 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
+        # header_layout.addWidget(self.create_back_button(), 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
 
         content_layout.addWidget(header_container)
 
@@ -899,32 +1340,117 @@ class PreferencesWidget(QWidget):
             self.startup_status.setText("Disabled")
             self.startup_status.setStyleSheet(AppStyles.STATUS_TEXT_STYLE)
 
-    def change_timezone(self, index):
-        timezone = self.timezone_combo.currentText()
-        print(f"Timezone changed to: {timezone}")
+    def on_line_numbers_changed(self, text):
+        """Update line numbers setting"""
+        show_line_numbers = text == "On"
+        print(f"PreferencesWidget: Line numbers changed to {show_line_numbers}")
+        self.show_line_numbers = show_line_numbers
+        self.line_numbers_changed.emit(show_line_numbers)
+
+    # New method to handle tab size changes
+    def on_tab_size_changed(self):
+        """Update tab size for YAML editor"""
+        text = self.tab_size_input.text()
+        try:
+            tab_size = int(text)
+            # Validate tab size within a reasonable range
+            if 1 <= tab_size <= 8:
+                # Only emit signal if the size has actually changed
+                if tab_size != self.current_tab_size:
+                    self.current_tab_size = tab_size
+                    print(f"PreferencesWidget: Emitting tab_size_changed with size: {tab_size}")
+                    self.tab_size_changed.emit(tab_size)
+            else:
+                print(f"PreferencesWidget: Tab size {tab_size} out of range (1-8)")
+                self.tab_size_input.setText(str(self.current_tab_size))
+        except ValueError:
+            print(f"PreferencesWidget: Invalid tab size input: {text}")
+            self.tab_size_input.setText(str(self.current_tab_size))
 
     def on_font_changed(self, font_family):
-        self.current_font_family = font_family
-        print(f"PreferencesWidget: Font family changed to {font_family}")
-        self.font_changed.emit(font_family)
+        """Update terminal font family"""
+        if self.current_font_family != font_family:
+            self.current_font_family = font_family
+            print(f"PreferencesWidget: Font family changed to {font_family}")
+            self.font_changed.emit(font_family)
+
+    def on_editor_font_changed(self, font_family):
+        """Update editor font family - applies to YAML editor too"""
+        if self.current_font_family != font_family:
+            self.current_font_family = font_family
+            print(f"PreferencesWidget: Editor font family changed to {font_family}")
+            # Emit signal to update all YAML editors
+            self.font_changed.emit(font_family)
+            
+            # Sync terminal font family combo if it exists
+            if hasattr(self, 'font_family_combo') and not self.font_family_combo.isNull():
+                try:
+                    self.font_family_combo.blockSignals(True)
+                    self.font_family_combo.setCurrentText(font_family)
+                    self.font_family_combo.blockSignals(False)
+                except RuntimeError:
+                    # Handle the case where the widget has been deleted
+                    print("Warning: font_family_combo has been deleted")
+                    
+            # Additional logging to confirm signal emission
+            print(f"PreferencesWidget: Emitted font_changed signal with font family: {font_family}")
 
     def on_font_size_changed(self):
+        """Update terminal font size"""
         text = self.font_size_input.text()
         try:
             font_size = int(text)
             # Validate font size within a reasonable range
             if 6 <= font_size <= 72:
-                self.current_font_size = font_size
-                self.pending_font_size = font_size
-                print(f"PreferencesWidget: Emitting font_size_changed with size: {font_size}")
-                self.font_size_changed.emit(font_size)
-                self.apply_font_size_manually(font_size)
+                # Only emit signal if the size has actually changed
+                if font_size != self.last_emitted_size:
+                    self.current_font_size = font_size
+                    self.pending_font_size = font_size
+                    self.last_emitted_size = font_size
+                    print(f"PreferencesWidget: Emitting font_size_changed with size: {font_size}")
+                    self.font_size_changed.emit(font_size)
+                    self.apply_font_size_manually(font_size)
+                    
+                    # Sync editor font size input if it exists
+                    if hasattr(self, 'editor_font_size_input'):
+                        self.editor_font_size_input.blockSignals(True)
+                        self.editor_font_size_input.setText(str(font_size))
+                        self.editor_font_size_input.blockSignals(False)
             else:
                 print(f"PreferencesWidget: Font size {font_size} out of range (6-72)")
                 self.font_size_input.setText(str(self.current_font_size))
         except ValueError:
             print(f"PreferencesWidget: Invalid font size input: {text}")
             self.font_size_input.setText(str(self.current_font_size))
+
+    def on_editor_font_size_changed(self):
+        """Update editor font size - applies to YAML editor too"""
+        text = self.editor_font_size_input.text() if hasattr(self, 'editor_font_size_input') else "9"
+        try:
+            font_size = int(text)
+            # Validate font size within a reasonable range
+            if 6 <= font_size <= 72:
+                # Only emit signal if the size has actually changed
+                if font_size != self.last_emitted_size:
+                    self.current_font_size = font_size
+                    self.pending_font_size = font_size
+                    self.last_emitted_size = font_size
+                    print(f"PreferencesWidget: Emitting font_size_changed with size: {font_size}")
+                    self.font_size_changed.emit(font_size)
+                    
+                    # Sync terminal font size input if it exists
+                    if hasattr(self, 'font_size_input'):
+                        self.font_size_input.blockSignals(True)
+                        self.font_size_input.setText(str(font_size))
+                        self.font_size_input.blockSignals(False)
+            else:
+                print(f"PreferencesWidget: Font size {font_size} out of range (6-72)")
+                if hasattr(self, 'editor_font_size_input'):
+                    self.editor_font_size_input.setText(str(self.current_font_size))
+        except ValueError:
+            print(f"PreferencesWidget: Invalid font size input: {text}")
+            if hasattr(self, 'editor_font_size_input'):
+                self.editor_font_size_input.setText(str(self.current_font_size))
 
     def on_copy_paste_changed(self, checked):
         self.copy_paste_enabled = checked
@@ -995,4 +1521,3 @@ class PreferencesWidget(QWidget):
                     print("PreferencesWidget: Font size change is pending until terminal panel is set or terminal widgets are found")
         except Exception as e:
             print(f"PreferencesWidget: Error applying font size: {e}")
-            

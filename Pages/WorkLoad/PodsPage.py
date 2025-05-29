@@ -1,5 +1,5 @@
 """
-Dynamic implementation of the Pods page with live Kubernetes data and resource operations.
+Dynamic implementation of the Pods page with live Kubernetes data using Python kubernetes library.
 Status colors are properly displayed and have consistent background styling.
 """
 
@@ -44,10 +44,10 @@ class StatusLabel(QWidget):
 
 class PodsPage(BaseResourcePage):
     """
-    Displays Kubernetes Pods with live data and resource operations.
+    Displays Kubernetes Pods with live data and resource operations using Python kubernetes library.
     
     Features:
-    1. Dynamic loading of Pods from the cluster
+    1. Dynamic loading of Pods from the cluster using kubernetes client
     2. Editing Pods with editor
     3. Deleting Pods (individual and batch)
     4. Resource details viewer
@@ -132,95 +132,73 @@ class PodsPage(BaseResourcePage):
             
     def populate_resource_row(self, row, resource):
         """
-        Populate a single row with Pod data, using a StatusLabel for the Status column
-        so per-status colors aren't overridden by the table stylesheet.
+        Populate a single row with Pod data from kubernetes client response,
+        using a StatusLabel for the Status column so per-status colors aren't overridden.
         """
         self.table.setRowHeight(row, 40)
         name = resource["name"]
+        
         # 1) Checkbox
         cb = self._create_checkbox_container(row, name)
         cb.setStyleSheet(AppStyles.CHECKBOX_STYLE)
         self.table.setCellWidget(row, 0, cb)
 
+        # Get data from the kubernetes client response
         raw = resource.get("raw_data", {}) or {}
-        # Get container count
+        
+        # Get container count from kubernetes API response
         containers_count = "0"
-        if raw:
-            spec = raw.get("spec", {})
-            containers = spec.get("containers", [])
-            init_containers = spec.get("initContainers", [])
+        if raw and raw.get("spec", {}).get("containers"):
+            containers = raw["spec"]["containers"]
+            init_containers = raw["spec"].get("initContainers", [])
             containers_count = str(len(containers) + len(init_containers))
         
-        # Get restart count
+        # Get restart count from kubernetes API response
         restart_count = "0"
-        if raw:
-            status = raw.get("status", {})
-            container_statuses = status.get("containerStatuses", [])
+        if raw and raw.get("status", {}).get("containerStatuses"):
+            container_statuses = raw["status"]["containerStatuses"]
             total_restarts = sum(container.get("restartCount", 0) for container in container_statuses)
             restart_count = str(total_restarts)
         
-        # Get controller reference
+        # Get controller reference from kubernetes API response
         controller_by = ""
-        if raw:
-            metadata = raw.get("metadata", {})
-            owner_references = metadata.get("ownerReferences", [])
+        if raw and raw.get("metadata", {}).get("ownerReferences"):
+            owner_references = raw["metadata"]["ownerReferences"]
             if owner_references:
                 controller_by = owner_references[0].get("kind", "")
         
-        # Get QoS class
+        # Get QoS class from kubernetes API response
         qos_class = ""
-        if raw:
-            status = raw.get("status", {})
-            qos_class = status.get("qosClass", "")
+        if raw and raw.get("status", {}).get("qosClass"):
+            qos_class = raw["status"]["qosClass"]
         
-        # Get node name
+        # Get node name from kubernetes API response
         node_name = ""
-        if raw:
-            spec = raw.get("spec", {})
-            node_name = spec.get("nodeName", "")
+        if raw and raw.get("spec", {}).get("nodeName"):
+            node_name = raw["spec"]["nodeName"]
         
-        # Parse age correctly from metadata
-        age_str = resource["age"]
-        if raw:
-            metadata = raw.get("metadata", {})
-            creation_timestamp = metadata.get("creationTimestamp")
-            if creation_timestamp:
-                import datetime
-                from dateutil import parser
-                try:
-                    # Parse creation time and calculate age
-                    creation_time = parser.parse(creation_timestamp)
-                    now = datetime.datetime.now(datetime.timezone.utc)
-                    delta = now - creation_time
-                    
-                    # Format age string
-                    days = delta.days
-                    seconds = delta.seconds
-                    hours = seconds // 3600
-                    minutes = (seconds % 3600) // 60
-                    
-                    if days > 0:
-                        age_str = f"{days}d"
-                    elif hours > 0:
-                        age_str = f"{hours}h"
-                    else:
-                        age_str = f"{minutes}m"
-                except Exception:
-                    # Keep the original age if parsing fails
-                    pass
-
-        # Determine pod_status
-        pod_phase = raw.get("status", {}).get("phase", "Unknown")
-        pod_status = pod_phase
-        for cs in raw.get("status", {}).get("containerStatuses", []):
-            state = cs.get("state", {})
-            if "waiting" in state and state["waiting"].get("reason") in (
-                    "CrashLoopBackOff", "ImagePullBackOff", "ErrImagePull"):
-                pod_status = state["waiting"]["reason"]
-                break
-            if "terminated" in state and state["terminated"].get("exitCode", 0) != 0:
-                pod_status = "Error"
-                break
+        # Use age from resource (already formatted by the loader)
+        age_str = resource.get("age", "Unknown")
+        
+        # Determine pod status from kubernetes API response
+        pod_status = "Unknown"
+        if raw and raw.get("status"):
+            status = raw["status"]
+            pod_phase = status.get("phase", "Unknown")
+            pod_status = pod_phase
+            
+            # Check for more specific states from container statuses
+            for cs in status.get("containerStatuses", []):
+                state = cs.get("state", {})
+                if "waiting" in state:
+                    reason = state["waiting"].get("reason", "")
+                    if reason in ("CrashLoopBackOff", "ImagePullBackOff", "ErrImagePull"):
+                        pod_status = reason
+                        break
+                elif "terminated" in state:
+                    if state["terminated"].get("exitCode", 0) != 0:
+                        pod_status = "Error"
+                        break
 
         # 2) All columns *except* Status and Actions
         cols = [
@@ -233,17 +211,19 @@ class PodsPage(BaseResourcePage):
             qos_class,
             age_str
         ]
+        
         for idx, val in enumerate(cols):
             col = idx + 1  # shift right for checkbox at col 0
-            if idx in (2, 3):  # numeric columns
+            if idx in (2, 3):  # numeric columns (containers, restarts)
                 num = int(val) if val.isdigit() else 0
                 item = SortableTableWidgetItem(val, num)
-            elif idx == 7:  # age
-                if val:
+            elif idx == 7:  # age column
+                if val and val != "Unknown":
                     unit = val[-1]
                     time_value = val[:-1]
                     if time_value.isdigit():
-                        num = int(time_value) * {'d':1440, 'h':60, 'm':1}.get(unit, 1)
+                        # Convert to minutes for sorting
+                        num = int(time_value) * {'d': 1440, 'h': 60, 'm': 1}.get(unit, 1)
                         item = SortableTableWidgetItem(val, num)
                     else:
                         item = SortableTableWidgetItem(val)
@@ -251,28 +231,34 @@ class PodsPage(BaseResourcePage):
                     item = SortableTableWidgetItem(val)
             else:
                 item = SortableTableWidgetItem(val)
-            # alignment
-            if idx in (2, 3, 6, 7):
+            
+            # Set alignment
+            if idx in (2, 3, 6, 7):  # numeric and age columns
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             else:
                 item.setTextAlignment(
                     Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
                 )
-            # non-editable
+            
+            # Make non-editable
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            # default text color for these cells
+            
+            # Set default text color
             item.setForeground(QColor(AppColors.TEXT_TABLE))
             self.table.setItem(row, col, item)
 
         # 3) Status column as StatusLabel widget (col index 9)
-        status_col = 1 + len(cols)  # that equals 9
-        # pick the right color
+        status_col = 1 + len(cols)  # equals 9
+        
+        # Pick the right color based on pod status
         if pod_status == "Running":
             color = AppColors.STATUS_ACTIVE
         elif pod_status == "Pending":
             color = AppColors.STATUS_PENDING
         elif pod_status in ("Failed", "Error", "CrashLoopBackOff", "ImagePullBackOff", "ErrImagePull"):
             color = AppColors.STATUS_DISCONNECTED
+        elif pod_status == "Succeeded":
+            color = AppColors.STATUS_AVAILABLE
         else:
             color = AppColors.TEXT_TABLE
 
@@ -290,6 +276,7 @@ class PodsPage(BaseResourcePage):
         self.table.setCellWidget(row, status_col + 1, action_container)
         
     def handle_row_click(self, row, column):
+        """Handle row clicks to show pod details"""
         if column != self.table.columnCount() - 1:  # Skip action column
             # Select the row
             self.table.selectRow(row)
@@ -314,9 +301,5 @@ class PodsPage(BaseResourcePage):
                     parent = parent.parent()
                 
                 if parent and hasattr(parent, 'detail_manager'):
-                    # Get singular resource type
-                    resource_type = self.resource_type
-                    if resource_type.endswith('s'):
-                        resource_type = resource_type[:-1]
-                    
-                    parent.detail_manager.show_detail(resource_type, resource_name, namespace)
+                    # Show pod details using the detail manager
+                    parent.detail_manager.show_detail("pod", resource_name, namespace)

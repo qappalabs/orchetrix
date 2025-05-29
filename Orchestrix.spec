@@ -2,15 +2,6 @@
 
 import os
 
-#from PyInstaller.utils.win32 import versioninfo
-
-# Generate an RC file with version info
-#version_file = 'version_info.txt'
-#if os.path.isfile(version_file):
-#    version_info = versioninfo.load_version_info_from_text_file(version_file)
-#else:
-#   version_info = None
-
 icon_path = os.path.abspath(os.path.join('icons', 'logoIcon.ico'))
 
 a = Analysis(
@@ -33,7 +24,9 @@ a = Analysis(
         'logging',
         'datetime',
         'json',
-        'subprocess'
+        'subprocess',
+        'psutil',
+        'pillow'
     ],
     hookspath=[],
     hooksconfig={},
@@ -62,7 +55,7 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=icon_path,  # Use absolute path to icon
-    #version=version_info,
+
 )
 
 coll = COLLECT(

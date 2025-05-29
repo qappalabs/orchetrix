@@ -4,9 +4,11 @@ Dynamic implementation of the Secrets page with live Kubernetes data.
 
 from PyQt6.QtWidgets import QHeaderView, QPushButton
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QColor
 
 from base_components.base_components import SortableTableWidgetItem
 from base_components.base_resource_page import BaseResourcePage
+from UI.Styles import AppColors
 
 class SecretsPage(BaseResourcePage):
     """
@@ -26,7 +28,7 @@ class SecretsPage(BaseResourcePage):
         
     def setup_page_ui(self):
         """Set up the main UI elements for the Secrets page"""
-        # Define headers and sortable columns
+        # Define headers and sortable columns - KEEP ORIGINAL
         headers = ["", "Name", "Namespace", "Labels", "Keys", "Type", "Age", ""]
         sortable_columns = {1, 2, 3, 4, 5, 6}
         
@@ -89,7 +91,7 @@ class SecretsPage(BaseResourcePage):
     
     def populate_resource_row(self, row, resource):
         """
-        Populate a single row with Secret data
+        Populate a single row with Secret data extracted from raw_data
         """
         # Set row height
         self.table.setRowHeight(row, 40)
@@ -99,14 +101,38 @@ class SecretsPage(BaseResourcePage):
         checkbox_container = self._create_checkbox_container(row, resource_name)
         self.table.setCellWidget(row, 0, checkbox_container)
         
-        # Prepare data columns
+        # Extract data from raw_data
+        raw_data = resource.get("raw_data", {})
+        metadata = raw_data.get("metadata", {})
+        
+        # Get labels (show all labels)
+        labels = "<none>"
+        if metadata.get("labels"):
+            labels_dict = metadata["labels"]
+            if labels_dict:
+                # Show all label key=value pairs
+                label_pairs = [f"{k}={v}" for k, v in labels_dict.items()]
+                labels = ", ".join(label_pairs)
+        
+        # Get keys (show all keys)
+        keys = "<none>"
+        if raw_data.get("data"):
+            data_keys = list(raw_data["data"].keys())
+            if data_keys:
+                # Show all key names
+                keys = ", ".join(data_keys)
+        
+        # Get secret type
+        secret_type = raw_data.get("type", "Opaque")
+        
+        # Prepare data columns - MATCH ORIGINAL HEADERS
         columns = [
-            resource["name"],
-            resource["namespace"],
-            resource.get("labels", "<none>"),
-            resource.get("keys", "<none>"),
-            resource.get("type", "Opaque"),
-            resource["age"]
+            resource["name"],        # Name
+            resource["namespace"],   # Namespace
+            labels,                 # Labels
+            keys,                   # Keys
+            secret_type,           # Type
+            resource["age"]        # Age
         ]
         
         # Add columns to table
@@ -116,7 +142,15 @@ class SecretsPage(BaseResourcePage):
             # Handle numeric columns for sorting
             if col == 5:  # Age column
                 try:
-                    num = int(value.replace('d', ''))
+                    # Extract numeric part from age string
+                    if 'd' in value:
+                        num = int(value.replace('d', ''))
+                    elif 'h' in value:
+                        num = int(value.replace('h', '')) / 24  # Convert to fraction of day
+                    elif 'm' in value:
+                        num = int(value.replace('m', '')) / (24 * 60)  # Convert to fraction of day
+                    else:
+                        num = 0
                 except ValueError:
                     num = 0
                 item = SortableTableWidgetItem(value, num)
@@ -124,8 +158,8 @@ class SecretsPage(BaseResourcePage):
                 item = SortableTableWidgetItem(value)
             
             # Set text alignment
-            if col == 5:
-                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            if col == 0:  # Name column
+                item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             else:
                 item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             
@@ -139,12 +173,6 @@ class SecretsPage(BaseResourcePage):
         action_button = self._create_action_button(row, resource["name"], resource["namespace"])
         action_container = self._create_action_container(row, action_button)
         self.table.setCellWidget(row, len(columns) + 1, action_container)
-    
-    # def handle_row_click(self, row, column):
-    #     """Handle row selection when a table cell is clicked"""
-    #     if column != self.table.columnCount() - 1:  # Skip action column
-    #         # Select the row
-    #         self.table.selectRow(row)
 
     def handle_row_click(self, row, column):
         if column != self.table.columnCount() - 1:  # Skip action column
@@ -171,9 +199,4 @@ class SecretsPage(BaseResourcePage):
                     parent = parent.parent()
                 
                 if parent and hasattr(parent, 'detail_manager'):
-                    # Get singular resource type
-                    resource_type = self.resource_type
-                    if resource_type.endswith('s'):
-                        resource_type = resource_type[:-1]
-                    
-                    parent.detail_manager.show_detail(resource_type, resource_name, namespace)
+                    parent.detail_manager.show_detail("secret", resource_name, namespace)

@@ -1,105 +1,191 @@
 """
-Detail Manager for ClusterView that handles showing and managing resource detail pages.
-Improved version with better performance and animation handling.
+Optimized Detail Manager for ClusterView that handles showing and managing resource detail pages.
+Improved version with better performance, error handling, and code organization.
 """
 
 from PyQt6.QtCore import QObject, pyqtSignal, Qt, QTimer
 from PyQt6.QtWidgets import QApplication
+from typing import Optional, Dict, Any
 
 from .DetailPageComponent import DetailPage
 
+
 class DetailManager(QObject):
     """
-    Manages the detail page component for ClusterView.
-    Handles showing and hiding resource details with improved performance.
+    Manages the detail page component for ClusterView with optimized performance.
+    Handles showing and hiding resource details with improved caching and state management.
     """
+    
     # Signals
     resource_updated = pyqtSignal(str, str, str)  # Resource type, name, namespace
     
-    def __init__(self, parent=None):
+    def __init__(self, parent: Optional[QObject] = None):
         super().__init__(parent)
         self.parent_window = parent
         
-        # Create the detail page but don't show it yet
-        self.detail_page = DetailPage(self.parent_window)
+        # Initialize core attributes
+        self._detail_page: Optional[DetailPage] = None
+        self._current_resource: Dict[str, Optional[str]] = {
+            'type': None,
+            'name': None,
+            'namespace': None
+        }
         
-        # Connect signals
-        self.detail_page.resource_updated_signal.connect(self.handle_resource_updated)
+        # Performance optimization: Pre-calculate sizes
+        self._cached_height: Optional[int] = None
         
-        # Track current resource
-        self.current_resource_type = None
-        self.current_resource_name = None
-        self.current_resource_namespace = None
-        
-        # Pre-calculate sizes to avoid layout recalculation during animation
-        self.init_sizing()
+        # Lazy initialization flag
+        self._is_initialized = False
     
-    def init_sizing(self):
+    def _ensure_detail_page(self) -> DetailPage:
+        """Lazy initialization of detail page for better startup performance"""
+        if self._detail_page is None:
+            self._detail_page = DetailPage(self.parent_window)
+            self._detail_page.resource_updated_signal.connect(self._handle_resource_updated)
+            self._init_sizing()
+            self._is_initialized = True
+        
+        return self._detail_page
+    
+    def _init_sizing(self) -> None:
         """Pre-calculate sizes to improve animation performance"""
         if self.parent_window:
-            # Set the detail page height to match parent window
-            self.detail_page.setFixedHeight(self.parent_window.height())
-    def show_detail(self, resource_type, resource_name, namespace=None, raw_data=None):
-        """Show detail view for the specified resource with improved click handling"""
-        # Store current resource info
-        self.current_resource_type = resource_type
-        self.current_resource_name = resource_name
-        self.current_resource_namespace = namespace
+            self._cached_height = self.parent_window.height()
+            if self._detail_page:
+                self._detail_page.setFixedHeight(self._cached_height)
+    
+    def _update_cached_height(self) -> None:
+        """Update cached height if parent window size changed"""
+        if self.parent_window:
+            new_height = self.parent_window.height()
+            if new_height != self._cached_height:
+                self._cached_height = new_height
+                if self._detail_page:
+                    self._detail_page.setFixedHeight(new_height)
+    
+    def show_detail(self, resource_type: str, resource_name: str, 
+                   namespace: Optional[str] = None, raw_data: Optional[Dict[str, Any]] = None) -> None:
+        """Show detail view for the specified resource with optimized performance"""
+        # Ensure detail page is created
+        detail_page = self._ensure_detail_page()
         
-        # Store raw data for event lookup if provided
-        if raw_data and resource_type.lower() == "event":
-            self.detail_page.event_raw_data = raw_data
-
-        # Check if we're viewing the same resource
-        if (self.detail_page.resource_type == resource_type and 
-            self.detail_page.resource_name == resource_name and
-            self.detail_page.resource_namespace == namespace and
-            self.detail_page.isVisible()):
-            # Just make sure it's positioned correctly and visible
+        # Check if we're already viewing the same resource
+        if self._is_same_resource(resource_type, resource_name, namespace) and detail_page.isVisible():
             self.update_detail_position()
             return
         
-        # Update the detail page height before showing
-        if self.parent_window:
-            self.detail_page.setFixedHeight(self.parent_window.height())
+        # Update current resource tracking
+        self._current_resource.update({
+            'type': resource_type,
+            'name': resource_name,
+            'namespace': namespace
+        })
         
-        # Show the detail page with new resource info
-        self.detail_page.show_detail(resource_type, resource_name, namespace)
+        # Handle special data for events
+        if raw_data and resource_type.lower() == "event":
+            detail_page.event_raw_data = raw_data
         
-        # Ensure it's positioned correctly
-        QTimer.singleShot(50, self.update_detail_position)
+        # Update height before showing
+        self._update_cached_height()
         
-    def hide_detail(self):
-        """Hide the detail view with cleanup"""
-        # If the parent window has our event filter, remove it
-        if self.parent_window and self.detail_page:
-            self.parent_window.removeEventFilter(self.detail_page)
+        # Show the detail page
+        detail_page.show_detail(resource_type, resource_name, namespace)
         
-        self.detail_page.close_detail()
-        
-        # Clear current resource info
-        self.current_resource_type = None
-        self.current_resource_name = None
-        self.current_resource_namespace = None
-    def is_detail_visible(self):
-        """Check if the detail view is currently visible"""
-        return self.detail_page.isVisible()
+        # Position correctly with minimal delay
+        QTimer.singleShot(25, self.update_detail_position)  # Reduced from 50ms
     
-    def handle_resource_updated(self, resource_type, resource_name, namespace):
+    def hide_detail(self) -> None:
+        """Hide the detail view with proper cleanup"""
+        if not self._detail_page:
+            return
+        
+        # Remove event filter from parent if installed
+        if self.parent_window:
+            self.parent_window.removeEventFilter(self._detail_page)
+        
+        # Close detail page
+        self._detail_page.close_detail()
+        
+        # Clear current resource tracking
+        self._current_resource.update({
+            'type': None,
+            'name': None,
+            'namespace': None
+        })
+    
+    def is_detail_visible(self) -> bool:
+        """Check if the detail view is currently visible"""
+        return self._detail_page is not None and self._detail_page.isVisible()
+    
+    def update_detail_position(self) -> None:
+        """Update the position of the detail page when parent geometry changes"""
+        if not self.is_detail_visible() or not self.parent_window:
+            return
+        
+        detail_page = self._detail_page
+        
+        # Update height to match parent
+        self._update_cached_height()
+        
+        # Calculate position based on minimized state
+        parent_width = self.parent_window.width()
+        
+        if detail_page.is_minimized:
+            target_x = parent_width - detail_page.minimized_width
+        else:
+            target_x = parent_width - detail_page.width()
+        
+        detail_page.move(target_x, 0)
+    
+    def get_current_resource_info(self) -> Dict[str, Optional[str]]:
+        """Get information about the currently displayed resource"""
+        return self._current_resource.copy()
+    
+    def refresh_current_detail(self) -> None:
+        """Refresh the current detail view if one is open"""
+        if self.is_detail_visible() and self._current_resource['type']:
+            current = self._current_resource
+            self.show_detail(
+                current['type'], 
+                current['name'], 
+                current['namespace']
+            )
+    
+    # Private helper methods
+    def _is_same_resource(self, resource_type: str, resource_name: str, 
+                         namespace: Optional[str]) -> bool:
+        """Check if the given resource is the same as currently displayed"""
+        current = self._current_resource
+        return (current['type'] == resource_type and 
+                current['name'] == resource_name and 
+                current['namespace'] == namespace)
+    
+    def _handle_resource_updated(self, resource_type: str, resource_name: str, namespace: str) -> None:
         """Handle when a resource is updated in the detail view"""
-        # Emit signal to notify listeners
         self.resource_updated.emit(resource_type, resource_name, namespace)
     
-    def update_detail_position(self):
-        """Update the position of the detail page when parent geometry changes"""
-        if self.is_detail_visible() and self.parent_window:
-            # Update height to match parent
-            self.detail_page.setFixedHeight(self.parent_window.height())
-            
-            # Position at the right edge of the parent
-            if self.detail_page.is_minimized:
-                target_x = self.parent_window.width() - self.detail_page.minimized_width
-                self.detail_page.move(target_x, 0)
-            else:
-                target_x = self.parent_window.width() - self.detail_page.width()
-                self.detail_page.move(target_x, 0)
+    # Properties for external access
+    @property
+    def current_resource_type(self) -> Optional[str]:
+        """Get the current resource type"""
+        return self._current_resource['type']
+    
+    @property
+    def current_resource_name(self) -> Optional[str]:
+        """Get the current resource name"""
+        return self._current_resource['name']
+    
+    @property
+    def current_resource_namespace(self) -> Optional[str]:
+        """Get the current resource namespace"""
+        return self._current_resource['namespace']
+    
+    def cleanup(self) -> None:
+        """Clean up resources when manager is being destroyed"""
+        if self._detail_page:
+            self._detail_page.close()
+            self._detail_page.deleteLater()
+            self._detail_page = None
+        
+        self._current_resource.clear()
+        self._cached_height = None

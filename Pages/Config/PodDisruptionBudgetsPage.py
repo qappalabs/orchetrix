@@ -4,9 +4,11 @@ Dynamic implementation of the PodDisruptionBudgets page with live Kubernetes dat
 
 from PyQt6.QtWidgets import QHeaderView, QPushButton
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QColor
 
 from base_components.base_components import SortableTableWidgetItem
 from base_components.base_resource_page import BaseResourcePage
+from UI.Styles import AppColors
 
 class PodDisruptionBudgetsPage(BaseResourcePage):
     """
@@ -26,7 +28,7 @@ class PodDisruptionBudgetsPage(BaseResourcePage):
         
     def setup_page_ui(self):
         """Set up the main UI elements for the PodDisruptionBudgets page"""
-        # Define headers and sortable columns
+        # Define headers and sortable columns - KEEP ORIGINAL
         headers = ["", "Name", "Namespace", "Min Available", "Max Unavailable", "Current Healthy", "Desired Healthy", "Age", ""]
         sortable_columns = {1, 2, 3, 4, 5, 6, 7}
         
@@ -89,7 +91,7 @@ class PodDisruptionBudgetsPage(BaseResourcePage):
     
     def populate_resource_row(self, row, resource):
         """
-        Populate a single row with PodDisruptionBudget data
+        Populate a single row with PodDisruptionBudget data extracted from raw_data
         """
         # Set row height
         self.table.setRowHeight(row, 40)
@@ -99,15 +101,34 @@ class PodDisruptionBudgetsPage(BaseResourcePage):
         checkbox_container = self._create_checkbox_container(row, resource_name)
         self.table.setCellWidget(row, 0, checkbox_container)
         
-        # Prepare data columns
+        # Extract data from raw_data
+        raw_data = resource.get("raw_data", {})
+        spec = raw_data.get("spec", {})
+        status = raw_data.get("status", {})
+        
+        # Get min available
+        min_available = "N/A"
+        if spec.get("minAvailable") is not None:
+            min_available = str(spec["minAvailable"])
+        
+        # Get max unavailable
+        max_unavailable = "N/A"
+        if spec.get("maxUnavailable") is not None:
+            max_unavailable = str(spec["maxUnavailable"])
+        
+        # Get status information
+        current_healthy = str(status.get("currentHealthy", 0))
+        desired_healthy = str(status.get("desiredHealthy", 0))
+        
+        # Prepare data columns - MATCH ORIGINAL HEADERS
         columns = [
-            resource["name"],
-            resource["namespace"],
-            resource.get("min_available", "N/A"),
-            resource.get("max_unavailable", "N/A"),
-            resource.get("current_healthy", "0"),
-            resource.get("desired_healthy", "0"),
-            resource["age"]
+            resource["name"],        # Name
+            resource["namespace"],   # Namespace
+            min_available,          # Min Available
+            max_unavailable,        # Max Unavailable
+            current_healthy,        # Current Healthy
+            desired_healthy,        # Desired Healthy
+            resource["age"]         # Age
         ]
         
         # Add columns to table
@@ -123,7 +144,15 @@ class PodDisruptionBudgetsPage(BaseResourcePage):
                 item = SortableTableWidgetItem(value, num)
             elif col == 6:  # Age column
                 try:
-                    num = int(value.replace('d', ''))
+                    # Extract numeric part from age string
+                    if 'd' in value:
+                        num = int(value.replace('d', ''))
+                    elif 'h' in value:
+                        num = int(value.replace('h', '')) / 24  # Convert to fraction of day
+                    elif 'm' in value:
+                        num = int(value.replace('m', '')) / (24 * 60)  # Convert to fraction of day
+                    else:
+                        num = 0
                 except ValueError:
                     num = 0
                 item = SortableTableWidgetItem(value, num)
@@ -131,10 +160,10 @@ class PodDisruptionBudgetsPage(BaseResourcePage):
                 item = SortableTableWidgetItem(value)
             
             # Set text alignment
-            if col in [2, 3, 4, 5, 6]:
-                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            else:
+            if col == 0:  # Name column
                 item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            else:
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             
             # Make cells non-editable
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
@@ -146,12 +175,6 @@ class PodDisruptionBudgetsPage(BaseResourcePage):
         action_button = self._create_action_button(row, resource["name"], resource["namespace"])
         action_container = self._create_action_container(row, action_button)
         self.table.setCellWidget(row, len(columns) + 1, action_container)
-    
-    # def handle_row_click(self, row, column):
-    #     """Handle row selection when a table cell is clicked"""
-    #     if column != self.table.columnCount() - 1:  # Skip action column
-    #         # Select the row
-    #         self.table.selectRow(row)
 
     def handle_row_click(self, row, column):
         if column != self.table.columnCount() - 1:  # Skip action column
@@ -178,9 +201,4 @@ class PodDisruptionBudgetsPage(BaseResourcePage):
                     parent = parent.parent()
                 
                 if parent and hasattr(parent, 'detail_manager'):
-                    # Get singular resource type
-                    resource_type = self.resource_type
-                    if resource_type.endswith('s'):
-                        resource_type = resource_type[:-1]
-                    
-                    parent.detail_manager.show_detail(resource_type, resource_name, namespace)
+                    parent.detail_manager.show_detail("poddisruptionbudget", resource_name, namespace)

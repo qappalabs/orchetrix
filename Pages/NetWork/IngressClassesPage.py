@@ -26,7 +26,7 @@ class IngressClassesPage(BaseResourcePage):
         
     def setup_page_ui(self):
         """Set up the main UI elements for the IngressClasses page"""
-        # Define headers and sortable columns
+        # Define headers and sortable columns - KEEP ORIGINAL
         headers = ["", "Name", "Controller", "API Group", "Scope", "Kind", "Age", ""]
         sortable_columns = {1, 2, 3, 4, 5, 6}
         
@@ -96,7 +96,7 @@ class IngressClassesPage(BaseResourcePage):
     
     def populate_resource_row(self, row, resource):
         """
-        Populate a single row with IngressClass data
+        Populate a single row with IngressClass data extracted from raw_data
         """
         # Set row height once
         self.table.setRowHeight(row, 40)
@@ -107,14 +107,35 @@ class IngressClassesPage(BaseResourcePage):
         checkbox_container.setStyleSheet(AppStyles.CHECKBOX_STYLE)
         self.table.setCellWidget(row, 0, checkbox_container)
         
-        # Prepare data columns
+        # Extract data from raw_data
+        raw_data = resource.get("raw_data", {})
+        spec = raw_data.get("spec", {})
+        metadata = raw_data.get("metadata", {})
+        
+        # Get controller
+        controller = spec.get("controller", "<none>")
+        
+        # Get API group from apiVersion
+        api_version = raw_data.get("apiVersion", "networking.k8s.io/v1")
+        if "/" in api_version:
+            api_group = api_version.split("/")[0]
+        else:
+            api_group = "core"
+        
+        # Get scope (IngressClasses are always Cluster scoped)
+        scope = "Cluster"
+        
+        # Get kind
+        kind = raw_data.get("kind", "IngressClass")
+        
+        # Prepare data columns - MATCH ORIGINAL HEADERS
         columns = [
-            resource["name"],
-            resource.get("controller", "<none>"),
-            resource.get("apiGroup", "<none>"),
-            resource.get("scope", "<none>"),
-            resource.get("kind", "<none>"),
-            resource["age"]
+            resource["name"],      # Name
+            controller,            # Controller  
+            api_group,            # API Group
+            scope,                # Scope
+            kind,                 # Kind
+            resource["age"]       # Age
         ]
         
         # Add columns to table
@@ -124,7 +145,15 @@ class IngressClassesPage(BaseResourcePage):
             # Handle numeric columns for sorting
             if col == 5:  # Age column
                 try:
-                    num = int(value.replace('d', ''))
+                    # Extract numeric part from age string
+                    if 'd' in value:
+                        num = int(value.replace('d', ''))
+                    elif 'h' in value:
+                        num = int(value.replace('h', '')) / 24  # Convert to fraction of day
+                    elif 'm' in value:
+                        num = int(value.replace('m', '')) / (24 * 60)  # Convert to fraction of day
+                    else:
+                        num = 0
                 except ValueError:
                     num = 0
                 item = SortableTableWidgetItem(value, num)
@@ -132,10 +161,10 @@ class IngressClassesPage(BaseResourcePage):
                 item = SortableTableWidgetItem(value)
             
             # Set text alignment
-            if col in [1, 2, 3, 4, 5]:
-                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            else:
+            if col == 0:  # Name column
                 item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            else:
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             
             # Make cells non-editable
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
@@ -149,12 +178,6 @@ class IngressClassesPage(BaseResourcePage):
         action_container = self._create_action_container(row, action_button)
         action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
         self.table.setCellWidget(row, len(columns) + 1, action_container)
-    
-    # def handle_row_click(self, row, column):
-    #     """Handle row selection when a table cell is clicked"""
-    #     if column != self.table.columnCount() - 1:  # Skip action column
-    #         # Select the row
-    #         self.table.selectRow(row)
 
     def handle_row_click(self, row, column):
         if column != self.table.columnCount() - 1:  # Skip action column
@@ -163,15 +186,10 @@ class IngressClassesPage(BaseResourcePage):
             
             # Get resource details
             resource_name = None
-            namespace = None
             
             # Get the resource name
             if self.table.item(row, 1) is not None:
                 resource_name = self.table.item(row, 1).text()
-            
-            # Get namespace if applicable
-            if self.table.item(row, 2) is not None:
-                namespace = self.table.item(row, 2).text()
             
             # Show detail view
             if resource_name:
@@ -181,9 +199,5 @@ class IngressClassesPage(BaseResourcePage):
                     parent = parent.parent()
                 
                 if parent and hasattr(parent, 'detail_manager'):
-                    # Get singular resource type
-                    resource_type = self.resource_type
-                    if resource_type.endswith('s'):
-                        resource_type = resource_type[:-1]
-                    
-                    parent.detail_manager.show_detail(resource_type, resource_name, namespace)
+                    # IngressClasses are cluster-scoped, so no namespace
+                    parent.detail_manager.show_detail("ingressclass", resource_name, None)

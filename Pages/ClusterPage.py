@@ -1,9 +1,11 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, 
                              QGridLayout, QSizePolicy, QFrame, QToolTip,
                              QTableWidget, QTableWidgetItem, QHeaderView, QStackedLayout)
-from PyQt6.QtCore import Qt, QSize, QRect
-from PyQt6.QtGui import QColor,QPainter, QPen, QBrush, QFont, QCursor
+from PyQt6.QtCore import Qt, QSize, QRect, QTimer
+from PyQt6.QtGui import QColor, QPainter, QPen, QBrush, QFont, QCursor
 import math
+import datetime
+import logging
 
 from UI.Styles import AppStyles, AppColors
 from utils.cluster_connector import get_cluster_connector
@@ -12,7 +14,7 @@ class BarChart(QWidget):
     def __init__(self, color="#ff0000", title="", unit=""):
         super().__init__()
         self.color = QColor(color)
-        self.data = []  # Empty data initially
+        self.data = []
         self.current_value = 0
         self.setMinimumHeight(300)
         self.setStyleSheet(AppStyles.BAR_CHART_TOOLTIP_STYLE)
@@ -22,11 +24,13 @@ class BarChart(QWidget):
         else:  # Cyan for Memory
             self.chart_title = "Memory Usage"
             
-        self.times = []  # Empty times initially
-        
+        self.times = []
         self.bar_positions = []
         self.hovered_bar = -1
-        self.has_data = False  # Flag to indicate if we have real data
+        self.has_data = False
+        
+        # Enable mouse tracking
+        self.setMouseTracking(True)
 
     def mouseMoveEvent(self, event):
         if not self.has_data or not self.data:
@@ -38,7 +42,7 @@ class BarChart(QWidget):
                     self.hovered_bar = i
                     self.update()
                     if i < len(self.data) and i < len(self.times):
-                        tooltip_text = f"{self.chart_title}\nTime: {self.times[i]}\nValue: {self.data[i]}%"
+                        tooltip_text = f"{self.chart_title}\nTime: {self.times[i]}\nValue: {self.data[i]:.1f}%"
                         QToolTip.showText(QCursor.pos(), tooltip_text, self)
                 return
         
@@ -53,15 +57,68 @@ class BarChart(QWidget):
         if self.hovered_bar != -1:
             self.hovered_bar = -1
             self.update()
+            QToolTip.hideText()
         super().leaveEvent(event)
     
-    def update_data(self, data, times):
+    def update_data(self, data, times=None):
         """Update chart with real data"""
-        if data and times:
-            self.data = data
-            self.times = times
-            self.has_data = True
+        try:
+            if data and isinstance(data, list) and len(data) > 0:
+                # Validate data
+                validated_data = []
+                for value in data:
+                    try:
+                        val = float(value)
+                        validated_data.append(max(0, min(100, val)))  # Clamp between 0-100
+                    except (ValueError, TypeError):
+                        validated_data.append(0)
+                
+                self.data = validated_data
+                
+                # Generate times if not provided
+                if times and len(times) == len(self.data):
+                    self.times = times
+                else:
+                    self.times = self._generate_time_labels(len(self.data))
+                
+                self.has_data = True
+                logging.debug(f"Chart updated with {len(self.data)} data points")
+                self.update()
+            else:
+                logging.warning(f"Invalid data provided to chart: {data}")
+                self.has_data = False
+                self.data = []
+                self.times = []
+                self.update()
+        except Exception as e:
+            logging.error(f"Error updating chart data: {e}")
+            self.has_data = False
+            self.data = []
+            self.times = []
             self.update()
+    
+    def _generate_time_labels(self, count):
+        """Generate time labels for the chart"""
+        try:
+            now = datetime.datetime.now()
+            times = []
+            
+            # Calculate interval based on count
+            if count <= 12:
+                interval_minutes = 5
+            elif count <= 24:
+                interval_minutes = 2
+            else:
+                interval_minutes = 1
+            
+            for i in range(count):
+                time_point = now - datetime.timedelta(minutes=(count - i) * interval_minutes)
+                times.append(time_point.strftime("%H:%M"))
+            
+            return times
+        except Exception as e:
+            logging.error(f"Error generating time labels: {e}")
+            return [f"T{i}" for i in range(count)]
     
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -72,7 +129,6 @@ class BarChart(QWidget):
         
         # Don't draw chart if we don't have data
         if not self.has_data or not self.data:
-            # Draw "No data available" message
             painter.setPen(QColor("#aaaaaa"))
             font = painter.font()
             font.setPointSize(12)
@@ -84,9 +140,9 @@ class BarChart(QWidget):
             )
             return
             
-        # Calculate chart area - ensure enough space for labels
-        chart_height = height - 140  # Height for the actual chart
-        bottom_y = height - 50  # Where the x-axis sits
+        # Calculate chart area
+        chart_height = height - 140
+        bottom_y = height - 50
         
         self.bar_positions = []
         
@@ -103,8 +159,8 @@ class BarChart(QWidget):
         
         # Calculate bar sizes
         bar_count = len(self.data)
-        available_width = width - 60  # Allow space on both sides
-        bar_width = min(30, available_width / bar_count * 0.6)  # Cap max width at 30px
+        available_width = width - 60
+        bar_width = min(30, available_width / bar_count * 0.6)
         bar_spacing = available_width / bar_count - bar_width
         
         # Draw x-axis
@@ -135,15 +191,15 @@ class BarChart(QWidget):
                 
             painter.drawRect(bar_rect)
             
-            # Draw x-axis labels (time) - but avoid overcrowding
+            # Draw x-axis labels (time)
             painter.setPen(QColor("#aaaaaa"))
             label_font = painter.font()
             label_font.setPointSize(9)
             painter.setFont(label_font)
             
-            # Calculate label display interval to avoid overlap
-            label_interval = max(1, bar_count // 8)  # Show at most 8 labels
-            if i % label_interval == 0 or i == bar_count - 1:  # Show selected labels plus the last one
+            # Show every nth label to avoid overcrowding
+            label_interval = max(1, bar_count // 8)
+            if i % label_interval == 0 or i == bar_count - 1:
                 x_center = x + (bar_width / 2)
                 time_label = self.times[i] if i < len(self.times) else ""
                 painter.drawText(
@@ -164,17 +220,32 @@ class ResourceCircularIndicator(QWidget):
         self.limits = limits
         self.allocated = allocated
         self.capacity = capacity
-        self.resource_type = resource_type  # Store resource type
+        self.resource_type = resource_type
         self.hovered_segment = None
         self.setMinimumSize(120, 120)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setMouseTracking(True)
         self.title = ""
         self.setStyleSheet(AppStyles.CIRCULAR_INDICATOR_TOOLTIP_STYLE)
-        self.has_data = False  # Flag to track if we have real data
+        self.has_data = False
         
     def set_title(self, title):
         self.title = title
+
+    def update_metrics(self, usage, requests, limits, allocated, capacity):
+        """Update the metrics and mark as having data"""
+        try:
+            self.usage = float(usage) if usage is not None else 0
+            self.requests = float(requests) if requests is not None else 0
+            self.limits = float(limits) if limits is not None else 0
+            self.allocated = float(allocated) if allocated is not None else 0
+            self.capacity = float(capacity) if capacity is not None else 100
+            self.has_data = True
+            self.update()
+            logging.debug(f"Updated metrics for {self.resource_type}: usage={self.usage}, capacity={self.capacity}")
+        except Exception as e:
+            logging.error(f"Error updating metrics for {self.resource_type}: {e}")
+            self.has_data = False
 
     def get_segment_at_position(self, x, y):
         if not self.has_data:
@@ -204,7 +275,7 @@ class ResourceCircularIndicator(QWidget):
         if distance > outer_radius or distance < ring2_radius - 5:
             return None
             
-        usage_angle = self.usage / self.capacity * 360 if self.capacity > 0 else 0
+        usage_angle = self.usage / 100 * 360 if self.usage <= 100 else 360
         requests_angle = self.requests / self.capacity * 360 if self.capacity > 0 else 0
         limits_angle = self.limits / self.capacity * 360 if self.capacity > 0 else 0
         allocated_angle = self.allocated / self.capacity * 360 if self.capacity > 0 else 0
@@ -261,7 +332,6 @@ class ResourceCircularIndicator(QWidget):
         center_y = height / 2
 
         if not self.has_data:
-            # Draw "No data" message
             painter.setPen(QColor("#aaaaaa"))
             font = painter.font()
             font.setPointSize(12)
@@ -284,7 +354,7 @@ class ResourceCircularIndicator(QWidget):
         pen.setWidth(max(3, int(pen_width)))
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
 
-        # Draw background circles - only for rings that have data
+        # Draw background circles
         pen.setColor(QColor(30, 30, 30))
         painter.setPen(pen)
 
@@ -292,12 +362,11 @@ class ResourceCircularIndicator(QWidget):
         painter.drawEllipse(int(center_x - outer_radius), int(center_y - outer_radius),
                             int(outer_radius * 2), int(outer_radius * 2))
         
-        # Only draw the requests ring if we have request data
+        # Only draw other rings if we have data
         if self.requests > 0 or self.resource_type == "pods":
             painter.drawEllipse(int(center_x - ring4_radius), int(center_y - ring4_radius),
                             int(ring4_radius * 2), int(ring4_radius * 2))
         
-        # For CPU/Memory, draw the limits and allocated rings if we have data
         if self.resource_type != "pods":
             if self.limits > 0:
                 painter.drawEllipse(int(center_x - ring3_radius), int(center_y - ring3_radius),
@@ -314,7 +383,7 @@ class ResourceCircularIndicator(QWidget):
             color = QColor(80, 255, 80) if self.hovered_segment == "usage" else QColor(50, 220, 50)
             pen.setColor(color)
             painter.setPen(pen)
-            segment_angle = int(self.usage / 100 * 360 * 16)  # Use fixed scale 0-100%
+            segment_angle = int(min(self.usage, 100) / 100 * 360 * 16)
             painter.drawArc(int(center_x - outer_radius), int(center_y - outer_radius),
                             int(outer_radius * 2), int(outer_radius * 2),
                             start_angle, segment_angle)
@@ -324,35 +393,32 @@ class ResourceCircularIndicator(QWidget):
             color = QColor(80, 180, 255) if self.hovered_segment == "requests" else QColor(50, 150, 220)
             pen.setColor(color)
             painter.setPen(pen)
-            segment_angle = int(self.requests / self.capacity * 360 * 16)
+            segment_angle = int(min(self.requests / self.capacity, 1.0) * 360 * 16)
             painter.drawArc(int(center_x - ring4_radius), int(center_y - ring4_radius),
                             int(ring4_radius * 2), int(ring4_radius * 2),
                             start_angle, segment_angle)
 
         # Only draw limits and allocated arcs for non-pod resources
         if self.resource_type != "pods":
-            # Draw limits arc if limits > 0
             if self.limits > 0 and self.capacity > 0:
                 color = QColor(200, 100, 255) if self.hovered_segment == "limits" else QColor(170, 70, 220)
                 pen.setColor(color)
                 painter.setPen(pen)
-                segment_angle = int(self.limits / self.capacity * 360 * 16)
+                segment_angle = int(min(self.limits / self.capacity, 1.0) * 360 * 16)
                 painter.drawArc(int(center_x - ring3_radius), int(center_y - ring3_radius),
                                 int(ring3_radius * 2), int(ring3_radius * 2),
                                 start_angle, segment_angle)
 
-            # Draw allocated arc if allocated > 0
             if self.allocated > 0 and self.capacity > 0:
                 color = QColor(255, 160, 80) if self.hovered_segment == "allocated" else QColor(255, 140, 40)
                 pen.setColor(color)
                 painter.setPen(pen)
-                segment_angle = int(self.allocated / self.capacity * 360 * 16)
+                segment_angle = int(min(self.allocated / self.capacity, 1.0) * 360 * 16)
                 painter.drawArc(int(center_x - ring2_radius), int(center_y - ring2_radius),
                                 int(ring2_radius * 2), int(ring2_radius * 2),
                                 start_angle, segment_angle)
 
     def sizeHint(self):
-        # Make all resource indicators the same size
         return QSize(150, 150)
 
 
@@ -363,7 +429,7 @@ class ResourceStatusWidget(QWidget):
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)  # No spacing between elements to keep them tight
+        main_layout.setSpacing(0)
 
         self.box = QFrame()
         self.box.setObjectName("statusBox")
@@ -371,7 +437,7 @@ class ResourceStatusWidget(QWidget):
 
         box_layout = QVBoxLayout(self.box)
         box_layout.setContentsMargins(10, 10, 10, 10)
-        box_layout.setSpacing(0)  # No spacing to keep elements tight
+        box_layout.setSpacing(0)
 
         self.title = title
         self.title_label = QLabel(title)
@@ -382,98 +448,120 @@ class ResourceStatusWidget(QWidget):
         self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         box_layout.addWidget(self.title_label)
 
-        # Create the progress indicator with resource type
+        # Create the progress indicator
         self.progress = ResourceCircularIndicator(usage, requests, limits, allocated, capacity, resource_type)
         self.progress.set_title(title)
-        
-        # Use fixed size for indicator to ensure consistent spacing
         self.progress.setFixedSize(130, 130)
         
-        # Create a container with no spacing
         progress_container = QWidget()
         progress_layout = QVBoxLayout(progress_container)
-        progress_layout.setContentsMargins(0, 0, 0, 0)  # No margins
-        progress_layout.setSpacing(0)  # No spacing
+        progress_layout.setContentsMargins(0, 0, 0, 0)
+        progress_layout.setSpacing(0)
         progress_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
         progress_layout.addWidget(self.progress)
-        
         box_layout.addWidget(progress_container)
 
-        # Create labels container with minimal spacing
+        # Create labels container
         self.labels_container = QWidget()
         labels_layout = QVBoxLayout(self.labels_container)
-        labels_layout.setContentsMargins(10, 0, 0, 0)  # Add left margin for better left alignment
-        labels_layout.setSpacing(1)  # Minimal spacing between labels
+        labels_layout.setContentsMargins(10, 0, 0, 0)
+        labels_layout.setSpacing(1)
 
-        # Set labels to be left-aligned instead of center-aligned
         self.usage_label = QLabel("● Usage: No data")
         self.usage_label.setStyleSheet(AppStyles.CLUSTER_RESOURCE_LABEL_USAGE_STYLE)
-        self.usage_label.setAlignment(Qt.AlignmentFlag.AlignLeft)  # Left-aligned
+        self.usage_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
         labels_layout.addWidget(self.usage_label)
 
         self.requests_label = QLabel("● Requests: No data")
         self.requests_label.setStyleSheet(AppStyles.CLUSTER_RESOURCE_LABEL_REQUESTS_STYLE)
-        self.requests_label.setAlignment(Qt.AlignmentFlag.AlignLeft)  # Left-aligned
+        self.requests_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
         labels_layout.addWidget(self.requests_label)
 
-        # For CPU and Memory, add limits and allocated labels (not for Pods)
+        # For CPU and Memory, add limits and allocated labels
         if resource_type != "pods":
             self.limits_label = QLabel("● Limits: No data")
             self.limits_label.setStyleSheet(AppStyles.CLUSTER_RESOURCE_LABEL_LIMITS_STYLE)
-            self.limits_label.setAlignment(Qt.AlignmentFlag.AlignLeft)  # Left-aligned
+            self.limits_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
             labels_layout.addWidget(self.limits_label)
 
             self.allocated_label = QLabel("● Allocated: No data")
             self.allocated_label.setStyleSheet(AppStyles.CLUSTER_RESOURCE_LABEL_ALLOCATED_STYLE)
-            self.allocated_label.setAlignment(Qt.AlignmentFlag.AlignLeft)  # Left-aligned
+            self.allocated_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
             labels_layout.addWidget(self.allocated_label)
 
         self.capacity_label = QLabel("● Capacity: No data")
         self.capacity_label.setStyleSheet(AppStyles.CLUSTER_RESOURCE_LABEL_CAPACITY_STYLE)
-        self.capacity_label.setAlignment(Qt.AlignmentFlag.AlignLeft)  # Left-aligned
+        self.capacity_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
         labels_layout.addWidget(self.capacity_label)
 
-        # Add the labels container directly after the progress with no spacing
         box_layout.addWidget(self.labels_container)
         self.labels_container.hide()  # Initially hide until we have data
 
-        # Add a stretch at the end to push everything to the top
         box_layout.addStretch(1)
-
         main_layout.addWidget(self.box)
         self.setStyleSheet("background-color: transparent;")
         
     def update_metrics(self, usage, requests, limits, allocated, capacity=None):
         """Update the resource metrics with real data"""
-        # Update the progress indicator
-        self.progress.usage = usage
-        self.progress.requests = requests
-        
-        if self.resource_type != "pods":
-            self.progress.limits = limits
-            self.progress.allocated = allocated
-        else:
-            # For pods, don't show limits and allocated
-            self.progress.limits = 0
-            self.progress.allocated = 0
+        try:
+            # Update the progress indicator
+            if capacity is not None:
+                self.progress.capacity = capacity
             
-        if capacity is not None:
-            self.progress.capacity = capacity
+            self.progress.update_metrics(usage, requests, limits, allocated, self.progress.capacity)
             
-        self.progress.has_data = True
-        self.progress.update()
-        
-        # Show the labels container now that we have data
-        self.labels_container.show()
+            # Show the labels container now that we have data
+            self.labels_container.show()
+            
+            # Update labels based on resource type
+            if self.resource_type == "cpu":
+                self.usage_label.setText(f"● Usage: {usage:.1f}% ({requests:.2f} cores)")
+                self.requests_label.setText(f"● Requests: {requests:.2f} cores")
+                if hasattr(self, 'limits_label') and limits > 0:
+                    self.limits_label.setText(f"● Limits: {limits:.2f} cores")
+                if hasattr(self, 'allocated_label') and allocated > 0:
+                    self.allocated_label.setText(f"● Allocated: {allocated:.2f} cores")
+                self.capacity_label.setText(f"● Capacity: {self.progress.capacity:.2f} cores")
+                
+            elif self.resource_type == "memory":
+                self.usage_label.setText(f"● Usage: {usage:.1f}% ({self.format_memory(requests)})")
+                self.requests_label.setText(f"● Requests: {self.format_memory(requests)}")
+                if hasattr(self, 'limits_label') and limits > 0:
+                    self.limits_label.setText(f"● Limits: {self.format_memory(limits)}")
+                if hasattr(self, 'allocated_label') and allocated > 0:
+                    self.allocated_label.setText(f"● Allocated: {self.format_memory(allocated)}")
+                self.capacity_label.setText(f"● Capacity: {self.format_memory(self.progress.capacity)}")
+                
+            elif self.resource_type == "pods":
+                count = int(requests)  # For pods, requests represents count
+                self.usage_label.setText(f"● Usage: {usage:.1f}% ({count} pods)")
+                self.requests_label.setText(f"● Count: {count} pods")
+                self.capacity_label.setText(f"● Capacity: {int(self.progress.capacity)} pods")
+                
+            logging.debug(f"Updated {self.resource_type} metrics: usage={usage:.1f}%")
+            
+        except Exception as e:
+            logging.error(f"Error updating {self.resource_type} metrics: {e}")
+    
+    def format_memory(self, memory_value):
+        """Format memory values to human-readable format"""
+        try:
+            if memory_value < 1024:
+                return f"{memory_value:.2f} MB"
+            elif memory_value < 1024 * 1024:
+                return f"{memory_value/1024:.2f} GB"
+            else:
+                return f"{memory_value/(1024*1024):.2f} TB"
+        except:
+            return f"{memory_value:.2f} MB"
         
     def sizeHint(self):
-        # Same size for all resource types to ensure alignment
         return QSize(170, 300)
 
     def minimumSizeHint(self):
-        # Same minimum size for all resource types to ensure alignment
         return QSize(150, 270)
+
+
 class IssuesTable(QTableWidget):
     """Table to display cluster issues"""
     def __init__(self, parent=None):
@@ -494,12 +582,11 @@ class IssuesTable(QTableWidget):
         
     def update_issues(self, issues):
         """Update the table with a list of issues"""
-        self.setRowCount(0)  # Clear existing rows
+        self.setRowCount(0)
         
         if not issues:
             return
             
-        # Add issues to the table
         for i, issue in enumerate(issues):
             self.insertRow(i)
             
@@ -544,15 +631,22 @@ class ClusterPage(QWidget):
         # Get the cluster connector
         self.cluster_connector = get_cluster_connector()
         
-        # Connect signals from the connector
-        self.cluster_connector.cluster_data_loaded.connect(self.update_cluster_info)
-        self.cluster_connector.metrics_data_loaded.connect(self.update_metrics)
-        self.cluster_connector.issues_data_loaded.connect(self.update_issues)
+        # Connect signals from the connector with error handling
+        try:
+            self.cluster_connector.cluster_data_loaded.connect(self.update_cluster_info)
+            self.cluster_connector.metrics_data_loaded.connect(self.update_metrics)
+            self.cluster_connector.issues_data_loaded.connect(self.update_issues)
+        except Exception as e:
+            logging.error(f"Error connecting cluster signals: {e}")
         
         # Initialize data
         self.cluster_info = None
         self.metrics_data = None
         self.issues_data = []
+        
+        # Data refresh timer
+        self.refresh_timer = QTimer(self)
+        self.refresh_timer.timeout.connect(self.refresh_data)
         
         # UI setup
         self.setup_ui()
@@ -580,40 +674,39 @@ class ClusterPage(QWidget):
         # Create the chart panel
         chart_panel = self.create_chart_panel()
         
-        # Create a container widget for resource metrics
+        # Create metrics container
         metrics_container = QWidget()
         metrics_container.setStyleSheet(AppStyles.CLUSTER_METRICS_PANEL_STYLE)
         metrics_container.setMinimumWidth(600)
         
-        # Use a grid layout for resource widgets with equal column widths
         metrics_grid = QGridLayout(metrics_container)
         metrics_grid.setContentsMargins(16, 16, 16, 16)
         metrics_grid.setSpacing(15)
         
-        # Create resource widgets with proper resource types
+        # Create resource widgets
         self.cpu_status = ResourceStatusWidget("CPU Resources", 0, 0, 0, 0, 100, "cpu")
         self.memory_status = ResourceStatusWidget("Memory Resources", 0, 0, 0, 0, 100, "memory")
         self.disk_status = ResourceStatusWidget("Pod Resources", 0, 0, 0, 0, 100, "pods")
         
-        # Set fixed width for each resource widget to ensure they're all the same size
+        # Set fixed width for alignment
         fixed_width = 180
         self.cpu_status.setFixedWidth(fixed_width)
         self.memory_status.setFixedWidth(fixed_width)
         self.disk_status.setFixedWidth(fixed_width)
         
-        # Add widgets to the grid layout with equal column sizes
+        # Add widgets to grid
         metrics_grid.addWidget(self.cpu_status, 0, 0)
         metrics_grid.addWidget(self.memory_status, 0, 1)
         metrics_grid.addWidget(self.disk_status, 0, 2)
         
-        # Set equal column stretches to ensure proper alignment
+        # Set equal column stretches
         metrics_grid.setColumnStretch(0, 1)
         metrics_grid.setColumnStretch(1, 1)
         metrics_grid.setColumnStretch(2, 1)
         
-        # Add chart and metrics to the top section
-        top_layout.addWidget(chart_panel, 1)  # Chart gets stretch factor 1
-        top_layout.addWidget(metrics_container, 0)  # Metrics don't stretch
+        # Add to top section
+        top_layout.addWidget(chart_panel, 1)
+        top_layout.addWidget(metrics_container, 0)
         
         # Status panel for issues
         self.status_panel = self.create_status_panel()
@@ -649,7 +742,6 @@ class ClusterPage(QWidget):
         
         tabs_layout.addWidget(self.master_btn)
         tabs_layout.addWidget(self.worker_btn)
-        
         tabs_layout.addStretch()
         
         self.cpu_btn = QPushButton("CPU")
@@ -665,15 +757,14 @@ class ClusterPage(QWidget):
         
         main_layout.addWidget(tabs)
         
-        # Create a container for charts with a stacked layout
+        # Create charts container
         self.charts_container = QWidget()
         self.charts_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         
-        # Use a stacked layout to prevent chart widgets from being deleted
         self.charts_layout = QStackedLayout(self.charts_container)
         self.charts_layout.setContentsMargins(0, 16, 0, 0)
         
-        # Initialize with empty chart data - Fixed to include title and unit
+        # Initialize charts
         self.cpu_chart = BarChart(color="#ff0000", title="CPU Usage", unit="%")
         self.memory_chart = BarChart(color="#00ffff", title="Memory Usage", unit="%")
         
@@ -681,10 +772,9 @@ class ClusterPage(QWidget):
         self.charts_layout.addWidget(self.cpu_chart)
         self.charts_layout.addWidget(self.memory_chart)
         
-        # Set the CPU chart as current
+        # Set CPU chart as current
         self.charts_layout.setCurrentWidget(self.cpu_chart)
         
-        # Add the charts container to the main layout
         main_layout.addWidget(self.charts_container)
 
         return panel
@@ -698,47 +788,40 @@ class ClusterPage(QWidget):
         self.master_btn.setStyleSheet(AppStyles.CLUSTER_INACTIVE_BTN_STYLE)
 
     def show_cpu_chart(self):
-        """Switch to CPU chart view"""
         self.cpu_btn.setStyleSheet(AppStyles.CLUSTER_ACTIVE_BTN_STYLE)
         self.memory_btn.setStyleSheet(AppStyles.CLUSTER_INACTIVE_BTN_STYLE)
         
-        # Use the stacked layout to switch charts instead of show/hide
         if hasattr(self, 'charts_layout') and self.charts_layout:
             self.charts_layout.setCurrentWidget(self.cpu_chart)
 
     def show_memory_chart(self):
-        """Switch to memory chart view"""
         self.memory_btn.setStyleSheet(AppStyles.CLUSTER_ACTIVE_BTN_STYLE)
         self.cpu_btn.setStyleSheet(AppStyles.CLUSTER_INACTIVE_BTN_STYLE)
         
-        # Use the stacked layout to switch charts instead of show/hide
         if hasattr(self, 'charts_layout') and self.charts_layout:
             self.charts_layout.setCurrentWidget(self.memory_chart)
     
     def create_status_panel(self):
-        # Create a container widget
         container = QWidget()
         container_layout = QVBoxLayout(container)
         container_layout.setContentsMargins(0, 0, 0, 0)
         container_layout.setSpacing(0)
         
-        # Create the panel for both states (no issues and issues)
         self.status_widget = QWidget()
         self.status_widget.setStyleSheet(AppStyles.CLUSTER_STATUS_PANEL_STYLE)
         
-        # Create stacked layout to toggle between no issues and issues content
         self.stacked_layout = QStackedLayout(self.status_widget)
         self.stacked_layout.setContentsMargins(0, 0, 0, 0)
         
-        # Create no issues content - keep this the same
+        # No issues content
         no_issues_widget = QWidget()
         no_issues_layout = QVBoxLayout(no_issues_widget)
-        no_issues_layout.setContentsMargins(32, 48, 32, 48)  
+        no_issues_layout.setContentsMargins(32, 48, 32, 48)
         no_issues_layout.setSpacing(8)
         no_issues_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         success_icon = QLabel("✓")
-        success_icon.setFixedSize(80, 80)  
+        success_icon.setFixedSize(80, 80)
         success_icon.setStyleSheet(AppStyles.CLUSTER_STATUS_ICON_STYLE)
 
         status_title = QLabel("No issues found")
@@ -753,12 +836,11 @@ class ClusterPage(QWidget):
         no_issues_layout.addWidget(status_title)
         no_issues_layout.addWidget(status_subtitle)
         
-        # Create issues content - with reduced top space
+        # Issues content
         issues_widget = QWidget()
         issues_layout = QVBoxLayout(issues_widget)
-        # Significantly reduce the top margin (from 16 to just 2)
         issues_layout.setContentsMargins(16, 2, 16, 16)
-        issues_layout.setSpacing(8)  # Also reduce spacing between header and table
+        issues_layout.setSpacing(8)
         
         issues_header = QLabel("Cluster Issues")
         issues_header.setStyleSheet(AppStyles.CLUSTER_STATUS_TITLE_STYLE)
@@ -769,214 +851,149 @@ class ClusterPage(QWidget):
         issues_layout.addWidget(issues_header)
         issues_layout.addWidget(self.issues_table)
         
-        # Add both widgets to the stacked layout
+        # Add both widgets to stacked layout
         self.stacked_layout.addWidget(no_issues_widget)  # index 0
         self.stacked_layout.addWidget(issues_widget)     # index 1
         
-        # Add the status widget to the container
         container_layout.addWidget(self.status_widget)
-        
         return container
+
     def update_cluster_info(self, info):
         """Update cluster information from real data"""
         self.cluster_info = info
-        # We don't immediately update UI here because we wait for metrics
+        logging.info(f"Cluster info updated: {info.get('name', 'Unknown')}")
 
-    # In the ClusterPage class, add a method to directly update with cached data
     def preload_with_cached_data(self, cluster_info, metrics, issues):
         """Preload the page with cached data"""
-        if cluster_info:
-            self.update_cluster_info(cluster_info)
-        
-        if metrics:
-            self.update_metrics(metrics)
-        
-        if issues:
-            self.update_issues(issues)
+        logging.info(f"ClusterPage: Preloading with data for cluster: {cluster_info.get('name') if cluster_info else 'Unknown'}")
+        try:
+            if cluster_info:
+                self.update_cluster_info(cluster_info)
+            
+            if metrics:
+                self.update_metrics(metrics)
+            else:
+                # Clear or show loading state for metrics-dependent UI elements
+                if hasattr(self, 'cpu_chart'): self.cpu_chart.update_data([], [])
+                if hasattr(self, 'memory_chart'): self.memory_chart.update_data([], [])
+                if hasattr(self, 'cpu_status'): self.cpu_status.update_metrics(0,0,0,0,0)
+                if hasattr(self, 'memory_status'): self.memory_status.update_metrics(0,0,0,0,0)
+                if hasattr(self, 'disk_status'): self.disk_status.update_metrics(0,0,0,0,0)
+
+            
+            # if issues:
+            #     self.update_issues(issues)
+            if issues is not None: # Allow empty list of issues
+                self.update_issues(issues)
+            else:
+                if hasattr(self, 'issues_table'): self.update_issues([])
+
+            logging.info("Preloaded cluster page with cached data")
+        except Exception as e:
+            logging.error(f"Error preloading cached data: {e}")
+
     def update_metrics(self, metrics):
-        """Update metrics with real data and proper formatting"""
+        self.metrics_data = metrics
+        if not metrics:
+            logging.warning("ClusterPage: No metrics data to update.")
+            # Optionally clear metric displays or show "Loading..."
+            if hasattr(self, 'cpu_chart'): self.cpu_chart.update_data([], [])
+            # ... clear other metric UIs ...
+            return
+
+        logging.info(f"ClusterPage: Metrics data updated.")
         try:
-            self.metrics_data = metrics
-            
-            if not metrics:
-                return
-                    
-            # Check if widgets still exist
-            if not all(hasattr(self, attr) for attr in ['cpu_status', 'memory_status', 'disk_status', 'cpu_chart', 'memory_chart']):
-                return
-                    
-            # CPU metrics
-            if "cpu" in metrics:
+            if "cpu" in metrics and hasattr(self, 'cpu_status') and hasattr(self, 'cpu_chart'):
                 cpu = metrics["cpu"]
-                usage_percent = cpu.get("usage", 0)  # Already in percentage
-                requests = cpu.get("requests", 0)    # Absolute value
-                limits = cpu.get("limits", 0)
-                allocated = cpu.get("allocatable", 0)
-                capacity = cpu.get("capacity", 100)
-                
-                # Only update if we have valid data (usage > 0 or requests > 0)
-                if usage_percent > 0 or requests > 0:
-                    # Update the CPU status widget
-                    self.cpu_status.update_metrics(
-                        usage_percent,
-                        requests,
-                        limits,
-                        allocated,
-                        capacity
-                    )
-                    
-                    # Format the labels with proper units (cores)
-                    self.cpu_status.usage_label.setText(f"● Usage: {usage_percent:.1f}% ({requests:.2f} cores)")
-                    self.cpu_status.requests_label.setText(f"● Requests: {requests:.2f} cores")
-                    
-                    if hasattr(self.cpu_status, 'limits_label') and limits > 0:
-                        self.cpu_status.limits_label.setText(f"● Limits: {limits:.2f} cores")
-                    
-                    if hasattr(self.cpu_status, 'allocated_label') and allocated > 0:
-                        self.cpu_status.allocated_label.setText(f"● Allocated: {allocated:.2f} cores")
-                        
-                    self.cpu_status.capacity_label.setText(f"● Capacity: {capacity:.2f} cores")
-                    
-                    # Update CPU chart with history data
-                    cpu_history = cpu.get("history")
-                    cpu_timestamps = cpu.get("timestamps", [])  # Get real timestamps if available
-                    
-                    if cpu_history and len(cpu_history) > 0:
-                        # Use real timestamps from the metrics if available
-                        if cpu_timestamps and len(cpu_timestamps) == len(cpu_history):
-                            times = cpu_timestamps
-                        else:
-                            # Fall back to generated timestamps if real ones aren't available
-                            times = self.generate_time_points(len(cpu_history))
-                            
-                        try:
-                            self.cpu_chart.update_data(cpu_history, times)
-                        except RuntimeError:
-                            # Handle case where widget was deleted
-                            pass
-                
-                # Memory metrics
-                if "memory" in metrics:
-                    memory = metrics["memory"]
-                    usage_percent = memory.get("usage", 0)
-                    requests = memory.get("requests", 0)
-                    limits = memory.get("limits", 0)
-                    allocated = memory.get("allocatable", 0)
-                    capacity = memory.get("capacity", 100)
-                    
-                    # Only update if we have valid data (usage > 0 or requests > 0)
-                    if usage_percent > 0 or requests > 0:
-                        # Update the memory status widget
-                        self.memory_status.update_metrics(
-                            usage_percent,
-                            requests,
-                            limits,
-                            allocated,
-                            capacity
-                        )
-                        
-                        # Format the labels with proper units
-                        self.memory_status.usage_label.setText(f"● Usage: {usage_percent:.1f}% ({self.format_memory(requests)})")
-                        self.memory_status.requests_label.setText(f"● Requests: {self.format_memory(requests)}")
-                        
-                        if hasattr(self.memory_status, 'limits_label') and limits > 0:
-                            self.memory_status.limits_label.setText(f"● Limits: {self.format_memory(limits)}")
-                        
-                        if hasattr(self.memory_status, 'allocated_label') and allocated > 0:
-                            self.memory_status.allocated_label.setText(f"● Allocated: {self.format_memory(allocated)}")
-                            
-                        self.memory_status.capacity_label.setText(f"● Capacity: {self.format_memory(capacity)}")
-                        
-                        # Update memory chart with history data
-                        memory_history = memory.get("history")
-                        memory_timestamps = memory.get("timestamps", [])  # Get real timestamps if available
-                        
-                        if memory_history and len(memory_history) > 0:
-                            # Use real timestamps from the metrics if available
-                            if memory_timestamps and len(memory_timestamps) == len(memory_history):
-                                times = memory_timestamps
-                            else:
-                                # Fall back to generated timestamps if real ones aren't available
-                                times = self.generate_time_points(len(memory_history))
-                                
-                            try:
-                                self.memory_chart.update_data(memory_history, times)
-                            except RuntimeError:
-                                # Handle case where widget was deleted
-                                pass
-                if "pods" in metrics:
-    #             # Use pods metrics if storage not available
-                    pods = metrics["pods"]
-                    usage_percent = pods.get("usage", 0)
-                    count = pods.get("count", 0)
-                    capacity = pods.get("capacity", 100)
-                    
-                    # Only update if we have valid data (usage > 0 or count > 0)
-                    if usage_percent > 0 or count > 0:
-                        # Update the widget title to indicate it's showing pods
-                        self.disk_status.title_label.setText("Pod Resources")
-                        
-                        # Update the pods status widget
-                        self.disk_status.update_metrics(
-                            usage_percent,
-                            count,
-                            0,  # No limits for pods
-                            0,  # No allocation for pods
-                            capacity
-                        )
-                        
-                        # Format the labels for pods
-                        self.disk_status.usage_label.setText(f"● Usage: {usage_percent:.1f}% ({count} pods)")
-                        self.disk_status.requests_label.setText(f"● Count: {count} pods")
-                        self.disk_status.capacity_label.setText(f"● Capacity: {capacity} pods")
+                self.cpu_status.update_metrics(
+                    float(cpu.get("usage", 0)), float(cpu.get("requests", 0)),
+                    float(cpu.get("limits", 0)), float(cpu.get("allocatable", 0)),
+                    float(cpu.get("capacity", 100))
+                )
+                self.cpu_chart.update_data(cpu.get("history", []), cpu.get("timestamps", self._generate_time_points(len(cpu.get("history", [])))))
             
-            # Storage metrics remain the same...
-                
+            if "memory" in metrics and hasattr(self, 'memory_status') and hasattr(self, 'memory_chart'):
+                memory = metrics["memory"]
+                self.memory_status.update_metrics(
+                    float(memory.get("usage", 0)), float(memory.get("requests", 0)),
+                    float(memory.get("limits", 0)), float(memory.get("allocatable", 0)),
+                    float(memory.get("capacity", 100))
+                )
+                self.memory_chart.update_data(memory.get("history", []), memory.get("timestamps", self._generate_time_points(len(memory.get("history", [])))))
+
+            if "pods" in metrics and hasattr(self, 'disk_status'): # Assuming disk_status is for pods
+                pods = metrics["pods"]
+                self.disk_status.update_metrics(
+                    float(pods.get("usage", 0)), int(pods.get("count", 0)),
+                    0,0, # limits, allocated not typically for pods overview like this
+                    int(pods.get("capacity", 100))
+                )
         except Exception as e:
-            pass    
-    def format_memory(self, memory_value):
-        """Format memory values to human-readable format"""
-        if memory_value < 1024:
-            return f"{memory_value:.2f} MB"
-        elif memory_value < 1024 * 1024:
-            return f"{memory_value/1024:.2f} GB"
-        else:
-            return f"{memory_value/(1024*1024):.2f} TB"
-    
+            logging.error(f"ClusterPage: Error updating metrics UI: {e}")
+
+
     def update_issues(self, issues):
-        """Update with real issues data"""
+        self.issues_data = issues if issues is not None else []
+        logging.info(f"ClusterPage: Issues data updated with {len(self.issues_data)} issues.")
         try:
-            self.issues_data = issues
-            
-            if hasattr(self, 'stacked_layout'):
-                if issues and len(issues) > 0:
-                    # We have issues to display - switch to issues view
-                    self.stacked_layout.setCurrentIndex(1)
-                    if hasattr(self, 'issues_table'):
-                        self.issues_table.update_issues(issues)
+            if hasattr(self, 'stacked_layout') and hasattr(self, 'issues_table'):
+                if self.issues_data:
+                    self.stacked_layout.setCurrentIndex(1)  # Show issues view
+                    self.issues_table.update_issues(self.issues_data)
                 else:
-                    # No issues, show the success panel
-                    self.stacked_layout.setCurrentIndex(0)
+                    self.stacked_layout.setCurrentIndex(0)  # Show no issues view
         except Exception as e:
-            pass
-    def generate_time_points(self, count):
-        """Generate time points for charts with even spacing"""
-        import datetime
-        
-        now = datetime.datetime.now()
-        # Generate time points backwards from now with proper spacing
-        times = []
-        
-        # Calculate appropriate time interval based on data point count
-        if count <= 12:
-            interval_minutes = 5  # 5 minute intervals for small datasets
-        elif count <= 24:
-            interval_minutes = 2  # 2 minute intervals for medium datasets
-        else:
-            interval_minutes = 1  # 1 minute intervals for large datasets
-        
-        for i in range(count, 0, -1):
-            time_point = now - datetime.timedelta(minutes=i*interval_minutes)
-            times.append(time_point.strftime("%H:%M"))
-        
-        return times
+            logging.error(f"ClusterPage: Error updating issues UI: {e}")
+
+    def force_load_data(self):
+        """Request fresh data for the current cluster if one is active."""
+        # This method might be called by ClusterView's handle_page_change.
+        # It should be smart enough not to immediately re-fetch if preloaded data is fresh,
+        # or it could simply always trigger a refresh.
+        logging.info("ClusterPage: force_load_data called.")
+        self.refresh_data()
+
+    def _generate_time_points(self, count):
+        """Generate time points for charts"""
+        try:
+            now = datetime.datetime.now()
+            times = []
+            
+            # Calculate interval based on count
+            if count <= 12:
+                interval_minutes = 5
+            elif count <= 24:
+                interval_minutes = 2
+            else:
+                interval_minutes = 1
+            
+            for i in range(count):
+                time_point = now - datetime.timedelta(minutes=(count - i) * interval_minutes)
+                times.append(time_point.strftime("%H:%M"))
+            
+            return times
+        except Exception as e:
+            logging.error(f"Error generating time points: {e}")
+            return [f"T{i}" for i in range(count)]
+
+    def refresh_data(self):
+        """Refresh cluster data"""
+        try:
+            if self.cluster_connector and hasattr(self.cluster_connector, 'load_metrics'):
+                self.cluster_connector.load_metrics()
+            if self.cluster_connector and hasattr(self.cluster_connector, 'load_issues'):
+                self.cluster_connector.load_issues()
+        except Exception as e:
+            logging.error(f"Error refreshing data: {e}")
+
+    def showEvent(self, event):
+        """Start refresh timer when page becomes visible"""
+        super().showEvent(event)
+        if not self.refresh_timer.isActive():
+            self.refresh_timer.start(30000)  # Refresh every 30 seconds
+
+    def hideEvent(self, event):
+        """Stop refresh timer when page is hidden"""
+        super().hideEvent(event)
+        if self.refresh_timer.isActive():
+            self.refresh_timer.stop()

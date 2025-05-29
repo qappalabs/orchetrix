@@ -7,18 +7,30 @@ from PyQt6.QtGui import QIcon, QFont, QColor, QAction, QPixmap
 from UI.Styles import AppColors, AppStyles
 from UI.Icons import Icons
 import logging
+
 class NavMenuDropdown(QMenu):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowFlags(self.windowFlags() | Qt.WindowType.FramelessWindowHint | Qt.WindowType.NoDropShadowWindowHint)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        # Simplified window flags to avoid Windows layered window issues
+        self.setWindowFlags(Qt.WindowType.Popup)
+        
+        # Remove problematic attributes that cause Windows layered window errors
+        # self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        
         self.setStyleSheet(AppStyles.NAV_MENU_DROPDOWN_STYLE)
 
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setColor(QColor(0, 0, 0, 100))
-        shadow.setBlurRadius(15)
-        shadow.setOffset(0, 5)
-        self.setGraphicsEffect(shadow)
+        # Only add shadow effect on non-Windows platforms or disable it entirely
+        # to avoid UpdateLayeredWindowIndirect errors
+        try:
+            import platform
+            if platform.system() != "Windows":
+                shadow = QGraphicsDropShadowEffect(self)
+                shadow.setColor(QColor(0, 0, 0, 100))
+                shadow.setBlurRadius(15)
+                shadow.setOffset(0, 5)
+                self.setGraphicsEffect(shadow)
+        except Exception as e:
+            logging.debug(f"Could not apply shadow effect: {e}")
 
 
 class SidebarToggleButton(QToolButton):
@@ -30,21 +42,6 @@ class SidebarToggleButton(QToolButton):
         self.setStyleSheet(AppStyles.SIDEBAR_TOGGLE_BUTTON_STYLE)
         self.expanded = True
 
-        # Try to load icons from files
-        # try:
-        #     self.expanded_icon = QIcon("icons/back.svg")
-        #     self.collapsed_icon = QIcon("icons/forward.svg")
-        #     # Check if icons loaded successfully
-        #     if self.expanded_icon.isNull() or self.collapsed_icon.isNull():
-        #         # Fallback to text-based icons
-        #         self.expanded_icon = None
-        #         self.collapsed_icon = None
-        # except Exception as e:
-            
-        #     # Fallback to text-based icons
-        #     self.expanded_icon = None
-        #     self.collapsed_icon = None
-        
         try:
             from UI.Icons import resource_path  # Import the resource_path function
             back_icon_path = resource_path("icons/back.svg")
@@ -63,6 +60,7 @@ class SidebarToggleButton(QToolButton):
             # Fallback to text-based icons
             self.expanded_icon = None
             self.collapsed_icon = None
+        
         # Set the initial icon
         self.update_icon()
         self.setIconSize(QSize(24, 24))
@@ -99,6 +97,9 @@ class NavIconButton(QToolButton):
         self.dropdown_menu = None
         self.expanded = expanded  # Track if sidebar is expanded
         self.coming_soon = coming_soon  # New flag for coming soon features
+        
+        # Track signal connections to prevent multiple connections
+        self._dropdown_connections = []
 
         # Store the fallback icon text (emoji)
         self.icon_text = getattr(Icons, icon_id.upper(), "⚙️") if isinstance(icon_id, str) else "⚙️"
@@ -256,16 +257,17 @@ class NavIconButton(QToolButton):
                 pass  # No connections to disconnect
         else:
             # Regular buttons get normal functionality
+            try:
+                self.clicked.disconnect()  # Clear any existing connections
+            except TypeError:
+                pass
+            
             self.clicked.connect(self.activate)
             if self.has_dropdown:
                 self.clicked.connect(self.show_dropdown)
 
         self.installEventFilter(self)
 
-    # The rest of the class methods remain unchanged
-
-
-    # Modify NavIconButton class in Sidebar.py
     def show_loading_state(self):
         """Show a loading state for the button without modifying item_text"""
         # Create loading indicator if needed
@@ -311,6 +313,7 @@ class NavIconButton(QToolButton):
         symbol = self.loading_symbols[self.loading_animation_step % len(self.loading_symbols)]
         self.loading_indicator.setText(symbol)
         self.loading_animation_step += 1
+
     def set_expanded(self, expanded):
         if self.expanded != expanded:  # Only update if state actually changed
             self.expanded = expanded
@@ -318,56 +321,104 @@ class NavIconButton(QToolButton):
             self.update_style()
 
     def setup_dropdown(self):
-        self.dropdown_menu = NavMenuDropdown(self.parent_window)
+        """Setup dropdown menu with improved error handling"""
+        try:
+            # Clean up existing dropdown if it exists
+            if self.dropdown_menu:
+                self.dropdown_menu.deleteLater()
+                self.dropdown_menu = None
+            
+            # Clear previous connections
+            self._clear_dropdown_connections()
+            
+            self.dropdown_menu = NavMenuDropdown(self.parent_window)
 
-        title_action = QAction(f"{self.icon_text} {self.item_text}", self)
-        title_action.setEnabled(False)
-        self.dropdown_menu.addAction(title_action)
-        self.dropdown_menu.addSeparator()
+            title_action = QAction(f"{self.icon_text} {self.item_text}", self)
+            title_action.setEnabled(False)
+            self.dropdown_menu.addAction(title_action)
+            self.dropdown_menu.addSeparator()
 
-        if self.item_text == "Workloads":
-            menu_items = ["Overview", "Pods", "Deployments", "Daemon Sets",
-                          "Stateful Sets", "Replica Sets", "Replication Controllers",
-                          "Jobs", "Cron Jobs"]
-        elif self.item_text == "Config":
-            menu_items = ["Config Maps", "Secrets", "Resource Quotas", "Limit Ranges",
-                          "Horizontal Pod Autoscalers", "Pod Disruption Budgets",
-                          "Priority Classes", "Runtime Classes", "Leases", "Mutating Webhook Configs","Validating Webhook Configs"]
-        elif self.item_text == "Network":
-            menu_items = ["Services", "Endpoints", "Ingresses", "Ingress Classes",
-                          "Network Policies", 'Port Forwarding']
-        elif self.item_text == "Storage":
-            menu_items = ["Persistent Volume Claims", "Persistent Volumes",
-                          "Storage Classes"]
-        elif self.item_text == "Helm":
-            menu_items = ["Charts", "Releases"]
-        elif self.item_text == "Access Control":
-            menu_items = ["Service Accounts", "Cluster Roles", "Roles",
-                          "Cluster Role Bindings", "Role Bindings"]
-        elif self.item_text == "Custom Resources":
-            menu_items = ["Definitions"]
-        else:
-            menu_items = []
+            if self.item_text == "Workloads":
+                menu_items = ["Overview", "Pods", "Deployments", "Daemon Sets",
+                              "Stateful Sets", "Replica Sets", "Replication Controllers",
+                              "Jobs", "Cron Jobs"]
+            elif self.item_text == "Config":
+                menu_items = ["Config Maps", "Secrets", "Resource Quotas", "Limit Ranges",
+                              "Horizontal Pod Autoscalers", "Pod Disruption Budgets",
+                              "Priority Classes", "Runtime Classes", "Leases", "Mutating Webhook Configs","Validating Webhook Configs"]
+            elif self.item_text == "Network":
+                menu_items = ["Services", "Endpoints", "Ingresses", "Ingress Classes",
+                              "Network Policies", 'Port Forwarding']
+            elif self.item_text == "Storage":
+                menu_items = ["Persistent Volume Claims", "Persistent Volumes",
+                              "Storage Classes"]
+            elif self.item_text == "Helm":
+                menu_items = ["Charts", "Releases"]
+            elif self.item_text == "Access Control":
+                menu_items = ["Service Accounts", "Cluster Roles", "Roles",
+                              "Cluster Role Bindings", "Role Bindings"]
+            elif self.item_text == "Custom Resources":
+                menu_items = ["Definitions"]
+            else:
+                menu_items = []
 
-        for item in menu_items:
-            action = self.dropdown_menu.addAction(item)
-            action.triggered.connect(lambda checked=False, item_name=item:
-                                     self.parent_window.handle_dropdown_selection(item_name))
+            for item in menu_items:
+                action = self.dropdown_menu.addAction(item)
+                action.triggered.connect(lambda checked=False, item_name=item:
+                                         self.parent_window.handle_dropdown_selection(item_name))
+        except Exception as e:
+            logging.error(f"Error setting up dropdown for {self.item_text}: {e}")
+            self.dropdown_menu = None
+
+    def _clear_dropdown_connections(self):
+        """Clear all dropdown signal connections"""
+        for connection in self._dropdown_connections:
+            try:
+                connection.disconnect()
+            except (TypeError, RuntimeError):
+                pass  # Connection already broken or doesn't exist
+        self._dropdown_connections.clear()
 
     def show_dropdown(self):
-        if self.has_dropdown:
+        """Show dropdown menu with improved error handling"""
+        if not self.has_dropdown or not self.dropdown_menu:
+            return
+            
+        try:
             self.dropdown_open = True
             self.update_style()
+            
+            # Calculate position
             if self.expanded:
                 pos = self.mapToGlobal(QPoint(self.width(), 0))
             else:
                 pos = self.mapToGlobal(QPoint(40, 0))
+            
+            # Clear any existing aboutToHide connections for this dropdown
+            try:
+                self.dropdown_menu.aboutToHide.disconnect()
+            except TypeError:
+                pass  # No connections to disconnect
+            
+            # Connect the aboutToHide signal
+            connection = self.dropdown_menu.aboutToHide.connect(self.dropdown_closed)
+            self._dropdown_connections.append(connection)
+            
+            # Show the dropdown
             self.dropdown_menu.popup(pos)
-            self.dropdown_menu.aboutToHide.connect(self.dropdown_closed)
+            
+        except Exception as e:
+            logging.error(f"Error showing dropdown for {self.item_text}: {e}")
+            self.dropdown_open = False
+            self.update_style()
 
     def dropdown_closed(self):
-        self.dropdown_open = False
-        self.update_style()
+        """Handle dropdown close event"""
+        try:
+            self.dropdown_open = False
+            self.update_style()
+        except Exception as e:
+            logging.error(f"Error in dropdown_closed for {self.item_text}: {e}")
 
     def activate(self):
         if hasattr(self.parent_window, "set_active_nav_button"):
@@ -418,6 +469,15 @@ class NavIconButton(QToolButton):
                     2000
                 )
         return super().eventFilter(obj, event)
+
+    def __del__(self):
+        """Clean up resources when button is destroyed"""
+        try:
+            self._clear_dropdown_connections()
+            if hasattr(self, 'dropdown_menu') and self.dropdown_menu:
+                self.dropdown_menu.deleteLater()
+        except Exception:
+            pass  # Ignore errors during cleanup
 
 
 class Sidebar(QWidget):

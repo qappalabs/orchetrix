@@ -2,14 +2,13 @@
 Dynamic implementation of the Persistent Volume Claims page with live Kubernetes data.
 """
 
-from PyQt6.QtWidgets import (QHeaderView, QWidget, QLabel, QHBoxLayout)
+from PyQt6.QtWidgets import (QHeaderView, QWidget, QLabel, QHBoxLayout, QPushButton)
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor
 
 from base_components.base_components import SortableTableWidgetItem
 from base_components.base_resource_page import BaseResourcePage
 from UI.Styles import AppStyles, AppColors
-
 
 
 class StatusLabel(QWidget):
@@ -55,7 +54,7 @@ class PersistentVolumeClaimsPage(BaseResourcePage):
         
     def setup_page_ui(self):
         """Set up the main UI elements for the Persistent Volume Claims page"""
-        # Define headers and sortable columns
+        # Define headers and sortable columns - KEEP ORIGINAL
         headers = ["", "Name", "Namespace", "Storage Class", "Size", "Pods", "Age", "Status", ""]
         sortable_columns = {1, 2, 3, 4, 5, 6, 7}
         
@@ -68,6 +67,44 @@ class PersistentVolumeClaimsPage(BaseResourcePage):
         
         # Configure column widths
         self.configure_columns()
+        
+        # Add delete selected button
+        self._add_delete_selected_button()
+        
+    def _add_delete_selected_button(self):
+        """Add a button to delete selected resources."""
+        delete_btn = QPushButton("Delete Selected")
+        delete_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #d32f2f;
+                color: #ffffff;
+                border: none;
+                border-radius: 4px;
+                padding: 5px 10px;
+            }
+            QPushButton:hover {
+                background-color: #b71c1c;
+            }
+            QPushButton:pressed {
+                background-color: #d32f2f;
+            }
+            QPushButton:disabled {
+                background-color: #555555;
+                color: #888888;
+            }
+        """)
+        delete_btn.clicked.connect(self.delete_selected_resources)
+        
+        # Find the header layout
+        for i in range(self.layout().count()):
+            item = self.layout().itemAt(i)
+            if item.layout():
+                for j in range(item.layout().count()):
+                    widget = item.layout().itemAt(j).widget()
+                    if isinstance(widget, QPushButton) and widget.text() == "Refresh":
+                        # Insert before the refresh button
+                        item.layout().insertWidget(item.layout().count() - 1, delete_btn)
+                        break
         
     def configure_columns(self):
         """Configure column widths and behaviors"""
@@ -98,25 +135,40 @@ class PersistentVolumeClaimsPage(BaseResourcePage):
         checkbox_container.setStyleSheet(AppStyles.CHECKBOX_STYLE)
         self.table.setCellWidget(row, 0, checkbox_container)
         
-        # Extract data from resource
-        storage_class = resource.get("raw_data", {}).get("spec", {}).get("storageClassName", "<none>")
-        size = resource.get("raw_data", {}).get("spec", {}).get("resources", {}).get("requests", {}).get("storage", "<none>")
+        # Extract data from raw_data
+        raw_data = resource.get("raw_data", {})
+        spec = raw_data.get("spec", {})
+        status = raw_data.get("status", {})
+        metadata = raw_data.get("metadata", {})
         
-        # Count pods using this PVC
-        pods = resource.get("raw_data", {}).get("metadata", {}).get("annotations", {}).get("kubernetes.io/pods-using-pvc", "0")
+        # Get storage class
+        storage_class = spec.get("storageClassName", "<none>")
+        if not storage_class:
+            storage_class = "<none>"
+        
+        # Get size
+        size = "<none>"
+        if status.get("capacity") and status["capacity"].get("storage"):
+            size = status["capacity"]["storage"]
+        elif spec.get("resources") and spec["resources"].get("requests") and spec["resources"]["requests"].get("storage"):
+            size = spec["resources"]["requests"]["storage"]
+        
+        # Get pods using this PVC (we'll need to search for this)
+        # For now, show placeholder - this requires additional API call to find pods using this PVC
+        pods = self._get_pods_using_pvc(resource_name, resource["namespace"])
         
         # Get status
-        status = resource.get("raw_data", {}).get("status", {}).get("phase", "<none>")
+        pvc_status = status.get("phase", "Unknown")
         
-        # Prepare data columns
+        # Prepare data columns - MATCH ORIGINAL HEADERS
         columns = [
-            resource["name"],
-            resource["namespace"],
-            storage_class,
-            size,
-            pods,
-            resource["age"]
-            # Status is now handled separately using StatusLabel widget
+            resource["name"],        # Name
+            resource["namespace"],   # Namespace
+            storage_class,          # Storage Class
+            size,                   # Size
+            pods,                   # Pods
+            resource["age"]         # Age
+            # Status is handled separately as StatusLabel widget
         ]
         
         # Add columns to table
@@ -126,13 +178,32 @@ class PersistentVolumeClaimsPage(BaseResourcePage):
             # Handle numeric columns for sorting
             if col == 5:  # Age column
                 try:
-                    num = int(value.replace('d', ''))
+                    # Extract numeric part from age string
+                    if 'd' in value:
+                        num = int(value.replace('d', ''))
+                    elif 'h' in value:
+                        num = int(value.replace('h', '')) / 24  # Convert to fraction of day
+                    elif 'm' in value:
+                        num = int(value.replace('m', '')) / (24 * 60)  # Convert to fraction of day
+                    else:
+                        num = 0
                 except ValueError:
                     num = 0
                 item = SortableTableWidgetItem(value, num)
-            elif col == 4:  # Pods column
+            elif col == 4:  # Pods column - sort by number of pods
                 try:
-                    num = int(value)
+                    if value == "<none>":
+                        num = 0
+                    elif "+" in value and "more" in value:
+                        # Extract number from "pod1, pod2 +3 more" format
+                        parts = value.split("+")
+                        if len(parts) > 1:
+                            num = int(parts[1].split()[0]) + 2  # +2 for the two shown pods
+                        else:
+                            num = 1
+                    else:
+                        # Count commas to get number of pods
+                        num = len(value.split(","))
                 except ValueError:
                     num = 0
                 item = SortableTableWidgetItem(value, num)
@@ -154,9 +225,9 @@ class PersistentVolumeClaimsPage(BaseResourcePage):
             # Add the item to the table
             self.table.setItem(row, cell_col, item)
         
-        # Create status widget with proper color for PVCs
+        # Create status widget with proper color for PVCs (column 7 - Status)
         status_col = 7  # Status column index
-        status_text = status
+        status_text = pvc_status
         
         # Pick the right color
         if status_text == "Bound":
@@ -176,11 +247,6 @@ class PersistentVolumeClaimsPage(BaseResourcePage):
         action_container = self._create_action_container(row, action_button)
         action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
         self.table.setCellWidget(row, len(columns) + 2, action_container)  # +2 for checkbox and status
-    # def handle_row_click(self, row, column):
-    #     """Handle row selection when a table cell is clicked"""
-    #     if column != self.table.columnCount() - 1:  # Skip action column
-    #         # Select the row
-    #         self.table.selectRow(row)
 
     def handle_row_click(self, row, column):
         if column != self.table.columnCount() - 1:  # Skip action column
@@ -207,9 +273,46 @@ class PersistentVolumeClaimsPage(BaseResourcePage):
                     parent = parent.parent()
                 
                 if parent and hasattr(parent, 'detail_manager'):
-                    # Get singular resource type
-                    resource_type = self.resource_type
-                    if resource_type.endswith('s'):
-                        resource_type = resource_type[:-1]
-                    
-                    parent.detail_manager.show_detail(resource_type, resource_name, namespace)
+                    parent.detail_manager.show_detail("persistentvolumeclaim", resource_name, namespace)
+    
+    def _get_pods_using_pvc(self, pvc_name, namespace):
+        """Get the names of pods that are using this PVC"""
+        try:
+            # Get kubernetes client from parent or create new one
+            kube_client = None
+            
+            # Try to get from parent first
+            parent = self.parent()
+            while parent and not hasattr(parent, 'kube_client'):
+                parent = parent.parent()
+            
+            if parent and hasattr(parent, 'kube_client'):
+                kube_client = parent.kube_client
+            else:
+                # Import and create new client
+                from utils.kubernetes_client import get_kubernetes_client
+                kube_client = get_kubernetes_client()
+            
+            # Get all pods in the same namespace
+            pods_list = kube_client.v1.list_namespaced_pod(namespace=namespace)
+            
+            using_pods = []
+            for pod in pods_list.items:
+                if pod.spec and pod.spec.volumes:
+                    for volume in pod.spec.volumes:
+                        if (volume.persistent_volume_claim and 
+                            volume.persistent_volume_claim.claim_name == pvc_name):
+                            using_pods.append(pod.metadata.name)
+                            break  # Found it, no need to check other volumes
+            
+            if using_pods:
+                if len(using_pods) <= 3:
+                    return ", ".join(using_pods)
+                else:
+                    return f"{using_pods[0]}, {using_pods[1]} +{len(using_pods)-2} more"
+            else:
+                return "<none>"
+                
+        except Exception as e:
+            # If we can't get the pod info, return placeholder
+            return "<none>"

@@ -132,7 +132,7 @@ class UnifiedTerminalWidget(QTextEdit):
         self.edit_file_path = None
         self.edit_start_pos = 0
         self.edit_end_pos = 0
-        self.font_size = 12
+        self.font_size = 9  # Changed from 12 to 9 - default terminal font size
         self.font_family = "Consolas"
         self.copy_paste_enabled = False  # For copy-paste toggle
         self.setup_ui()
@@ -566,7 +566,7 @@ class UnifiedTerminalHeader(QWidget):
         button = QToolButton()
         if text.endswith('.svg'):
             button.setIcon(QIcon(text))
-            button.setIconSize(QSize(16, 16))
+            button.setIconSize(QSize(10, 10))  # Set icon size to 10px
         else:
             button.setText(text)
         button.setToolTip(tooltip)

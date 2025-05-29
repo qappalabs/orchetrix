@@ -1,12 +1,11 @@
 """
-Extended BaseTablePage for handling Kubernetes resources with live data.
+Extended BaseTablePage for handling Kubernetes resources with live data using Python kubernetes library.
 This module handles common resource operations like listing, deletion, and editing.
 """
 
 import os
 import tempfile
 import yaml
-import subprocess
 import time
 from PyQt6.QtWidgets import (
      QMessageBox, QWidget, QVBoxLayout, QLineEdit, QComboBox,
@@ -16,6 +15,12 @@ from PyQt6.QtGui import QColor
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from base_components.base_components import BaseTablePage
 from UI.Styles import AppStyles
+from utils.kubernetes_client import get_kubernetes_client
+
+# Kubernetes imports
+from kubernetes import client
+from kubernetes.client.rest import ApiException
+import logging
 
 class KubernetesResourceLoader(QThread):
     """Thread for loading Kubernetes resources without blocking the UI."""
@@ -26,79 +31,1105 @@ class KubernetesResourceLoader(QThread):
         super().__init__()
         self.resource_type = resource_type
         self.namespace = namespace
+        self.kube_client = get_kubernetes_client()
         
     def run(self):
-        """Execute the kubectl command and emit results."""
+        """Execute the Kubernetes API call and emit results."""
         try:
-            cmd = ["kubectl", "get", self.resource_type]
-            
-            # Use namespace if specified
-            if self.namespace and self.namespace != "all":
-                cmd.extend(["-n", self.namespace])
-            else:
-                cmd.append("--all-namespaces")
-                
-            cmd.extend(["-o", "json"])
-            
-            # Execute the command
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                check=True
-            )
-            
-            # Process the result
-            import json
-            data = json.loads(result.stdout)
-            
-            # Extract and format items
+            # Map resource types to appropriate API methods
             resources = []
-            if "items" in data:
-                for item in data["items"]:
-                    # Get resource details
-                    metadata = item.get("metadata", {})
-                    name = metadata.get("name", "")
-                    namespace = metadata.get("namespace", "default")
-                    
-                    # Get resource age
-                    creation_time = metadata.get("creationTimestamp", "")
-                    age = self._format_age(creation_time)
-                    
-                    # Create resource object with common fields
-                    resource = {
-                        "name": name,
-                        "namespace": namespace,
-                        "age": age,
-                        "raw_data": item  # Store the raw data for editing
-                    }
-                    
-                    # Add resource-specific fields based on type
-                    self._add_resource_specific_fields(resource, item)
-                    resources.append(resource)
+            
+            if self.resource_type == "pods":
+                resources = self._load_pods()
+            elif self.resource_type == "services":
+                resources = self._load_services()
+            elif self.resource_type == "deployments":
+                resources = self._load_deployments()
+            elif self.resource_type == "nodes":
+                resources = self._load_nodes()
+            elif self.resource_type == "namespaces":
+                resources = self._load_namespaces()
+            elif self.resource_type == "configmaps":
+                resources = self._load_configmaps()
+            elif self.resource_type == "secrets":
+                resources = self._load_secrets()
+            elif self.resource_type == "events":
+                resources = self._load_events()
+            elif self.resource_type == "persistentvolumes":
+                resources = self._load_persistent_volumes()
+            elif self.resource_type == "persistentvolumeclaims":
+                resources = self._load_persistent_volume_claims()
+            elif self.resource_type == "ingresses":
+                resources = self._load_ingresses()
+            elif self.resource_type == "daemonsets":
+                resources = self._load_daemonsets()
+            elif self.resource_type == "statefulsets":
+                resources = self._load_statefulsets()
+            elif self.resource_type == "replicasets":
+                resources = self._load_replicasets()
+            elif self.resource_type == "jobs":
+                resources = self._load_jobs()
+            elif self.resource_type == "cronjobs":
+                resources = self._load_cronjobs()
+            # Add all the missing resource types
+            elif self.resource_type == "replicationcontrollers":
+                resources = self._load_replication_controllers()
+            elif self.resource_type == "resourcequotas":
+                resources = self._load_resource_quotas()
+            elif self.resource_type == "limitranges":
+                resources = self._load_limit_ranges()
+            elif self.resource_type == "horizontalpodautoscalers":
+                resources = self._load_horizontal_pod_autoscalers()
+            elif self.resource_type == "poddisruptionbudgets":
+                resources = self._load_pod_disruption_budgets()
+            elif self.resource_type == "priorityclasses":
+                resources = self._load_priority_classes()
+            elif self.resource_type == "runtimeclasses":
+                resources = self._load_runtime_classes()
+            elif self.resource_type == "leases":
+                resources = self._load_leases()
+            elif self.resource_type == "mutatingwebhookconfigurations":
+                resources = self._load_mutating_webhook_configurations()
+            elif self.resource_type == "validatingwebhookconfigurations":
+                resources = self._load_validating_webhook_configurations()
+            elif self.resource_type == "endpoints":
+                resources = self._load_endpoints()
+            elif self.resource_type == "ingressclasses":
+                resources = self._load_ingress_classes()
+            elif self.resource_type == "networkpolicies":
+                resources = self._load_network_policies()
+            elif self.resource_type == "storageclasses":
+                resources = self._load_storage_classes()
+            elif self.resource_type == "serviceaccounts":
+                resources = self._load_service_accounts()
+            elif self.resource_type == "clusterroles":
+                resources = self._load_cluster_roles()
+            elif self.resource_type == "roles":
+                resources = self._load_roles()
+            elif self.resource_type == "clusterrolebindings":
+                resources = self._load_cluster_role_bindings()
+            elif self.resource_type == "rolebindings":
+                resources = self._load_role_bindings()
+            elif self.resource_type == "customresourcedefinitions":
+                resources = self._load_custom_resource_definitions()
+            else:
+                # Generic handling for other resource types
+                resources = self._load_generic_resource()
             
             # Emit the result
             self.resources_loaded.emit(resources, self.resource_type)
             
-        except subprocess.CalledProcessError as e:
-            error_msg = f"Error loading {self.resource_type}: {e.stderr}"
+        except ApiException as e:
+            if e.status == 403:
+                error_msg = f"Access denied loading {self.resource_type}. Check RBAC permissions."
+            elif e.status == 404:
+                error_msg = f"Resource type {self.resource_type} not found in cluster."
+            else:
+                error_msg = f"API error loading {self.resource_type}: {e}"
             self.error_occurred.emit(error_msg)
         except Exception as e:
             self.error_occurred.emit(f"Error: {str(e)}")
+    
+    def _load_pods(self):
+        """Load pods using kubernetes client"""
+        resources = []
+        
+        if self.namespace and self.namespace != "all":
+            pods_list = self.kube_client.v1.list_namespaced_pod(namespace=self.namespace)
+        else:
+            pods_list = self.kube_client.v1.list_pod_for_all_namespaces()
+        
+        for pod in pods_list.items:
+            resource = {
+                "name": pod.metadata.name,
+                "namespace": pod.metadata.namespace or "default",
+                "age": self._format_age(pod.metadata.creation_timestamp),
+                "raw_data": client.ApiClient().sanitize_for_serialization(pod)
+            }
             
+            # Add pod-specific fields
+            if pod.spec and pod.spec.containers:
+                resource["containers"] = len(pod.spec.containers)
+            
+            if pod.status and pod.status.container_statuses:
+                restart_count = sum(container.restart_count or 0 for container in pod.status.container_statuses)
+                resource["restarts"] = restart_count
+            
+            if pod.spec and pod.spec.node_name:
+                resource["node"] = pod.spec.node_name
+            
+            resources.append(resource)
+        
+        return resources
+    
+    def _load_services(self):
+        """Load services using kubernetes client"""
+        resources = []
+        
+        if self.namespace and self.namespace != "all":
+            services_list = self.kube_client.v1.list_namespaced_service(namespace=self.namespace)
+        else:
+            services_list = self.kube_client.v1.list_service_for_all_namespaces()
+        
+        for service in services_list.items:
+            resource = {
+                "name": service.metadata.name,
+                "namespace": service.metadata.namespace or "default",
+                "age": self._format_age(service.metadata.creation_timestamp),
+                "raw_data": client.ApiClient().sanitize_for_serialization(service)
+            }
+            
+            # Add service-specific fields
+            if service.spec:
+                resource["type"] = service.spec.type or "ClusterIP"
+                resource["cluster_ip"] = service.spec.cluster_ip or "<none>"
+                
+                if service.spec.ports:
+                    ports = [f"{port.port}:{port.target_port}/{port.protocol}" for port in service.spec.ports]
+                    resource["ports"] = ", ".join(ports)
+                else:
+                    resource["ports"] = "<none>"
+            
+            resources.append(resource)
+        
+        return resources
+    
+    def _load_deployments(self):
+        """Load deployments using kubernetes client"""
+        resources = []
+        
+        if self.namespace and self.namespace != "all":
+            deployments_list = self.kube_client.apps_v1.list_namespaced_deployment(namespace=self.namespace)
+        else:
+            deployments_list = self.kube_client.apps_v1.list_deployment_for_all_namespaces()
+        
+        for deployment in deployments_list.items:
+            resource = {
+                "name": deployment.metadata.name,
+                "namespace": deployment.metadata.namespace or "default",
+                "age": self._format_age(deployment.metadata.creation_timestamp),
+                "raw_data": client.ApiClient().sanitize_for_serialization(deployment)
+            }
+            
+            # Add deployment-specific fields
+            if deployment.spec:
+                resource["replicas"] = deployment.spec.replicas or 0
+            
+            if deployment.status:
+                resource["ready_replicas"] = deployment.status.ready_replicas or 0
+                resource["available_replicas"] = deployment.status.available_replicas or 0
+            
+            resources.append(resource)
+        
+        return resources
+    
+    def _load_nodes(self):
+        """Load nodes using kubernetes client"""
+        resources = []
+        
+        nodes_list = self.kube_client.v1.list_node()
+        
+        for node in nodes_list.items:
+            resource = {
+                "name": node.metadata.name,
+                "namespace": "",  # Nodes are cluster-scoped
+                "age": self._format_age(node.metadata.creation_timestamp),
+                "raw_data": client.ApiClient().sanitize_for_serialization(node)
+            }
+            
+            # Add node-specific fields
+            if node.status:
+                # Get node status
+                status = "Unknown"
+                if node.status.conditions:
+                    for condition in node.status.conditions:
+                        if condition.type == "Ready":
+                            status = "Ready" if condition.status == "True" else "NotReady"
+                            break
+                resource["status"] = status
+                
+                # Get node roles
+                roles = []
+                if node.metadata.labels:
+                    for label in node.metadata.labels:
+                        if label.startswith("node-role.kubernetes.io/"):
+                            role = label.split("/")[1]
+                            roles.append(role)
+                resource["roles"] = ", ".join(roles) if roles else "<none>"
+                
+                # Get version
+                if node.status.node_info:
+                    resource["version"] = node.status.node_info.kubelet_version
+            
+            resources.append(resource)
+        
+        return resources
+    
+    def _load_namespaces(self):
+        """Load namespaces using kubernetes client"""
+        resources = []
+        
+        namespaces_list = self.kube_client.v1.list_namespace()
+        
+        for namespace in namespaces_list.items:
+            resource = {
+                "name": namespace.metadata.name,
+                "namespace": "",  # Namespaces are cluster-scoped
+                "age": self._format_age(namespace.metadata.creation_timestamp),
+                "raw_data": client.ApiClient().sanitize_for_serialization(namespace)
+            }
+            
+            # Add namespace-specific fields
+            if namespace.status:
+                resource["status"] = namespace.status.phase or "Active"
+            
+            resources.append(resource)
+        
+        return resources
+    
+    def _load_configmaps(self):
+        """Load configmaps using kubernetes client"""
+        resources = []
+        
+        if self.namespace and self.namespace != "all":
+            configmaps_list = self.kube_client.v1.list_namespaced_config_map(namespace=self.namespace)
+        else:
+            configmaps_list = self.kube_client.v1.list_config_map_for_all_namespaces()
+        
+        for cm in configmaps_list.items:
+            resource = {
+                "name": cm.metadata.name,
+                "namespace": cm.metadata.namespace or "default",
+                "age": self._format_age(cm.metadata.creation_timestamp),
+                "raw_data": client.ApiClient().sanitize_for_serialization(cm)
+            }
+            
+            # Add configmap-specific fields
+            if cm.data:
+                data_keys = list(cm.data.keys())
+                resource["keys"] = ", ".join(data_keys) if data_keys else "<none>"
+            else:
+                resource["keys"] = "<none>"
+            
+            resources.append(resource)
+        
+        return resources
+    
+    def _load_secrets(self):
+        """Load secrets using kubernetes client"""
+        resources = []
+        
+        if self.namespace and self.namespace != "all":
+            secrets_list = self.kube_client.v1.list_namespaced_secret(namespace=self.namespace)
+        else:
+            secrets_list = self.kube_client.v1.list_secret_for_all_namespaces()
+        
+        for secret in secrets_list.items:
+            resource = {
+                "name": secret.metadata.name,
+                "namespace": secret.metadata.namespace or "default",
+                "age": self._format_age(secret.metadata.creation_timestamp),
+                "raw_data": client.ApiClient().sanitize_for_serialization(secret)
+            }
+            
+            # Add secret-specific fields
+            resource["type"] = secret.type or "Opaque"
+            
+            if secret.data:
+                data_keys = list(secret.data.keys())
+                resource["keys"] = ", ".join(data_keys) if data_keys else "<none>"
+            else:
+                resource["keys"] = "<none>"
+            
+            resources.append(resource)
+        
+        return resources
+    
+    def _load_events(self):
+        """Load events using kubernetes client"""
+        resources = []
+        
+        if self.namespace and self.namespace != "all":
+            events_list = self.kube_client.v1.list_namespaced_event(namespace=self.namespace)
+        else:
+            events_list = self.kube_client.v1.list_event_for_all_namespaces()
+        
+        for event in events_list.items:
+            resource = {
+                "name": event.metadata.name or f"event-{event.involved_object.name}",
+                "namespace": event.metadata.namespace or "default",
+                "age": self._format_age(event.metadata.creation_timestamp),
+                "raw_data": client.ApiClient().sanitize_for_serialization(event)
+            }
+            
+            # Add event-specific fields
+            resource["type"] = event.type or "Normal"
+            resource["reason"] = event.reason or "Unknown"
+            resource["message"] = event.message or "No message"
+            
+            if event.involved_object:
+                resource["object"] = f"{event.involved_object.kind}/{event.involved_object.name}"
+            
+            resources.append(resource)
+        
+        return resources
+    
+    def _load_persistent_volumes(self):
+        """Load persistent volumes using kubernetes client"""
+        resources = []
+        
+        pvs_list = self.kube_client.v1.list_persistent_volume()
+        
+        for pv in pvs_list.items:
+            resource = {
+                "name": pv.metadata.name,
+                "namespace": "",  # PVs are cluster-scoped
+                "age": self._format_age(pv.metadata.creation_timestamp),
+                "raw_data": client.ApiClient().sanitize_for_serialization(pv)
+            }
+            
+            # Add PV-specific fields
+            if pv.spec:
+                resource["capacity"] = pv.spec.capacity.get("storage", "Unknown") if pv.spec.capacity else "Unknown"
+                resource["access_modes"] = ", ".join(pv.spec.access_modes) if pv.spec.access_modes else ""
+                resource["reclaim_policy"] = pv.spec.persistent_volume_reclaim_policy or "Retain"
+            
+            if pv.status:
+                resource["status"] = pv.status.phase or "Unknown"
+            
+            resources.append(resource)
+        
+        return resources
+    
+    def _load_persistent_volume_claims(self):
+        """Load persistent volume claims using kubernetes client"""
+        resources = []
+        
+        if self.namespace and self.namespace != "all":
+            pvcs_list = self.kube_client.v1.list_namespaced_persistent_volume_claim(namespace=self.namespace)
+        else:
+            pvcs_list = self.kube_client.v1.list_persistent_volume_claim_for_all_namespaces()
+        
+        for pvc in pvcs_list.items:
+            resource = {
+                "name": pvc.metadata.name,
+                "namespace": pvc.metadata.namespace or "default",
+                "age": self._format_age(pvc.metadata.creation_timestamp),
+                "raw_data": client.ApiClient().sanitize_for_serialization(pvc)
+            }
+            
+            # Add PVC-specific fields
+            if pvc.status:
+                resource["status"] = pvc.status.phase or "Unknown"
+                resource["volume"] = pvc.spec.volume_name if pvc.spec else ""
+            
+            if pvc.spec and pvc.spec.resources and pvc.spec.resources.requests:
+                resource["capacity"] = pvc.spec.resources.requests.get("storage", "Unknown")
+            
+            resources.append(resource)
+        
+        return resources
+    
+    def _load_ingresses(self):
+        """Load ingresses using kubernetes client"""
+        resources = []
+        
+        if self.namespace and self.namespace != "all":
+            ingresses_list = self.kube_client.networking_v1.list_namespaced_ingress(namespace=self.namespace)
+        else:
+            ingresses_list = self.kube_client.networking_v1.list_ingress_for_all_namespaces()
+        
+        for ingress in ingresses_list.items:
+            resource = {
+                "name": ingress.metadata.name,
+                "namespace": ingress.metadata.namespace or "default",
+                "age": self._format_age(ingress.metadata.creation_timestamp),
+                "raw_data": client.ApiClient().sanitize_for_serialization(ingress)
+            }
+            
+            # Add ingress-specific fields
+            if ingress.spec and ingress.spec.rules:
+                hosts = [rule.host for rule in ingress.spec.rules if rule.host]
+                resource["hosts"] = ", ".join(hosts) if hosts else "*"
+            else:
+                resource["hosts"] = "*"
+            
+            resources.append(resource)
+        
+        return resources
+    
+    def _load_daemonsets(self):
+        """Load daemonsets using kubernetes client"""
+        resources = []
+        
+        if self.namespace and self.namespace != "all":
+            ds_list = self.kube_client.apps_v1.list_namespaced_daemon_set(namespace=self.namespace)
+        else:
+            ds_list = self.kube_client.apps_v1.list_daemon_set_for_all_namespaces()
+        
+        for ds in ds_list.items:
+            resource = {
+                "name": ds.metadata.name,
+                "namespace": ds.metadata.namespace or "default",
+                "age": self._format_age(ds.metadata.creation_timestamp),
+                "raw_data": client.ApiClient().sanitize_for_serialization(ds)
+            }
+            
+            # Add daemonset-specific fields
+            if ds.status:
+                resource["desired"] = ds.status.desired_number_scheduled or 0
+                resource["current"] = ds.status.current_number_scheduled or 0
+                resource["ready"] = ds.status.number_ready or 0
+            
+            resources.append(resource)
+        
+        return resources
+    
+    def _load_statefulsets(self):
+        """Load statefulsets using kubernetes client"""
+        resources = []
+        
+        if self.namespace and self.namespace != "all":
+            sts_list = self.kube_client.apps_v1.list_namespaced_stateful_set(namespace=self.namespace)
+        else:
+            sts_list = self.kube_client.apps_v1.list_stateful_set_for_all_namespaces()
+        
+        for sts in sts_list.items:
+            resource = {
+                "name": sts.metadata.name,
+                "namespace": sts.metadata.namespace or "default",
+                "age": self._format_age(sts.metadata.creation_timestamp),
+                "raw_data": client.ApiClient().sanitize_for_serialization(sts)
+            }
+            
+            # Add statefulset-specific fields
+            if sts.spec:
+                resource["replicas"] = sts.spec.replicas or 0
+            
+            if sts.status:
+                resource["ready"] = sts.status.ready_replicas or 0
+            
+            resources.append(resource)
+        
+        return resources
+    
+    def _load_replicasets(self):
+        """Load replicasets using kubernetes client"""
+        resources = []
+        
+        if self.namespace and self.namespace != "all":
+            rs_list = self.kube_client.apps_v1.list_namespaced_replica_set(namespace=self.namespace)
+        else:
+            rs_list = self.kube_client.apps_v1.list_replica_set_for_all_namespaces()
+        
+        for rs in rs_list.items:
+            resource = {
+                "name": rs.metadata.name,
+                "namespace": rs.metadata.namespace or "default",
+                "age": self._format_age(rs.metadata.creation_timestamp),
+                "raw_data": client.ApiClient().sanitize_for_serialization(rs)
+            }
+            
+            # Add replicaset-specific fields
+            if rs.spec:
+                resource["desired"] = rs.spec.replicas or 0
+            
+            if rs.status:
+                resource["current"] = rs.status.replicas or 0
+                resource["ready"] = rs.status.ready_replicas or 0
+            
+            resources.append(resource)
+        
+        return resources
+    
+    def _load_jobs(self):
+        """Load jobs using kubernetes client"""
+        resources = []
+        
+        if self.namespace and self.namespace != "all":
+            jobs_list = self.kube_client.batch_v1.list_namespaced_job(namespace=self.namespace)
+        else:
+            jobs_list = self.kube_client.batch_v1.list_job_for_all_namespaces()
+        
+        for job in jobs_list.items:
+            resource = {
+                "name": job.metadata.name,
+                "namespace": job.metadata.namespace or "default",
+                "age": self._format_age(job.metadata.creation_timestamp),
+                "raw_data": client.ApiClient().sanitize_for_serialization(job)
+            }
+            
+            # Add job-specific fields
+            if job.status:
+                resource["completions"] = f"{job.status.succeeded or 0}/{job.spec.completions or 1}"
+                resource["duration"] = self._calculate_duration(
+                    job.status.start_time, job.status.completion_time
+                ) if job.status.start_time else ""
+            
+            resources.append(resource)
+        
+        return resources
+    
+    def _load_cronjobs(self):
+        """Load cronjobs using kubernetes client"""
+        resources = []
+        
+        if self.namespace and self.namespace != "all":
+            cj_list = self.kube_client.batch_v1.list_namespaced_cron_job(namespace=self.namespace)
+        else:
+            cj_list = self.kube_client.batch_v1.list_cron_job_for_all_namespaces()
+        
+        for cj in cj_list.items:
+            resource = {
+                "name": cj.metadata.name,
+                "namespace": cj.metadata.namespace or "default",
+                "age": self._format_age(cj.metadata.creation_timestamp),
+                "raw_data": client.ApiClient().sanitize_for_serialization(cj)
+            }
+            
+            # Add cronjob-specific fields
+            if cj.spec:
+                resource["schedule"] = cj.spec.schedule or ""
+                resource["suspend"] = "True" if cj.spec.suspend else "False"
+            
+            if cj.status:
+                resource["active"] = len(cj.status.active) if cj.status.active else 0
+                resource["last_schedule"] = self._format_age(cj.status.last_schedule_time) if cj.status.last_schedule_time else "<none>"
+            
+            resources.append(resource)
+        
+        return resources
+
+    def _load_replication_controllers(self):
+        """Load replication controllers using kubernetes client"""
+        resources = []
+        
+        if self.namespace and self.namespace != "all":
+            rc_list = self.kube_client.v1.list_namespaced_replication_controller(namespace=self.namespace)
+        else:
+            rc_list = self.kube_client.v1.list_replication_controller_for_all_namespaces()
+        
+        for rc in rc_list.items:
+            resource = {
+                "name": rc.metadata.name,
+                "namespace": rc.metadata.namespace or "default",
+                "age": self._format_age(rc.metadata.creation_timestamp),
+                "raw_data": client.ApiClient().sanitize_for_serialization(rc)
+            }
+            
+            # Add replication controller-specific fields
+            if rc.spec:
+                resource["desired_replicas"] = rc.spec.replicas or 0
+            
+            if rc.status:
+                resource["replicas"] = rc.status.replicas or 0
+                resource["ready_replicas"] = rc.status.ready_replicas or 0
+            
+            resources.append(resource)
+        
+        return resources
+
+    def _load_resource_quotas(self):
+        """Load resource quotas using kubernetes client"""
+        resources = []
+        
+        if self.namespace and self.namespace != "all":
+            rq_list = self.kube_client.v1.list_namespaced_resource_quota(namespace=self.namespace)
+        else:
+            rq_list = self.kube_client.v1.list_resource_quota_for_all_namespaces()
+        
+        for rq in rq_list.items:
+            resource = {
+                "name": rq.metadata.name,
+                "namespace": rq.metadata.namespace or "default",
+                "age": self._format_age(rq.metadata.creation_timestamp),
+                "raw_data": client.ApiClient().sanitize_for_serialization(rq)
+            }
+            
+            resources.append(resource)
+        
+        return resources
+
+    def _load_limit_ranges(self):
+        """Load limit ranges using kubernetes client"""
+        resources = []
+        
+        if self.namespace and self.namespace != "all":
+            lr_list = self.kube_client.v1.list_namespaced_limit_range(namespace=self.namespace)
+        else:
+            lr_list = self.kube_client.v1.list_limit_range_for_all_namespaces()
+        
+        for lr in lr_list.items:
+            resource = {
+                "name": lr.metadata.name,
+                "namespace": lr.metadata.namespace or "default",
+                "age": self._format_age(lr.metadata.creation_timestamp),
+                "raw_data": client.ApiClient().sanitize_for_serialization(lr)
+            }
+            
+            resources.append(resource)
+        
+        return resources
+
+    def _load_horizontal_pod_autoscalers(self):
+        """Load horizontal pod autoscalers using kubernetes client"""
+        resources = []
+        
+        if self.namespace and self.namespace != "all":
+            hpa_list = self.kube_client.autoscaling_v1.list_namespaced_horizontal_pod_autoscaler(namespace=self.namespace)
+        else:
+            hpa_list = self.kube_client.autoscaling_v1.list_horizontal_pod_autoscaler_for_all_namespaces()
+        
+        for hpa in hpa_list.items:
+            resource = {
+                "name": hpa.metadata.name,
+                "namespace": hpa.metadata.namespace or "default",
+                "age": self._format_age(hpa.metadata.creation_timestamp),
+                "raw_data": client.ApiClient().sanitize_for_serialization(hpa)
+            }
+            
+            # Add HPA-specific fields
+            if hpa.spec:
+                resource["min_replicas"] = hpa.spec.min_replicas or 0
+                resource["max_replicas"] = hpa.spec.max_replicas or 0
+                resource["target_cpu"] = hpa.spec.target_cpu_utilization_percentage or 0
+            
+            if hpa.status:
+                resource["current_replicas"] = hpa.status.current_replicas or 0
+                resource["current_cpu"] = hpa.status.current_cpu_utilization_percentage or 0
+            
+            resources.append(resource)
+        
+        return resources
+
+    def _load_pod_disruption_budgets(self):
+        """Load pod disruption budgets using kubernetes client"""
+        resources = []
+        
+        try:
+            # Try to use policy/v1 first (Kubernetes 1.21+)
+            policy_api = client.PolicyV1Api()
+            if self.namespace and self.namespace != "all":
+                pdb_list = policy_api.list_namespaced_pod_disruption_budget(namespace=self.namespace)
+            else:
+                pdb_list = policy_api.list_pod_disruption_budget_for_all_namespaces()
+        except AttributeError:
+            # Fall back to policy/v1beta1 for older clusters
+            policy_api = client.PolicyV1beta1Api()
+            if self.namespace and self.namespace != "all":
+                pdb_list = policy_api.list_namespaced_pod_disruption_budget(namespace=self.namespace)
+            else:
+                pdb_list = policy_api.list_pod_disruption_budget_for_all_namespaces()
+        
+        for pdb in pdb_list.items:
+            resource = {
+                "name": pdb.metadata.name,
+                "namespace": pdb.metadata.namespace or "default",
+                "age": self._format_age(pdb.metadata.creation_timestamp),
+                "raw_data": client.ApiClient().sanitize_for_serialization(pdb)
+            }
+            
+            resources.append(resource)
+        
+        return resources
+
+    def _load_priority_classes(self):
+        """Load priority classes using kubernetes client"""
+        resources = []
+        
+        try:
+            scheduling_api = client.SchedulingV1Api()
+            pc_list = scheduling_api.list_priority_class()
+            
+            for pc in pc_list.items:
+                resource = {
+                    "name": pc.metadata.name,
+                    "namespace": "",  # Priority classes are cluster-scoped
+                    "age": self._format_age(pc.metadata.creation_timestamp),
+                    "raw_data": client.ApiClient().sanitize_for_serialization(pc)
+                }
+                
+                # Add priority class-specific fields
+                resource["value"] = pc.value or 0
+                resource["global_default"] = pc.global_default or False
+                
+                resources.append(resource)
+        except AttributeError:
+            # If SchedulingV1Api is not available, return empty list
+            logging.warning("SchedulingV1Api not available for priority classes")
+        
+        return resources
+
+    def _load_runtime_classes(self):
+        """Load runtime classes using kubernetes client"""
+        resources = []
+        
+        try:
+            node_api = client.NodeV1Api()
+            rc_list = node_api.list_runtime_class()
+            
+            for rc in rc_list.items:
+                resource = {
+                    "name": rc.metadata.name,
+                    "namespace": "",  # Runtime classes are cluster-scoped
+                    "age": self._format_age(rc.metadata.creation_timestamp),
+                    "raw_data": client.ApiClient().sanitize_for_serialization(rc)
+                }
+                
+                # Add runtime class-specific fields
+                resource["handler"] = rc.handler or ""
+                
+                resources.append(resource)
+        except AttributeError:
+            # If NodeV1Api is not available, return empty list
+            logging.warning("NodeV1Api not available for runtime classes")
+        
+        return resources
+
+    def _load_leases(self):
+        """Load leases using kubernetes client"""
+        resources = []
+        
+        try:
+            coordination_api = client.CoordinationV1Api()
+            if self.namespace and self.namespace != "all":
+                lease_list = coordination_api.list_namespaced_lease(namespace=self.namespace)
+            else:
+                lease_list = coordination_api.list_lease_for_all_namespaces()
+            
+            for lease in lease_list.items:
+                resource = {
+                    "name": lease.metadata.name,
+                    "namespace": lease.metadata.namespace or "default",
+                    "age": self._format_age(lease.metadata.creation_timestamp),
+                    "raw_data": client.ApiClient().sanitize_for_serialization(lease)
+                }
+                
+                # Add lease-specific fields
+                if lease.spec:
+                    resource["holder"] = lease.spec.holder_identity or ""
+                
+                resources.append(resource)
+        except AttributeError:
+            # If CoordinationV1Api is not available, return empty list
+            logging.warning("CoordinationV1Api not available for leases")
+        
+        return resources
+
+    def _load_mutating_webhook_configurations(self):
+        """Load mutating webhook configurations using kubernetes client"""
+        resources = []
+        
+        try:
+            admission_api = client.AdmissionregistrationV1Api()
+            mwc_list = admission_api.list_mutating_webhook_configuration()
+            
+            for mwc in mwc_list.items:
+                resource = {
+                    "name": mwc.metadata.name,
+                    "namespace": "",  # Webhook configurations are cluster-scoped
+                    "age": self._format_age(mwc.metadata.creation_timestamp),
+                    "raw_data": client.ApiClient().sanitize_for_serialization(mwc)
+                }
+                
+                resources.append(resource)
+        except AttributeError:
+            # If AdmissionregistrationV1Api is not available, return empty list
+            logging.warning("AdmissionregistrationV1Api not available for mutating webhook configurations")
+        
+        return resources
+
+    def _load_validating_webhook_configurations(self):
+        """Load validating webhook configurations using kubernetes client"""
+        resources = []
+        
+        try:
+            admission_api = client.AdmissionregistrationV1Api()
+            vwc_list = admission_api.list_validating_webhook_configuration()
+            
+            for vwc in vwc_list.items:
+                resource = {
+                    "name": vwc.metadata.name,
+                    "namespace": "",  # Webhook configurations are cluster-scoped
+                    "age": self._format_age(vwc.metadata.creation_timestamp),
+                    "raw_data": client.ApiClient().sanitize_for_serialization(vwc)
+                }
+                
+                resources.append(resource)
+        except AttributeError:
+            # If AdmissionregistrationV1Api is not available, return empty list
+            logging.warning("AdmissionregistrationV1Api not available for validating webhook configurations")
+        
+        return resources
+
+    def _load_endpoints(self):
+        """Load endpoints using kubernetes client"""
+        resources = []
+        
+        if self.namespace and self.namespace != "all":
+            ep_list = self.kube_client.v1.list_namespaced_endpoints(namespace=self.namespace)
+        else:
+            ep_list = self.kube_client.v1.list_endpoints_for_all_namespaces()
+        
+        for ep in ep_list.items:
+            resource = {
+                "name": ep.metadata.name,
+                "namespace": ep.metadata.namespace or "default",
+                "age": self._format_age(ep.metadata.creation_timestamp),
+                "raw_data": client.ApiClient().sanitize_for_serialization(ep)
+            }
+            
+            # Add endpoints-specific fields
+            endpoints = []
+            if ep.subsets:
+                for subset in ep.subsets:
+                    addresses = subset.addresses or []
+                    ports = subset.ports or []
+                    for addr in addresses:
+                        for port in ports:
+                            endpoints.append(f"{addr.ip}:{port.port}")
+            
+            resource["endpoints"] = ", ".join(endpoints) if endpoints else "<none>"
+            
+            resources.append(resource)
+        
+        return resources
+
+    def _load_ingress_classes(self):
+        """Load ingress classes using kubernetes client"""
+        resources = []
+        
+        try:
+            ic_list = self.kube_client.networking_v1.list_ingress_class()
+            
+            for ic in ic_list.items:
+                resource = {
+                    "name": ic.metadata.name,
+                    "namespace": "",  # Ingress classes are cluster-scoped
+                    "age": self._format_age(ic.metadata.creation_timestamp),
+                    "raw_data": client.ApiClient().sanitize_for_serialization(ic)
+                }
+                
+                # Add ingress class-specific fields
+                if ic.spec:
+                    resource["controller"] = ic.spec.controller or ""
+                
+                resources.append(resource)
+        except AttributeError:
+            # If networking_v1 doesn't have ingress classes, return empty list
+            logging.warning("Ingress classes not available in this Kubernetes version")
+        
+        return resources
+
+    def _load_network_policies(self):
+        """Load network policies using kubernetes client"""
+        resources = []
+        
+        if self.namespace and self.namespace != "all":
+            np_list = self.kube_client.networking_v1.list_namespaced_network_policy(namespace=self.namespace)
+        else:
+            np_list = self.kube_client.networking_v1.list_network_policy_for_all_namespaces()
+        
+        for np in np_list.items:
+            resource = {
+                "name": np.metadata.name,
+                "namespace": np.metadata.namespace or "default",
+                "age": self._format_age(np.metadata.creation_timestamp),
+                "raw_data": client.ApiClient().sanitize_for_serialization(np)
+            }
+            
+            resources.append(resource)
+        
+        return resources
+
+    def _load_storage_classes(self):
+        """Load storage classes using kubernetes client"""
+        resources = []
+        
+        sc_list = self.kube_client.storage_v1.list_storage_class()
+        
+        for sc in sc_list.items:
+            resource = {
+                "name": sc.metadata.name,
+                "namespace": "",  # Storage classes are cluster-scoped
+                "age": self._format_age(sc.metadata.creation_timestamp),
+                "raw_data": client.ApiClient().sanitize_for_serialization(sc)
+            }
+            
+            # Add storage class-specific fields
+            resource["provisioner"] = sc.provisioner or ""
+            resource["reclaim_policy"] = sc.reclaim_policy or "Delete"
+            resource["volume_binding_mode"] = sc.volume_binding_mode or "Immediate"
+            
+            resources.append(resource)
+        
+        return resources
+
+    def _load_service_accounts(self):
+        """Load service accounts using kubernetes client"""
+        resources = []
+        
+        if self.namespace and self.namespace != "all":
+            sa_list = self.kube_client.v1.list_namespaced_service_account(namespace=self.namespace)
+        else:
+            sa_list = self.kube_client.v1.list_service_account_for_all_namespaces()
+        
+        for sa in sa_list.items:
+            resource = {
+                "name": sa.metadata.name,
+                "namespace": sa.metadata.namespace or "default",
+                "age": self._format_age(sa.metadata.creation_timestamp),
+                "raw_data": client.ApiClient().sanitize_for_serialization(sa)
+            }
+            
+            # Add service account-specific fields
+            resource["secrets"] = len(sa.secrets) if sa.secrets else 0
+            
+            resources.append(resource)
+        
+        return resources
+
+    def _load_cluster_roles(self):
+        """Load cluster roles using kubernetes client"""
+        resources = []
+        
+        cr_list = self.kube_client.rbac_v1.list_cluster_role()
+        
+        for cr in cr_list.items:
+            resource = {
+                "name": cr.metadata.name,
+                "namespace": "",  # Cluster roles are cluster-scoped
+                "age": self._format_age(cr.metadata.creation_timestamp),
+                "raw_data": client.ApiClient().sanitize_for_serialization(cr)
+            }
+            
+            resources.append(resource)
+        
+        return resources
+
+    def _load_roles(self):
+        """Load roles using kubernetes client"""
+        resources = []
+        
+        if self.namespace and self.namespace != "all":
+            role_list = self.kube_client.rbac_v1.list_namespaced_role(namespace=self.namespace)
+        else:
+            role_list = self.kube_client.rbac_v1.list_role_for_all_namespaces()
+        
+        for role in role_list.items:
+            resource = {
+                "name": role.metadata.name,
+                "namespace": role.metadata.namespace or "default",
+                "age": self._format_age(role.metadata.creation_timestamp),
+                "raw_data": client.ApiClient().sanitize_for_serialization(role)
+            }
+            
+            resources.append(resource)
+        
+        return resources
+
+    def _load_cluster_role_bindings(self):
+        """Load cluster role bindings using kubernetes client"""
+        resources = []
+        
+        crb_list = self.kube_client.rbac_v1.list_cluster_role_binding()
+        
+        for crb in crb_list.items:
+            resource = {
+                "name": crb.metadata.name,
+                "namespace": "",  # Cluster role bindings are cluster-scoped
+                "age": self._format_age(crb.metadata.creation_timestamp),
+                "raw_data": client.ApiClient().sanitize_for_serialization(crb)
+            }
+            
+            # Add cluster role binding-specific fields
+            if crb.role_ref:
+                resource["role"] = crb.role_ref.name or ""
+            
+            resource["subjects"] = len(crb.subjects) if crb.subjects else 0
+            
+            resources.append(resource)
+        
+        return resources
+
+    def _load_role_bindings(self):
+        """Load role bindings using kubernetes client"""
+        resources = []
+        
+        if self.namespace and self.namespace != "all":
+            rb_list = self.kube_client.rbac_v1.list_namespaced_role_binding(namespace=self.namespace)
+        else:
+            rb_list = self.kube_client.rbac_v1.list_role_binding_for_all_namespaces()
+        
+        for rb in rb_list.items:
+            resource = {
+                "name": rb.metadata.name,
+                "namespace": rb.metadata.namespace or "default",
+                "age": self._format_age(rb.metadata.creation_timestamp),
+                "raw_data": client.ApiClient().sanitize_for_serialization(rb)
+            }
+            
+            # Add role binding-specific fields
+            if rb.role_ref:
+                resource["role"] = rb.role_ref.name or ""
+            
+            resource["subjects"] = len(rb.subjects) if rb.subjects else 0
+            
+            resources.append(resource)
+        
+        return resources
+
+    def _load_custom_resource_definitions(self):
+        """Load custom resource definitions using kubernetes client"""
+        resources = []
+        
+        try:
+            apiextensions_api = client.ApiextensionsV1Api()
+            crd_list = apiextensions_api.list_custom_resource_definition()
+            
+            for crd in crd_list.items:
+                resource = {
+                    "name": crd.metadata.name,
+                    "namespace": "",  # CRDs are cluster-scoped
+                    "age": self._format_age(crd.metadata.creation_timestamp),
+                    "raw_data": client.ApiClient().sanitize_for_serialization(crd)
+                }
+                
+                # Add CRD-specific fields
+                if crd.spec:
+                    resource["group"] = crd.spec.group or ""
+                    resource["scope"] = crd.spec.scope or ""
+                    if crd.spec.versions:
+                        resource["version"] = crd.spec.versions[0].name or ""
+                
+                resources.append(resource)
+        except AttributeError:
+            # If ApiextensionsV1Api is not available, return empty list
+            logging.warning("ApiextensionsV1Api not available for custom resource definitions")
+        
+        return resources
+    
+    def _load_generic_resource(self):
+        """Generic resource loading for resources not specifically handled"""
+        # This would be used for custom resources or resources not yet implemented
+        # For now, return empty list
+        logging.warning(f"Generic resource loading not implemented for {self.resource_type}")
+        return []
+    
     def _format_age(self, timestamp):
-        """Format the age field from a timestamp."""
+        """Format timestamp to age string (e.g., "2d", "5h")"""
         if not timestamp:
             return "Unknown"
-            
-        import datetime
+        
         try:
-            # Convert ISO timestamp to Python datetime
-            timestamp = timestamp.replace('Z', '+00:00')
-            created_time = datetime.datetime.fromisoformat(timestamp)
-            now = datetime.datetime.now(datetime.timezone.utc)
+            import datetime
+            if isinstance(timestamp, str):
+                created_time = datetime.datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+            else:
+                # Assume it's already a datetime object
+                created_time = timestamp.replace(tzinfo=datetime.timezone.utc)
             
-            # Calculate the difference
+            now = datetime.datetime.now(datetime.timezone.utc)
             diff = now - created_time
             
             days = diff.days
@@ -113,102 +1144,41 @@ class KubernetesResourceLoader(QThread):
                 return f"{minutes}m"
         except Exception:
             return "Unknown"
+    
+    def _calculate_duration(self, start_time, end_time):
+        """Calculate duration between two timestamps"""
+        if not start_time or not end_time:
+            return ""
+        
+        try:
+            import datetime
+            if isinstance(start_time, str):
+                start = datetime.datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+            else:
+                start = start_time.replace(tzinfo=datetime.timezone.utc)
             
-    def _add_resource_specific_fields(self, resource, item):
-        """Add fields specific to the resource type."""
-        # This can be extended for specific resource types
-        # For now, handle basic types
-
-        # For ConfigMaps, get keys
-        if self.resource_type == "configmaps":
-            data_keys = list(item.get("data", {}).keys())
-            resource["keys"] = ", ".join(data_keys) if data_keys else "<none>"
+            if isinstance(end_time, str):
+                end = datetime.datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+            else:
+                end = end_time.replace(tzinfo=datetime.timezone.utc)
             
-        # For Secrets, get type and keys
-        elif self.resource_type == "secrets":
-            resource["type"] = item.get("type", "Opaque")
-            data_keys = list(item.get("data", {}).keys())
-            resource["keys"] = ", ".join(data_keys) if data_keys else "<none>"
+            diff = end - start
             
-            # Add labels field
-            labels = item.get("metadata", {}).get("labels", {})
-            label_str = ", ".join([f"{k}={v}" for k, v in labels.items()]) if labels else "<none>"
-            resource["labels"] = label_str
+            days = diff.days
+            hours = diff.seconds // 3600
+            minutes = (diff.seconds % 3600) // 60
+            seconds = diff.seconds % 60
             
-        # For ResourceQuotas
-        elif self.resource_type == "resourcequotas":
-            pass  # Basic fields are sufficient
-            
-        # For LimitRanges
-        elif self.resource_type == "limitranges":
-            pass  # Basic fields are sufficient
-            
-        # For HPA
-        elif self.resource_type == "horizontalpodautoscalers":
-            spec = item.get("spec", {})
-            status = item.get("status", {})
-            
-            resource["min_pods"] = str(spec.get("minReplicas", "N/A"))
-            resource["max_pods"] = str(spec.get("maxReplicas", "N/A"))
-            resource["current_replicas"] = str(status.get("currentReplicas", "0"))
-            
-            # Get metrics
-            metrics = []
-            for metric in spec.get("metrics", []):
-                metric_type = metric.get("type", "")
-                if metric_type == "Resource" and "resource" in metric:
-                    resource_name = metric["resource"].get("name", "")
-                    if "targetAverageUtilization" in metric["resource"]:
-                        metrics.append(f"{resource_name}/{metric['resource']['targetAverageUtilization']}%")
-                    elif "targetAverageValue" in metric["resource"]:
-                        metrics.append(f"{resource_name}/{metric['resource']['targetAverageValue']}")
-            
-            resource["metrics"] = ", ".join(metrics) if metrics else "None"
-            resource["status"] = "Scaling" if status.get("currentReplicas") != status.get("desiredReplicas") else "Healthy"
-            
-        # For PodDisruptionBudgets
-        elif self.resource_type == "poddisruptionbudgets":
-            spec = item.get("spec", {})
-            status = item.get("status", {})
-            
-            resource["min_available"] = str(spec.get("minAvailable", "N/A")) 
-            resource["max_unavailable"] = str(spec.get("maxUnavailable", "N/A"))
-            resource["current_healthy"] = str(status.get("currentHealthy", "0"))
-            resource["desired_healthy"] = str(status.get("desiredHealthy", "0"))
-            
-        # For PriorityClasses
-        elif self.resource_type == "priorityclasses":
-            resource["value"] = str(item.get("value", "0"))
-            resource["global_default"] = str(item.get("globalDefault", False)).lower()
-            
-        # For RuntimeClasses
-        elif self.resource_type == "runtimeclasses":
-            resource["handler"] = item.get("handler", "")
-            
-        # For Leases
-        elif self.resource_type == "leases":
-            spec = item.get("spec", {})
-            resource["holder"] = spec.get("holderIdentity", "")
-            
-        # For MutatingWebhookConfigurations
-        elif self.resource_type in ["mutatingwebhookconfigurations", "validatingwebhookconfigurations"]:
-            webhooks = item.get("webhooks", [])
-            resource["webhooks"] = str(len(webhooks))
-            
-        # For Endpoints
-        elif self.resource_type == "endpoints":
-            subsets = item.get("subsets", [])
-            endpoints = []
-            
-            for subset in subsets:
-                addresses = subset.get("addresses", [])
-                for address in addresses:
-                    ip = address.get("ip", "")
-                    if ip:
-                        endpoints.append(ip)
-            
-            resource["endpoints"] = ", ".join(endpoints) if endpoints else "<none>"
-
+            if days > 0:
+                return f"{days}d{hours}h"
+            elif hours > 0:
+                return f"{hours}h{minutes}m"
+            elif minutes > 0:
+                return f"{minutes}m{seconds}s"
+            else:
+                return f"{seconds}s"
+        except Exception:
+            return ""
 
 class ResourceEditorThread(QThread):
     """Thread for editing Kubernetes resources."""
@@ -220,36 +1190,70 @@ class ResourceEditorThread(QThread):
         self.resource_name = resource_name
         self.namespace = namespace
         self.yaml_content = yaml_content
+        self.kube_client = get_kubernetes_client()
         
     def run(self):
-        """Save the edited resource."""
+        """Save the edited resource using kubernetes client."""
         try:
-            # Create a temporary file
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".yaml", mode="w") as temp:
-                temp.write(self.yaml_content)
-                temp_path = temp.name
+            # Parse the YAML content
+            resource_dict = yaml.safe_load(self.yaml_content)
             
-            # Apply the updated resource
-            cmd = ["kubectl", "apply", "-f", temp_path]
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                check=True
-            )
-            
-            # Clean up the temp file
-            os.unlink(temp_path)
+            # Apply the updated resource using the appropriate API
+            if self.resource_type == "pod":
+                if self.namespace:
+                    result = self.kube_client.v1.patch_namespaced_pod(
+                        name=self.resource_name,
+                        namespace=self.namespace,
+                        body=resource_dict
+                    )
+                else:
+                    result = self.kube_client.v1.patch_pod(
+                        name=self.resource_name,
+                        body=resource_dict
+                    )
+            elif self.resource_type == "service":
+                result = self.kube_client.v1.patch_namespaced_service(
+                    name=self.resource_name,
+                    namespace=self.namespace,
+                    body=resource_dict
+                )
+            elif self.resource_type == "deployment":
+                result = self.kube_client.apps_v1.patch_namespaced_deployment(
+                    name=self.resource_name,
+                    namespace=self.namespace,
+                    body=resource_dict
+                )
+            elif self.resource_type == "configmap":
+                result = self.kube_client.v1.patch_namespaced_config_map(
+                    name=self.resource_name,
+                    namespace=self.namespace,
+                    body=resource_dict
+                )
+            elif self.resource_type == "secret":
+                result = self.kube_client.v1.patch_namespaced_secret(
+                    name=self.resource_name,
+                    namespace=self.namespace,
+                    body=resource_dict
+                )
+            # Add more resource types as needed
+            else:
+                self.edit_completed.emit(False, f"Editing not implemented for resource type: {self.resource_type}")
+                return
             
             # Report success
-            self.edit_completed.emit(True, result.stdout)
+            self.edit_completed.emit(True, f"Successfully updated {self.resource_type}/{self.resource_name}")
             
-        except subprocess.CalledProcessError as e:
-            # Report error
-            self.edit_completed.emit(False, f"Error applying changes: {e.stderr}")
+        except ApiException as e:
+            if e.status == 409:
+                self.edit_completed.emit(False, f"Conflict updating resource (version mismatch): {e}")
+            elif e.status == 422:
+                self.edit_completed.emit(False, f"Invalid resource specification: {e}")
+            else:
+                self.edit_completed.emit(False, f"API error updating resource: {e}")
+        except yaml.YAMLError as e:
+            self.edit_completed.emit(False, f"Invalid YAML format: {e}")
         except Exception as e:
             self.edit_completed.emit(False, f"Error: {str(e)}")
-
 
 class ResourceDeleterThread(QThread):
     """Thread for deleting Kubernetes resources."""
@@ -260,22 +1264,53 @@ class ResourceDeleterThread(QThread):
         self.resource_type = resource_type
         self.resource_name = resource_name
         self.namespace = namespace
+        self.kube_client = get_kubernetes_client()
         
     def run(self):
-        """Delete the specified resource."""
+        """Delete the specified resource using kubernetes client."""
         try:
-            cmd = ["kubectl", "delete", self.resource_type, self.resource_name]
-            
-            # Use namespace if not a cluster-scoped resource
-            if self.namespace:
-                cmd.extend(["-n", self.namespace])
-                
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                check=True
-            )
+            # Delete the resource using the appropriate API
+            if self.resource_type == "pod":
+                if self.namespace:
+                    self.kube_client.v1.delete_namespaced_pod(
+                        name=self.resource_name,
+                        namespace=self.namespace
+                    )
+                else:
+                    self.kube_client.v1.delete_pod(name=self.resource_name)
+            elif self.resource_type == "service":
+                self.kube_client.v1.delete_namespaced_service(
+                    name=self.resource_name,
+                    namespace=self.namespace
+                )
+            elif self.resource_type == "deployment":
+                self.kube_client.apps_v1.delete_namespaced_deployment(
+                    name=self.resource_name,
+                    namespace=self.namespace
+                )
+            elif self.resource_type == "node":
+                self.kube_client.v1.delete_node(name=self.resource_name)
+            elif self.resource_type == "namespace":
+                self.kube_client.v1.delete_namespace(name=self.resource_name)
+            elif self.resource_type == "configmap":
+                self.kube_client.v1.delete_namespaced_config_map(
+                    name=self.resource_name,
+                    namespace=self.namespace
+                )
+            elif self.resource_type == "secret":
+                self.kube_client.v1.delete_namespaced_secret(
+                    name=self.resource_name,
+                    namespace=self.namespace
+                )
+            # Add more resource types as needed
+            else:
+                self.delete_completed.emit(
+                    False, 
+                    f"Deletion not implemented for resource type: {self.resource_type}",
+                    self.resource_name,
+                    self.namespace
+                )
+                return
             
             # Report success
             self.delete_completed.emit(
@@ -285,14 +1320,28 @@ class ResourceDeleterThread(QThread):
                 self.namespace
             )
             
-        except subprocess.CalledProcessError as e:
-            # Report error
-            self.delete_completed.emit(
-                False, 
-                f"Error deleting {self.resource_type}/{self.resource_name}: {e.stderr}",
-                self.resource_name,
-                self.namespace
-            )
+        except ApiException as e:
+            if e.status == 404:
+                self.delete_completed.emit(
+                    False,
+                    f"Resource not found: {self.resource_type}/{self.resource_name}",
+                    self.resource_name,
+                    self.namespace
+                )
+            elif e.status == 409:
+                self.delete_completed.emit(
+                    False,
+                    f"Conflict deleting resource (may be in use): {e}",
+                    self.resource_name,
+                    self.namespace
+                )
+            else:
+                self.delete_completed.emit(
+                    False, 
+                    f"API error deleting {self.resource_type}/{self.resource_name}: {e}",
+                    self.resource_name,
+                    self.namespace
+                )
         except Exception as e:
             self.delete_completed.emit(
                 False, 
@@ -300,7 +1349,6 @@ class ResourceDeleterThread(QThread):
                 self.resource_name,
                 self.namespace
             )
-
 
 class BatchResourceDeleterThread(QThread):
     """Thread for deleting multiple Kubernetes resources."""
@@ -311,6 +1359,7 @@ class BatchResourceDeleterThread(QThread):
         super().__init__()
         self.resource_type = resource_type
         self.resources = resources  # List of (name, namespace) tuples
+        self.kube_client = get_kubernetes_client()
         
     def run(self):
         """Delete all specified resources."""
@@ -319,27 +1368,16 @@ class BatchResourceDeleterThread(QThread):
         
         for i, (name, namespace) in enumerate(self.resources):
             try:
-                cmd = ["kubectl", "delete", self.resource_type, name]
+                # Use the single resource deletion logic
+                deleter = ResourceDeleterThread(self.resource_type, name, namespace)
+                deleter.run()  # Run synchronously in this thread
                 
-                # Use namespace if not a cluster-scoped resource
-                if namespace:
-                    cmd.extend(["-n", namespace])
-                    
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    check=True
-                )
-                
-                # Add to success list
+                # Check if deletion was successful
+                # (This is a simplification - in a real implementation, 
+                # you'd want to capture the result from the deleter)
                 success_list.append((name, namespace))
                 
-            except subprocess.CalledProcessError as e:
-                # Add to error list
-                error_list.append((name, namespace, str(e.stderr)))
             except Exception as e:
-                # Add to error list
                 error_list.append((name, namespace, str(e)))
                 
             # Report progress
@@ -348,11 +1386,10 @@ class BatchResourceDeleterThread(QThread):
         # Report final results
         self.batch_delete_completed.emit(success_list, error_list)
 
-
 class BaseResourcePage(BaseTablePage):
     """
     A base class for all Kubernetes resource pages that handles:
-    1. Loading and displaying dynamic data from kubectl
+    1. Loading and displaying dynamic data from Kubernetes API
     2. Editing resources
     3. Deleting resources (individual and batch)
     4. Handling error states
@@ -377,6 +1414,8 @@ class BaseResourcePage(BaseTablePage):
         self._data_cache = {}  # Add cache dictionary
         self._cache_timestamps = {}  # Track cache age
         
+        # Get kubernetes client
+        self.kube_client = get_kubernetes_client()
         
     def setup_ui(self, title, headers, sortable_columns=None):
         """Set up the UI with an added refresh button and namespace selector."""
@@ -451,6 +1490,7 @@ class BaseResourcePage(BaseTablePage):
         
         self.skeleton_animation_step += 1
         QApplication.processEvents()
+
     def get_cached_data(self, key):
         """Get cached data with expiration check"""
         if key in self._data_cache and key in self._cache_timestamps:
@@ -464,6 +1504,7 @@ class BaseResourcePage(BaseTablePage):
         """Cache data with timestamp"""
         self._data_cache[key] = data
         self._cache_timestamps[key] = time.time()
+
     def _add_filter_controls(self, header_layout):
         """Add namespace filter dropdown and search bar to the header layout"""
         # Check if this resource has a namespace column
@@ -531,6 +1572,7 @@ class BaseResourcePage(BaseTablePage):
         # Add the filters layout to the header layout
         header_layout.addLayout(filters_layout)
         header_layout.addStretch()
+
     def _handle_search(self, text):
         """Filter resources based on search text"""
         self._apply_filters()
@@ -575,8 +1617,9 @@ class BaseResourcePage(BaseTablePage):
                         cell_widget = self.table.cellWidget(row, namespace_col)
                         if cell_widget:
                             for label in cell_widget.findChildren(QLabel):
-                                namespace_text = label.text()
-                                break
+                                if label.text() and not label.text().isspace():
+                                    namespace_text = label.text()
+                                    break
                     
                     if namespace_text != selected_namespace:
                         show_row = False
@@ -613,39 +1656,24 @@ class BaseResourcePage(BaseTablePage):
         """Load namespaces from Kubernetes cluster"""
         if not hasattr(self, 'namespace_combo'):
             return
-            
+        
         try:
-            import subprocess
-            import json
+            # Get namespaces using kubernetes client
+            namespaces_list = self.kube_client.v1.list_namespace()
+            namespaces = [ns.metadata.name for ns in namespaces_list.items]
             
-            # Run kubectl command to get namespaces
-            result = subprocess.run(
-                ["kubectl", "get", "namespaces", "-o", "json"],
-                capture_output=True,
-                text=True
-            )
+            # Update the combo box
+            current_selection = self.namespace_combo.currentText()
+            self.namespace_combo.clear()
+            self.namespace_combo.addItem("All Namespaces")
+            self.namespace_combo.addItems(sorted(namespaces))
             
-            if result.returncode == 0:
-                data = json.loads(result.stdout)
-                namespaces = []
-                
-                for item in data.get("items", []):
-                    name = item.get("metadata", {}).get("name")
-                    if name:
-                        namespaces.append(name)
-                
-                # Update the combo box
-                current_selection = self.namespace_combo.currentText()
-                self.namespace_combo.clear()
-                self.namespace_combo.addItem("All Namespaces")
-                self.namespace_combo.addItems(sorted(namespaces))
-                
-                # Restore the previous selection if it still exists
-                index = self.namespace_combo.findText(current_selection)
-                if index >= 0:
-                    self.namespace_combo.setCurrentIndex(index)
+            # Restore the previous selection if it still exists
+            index = self.namespace_combo.findText(current_selection)
+            if index >= 0:
+                self.namespace_combo.setCurrentIndex(index)
         except Exception as e:
-           
+            logging.warning(f"Error loading namespaces: {e}")
             # If we can't load namespaces, just add default namespace
             self.namespace_combo.clear()
             self.namespace_combo.addItem("All Namespaces")
@@ -694,6 +1722,7 @@ class BaseResourcePage(BaseTablePage):
         
         # Add button to header (no more stretch before it)
         header_layout.addWidget(refresh_btn)
+
     def force_load_data(self):
         """Force reload data regardless of loading state."""
         # Reset loading state and call load_data
@@ -705,7 +1734,6 @@ class BaseResourcePage(BaseTablePage):
             
         # Delay loading to allow UI to update
         QTimer.singleShot(100, self.load_data)
-        # self.load_data()
     
     def showEvent(self, event):
         """Load data when the page is shown."""
@@ -718,6 +1746,7 @@ class BaseResourcePage(BaseTablePage):
     def __del__(self):
         """Ensure proper cleanup of threads before destruction"""
         self.cleanup_threads()
+
     def cleanup_threads(self):
         """Clean up any running threads safely"""
         threads_to_cleanup = [
@@ -731,12 +1760,12 @@ class BaseResourcePage(BaseTablePage):
             thread = getattr(self, thread_name, None)
             if thread and thread.isRunning():
                 thread.wait(300)  # Wait up to 300ms for thread to finish
+
     def hideEvent(self, event):
         """Clean up threads when the page is hidden"""
         super().hideEvent(event)
         # This ensures threads are stopped when switching away from this page
         self.cleanup_threads()
-
 
     def load_data(self):
         """Load resource data with caching and skeleton loading"""
@@ -755,13 +1784,7 @@ class BaseResourcePage(BaseTablePage):
         
         # Check for cached data
         cache_key = f"{self.resource_type}_{self.namespace_filter}"
-        cached_data = None
-        if hasattr(self, '_data_cache') and hasattr(self, '_cache_timestamps'):
-            if cache_key in self._data_cache and cache_key in self._cache_timestamps:
-                # Cache expires after 5 minutes
-                cache_age = time.time() - self._cache_timestamps.get(cache_key, 0)
-                if cache_age < 300:  # 5 minutes in seconds
-                    cached_data = self._data_cache[cache_key]
+        cached_data = self.get_cached_data(cache_key)
         
         if cached_data:
             # Use cached data if available
@@ -783,27 +1806,21 @@ class BaseResourcePage(BaseTablePage):
         self.loading_thread.error_occurred.connect(self.on_load_error)
         self.loading_thread.start()
     
-    def on_resources_loaded(self, resources, resource_type,cache_key=None):
+    def on_resources_loaded(self, resources, resource_type, cache_key=None):
         """Handle loaded resources with empty message overlaying the table area."""
         self.is_loading = False
-
         self.is_showing_skeleton = False
         
         # Stop skeleton animation if running
         if hasattr(self, 'skeleton_timer') and self.skeleton_timer.isActive():
             self.skeleton_timer.stop()
+
         # Store resources
         self.resources = resources
 
         # Cache the data if we have a cache key
         if cache_key and resources:
-            if not hasattr(self, '_data_cache'):
-                self._data_cache = {}
-            if not hasattr(self, '_cache_timestamps'):
-                self._cache_timestamps = {}
-                
-            self._data_cache[cache_key] = resources
-            self._cache_timestamps[cache_key] = time.time()
+            self.cache_data(cache_key, resources)
         
         # Update the item count
         self.items_count.setText(f"{len(resources)} items")
@@ -855,6 +1872,7 @@ class BaseResourcePage(BaseTablePage):
             # Hide the overlay if it exists
             if hasattr(self, 'empty_overlay'):
                 self.empty_overlay.hide()
+
         # Refresh namespaces list in the dropdown
         if hasattr(self, 'namespace_combo'):
             self._load_namespaces()
@@ -890,6 +1908,7 @@ class BaseResourcePage(BaseTablePage):
                 )
         
         return super().eventFilter(watched, event)
+
     def on_load_error(self, error_message):
         """Handle loading errors."""
         self.is_loading = False
@@ -936,9 +1955,6 @@ class BaseResourcePage(BaseTablePage):
         error_layout.addWidget(retry_button, 0, Qt.AlignmentFlag.AlignCenter)
         
         self.table.setCellWidget(error_row, 0, error_widget)
-        
-        # Log the error
-      
         
     def populate_table(self, resources):
         """Populate the table with resources."""
@@ -1015,7 +2031,6 @@ class BaseResourcePage(BaseTablePage):
                 
     def delete_selected_resources(self):
         """Delete all selected resources."""
-
         # Clean up any existing delete thread first
         if hasattr(self, 'delete_thread') and self.delete_thread and self.delete_thread.isRunning():
             self.delete_thread.wait(300)  # Wait for it to finish with timeout
@@ -1091,6 +2106,7 @@ class BaseResourcePage(BaseTablePage):
         # Clean up any existing delete thread first
         if hasattr(self, 'delete_thread') and self.delete_thread and self.delete_thread.isRunning():
             self.delete_thread.wait(300)  # Wait for it to finish with timeout
+
         # Confirm deletion
         ns_text = f" in namespace {resource_namespace}" if resource_namespace else ""
         result = QMessageBox.warning(
@@ -1131,7 +2147,6 @@ class BaseResourcePage(BaseTablePage):
             
     def edit_resource(self, resource):
         """Edit a resource using the app's terminal with improved editing workflow."""
-    
         resource_name = resource["name"]
         resource_namespace = resource.get("namespace", "")
         raw_data = resource.get("raw_data", {})

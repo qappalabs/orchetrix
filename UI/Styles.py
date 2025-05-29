@@ -8,7 +8,7 @@ class AppColors:
     BG_HEADER = "#1e1e1e"
     BG_MEDIUM = "#2d2d2d"
     BG_LIGHT = "#3a3a3a"
-    
+
     # Text colors
     TEXT_LIGHT = "#ffffff"
     TEXT_SECONDARY = "#888888"
@@ -16,31 +16,31 @@ class AppColors:
     TEXT_LINK = "#4FC3F7"
     TEXT_DANGER = "#FF5252"
     TEXT_TABLE = "#e2e8f0"
-    
+
     # Accent colors
     ACCENT_BLUE = "#0095ff"
     ACCENT_GREEN = "#4CAF50"
     ACCENT_ORANGE = "#FF5733"
     ACCENT_RED = "#E81123"
     ACCENT_PURPLE = "#8C33FF"
-    
+
     # Border colors
     BORDER_COLOR = "#2d2d2d"
     BORDER_LIGHT = "#454545"
     BORDER_DARK = "#2a2a2a"
-    
+
     # UI element colors
     CARD_BG = "#1e1e1e"
     TAB_INACTIVE = "#2d2d2d"
     HEADER_BG = "#252525"
     TABLE_HEADER = "#323232"
-    
+
     # Hover states
     HOVER_BG = "rgba(255, 255, 255, 0.1)"
     HOVER_BG_DARKER = "rgba(255, 255, 255, 0.05)"
     SELECTED_BG = "rgba(33, 150, 243, 0.2)"
     DANGER_HOVER_BG = "rgba(255, 68, 68, 0.1)"
-    
+
     # Status colors
     STATUS_ACTIVE = "#4CAF50"    # Green
     STATUS_AVAILABLE = "#00FF00"
@@ -51,7 +51,7 @@ class AppColors:
 
     SEARCH_BAR_HEIGHT = 30
     SEARCH_BAR_MIN_WIDTH = 200
-    
+
     # Search bar styling
     SEARCH_BAR_STYLE = """
         QLineEdit, QComboBox {
@@ -80,7 +80,7 @@ class AppConstants:
         "ICON_SIZE": 16,
         "ACTION_WIDTH": 40
     }
-    
+
     # Events table column indices
     EVENTS_TABLE_COLUMNS = {
         "TYPE": 0,
@@ -93,7 +93,7 @@ class AppConstants:
         "LAST_SEEN": 7,
         "ACTIONS": 8
     }
-    
+
     # Releases table column indices
     RELEASES_TABLE_COLUMNS = {
         "CHECKBOX": 0,
@@ -106,6 +106,15 @@ class AppConstants:
         "STATUS": 7,
         "UPDATED": 8,
         "ACTIONS": 9
+    }
+
+    # Standardized spacing system
+    SPACING = {
+        "TINY": 4,
+        "SMALL": 8,
+        "MEDIUM": 16,
+        "LARGE": 24,
+        "XLARGE": 32
     }
 
 
@@ -136,7 +145,7 @@ class AppStyles:
             color: {AppColors.TEXT_LIGHT};
         }}
     """
-    
+
     # Preferences-specific styles
     PREFERENCES_MAIN_STYLE = f"""
         QWidget {{
@@ -161,13 +170,13 @@ class AppStyles:
             border-radius: 3px;
         }}
     """
-    
+
     PREFERENCES_SIDEBAR_STYLE = f"""
         QWidget {{
             background-color: {AppColors.BG_DARKER};
         }}
     """
-    
+
     PREFERENCES_HEADER_STYLE = f"""
         QLabel {{
             padding: 20px;
@@ -176,7 +185,7 @@ class AppStyles:
             font-weight: bold;
         }}
     """
-    
+
     SECTION_HEADER_STYLE = f"""
         QLabel#header {{
             color: {AppColors.TEXT_LIGHT};
@@ -185,7 +194,7 @@ class AppStyles:
             padding-bottom: 10px;
         }}
     """
-    
+
     SUBSECTION_HEADER_STYLE = f"""
         QLabel#sectionHeader {{
             color: {AppColors.TEXT_SUBTLE};
@@ -196,7 +205,7 @@ class AppStyles:
             padding-bottom: 10px;
         }}
     """
-    
+
     BACK_BUTTON_STYLE = f"""
         QPushButton {{
             background-color: transparent;
@@ -211,21 +220,21 @@ class AppStyles:
             color: {AppColors.TEXT_LIGHT};
         }}
     """
-    
+
     BACK_LABEL_STYLE = f"""
         QLabel {{
             color: {AppColors.TEXT_SUBTLE};
             font-size: 10px;
         }}
     """
-    
+
     TEXT_STYLE = f"""
         QLabel {{
             color: {AppColors.TEXT_LIGHT};
             font-size: 14px;
         }}
     """
-    
+
     DESCRIPTION_STYLE = f"""
         QLabel {{
             color: {AppColors.TEXT_SUBTLE};
@@ -233,7 +242,7 @@ class AppStyles:
             padding: 10px 0px;
         }}
     """
-    
+
     STATUS_TEXT_STYLE = f"""
         QLabel {{
             color: {AppColors.TEXT_SUBTLE};
@@ -241,7 +250,7 @@ class AppStyles:
             margin-right: 10px;
         }}
     """
-    
+
     STATUS_TEXT_ENABLED_STYLE = f"""
         QLabel {{
             color: {AppColors.ACCENT_BLUE};
@@ -249,7 +258,7 @@ class AppStyles:
             margin-right: 10px;
         }}
     """
-    
+
     INPUT_STYLE = f"""
         QLineEdit {{
             background-color: {AppColors.HEADER_BG};
@@ -259,7 +268,7 @@ class AppStyles:
             color: {AppColors.TEXT_LIGHT};
         }}
     """
-    
+
     DROPDOWN_STYLE = f"""
         QComboBox {{
             background-color: {AppColors.HEADER_BG};
@@ -277,7 +286,7 @@ class AppStyles:
             background-color: {AppColors.HOVER_BG};
         }}
     """
-    
+
     DIVIDER_STYLE = f"""
         QFrame#divider {{
             background-color: {AppColors.BORDER_DARK};
@@ -285,7 +294,7 @@ class AppStyles:
             margin: 20px 0px;
         }}
     """
-    
+
     SYNCED_ITEM_STYLE = f"""
         QLabel {{
             color: {AppColors.TEXT_LIGHT};
@@ -295,7 +304,7 @@ class AppStyles:
             border-radius: 4px;
         }}
     """
-    
+
     DELETE_BUTTON_STYLE = f"""
         QPushButton {{
             background-color: transparent;
@@ -307,7 +316,7 @@ class AppStyles:
             color: {AppColors.TEXT_DANGER};
         }}
     """
-    
+
     BUTTON_PRIMARY_STYLE = f"""
         QPushButton {{
             background-color: {AppColors.ACCENT_BLUE};
@@ -320,7 +329,7 @@ class AppStyles:
             background-color: #3A8EDF;
         }}
     """
-    
+
     BUTTON_SECONDARY_STYLE = f"""
         QPushButton {{
             background-color: {AppColors.HEADER_BG};
@@ -333,7 +342,7 @@ class AppStyles:
             background-color: {AppColors.BG_MEDIUM};
         }}
     """
-    
+
     PLACEHOLDER_STYLE = f"""
         QLabel {{
             color: {AppColors.TEXT_SUBTLE};
@@ -341,7 +350,7 @@ class AppStyles:
             padding: 40px 0px;
         }}
     """
-    
+
     # Table and related styles (used in ReplicaSetsPage and others)
     TABLE_STYLE = f"""
         QTableWidget {{
@@ -352,8 +361,8 @@ class AppStyles:
             color: {AppColors.TEXT_TABLE};
         }}
         QTableWidget::item {{
-            padding: 8px;
-            border: none;
+            padding: 10px 8px;
+            border-bottom: 1px solid {AppColors.BORDER_COLOR}33;
             outline: none;
             color: {AppColors.TEXT_TABLE};
         }}
@@ -366,16 +375,23 @@ class AppStyles:
             border: none;
         }}
         QHeaderView::section {{
-            background-color: {AppColors.HEADER_BG};
+            background-color: transparent;  /* Changed from {AppColors.HEADER_BG} */
             color: {AppColors.TEXT_SECONDARY};
-            padding: 8px;
+            padding: 10px 8px;
             border: none;
             border-bottom: 1px solid {AppColors.BORDER_COLOR};
             font-size: 12px;
             text-align: center;
         }}
     """
-    
+
+    FOCUS_STYLE = f"""
+        *:focus {{
+            outline: 1px solid {AppColors.ACCENT_BLUE}99;
+            outline-offset: -1px;
+        }}
+    """
+
     CUSTOM_HEADER_STYLE = f"""
         QHeaderView::section {{
             background-color: {AppColors.HEADER_BG};
@@ -390,16 +406,16 @@ class AppStyles:
             background-color: {AppColors.BG_MEDIUM};
         }}
     """
-    
+
     CHECKBOX_STYLE = f"""
         QCheckBox {{
-            spacing: 5px;
+            spacing: 3px;
             background: transparent;
         }}
         QCheckBox::indicator {{
-            width: 16px;
-            height: 16px;
-            border: 2px solid {AppColors.TEXT_SECONDARY};
+            width: 14px;
+            height: 14px;
+            border: 1px solid {AppColors.TEXT_SECONDARY};
             border-radius: 3px;
             background: transparent;
         }}
@@ -408,19 +424,19 @@ class AppStyles:
             border-color: {AppColors.ACCENT_BLUE};
         }}
         QCheckBox::indicator:hover {{
-            border-color: #888888;
+            border-color: {AppColors.TEXT_LIGHT};
         }}
     """
-    
+
     SELECT_ALL_CHECKBOX_STYLE = f"""
         QCheckBox {{
-            spacing: 5px;
-            background-color: {AppColors.HEADER_BG};
+            spacing: 3px;
+            background-color: transparent;  # Changed from {AppColors.HEADER_BG}
         }}
         QCheckBox::indicator {{
-            width: 16px;
-            height: 16px;
-            border: 2px solid {AppColors.TEXT_SECONDARY};
+            width: 14px;
+            height: 14px;
+            border: 1px solid {AppColors.TEXT_SECONDARY};
             border-radius: 3px;
             background: transparent;
         }}
@@ -432,39 +448,39 @@ class AppStyles:
             border-color: #888888;
         }}
     """
-    
+
     ACTION_BUTTON_STYLE = f"""
         QToolButton {{
-            color: {AppColors.TEXT_SECONDARY};
-            font-size: 18px;
             background: transparent;
             padding: 2px;
             margin: 0;
             border: none;
-            font-weight: bold;
         }}
         QToolButton:hover {{
             background-color: {AppColors.HOVER_BG};
             border-radius: 3px;
-            color: {AppColors.TEXT_LIGHT};
+        }}
+        QToolButton:pressed {{
+            background-color: {AppColors.HOVER_BG_DARKER};
         }}
         QToolButton::menu-indicator {{
             image: none;
         }}
     """
-    
+
     MENU_STYLE = f"""
         QMenu {{
             background-color: {AppColors.BG_DARKER};
             border: 1px solid {AppColors.BORDER_COLOR};
-            border-radius: 4px;
-            padding: 4px;
+            border-radius: 6px;
+            padding: 6px;
         }}
         QMenu::item {{
             color: {AppColors.TEXT_LIGHT};
-            padding: 8px 24px 8px 36px;
+            padding: 10px 24px 10px 36px;
             border-radius: 4px;
             font-size: 13px;
+            margin: 2px 0px;
         }}
         QMenu::item:selected {{
             background-color: {AppColors.SELECTED_BG};
@@ -476,15 +492,20 @@ class AppStyles:
         QMenu::item[dangerous="true"]:selected {{
             background-color: {AppColors.DANGER_HOVER_BG};
         }}
+        QMenu::separator {{
+            height: 1px;
+            background-color: {AppColors.BORDER_COLOR};
+            margin: 6px 10px;
+        }}
     """
-    
+
     ACTION_CONTAINER_STYLE = """
         background-color: transparent;
         border: none;
         margin: 0;
         padding: 0;
     """
-    
+
     ITEMS_COUNT_STYLE = f"""
         QLabel {{
             color: {AppColors.TEXT_SUBTLE};
@@ -493,7 +514,7 @@ class AppStyles:
             font-family: 'Segoe UI';
         }}
     """
-    
+
     # OverviewPage-specific styles
     EVENTS_TABLE_STYLE = f"""
         QTableWidget {{
@@ -551,7 +572,7 @@ class AppStyles:
             width: 0px;
         }}
     """
-    
+
     STATUS_SCROLL_STYLE = f"""
         QScrollArea {{
             background-color: transparent;
@@ -570,7 +591,7 @@ class AppStyles:
             width: 0px;
         }}
     """
-    
+
     # Other existing styles
     TOOLTIP_STYLE = f"""
         QToolTip {{
@@ -582,7 +603,7 @@ class AppStyles:
             font-size: 12px;
         }}
     """
-    
+
     SEARCH_BAR_STYLE = f"""
         QLineEdit {{
             background-color: #333333;
@@ -596,7 +617,7 @@ class AppStyles:
             background-color: #404040;
         }}
     """
-    
+
     SEARCH_STYLE = f"""
         QLineEdit {{
             padding: 5px;
@@ -606,7 +627,7 @@ class AppStyles:
             color: {AppColors.TEXT_LIGHT};
         }}
     """
-    
+
     GRAPH_FRAME_STYLE = f"""
         QFrame {{
             background-color: {AppColors.CARD_BG};
@@ -614,7 +635,7 @@ class AppStyles:
             border: 1px solid {AppColors.BORDER_COLOR};
         }}
     """
-    
+
     GRAPH_TITLE_STYLE = f"""
         QLabel {{
             color: {AppColors.TEXT_LIGHT};
@@ -622,7 +643,7 @@ class AppStyles:
             font-weight: bold;
         }}
     """
-    
+
     @staticmethod
     def graph_value_style(color):
         return f"""
@@ -632,11 +653,11 @@ class AppStyles:
                 font-weight: bold;
             }}
         """
-    
+
     HEADER_CONTAINER_STYLE = f"""
         background-color: {AppColors.HEADER_BG};
     """
-    
+
     TITLE_STYLE = f"""
         QLabel {{
             font-size: 20px;
@@ -644,7 +665,7 @@ class AppStyles:
             color: {AppColors.TEXT_LIGHT};
         }}
     """
-    
+
     TREE_WIDGET_STYLE = f"""
         QTreeWidget {{
             background-color: {AppColors.BG_DARK};
@@ -659,6 +680,7 @@ class AppStyles:
             padding: 6px 4px;
             border-bottom: 1px solid {AppColors.BORDER_DARK};
             border-right: 1px solid {AppColors.BORDER_DARK};
+            border-left: 1px solid {AppColors.BORDER_DARK};
             background-color: transparent;
         }}
         QTreeWidget::item:hover {{
@@ -670,13 +692,14 @@ class AppStyles:
             padding: 8px 8px;
             border-right: 1px solid {AppColors.BORDER_DARK};
             border-bottom: 1px solid {AppColors.BORDER_DARK};
+            border-left: 1px solid {AppColors.BORDER_DARK};
             border-top: none;
             border-left: none;
             text-align: left;
             font-weight: bold;
         }}
         QHeaderView::section:first {{
-            border-left: none;
+            border-left: 1px solid {AppColors.BORDER_DARK};  /* Changed from 'border-left: none;' to add left border */
         }}
         QHeaderView::section:last {{
             padding: 0;
@@ -694,21 +717,21 @@ class AppStyles:
             outline: none;
         }}
     """
-    
+
     HEADER_STYLE = f"""
         #header {{
             background-color: {AppColors.BG_HEADER};
             border-bottom: 1px solid {AppColors.BORDER_COLOR};
         }}
     """
-    
+
     SIDEBAR_STYLE = f"""
         #sidebar_content {{
             background-color: {AppColors.BG_SIDEBAR};
             border-top: 1px solid {AppColors.BORDER_COLOR};
         }}
     """
-    
+
     SIDEBAR_BUTTON_STYLE = f"""
         QPushButton {{
             background-color: transparent;
@@ -728,14 +751,14 @@ class AppStyles:
             padding-left: 17px;
         }}
     """
-    
+
     SIDEBAR_CONTAINER_STYLE = f"""
         QWidget {{
             background-color: {AppColors.BG_SIDEBAR};
             border-right: 2px solid {AppColors.BORDER_COLOR};
         }}
     """
-    
+
     TITLE_BAR_STYLE = f"""
         QWidget {{
             background-color: {AppColors.BG_DARK};
@@ -758,7 +781,7 @@ class AppStyles:
             border: 1px solid {AppColors.BORDER_COLOR};
         }}
     """
-    
+
     STATUS_BOX_STYLE = f"""
         #statusBox {{
             background-color: {AppColors.CARD_BG};
@@ -770,7 +793,7 @@ class AppStyles:
             border: 1px solid {AppColors.BORDER_COLOR};
         }}
     """
-    
+
     STATUS_ICON_STYLE = f"""
         QLabel {{
             background-color: {AppColors.STATUS_ACTIVE};
@@ -780,7 +803,7 @@ class AppStyles:
             qproperty-alignment: AlignCenter;
         }}
     """
-    
+
     STATUS_TITLE_STYLE = f"""
         QLabel {{
             color: {AppColors.TEXT_LIGHT};
@@ -789,7 +812,7 @@ class AppStyles:
             margin-top: 16px;
         }}
     """
-    
+
     STATUS_SUBTITLE_STYLE = f"""
         QLabel {{
             color: {AppColors.TEXT_SECONDARY};
@@ -797,14 +820,14 @@ class AppStyles:
             margin-top: 4px;
         }}
     """
-    
+
     RESOURCE_LABEL_USAGE_STYLE = f"color: {AppColors.STATUS_ACTIVE};"  # Green
     RESOURCE_LABEL_REQUESTS_STYLE = f"color: {AppColors.STATUS_PENDING};"  # Orange
     RESOURCE_LABEL_LIMITS_STYLE = f"color: {AppColors.ACCENT_PURPLE};"
     RESOURCE_LABEL_ALLOCATED_STYLE = f"color: {AppColors.ACCENT_ORANGE};"
     RESOURCE_LABEL_CAPACITY_STYLE = f"color: {AppColors.TEXT_SECONDARY};"
     RESOURCE_TITLE_STYLE = f"color: {AppColors.TEXT_LIGHT}; font-size: 16px;"
-    
+
     EMPTY_LABEL_STYLE = f"""
         QLabel {{
             color: {AppColors.TEXT_SUBTLE};
@@ -812,7 +835,7 @@ class AppStyles:
             background-color: transparent;
         }}
     """
-    
+
     HOME_ACTION_BUTTON_STYLE = f"""
         QPushButton {{
             background-color: transparent;
@@ -834,21 +857,21 @@ class AppStyles:
             background-color: transparent;
         }}
     """
-    
+
     MESSAGE_NORMAL_STYLE = f"color: {AppColors.TEXT_LIGHT};"
     MESSAGE_WARNING_STYLE = f"color: {AppColors.STATUS_DISCONNECTED};"  # Red
     SOURCE_LINK_STYLE = f"color: {AppColors.TEXT_LINK};"
-    
+
     TOP_BAR_STYLE = f"""
         QWidget {{
             background-color: {AppColors.BG_DARK};
             border-bottom: 1px solid {AppColors.BORDER_COLOR};
         }}
     """
-    
+
     BROWSER_LABEL_STYLE = f"font-weight: bold; font-size: 16px; color: {AppColors.TEXT_LIGHT};"
     ITEMS_LABEL_STYLE = f"color: {AppColors.TEXT_SUBTLE}; margin-left: 10px; font-size: 14px;"
-    
+
     CONTENT_AREA_STYLE = f"""
         QFrame {{
             background-color: {AppColors.BG_DARK};
@@ -869,7 +892,7 @@ class AppStyles:
             font-size: 12px;
         }}
     """
-    
+
     CIRCULAR_INDICATOR_TOOLTIP_STYLE = f"""
         QToolTip {{
             background-color: #2a2a2a;
@@ -880,7 +903,7 @@ class AppStyles:
             font-size: 12px;
         }}
     """
-    
+
     CLUSTER_STATUS_BOX_STYLE = f"""
         #statusBox {{
             background-color: #262626;
@@ -892,25 +915,25 @@ class AppStyles:
             border: 1px solid #4d4d4d;
         }}
     """
-    
+
     CLUSTER_RESOURCE_TITLE_STYLE = f"""
         color: {AppColors.TEXT_LIGHT};
         font-size: 16px;
     """
-    
+
     CLUSTER_RESOURCE_LABEL_USAGE_STYLE = "color: #32dc32;"  # Green
     CLUSTER_RESOURCE_LABEL_REQUESTS_STYLE = "color: #50a0ff;"  # Blue
     CLUSTER_RESOURCE_LABEL_LIMITS_STYLE = "color: #c050ff;"  # Purple
     CLUSTER_RESOURCE_LABEL_ALLOCATED_STYLE = "color: #ff9428;"  # Orange
     CLUSTER_RESOURCE_LABEL_CAPACITY_STYLE = "color: #d0d0d0;"  # Light gray
-    
+
     CLUSTER_CHART_PANEL_STYLE = f"""
         QWidget {{
             background-color: {AppColors.BG_SIDEBAR};
             border-radius: 4px;
         }}
     """
-    
+
     CLUSTER_ACTIVE_BTN_STYLE = f"""
         QPushButton {{
             background-color: #333333;
@@ -921,7 +944,7 @@ class AppStyles:
             border-radius: 4px;
         }}
     """
-    
+
     CLUSTER_INACTIVE_BTN_STYLE = f"""
         QPushButton {{
             background-color: transparent;
@@ -934,17 +957,17 @@ class AppStyles:
             color: {AppColors.TEXT_LIGHT};
         }}
     """
-    
+
     CLUSTER_METRICS_PANEL_STYLE = f"""
         background-color: {AppColors.BG_SIDEBAR};
         border-radius: 4px;
     """
-    
+
     CLUSTER_STATUS_PANEL_STYLE = f"""
         background-color: {AppColors.BG_SIDEBAR};
         border-radius: 4px;
     """
-    
+
     CLUSTER_STATUS_ICON_STYLE = f"""
         background-color: {AppColors.STATUS_ACTIVE};
         color: {AppColors.TEXT_LIGHT};
@@ -952,14 +975,14 @@ class AppStyles:
         border-radius: 40px;
         qproperty-alignment: AlignCenter;
     """
-    
+
     CLUSTER_STATUS_TITLE_STYLE = f"""
         color: {AppColors.TEXT_LIGHT};
         font-size: 20px;
         font-weight: 500;
         margin-top: 16px;
     """
-    
+
     CLUSTER_STATUS_SUBTITLE_STYLE = f"""
         color: {AppColors.TEXT_SECONDARY};
         font-size: 14px;
@@ -998,22 +1021,22 @@ class AppStyles:
             text-align: center;
         }}
     """
-    
+
     RELEASES_NAME_STYLE = f"""
         color: {AppColors.TEXT_TABLE};
         text-align: left;
     """
-    
+
     RELEASES_STATUS_ACTIVE_STYLE = f"""
         color: {AppColors.STATUS_ACTIVE};
         text-align: left;
     """
-    
+
     RELEASES_STATUS_INACTIVE_STYLE = f"""
         color: {AppColors.ACCENT_RED};
         text-align: left;
     """
-    
+
     RELEASES_DEFAULT_CELL_STYLE = f"""
         color: {AppColors.TEXT_TABLE};
         text-align: center;
@@ -1094,7 +1117,7 @@ class AppStyles:
             height: 0px;
         }}
     """
-    
+
     TERMINAL_INPUT_STYLE = f"""
         QTextEdit {{
             background-color: #252525;
@@ -1105,7 +1128,7 @@ class AppStyles:
             selection-background-color: #264F78;
         }}
     """
-    
+
     TERMINAL_WRAPPER_STYLE = f"""
         QWidget#terminal_wrapper {{
             background-color: {AppColors.BG_DARKER};
@@ -1113,14 +1136,14 @@ class AppStyles:
             border-bottom: none;
         }}
     """
-    
+
     TERMINAL_HEADER_STYLE = f"""
         QWidget {{
             background-color: {AppColors.BG_DARKER};
             border-bottom: 1px solid {AppColors.BORDER_COLOR};
         }}
     """
-    
+
     TERMINAL_HEADER_TITLE_STYLE = f"""
         QLabel {{
             color: {AppColors.TEXT_LIGHT};
@@ -1128,7 +1151,7 @@ class AppStyles:
             font-weight: bold;
         }}
     """
-    
+
     TERMINAL_HEADER_BUTTON_STYLE = f"""
         QToolButton {{
             background-color: transparent;
@@ -1143,7 +1166,7 @@ class AppStyles:
             border-radius: 4px;
         }}
     """
-    
+
     TERMINAL_TABS_CONTAINER_STYLE = f"""
         QWidget {{
             background-color: #252525;
@@ -1151,7 +1174,7 @@ class AppStyles:
             border-bottom: 1px solid {AppColors.BORDER_COLOR};
         }}
     """
-    
+
     TERMINAL_NEW_TAB_BUTTON_STYLE = f"""
         QPushButton {{
             background-color: transparent;
@@ -1167,7 +1190,7 @@ class AppStyles:
             border-radius: 4px;
         }}
     """
-    
+
     TERMINAL_TAB_LABEL_STYLE = f"""
         QLabel {{
             color: {AppColors.TEXT_SECONDARY};
@@ -1175,7 +1198,7 @@ class AppStyles:
             font-size: 12px;
         }}
     """
-    
+
     TERMINAL_TAB_CLOSE_BUTTON_STYLE = f"""
         QPushButton {{
             background-color: transparent;
@@ -1192,7 +1215,7 @@ class AppStyles:
             border-radius: 8px;
         }}
     """
-    
+
     TERMINAL_TAB_BUTTON_STYLE = f"""
         QPushButton {{
             background-color: transparent;
@@ -1304,7 +1327,7 @@ class AppStyles:
             margin: 5px 10px;
         }}
     """
-    
+
     SIDEBAR_TOGGLE_BUTTON_STYLE = f"""
         QToolButton {{
             background-color: transparent;
@@ -1314,7 +1337,7 @@ class AppStyles:
             background-color: rgba(255, 255, 255, 0.1);
         }}
     """
-    
+
     NAV_ICON_BUTTON_EXPANDED_STYLE = """
         QToolButton {{
             background-color: {background_color};
@@ -1326,7 +1349,7 @@ class AppStyles:
             background-color: {hover_background_color};
         }}
     """
-    
+
     NAV_ICON_BUTTON_COLLAPSED_STYLE = """
         QToolButton {{
             background-color: {background_color};
@@ -1340,30 +1363,30 @@ class AppStyles:
             background-color: {hover_background_color};
         }}
     """
-    
+
     NAV_ICON_BUTTON_ICON_LABEL_STYLE = f"""
         QLabel {{
             background-color: transparent;
             color: {AppColors.TEXT_SECONDARY};
         }}
     """
-    
+
     NAV_ICON_BUTTON_TEXT_LABEL_STYLE = f"""
         QLabel {{
             background-color: transparent;
             color: {AppColors.TEXT_SECONDARY};
         }}
     """
-    
+
     NAV_ICON_BUTTON_DROPDOWN_LABEL_STYLE = f"""
         QLabel {{
             background-color: transparent;
             color: {AppColors.TEXT_SECONDARY};
         }}
     """
-    
+
     SIDEBAR_BORDER_STYLE = "color: #444444;"
-    
+
     SIDEBAR_CONTROLS_STYLE = f"""
         QWidget#sidebar_controls {{
         }}
@@ -1641,3 +1664,51 @@ class AppStyles:
     """
 
     DETAIL_PAGE_ANIMATION_DURATION = 300
+
+    BASE_TITLE_STYLE = f"""
+        font-size: 20px;
+        font-weight: bold;
+        color: {AppColors.TEXT_LIGHT};
+    """
+
+    BASE_COUNT_STYLE = f"""
+        color: {AppColors.TEXT_SUBTLE};
+        font-size: 12px;
+        margin-left: 8px;
+        font-family: 'Segoe UI';
+    """
+
+    BASE_CHECKBOX_STYLE = f"""
+        QCheckBox {{
+            margin: 0;
+            padding: 0;
+            background: transparent;
+            height: 100%;
+            width: 100%;
+        }}
+        QCheckBox::indicator {{
+            width: 18px;
+            height: 18px;
+            border: none;
+            background: transparent;
+            subcontrol-position: center;
+            subcontrol-origin: content;
+        }}
+        QCheckBox::indicator:unchecked {{
+            image: url(icons/check_box_unchecked.svg);
+        }}
+        QCheckBox::indicator:checked {{
+            image: url(icons/check_box_checked.svg);
+            background-color: transparent;
+        }}
+        QCheckBox::indicator:hover {{
+            opacity: 0.8;
+        }}
+    """
+
+    EMPTY_STATE_STYLE = f"""
+        background-color: {AppColors.CARD_BG};
+        color: {AppColors.TEXT_SECONDARY};
+        border-radius: 8px;
+        border: 1px solid {AppColors.BORDER_COLOR};
+    """
