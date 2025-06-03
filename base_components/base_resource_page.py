@@ -1,6 +1,7 @@
 """
 Extended BaseTablePage for handling Kubernetes resources with live data using Python kubernetes library.
 This module handles common resource operations like listing, deletion, and editing.
+Updated to default to 'default' namespace and improved namespace handling.
 """
 
 import os
@@ -1180,81 +1181,6 @@ class KubernetesResourceLoader(QThread):
         except Exception:
             return ""
 
-class ResourceEditorThread(QThread):
-    """Thread for editing Kubernetes resources."""
-    edit_completed = pyqtSignal(bool, str)
-    
-    def __init__(self, resource_type, resource_name, namespace, yaml_content):
-        super().__init__()
-        self.resource_type = resource_type
-        self.resource_name = resource_name
-        self.namespace = namespace
-        self.yaml_content = yaml_content
-        self.kube_client = get_kubernetes_client()
-        
-    def run(self):
-        """Save the edited resource using kubernetes client."""
-        try:
-            # Parse the YAML content
-            resource_dict = yaml.safe_load(self.yaml_content)
-            
-            # Apply the updated resource using the appropriate API
-            if self.resource_type == "pod":
-                if self.namespace:
-                    result = self.kube_client.v1.patch_namespaced_pod(
-                        name=self.resource_name,
-                        namespace=self.namespace,
-                        body=resource_dict
-                    )
-                else:
-                    result = self.kube_client.v1.patch_pod(
-                        name=self.resource_name,
-                        body=resource_dict
-                    )
-            elif self.resource_type == "service":
-                result = self.kube_client.v1.patch_namespaced_service(
-                    name=self.resource_name,
-                    namespace=self.namespace,
-                    body=resource_dict
-                )
-            elif self.resource_type == "deployment":
-                result = self.kube_client.apps_v1.patch_namespaced_deployment(
-                    name=self.resource_name,
-                    namespace=self.namespace,
-                    body=resource_dict
-                )
-            elif self.resource_type == "configmap":
-                result = self.kube_client.v1.patch_namespaced_config_map(
-                    name=self.resource_name,
-                    namespace=self.namespace,
-                    body=resource_dict
-                )
-            elif self.resource_type == "secret":
-                result = self.kube_client.v1.patch_namespaced_secret(
-                    name=self.resource_name,
-                    namespace=self.namespace,
-                    body=resource_dict
-                )
-            # Add more resource types as needed
-            else:
-                self.edit_completed.emit(False, f"Editing not implemented for resource type: {self.resource_type}")
-                return
-            
-            # Report success
-            self.edit_completed.emit(True, f"Successfully updated {self.resource_type}/{self.resource_name}")
-            
-        except ApiException as e:
-            if e.status == 409:
-                self.edit_completed.emit(False, f"Conflict updating resource (version mismatch): {e}")
-            elif e.status == 422:
-                self.edit_completed.emit(False, f"Invalid resource specification: {e}")
-            else:
-                self.edit_completed.emit(False, f"API error updating resource: {e}")
-        except yaml.YAMLError as e:
-            self.edit_completed.emit(False, f"Invalid YAML format: {e}")
-        except Exception as e:
-            self.edit_completed.emit(False, f"Error: {str(e)}")
-
 class ResourceDeleterThread(QThread):
     """Thread for deleting Kubernetes resources."""
     delete_completed = pyqtSignal(bool, str, str, str)
@@ -1386,6 +1312,14 @@ class BatchResourceDeleterThread(QThread):
         # Report final results
         self.batch_delete_completed.emit(success_list, error_list)
 
+# Cluster-scoped resources that don't have namespaces
+CLUSTER_SCOPED_RESOURCES = {
+    'nodes', 'persistentvolumes', 'clusterroles', 'clusterrolebindings', 
+    'storageclasses', 'ingressclasses', 'priorityclasses', 'runtimeclasses',
+    'mutatingwebhookconfigurations', 'validatingwebhookconfigurations',
+    'customresourcedefinitions', 'namespaces'
+}
+
 class BaseResourcePage(BaseTablePage):
     """
     A base class for all Kubernetes resource pages that handles:
@@ -1393,6 +1327,7 @@ class BaseResourcePage(BaseTablePage):
     2. Editing resources
     3. Deleting resources (individual and batch)
     4. Handling error states
+    5. Namespace filtering with default namespace as default
     
     This should be subclassed for specific resource types.
     """
@@ -1401,7 +1336,7 @@ class BaseResourcePage(BaseTablePage):
         super().__init__(parent)
         self.resource_type = None  # To be set by subclasses
         self.resources = []
-        self.namespace_filter = "all"  # Default to all namespaces
+        self.namespace_filter = "default"  # Changed from "all" to "default"
         self.loading_thread = None
         self.delete_thread = None
         self.edit_thread = None
@@ -1516,6 +1451,10 @@ class BaseResourcePage(BaseTablePage):
                     has_namespace_column = True
                     break
         
+        # For cluster-scoped resources, don't show namespace dropdown
+        if self.resource_type in CLUSTER_SCOPED_RESOURCES:
+            has_namespace_column = False
+        
         # Create a layout for the filters
         filters_layout = QHBoxLayout()
         filters_layout.setSpacing(10)
@@ -1531,6 +1470,10 @@ class BaseResourcePage(BaseTablePage):
         
         # Create namespace filter dropdown if needed
         if has_namespace_column:
+            namespace_label = QLabel("Namespace:")
+            namespace_label.setStyleSheet("color: #ffffff; font-size: 13px; margin-right: 5px;")
+            filters_layout.addWidget(namespace_label)
+            
             self.namespace_combo = QComboBox()
             self.namespace_combo.setFixedHeight(AppStyles.SEARCH_BAR_HEIGHT)  # Match search bar height
             self.namespace_combo.setMinimumWidth(150)
@@ -1562,12 +1505,15 @@ class BaseResourcePage(BaseTablePage):
                     padding: 5px;
                 }
             """)
-            self.namespace_combo.addItem("All Namespaces")
+            
+            # Initially add just the default namespace
+            self.namespace_combo.addItem("default")
+            self.namespace_combo.setCurrentText("default")
             self.namespace_combo.currentTextChanged.connect(self._handle_namespace_change)
             filters_layout.addWidget(self.namespace_combo)
             
-            # Load namespaces
-            self._load_namespaces()
+            # Load namespaces asynchronously
+            QTimer.singleShot(100, self._load_namespaces)
         
         # Add the filters layout to the header layout
         header_layout.addLayout(filters_layout)
@@ -1578,8 +1524,18 @@ class BaseResourcePage(BaseTablePage):
         self._apply_filters()
 
     def _handle_namespace_change(self, namespace):
-        """Filter resources based on selected namespace"""
-        self._apply_filters()
+        """Filter resources based on selected namespace and reload data"""
+        if not namespace:
+            return
+            
+        # Update the namespace filter
+        if namespace == "All Namespaces":
+            self.namespace_filter = "all"
+        else:
+            self.namespace_filter = namespace
+        
+        # Reload data with new namespace filter
+        self.force_load_data()
 
     def _apply_filters(self):
         """Apply both namespace and search filters"""
@@ -1589,40 +1545,9 @@ class BaseResourcePage(BaseTablePage):
         # Get the search text
         search_text = self.search_bar.text().lower() if hasattr(self, 'search_bar') else ""
         
-        # Get the selected namespace
-        selected_namespace = None
-        if hasattr(self, 'namespace_combo') and self.namespace_combo.currentText() != "All Namespaces":
-            selected_namespace = self.namespace_combo.currentText()
-        
         # Hide rows that don't match the filters
         for row in range(self.table.rowCount()):
             show_row = True
-            
-            # Apply namespace filter if selected
-            if selected_namespace:
-                namespace_col = None
-                for col in range(self.table.columnCount()):
-                    header_item = self.table.horizontalHeaderItem(col)
-                    if header_item and header_item.text() == "Namespace":
-                        namespace_col = col
-                        break
-                
-                if namespace_col is not None:
-                    namespace_text = ""
-                    item = self.table.item(row, namespace_col)
-                    if item:
-                        namespace_text = item.text()
-                    else:
-                        # Check if the cell has a widget (like a QLabel)
-                        cell_widget = self.table.cellWidget(row, namespace_col)
-                        if cell_widget:
-                            for label in cell_widget.findChildren(QLabel):
-                                if label.text() and not label.text().isspace():
-                                    namespace_text = label.text()
-                                    break
-                    
-                    if namespace_text != selected_namespace:
-                        show_row = False
             
             # Apply search filter if text is entered
             if show_row and search_text:
@@ -1668,16 +1593,28 @@ class BaseResourcePage(BaseTablePage):
             self.namespace_combo.addItem("All Namespaces")
             self.namespace_combo.addItems(sorted(namespaces))
             
-            # Restore the previous selection if it still exists
-            index = self.namespace_combo.findText(current_selection)
-            if index >= 0:
-                self.namespace_combo.setCurrentIndex(index)
+            # Set default namespace as selected if it's the first load
+            if current_selection == "default" and "default" in namespaces:
+                self.namespace_combo.setCurrentText("default")
+            else:
+                # Restore the previous selection if it still exists
+                index = self.namespace_combo.findText(current_selection)
+                if index >= 0:
+                    self.namespace_combo.setCurrentIndex(index)
+                else:
+                    # Default to "default" namespace if available
+                    if "default" in namespaces:
+                        self.namespace_combo.setCurrentText("default")
+                    else:
+                        self.namespace_combo.setCurrentText("All Namespaces")
+                        
         except Exception as e:
             logging.warning(f"Error loading namespaces: {e}")
             # If we can't load namespaces, just add default namespace
             self.namespace_combo.clear()
             self.namespace_combo.addItem("All Namespaces")
             self.namespace_combo.addItem("default")
+            self.namespace_combo.setCurrentText("default")
     
     def _add_refresh_button(self):
         """Add a refresh button and filter controls to the page header."""
@@ -1873,10 +1810,6 @@ class BaseResourcePage(BaseTablePage):
             if hasattr(self, 'empty_overlay'):
                 self.empty_overlay.hide()
 
-        # Refresh namespaces list in the dropdown
-        if hasattr(self, 'namespace_combo'):
-            self._load_namespaces()
-        
         # Apply any existing filters
         self._apply_filters()
         
@@ -1988,8 +1921,8 @@ class BaseResourcePage(BaseTablePage):
         resource_name = resource.get("name", "")
         resource_namespace = resource.get("namespace", "")
         
-        if action == "Edit":
-            self.edit_resource(resource)
+        if action == "Logs":
+            print(f"logs for {resource_name}, and {resource_namespace}" )
         elif action == "Delete":
             self.delete_resource(resource_name, resource_namespace)
             
@@ -2145,104 +2078,3 @@ class BaseResourcePage(BaseTablePage):
             # Show error message
             QMessageBox.critical(self, "Deletion Failed", message)
             
-    def edit_resource(self, resource):
-        """Edit a resource using the app's terminal with improved editing workflow."""
-        resource_name = resource["name"]
-        resource_namespace = resource.get("namespace", "")
-        raw_data = resource.get("raw_data", {})
-        
-        if not raw_data:
-            QMessageBox.critical(self, "Error", "No raw data available for editing.")
-            return
-        
-        # Convert to YAML
-        yaml_content = yaml.dump(raw_data, default_flow_style=False)
-        
-        # Create a temporary file
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".yaml", mode="w") as temp:
-            temp.write(yaml_content)
-            temp_path = temp.name
-        
-        # Find terminal in the application
-        terminal_panel = None
-        parent = self
-        while parent and not terminal_panel:
-            if hasattr(parent, 'terminal_panel'):
-                terminal_panel = parent.terminal_panel
-                break
-            if hasattr(parent, 'parent_window') and parent.parent_window:
-                if hasattr(parent.parent_window, 'terminal_panel'):
-                    terminal_panel = parent.parent_window.terminal_panel
-                    break
-                if hasattr(parent.parent_window, 'cluster_view') and hasattr(parent.parent_window.cluster_view, 'terminal_panel'):
-                    terminal_panel = parent.parent_window.cluster_view.terminal_panel
-                    break
-            parent = parent.parent()
-        
-        if not terminal_panel:
-            QMessageBox.warning(self, "Terminal Not Found", "Terminal not found. Using external editor.")
-            self._edit_with_external_editor(resource_name, resource_namespace, temp_path)
-            return
-        
-        # Show terminal
-        if not terminal_panel.is_visible:
-            terminal_panel.show_terminal()
-        
-        # Add a new terminal tab specifically for editing
-        tab_index = terminal_panel.add_terminal_tab()
-        terminal_data = terminal_panel.terminal_tabs[tab_index]
-        terminal_widget = terminal_data.get('terminal_widget')
-        
-        if not terminal_widget:
-            QMessageBox.warning(self, "Terminal Not Available", "Terminal widget not found.")
-            self._edit_with_external_editor(resource_name, resource_namespace, temp_path)
-            return
-        
-        # Set the title for the terminal tab
-        for child in terminal_data.get('tab_container', QWidget()).findChildren(QLabel):
-            child.setText(f"Edit: {resource_name}")
-            break
-        
-        # Enable edit mode in the terminal header
-        if hasattr(terminal_panel, 'unified_header'):
-            terminal_panel.unified_header.enter_edit_mode(temp_path)
-        
-        # Display header information
-        ns_text = f" -n {resource_namespace}" if resource_namespace else ""
-        terminal_widget.append_output(f"\n# Editing {self.resource_type}/{resource_name}{ns_text}\n", "#4CAF50")
-        
-        # Read and display file content
-        try:
-            with open(temp_path, 'r') as f:
-                file_content = f.read()
-            terminal_widget.append_output(file_content + "\n")
-        except Exception as e:
-            terminal_widget.append_output(f"Error reading file: {str(e)}\n", "#FF6B68")
-        
-        # Show commands
-        terminal_widget.append_output("\n# COMMANDS:\n", "#FFA500")
-        terminal_widget.append_output(f"# The content above is editable. Make your changes directly here.\n", "#FFA500")
-        terminal_widget.append_output(f"# When finished, click the 💾 button in the terminal header to save and apply changes.\n", "#FFA500")
-        
-        # Set cursor at the beginning of the content for editing
-        cursor = terminal_widget.textCursor()
-        start_pos = terminal_widget.toPlainText().find("\n# Editing ")
-        if start_pos >= 0:
-            start_pos = terminal_widget.toPlainText().find("\n", start_pos + 10) + 1
-            cursor.setPosition(start_pos)
-            terminal_widget.setTextCursor(cursor)
-            
-        # Focus the terminal widget
-        terminal_widget.setFocus()    
-    
-    def on_edit_completed(self, success, message):
-        """Handle edit completion."""
-        if success:
-            # Show success message
-            QMessageBox.information(self, "Update Successful", message)
-            
-            # Reload data
-            self.load_data()
-        else:
-            # Show error message
-            QMessageBox.critical(self, "Update Failed", message)

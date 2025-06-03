@@ -21,7 +21,7 @@ from Pages.NamespacesPage import NamespacesPage
 from Pages.WorkLoad.OverviewPage import OverviewPage
 from Pages.WorkLoad.PodsPage import PodsPage
 from Pages.WorkLoad.DeploymentsPage import DeploymentsPage
-from Pages.WorkLoad.StatfulSetsPage import StatefulSetsPage
+from Pages.WorkLoad.StatefulSetsPage import StatefulSetsPage
 from Pages.WorkLoad.DaemonSetsPage import DaemonSetsPage
 from Pages.WorkLoad.ReplicaSetsPage import ReplicaSetsPage
 from Pages.WorkLoad.ReplicationControllersPage import ReplicaControllersPage
