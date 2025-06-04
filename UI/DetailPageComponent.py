@@ -98,6 +98,174 @@ class YamlHighlighter(QSyntaxHighlighter):
                 length = match.end() - start
                 self.setFormat(start, length, format)
 
+class EnhancedStyles:
+    # Typography hierarchy
+    SECTION_HEADER = {
+        'font_size': '16px',
+        'font_weight': 'bold',
+        'color': '#E8EAED',
+        'letter_spacing': '0.5px',
+        'text_transform': 'uppercase',
+        'margin_bottom': '12px'
+    }
+
+    FIELD_LABEL = {
+        'font_size': '13px',
+        'font_weight': '500',
+        'color': '#8AB4F8'
+    }
+
+    FIELD_VALUE = {
+        'font_size': '13px',
+        'font_weight': 'normal',
+        'color': '#DADCE0',
+        'line_height': '1.5'
+    }
+
+    PRIMARY_TEXT = {
+        'font_size': '20px',
+        'font_weight': 'bold',
+        'color': '#FFFFFF'
+    }
+
+    SECONDARY_TEXT = {
+        'font_size': '14px',
+        'font_weight': 'normal',
+        'color': '#9AA0A6'
+    }
+
+    # Spacing system
+    SECTION_GAP = 24
+    SUBSECTION_GAP = 16
+    FIELD_GAP = 8
+    CONTENT_PADDING = 20
+
+    @staticmethod
+    def get_section_header_style():
+        return f"""
+            QLabel {{
+                font-size: {EnhancedStyles.SECTION_HEADER['font_size']};
+                font-weight: {EnhancedStyles.SECTION_HEADER['font_weight']};
+                color: {EnhancedStyles.SECTION_HEADER['color']};
+                letter-spacing: {EnhancedStyles.SECTION_HEADER['letter_spacing']};
+                margin-bottom: {EnhancedStyles.SECTION_HEADER['margin_bottom']};
+            }}
+        """
+
+    @staticmethod
+    def get_field_label_style():
+        return f"""
+            QLabel {{
+                font-size: {EnhancedStyles.FIELD_LABEL['font_size']};
+                font-weight: {EnhancedStyles.FIELD_LABEL['font_weight']};
+                color: {EnhancedStyles.FIELD_LABEL['color']};
+            }}
+        """
+
+    @staticmethod
+    def get_field_value_style():
+        return f"""
+            QLabel {{
+                font-size: {EnhancedStyles.FIELD_VALUE['font_size']};
+                font-weight: {EnhancedStyles.FIELD_VALUE['font_weight']};
+                color: {EnhancedStyles.FIELD_VALUE['color']};
+                line-height: {EnhancedStyles.FIELD_VALUE['line_height']};
+            }}
+        """
+    @staticmethod
+    def get_primary_text_style():
+        return f"""
+            QLabel {{
+                font-size: {EnhancedStyles.PRIMARY_TEXT['font_size']};
+                font-weight: {EnhancedStyles.PRIMARY_TEXT['font_weight']};
+                color: {EnhancedStyles.PRIMARY_TEXT['color']};
+                padding: 4px 0px;
+            }}
+        """
+
+    @staticmethod
+    def get_secondary_text_style():
+        return f"""
+            QLabel {{
+                font-size: {EnhancedStyles.SECONDARY_TEXT['font_size']};
+                font-weight: {EnhancedStyles.SECONDARY_TEXT['font_weight']};
+                color: {EnhancedStyles.SECONDARY_TEXT['color']};
+                padding: 2px 0px;
+            }}
+        """
+
+class StatusBadge(QLabel):
+    """Enhanced status badge with color coding"""
+    def __init__(self, status, status_type="default"):
+        super().__init__(status)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.set_status_style(status_type)
+
+    def set_status_style(self, status_type):
+        styles = {
+            "success": {"bg": "#1B5E20", "color": "#4CAF50", "border": "#2E7D32"},
+            "warning": {"bg": "#E65100", "color": "#FF9800", "border": "#F57C00"},
+            "error": {"bg": "#B71C1C", "color": "#F44336", "border": "#D32F2F"},
+            "info": {"bg": "#0D47A1", "color": "#2196F3", "border": "#1976D2"},
+            "default": {"bg": "#424242", "color": "#BDBDBD", "border": "#616161"}
+        }
+
+        style = styles.get(status_type, styles["default"])
+        self.setStyleSheet(f"""
+            QLabel {{
+                background-color: {style["bg"]};
+                color: {style["color"]};
+                border: 1px solid {style["border"]};
+                border-radius: 12px;
+                padding: 4px 12px;
+                font-size: 12px;
+                font-weight: bold;
+                min-width: 60px;
+            }}
+        """)
+
+class InfoCard(QWidget):
+    """Enhanced information card with better layout"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setStyleSheet("""
+            QWidget {
+                background-color: #2D2D30;
+                border-radius: 8px;
+                border: 1px solid #3C3C3C;
+            }
+        """)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(8)
+
+class ConditionWidget(QWidget):
+    """Enhanced condition display widget"""
+    def __init__(self, condition_type, status, message="", parent=None):
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(12)
+
+        # Condition type
+        type_label = QLabel(condition_type)
+        type_label.setFixedWidth(120)
+        type_label.setStyleSheet(EnhancedStyles.get_field_label_style())
+
+        # Status badge
+        status_type = "success" if status == "True" else "error"
+        status_badge = StatusBadge(status, status_type)
+        status_badge.setFixedWidth(80)
+
+        # Message
+        message_label = QLabel(message)
+        message_label.setStyleSheet(EnhancedStyles.get_field_value_style())
+        message_label.setWordWrap(True)
+
+        layout.addWidget(type_label)
+        layout.addWidget(status_badge)
+        layout.addWidget(message_label, 1)
+
 class LineNumberArea(QWidget):
     def __init__(self, editor):
         super().__init__(editor)
@@ -200,44 +368,54 @@ class YamlEditorWithLineNumbers(QTextEdit):
             block = block.next()
             block_number += 1
 
-class ModernResizeHandle(QWidget):
-    """A modern resize handle with visual feedback"""
+class EnhancedLeftResizeHandle(QWidget):
+    """Enhanced resize handle covering the entire left side of the detail panel"""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setCursor(Qt.CursorShape.SizeHorCursor)
-        self.setFixedWidth(AppStyles.DETAIL_PAGE_RESIZE_HANDLE_WIDTH)
+        self.setFixedWidth(30)  # Make it wider for easier dragging
         self.setMouseTracking(True)
         self.hovered = False
         self.dragging = False
-        
+
+        # Visual styling
         self.normal_color = QColor(AppColors.BORDER_COLOR)
         self.hover_color = QColor(AppColors.ACCENT_BLUE)
         self.active_color = QColor(AppColors.ACCENT_BLUE)
-        
+
+        # Make it cover the entire height and position on the left
+        self.setStyleSheet("""
+            QWidget {
+                background-color: transparent;
+                border: none;
+            }
+        """)
+
     def enterEvent(self, event):
         self.hovered = True
         self.update()
         super().enterEvent(event)
-        
+
     def leaveEvent(self, event):
         self.hovered = False
         self.update()
         super().leaveEvent(event)
-        
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self.dragging = True
         super().mousePressEvent(event)
-        
+
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self.dragging = False
         super().mouseReleaseEvent(event)
-            
+
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
+
+        # Determine color and opacity based on state
         if self.dragging:
             color = self.active_color
             opacity = 1.0
@@ -247,33 +425,56 @@ class ModernResizeHandle(QWidget):
         else:
             color = self.normal_color
             opacity = 0.6
-        
+
         color.setAlphaF(opacity)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(color))
-        
-        dot_size = 2
-        dot_spacing = 6
-        num_dots = self.height() // dot_spacing - 1
-        start_y = (self.height() - (num_dots * dot_spacing)) / 2
-        
-        for i in range(num_dots):
-            y_pos = start_y + i * dot_spacing
-            painter.drawEllipse(
-                int(self.width() / 2 - dot_size / 2),
-                int(y_pos),
-                dot_size,
-                dot_size
-            )
+        # painter.setPen(Qt.PenStyle.NoPen)
+        # painter.setBrush(QBrush(color))
+        #
+        # # Draw dots pattern along the entire left edge
+        # dot_size = 3
+        # dot_spacing = 8
+        #
+        # # Vertical dots along the center line of the handle
+        # center_x = self.width() // 2
+        # num_dots = self.height() // dot_spacing - 1
+        # start_y = (self.height() - (num_dots * dot_spacing)) / 2
+        #
+        # for i in range(num_dots):
+        #     y_pos = start_y + i * dot_spacing
+        #     painter.drawEllipse(
+        #         int(center_x - dot_size / 2),
+        #         int(y_pos),
+        #         dot_size,
+        #         dot_size
+        #     )
+
+        # Draw a subtle vertical line indicator when hovered/dragging
+        if self.hovered or self.dragging:
+            center_x = self.width() // 2
+            line_color = color
+            line_color.setAlphaF(0.3)
+            painter.setPen(QPen(line_color, 1))
+            painter.drawLine(center_x, 10, center_x, self.height() - 10)
+
+    def mouseMoveEvent(self, event):
+        """Handle mouse move for dragging"""
+        if self.dragging and hasattr(event, 'buttons') and event.buttons() == Qt.MouseButton.LeftButton:
+            # Let the parent DetailPage handle the actual resizing
+            if self.parent():
+                self.parent().resize_handle_mouseMoveEvent(event)
+        super().mouseMoveEvent(event)
 
 class ModernBackButton(QToolButton):
     """A modern styled back button with animations"""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedSize(36, 36)
-        self.setText("←")
-        self.setFont(QFont("Segoe UI", 14))
+        # Set the SVG icon
+        self.setIcon(QIcon("icons/Detailpage_Close.svg"))
+        self.setIconSize(QSize(20, 20))  # Optional: tweak for better fit
+
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setStyleSheet("border: none; background: transparent;")
         
         self.hovered = False
         self.pressed = False
@@ -306,11 +507,11 @@ class ModernBackButton(QToolButton):
             self.pressed = False
             self.update()
         super().mouseReleaseEvent(event)
-    
+
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
+
         if self.pressed:
             bg_color = self.bg_pressed
             text_color = self.color_hover
@@ -320,20 +521,26 @@ class ModernBackButton(QToolButton):
         else:
             bg_color = self.bg_normal
             text_color = self.color_normal
-            
+
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QBrush(bg_color))
         painter.drawEllipse(QRect(0, 0, self.width(), self.height()))
-        
-        painter.setPen(text_color)
-        painter.setFont(self.font())
-        painter.drawText(QRect(0, 0, self.width(), self.height()), 
-                        Qt.AlignmentFlag.AlignCenter, self.text())
+
+        # Draw the icon (this is the missing part)
+        icon = self.icon()
+        if not icon.isNull():
+            icon_size = self.iconSize()
+            x = (self.width() - icon_size.width()) // 2
+            y = (self.height() - icon_size.height()) // 2
+            icon.paint(painter, x, y, icon_size.width(), icon_size.height(),
+                       Qt.AlignmentFlag.AlignCenter, QIcon.Mode.Normal, QIcon.State.Off)
 
 
 class DetailPage(QWidget):
+    detail_closed_signal = pyqtSignal()  # New signal for when detail is closed
     back_signal = pyqtSignal()
     resource_updated_signal = pyqtSignal(str, str, str)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.parent_window = parent
@@ -350,6 +557,8 @@ class DetailPage(QWidget):
         self.current_font_family = "Consolas"  # Default font family
         self.current_tab_size = 2  # Default tab size
         self.show_line_numbers = True  # Default to showing line numbers
+        self._closing = False
+        self._programmatic_close = False
         
         # Initialize recursion prevention flags
         self._currently_updating_font = None
@@ -410,10 +619,13 @@ class DetailPage(QWidget):
         self.animation_group.addAnimation(self.slide_animation)
         self.animation_group.addAnimation(self.fade_animation)
         self.animation_group.finished.connect(self.on_animation_finished)
-    
+
     def on_animation_finished(self):
         self.animation_in_progress = False
-        if self.slide_animation.direction() == QAbstractAnimation.Direction.Backward and not self.is_minimized:
+        if hasattr(self, '_closing') and self._closing:
+            self.hide()
+            self._closing = False
+        elif self.slide_animation.direction() == QAbstractAnimation.Direction.Backward and not self.is_minimized:
             self.hide()
 
     def create_header(self):
@@ -499,39 +711,40 @@ class DetailPage(QWidget):
         header_layout.addWidget(self.loading_indicator)
         
         self.main_layout.addWidget(self.header)
-        
+
     def create_resize_handle(self):
-        self.resize_handle = ModernResizeHandle(self)
+        """Create the enhanced full-left-side resize handle"""
+        self.resize_handle = EnhancedLeftResizeHandle(self)
         self.resize_handle.show()
-        
+
         self.resize_start_x = 0
         self.resize_start_width = self.width()
-        
+
+        # Connect mouse events for resizing
         self.resize_handle.mousePressEvent = self.resize_handle_mousePressEvent
         self.resize_handle.mouseMoveEvent = self.resize_handle_mouseMoveEvent
         self.resize_handle.mouseReleaseEvent = self.resize_handle_mouseReleaseEvent
-    
+
     def resize_handle_mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self.resize_start_x = int(event.globalPosition().x())
             self.resize_start_width = self.width()
-        ModernResizeHandle.mousePressEvent(self.resize_handle, event)
-    
+        # Don't call the parent class method here
+
     def resize_handle_mouseMoveEvent(self, event):
         if hasattr(event, 'buttons') and event.buttons() == Qt.MouseButton.LeftButton:
             delta = self.resize_start_x - event.globalPosition().x()
             new_width = int(self.resize_start_width + delta)
-            
+
             if new_width >= AppStyles.DETAIL_PAGE_MIN_WIDTH and new_width <= AppStyles.DETAIL_PAGE_MAX_WIDTH:
                 self.setFixedWidth(new_width)
                 if self.parent():
                     self.move(self.parent().width() - self.width(), 0)
-        ModernResizeHandle.mouseMoveEvent(self.resize_handle, event)
-    
+
     def resize_handle_mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self.resize_start_width = self.width()
-        ModernResizeHandle.mouseReleaseEvent(self.resize_handle, event)
+        # Don't call the parent class method here
     
     def create_content_area(self):
         self.content_area = QWidget()
@@ -569,117 +782,113 @@ class DetailPage(QWidget):
         self.main_layout.addWidget(self.content_area)
     
     def create_tabs(self):
-        self.overview_tab = QWidget()
-        self.overview_tab.setStyleSheet(f"background-color: {AppColors.BG_SIDEBAR}; border: none;")
-        self.overview_layout = QVBoxLayout(self.overview_tab)
-        self.overview_layout.setContentsMargins(20, 20, 20, 20)
-        self.overview_layout.setSpacing(10)
+        # Create OVERVIEW TAB as a QScrollArea (not just QWidget)
+        self.overview_tab = QScrollArea()
+        self.overview_tab.setStyleSheet(AppStyles.DETAIL_PAGE_OVERVIEW_STYLE)
+        self.overview_tab.setWidgetResizable(True)
+        self.overview_tab.setFrameShape(QFrame.Shape.NoFrame)
+        self.overview_tab.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        # Create the actual content widget for overview
+        self.overview_content = QWidget()
+        self.overview_content.setStyleSheet(f"background-color: {AppColors.BG_SIDEBAR}; border: none;")
+        self.overview_layout = QVBoxLayout(self.overview_content)
+        self.overview_layout.setContentsMargins(
+            EnhancedStyles.CONTENT_PADDING,
+            EnhancedStyles.CONTENT_PADDING,
+            EnhancedStyles.CONTENT_PADDING,
+            EnhancedStyles.CONTENT_PADDING
+        )
+        self.overview_layout.setSpacing(EnhancedStyles.SECTION_GAP)
+
+        # Set the content widget to the scroll area
+        self.overview_tab.setWidget(self.overview_content)
         
         self.create_overview_summary()
-        
+
+        # Create DETAILS TAB as a QScrollArea with proper styling
         self.details_tab = QScrollArea()
-        self.details_tab.setStyleSheet(f"""
-            QScrollArea {{
-                background-color: {AppColors.BG_SIDEBAR};
-                border: none;
-            }}
-            QScrollBar:vertical {{
-                background-color: {AppColors.BG_DARK};
-                width: 8px;
-                margin: 0px;
-            }}
-            QScrollBar::handle:vertical {{
-                background-color: {AppColors.BG_LIGHT};
-                min-height: 20px;
-                border-radius: 4px;
-            }}
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
-                height: 0px;
-            }}
-        """)
+        self.details_tab.setStyleSheet(AppStyles.DETAIL_PAGE_DETAILS_STYLE)
         self.details_tab.setWidgetResizable(True)
         self.details_tab.setFrameShape(QFrame.Shape.NoFrame)
         self.details_tab.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        
+
         self.details_content = QWidget()
         self.details_content.setStyleSheet(f"background-color: {AppColors.BG_SIDEBAR}; border: none;")
         self.details_layout = QVBoxLayout(self.details_content)
-        self.details_layout.setContentsMargins(20, 20, 20, 20)
-        self.details_layout.setSpacing(10)
+        self.details_layout.setContentsMargins(
+            EnhancedStyles.CONTENT_PADDING,
+            EnhancedStyles.CONTENT_PADDING,
+            EnhancedStyles.CONTENT_PADDING,
+            EnhancedStyles.CONTENT_PADDING
+        )
+        self.details_layout.setSpacing(EnhancedStyles.SECTION_GAP)
         self.details_tab.setWidget(self.details_content)
-        
+
+        # Create YAML TAB as a regular QWidget (not QScrollArea)
         self.yaml_tab = QWidget()
         self.yaml_tab.setStyleSheet(f"background-color: {AppColors.BG_SIDEBAR}; border: none;")
         self.yaml_layout = QVBoxLayout(self.yaml_tab)
         self.yaml_layout.setContentsMargins(0, 0, 0, 0)
         self.yaml_layout.setSpacing(0)
-        
+
+
         self.create_yaml_editor()
-        
+
+        # Create EVENTS TAB
         self.events_tab = QWidget()
         self.events_layout = QVBoxLayout(self.events_tab)
         self.events_tab.setStyleSheet(f"background-color: {AppColors.BG_SIDEBAR}; border: none;")
         self.events_layout.setContentsMargins(20, 20, 20, 20)
         self.events_layout.setSpacing(10)
-        
+
         self.create_events_list()
-        
+
+        # Add all tabs to the tab widget
         self.tab_widget.addTab(self.overview_tab, "Overview")
         self.tab_widget.addTab(self.details_tab, "Details")
         self.tab_widget.addTab(self.yaml_tab, "YAML")
         self.tab_widget.addTab(self.events_tab, "Events")
-        
+
         self.tab_widget.currentChanged.connect(self.handle_tab_changed)
-    
+
     def create_overview_summary(self):
-        """Create the overview summary with install/upgrade button"""
-        self.resource_name_label = QLabel("Resource Name")
-        self.resource_name_label.setStyleSheet(f"""
-            font-size: 20px;
-            font-weight: bold;
-            color: {AppColors.TEXT_LIGHT};
-        """)
-        
-        self.resource_info_label = QLabel("Type / Namespace")
-        self.resource_info_label.setStyleSheet(f"""
-            font-size: 14px;
-            color: {AppColors.TEXT_SUBTLE};
-            margin-bottom: 10px;
-        """)
-        
-        self.creation_time_label = QLabel("Created: unknown")
-        self.creation_time_label.setStyleSheet(f"""
-            font-size: 13px;
-            color: {AppColors.TEXT_SUBTLE};
-        """)
-        
-        # Create a container for header info and action button
-        header_container = QWidget()
-        header_layout = QHBoxLayout(header_container)
+        """Create enhanced overview summary with modern UI"""
+        # Resource Header Section
+        header_card = InfoCard()
+        header_layout = QHBoxLayout()
         header_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Create a vertical layout for the left side (name, info, creation time)
+        header_layout.setSpacing(16)
+
+        # Left side - Resource info
         left_layout = QVBoxLayout()
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(5)
-        
+        left_layout.setSpacing(4)
+
+        self.resource_name_label = QLabel("Resource Name")
+        self.resource_name_label.setStyleSheet(EnhancedStyles.get_primary_text_style())
+
+        self.resource_info_label = QLabel("Type / Namespace")
+        self.resource_info_label.setStyleSheet(EnhancedStyles.get_secondary_text_style())
+
+        self.creation_time_label = QLabel("Created: unknown")
+        self.creation_time_label.setStyleSheet(EnhancedStyles.get_secondary_text_style())
+
         left_layout.addWidget(self.resource_name_label)
         left_layout.addWidget(self.resource_info_label)
         left_layout.addWidget(self.creation_time_label)
-        
-        header_layout.addLayout(left_layout)
-        header_layout.addStretch()
-        
-        # Add action button (Install/Upgrade)
+
+        header_layout.addLayout(left_layout, 1)
+
         self.action_button = QPushButton("Install")
         self.action_button.setStyleSheet(f"""
             QPushButton {{
                 background-color: {AppColors.ACCENT_GREEN};
                 color: white;
                 border: none;
-                border-radius: 4px;
-                padding: 8px 20px;
+                border-radius: 6px;
+                padding: 10px 20px;
                 font-weight: bold;
+                font-size: 13px;
             }}
             QPushButton:hover {{
                 background-color: #45a049;
@@ -689,142 +898,78 @@ class DetailPage(QWidget):
             }}
         """)
         self.action_button.clicked.connect(self.handle_action_button)
-        self.action_button.hide()  # Hidden by default
-        
+        self.action_button.hide()
+
         header_layout.addWidget(self.action_button)
-        
-        # Add the header container to the main layout
-        self.overview_layout.addWidget(header_container)
-        
-        divider = QFrame()
-        divider.setFrameShape(QFrame.Shape.HLine)
-        divider.setStyleSheet(f"""
-            background-color: {AppColors.BORDER_COLOR};
-            max-height: 1px;
-            margin-top: 15px;
-            margin-bottom: 15px;
-        """)
-        self.overview_layout.addWidget(divider)
-        
-        # Continue with the rest of your existing code...
-        self.status_section = QWidget()
-        self.status_layout = QVBoxLayout(self.status_section)
-        self.status_layout.setContentsMargins(0, 0, 0, 0)
-        self.status_layout.setSpacing(10)
-        
-        status_title = QLabel("STATUS")
-        status_title.setStyleSheet(f"""
-            font-size: 12px;
-            font-weight: bold;
-            color: {AppColors.TEXT_SUBTLE};
-            text-transform: uppercase;
-        """)
-        self.status_layout.addWidget(status_title)
-        
-        self.status_container = QWidget()
-        self.status_container.setStyleSheet(f"""
-            background-color: {AppColors.BG_MEDIUM};
-            border-radius: 6px;
-            padding: 5px;
-        """)
-        status_container_layout = QHBoxLayout(self.status_container)
-        status_container_layout.setContentsMargins(15, 10, 15, 10)
-        status_container_layout.setSpacing(5)
-        
-        self.status_value_label = QLabel("Unknown")
-        self.status_value_label.setStyleSheet(AppStyles.DETAIL_PAGE_STATUS_VALUE_RUNNING_STYLE)
-        
+        header_card.layout().addLayout(header_layout)
+        self.overview_layout.addWidget(header_card)
+
+        # Status Section
+        status_header = QLabel("STATUS")
+        status_header.setStyleSheet(EnhancedStyles.get_section_header_style())
+        self.overview_layout.addWidget(status_header)
+
+        self.status_card = InfoCard()
+        status_layout = QHBoxLayout()
+        status_layout.setContentsMargins(0, 0, 0, 0)
+        status_layout.setSpacing(16)
+
+        # Replace old status labels with new badge
+        self.status_badge = StatusBadge("Unknown", "default")
         self.status_text_label = QLabel("Status not available")
-        self.status_text_label.setStyleSheet(AppStyles.DETAIL_PAGE_STATUS_TEXT_STYLE)
-        
-        status_container_layout.addWidget(self.status_value_label)
-        status_container_layout.addWidget(self.status_text_label)
-        status_container_layout.addStretch()
-        
-        self.status_layout.addWidget(self.status_container)
-        self.overview_layout.addWidget(self.status_section)
-        
-        self.conditions_section = QWidget()
-        self.conditions_layout = QVBoxLayout(self.conditions_section)
-        self.conditions_layout.setContentsMargins(0, 0, 0, 0)
-        self.conditions_layout.setSpacing(10)
-        
-        conditions_title = QLabel("CONDITIONS")
-        conditions_title.setStyleSheet(f"""
-            font-size: 12px;
-            font-weight: bold;
-            color: {AppColors.TEXT_SUBTLE};
-            text-transform: uppercase;
-            margin-top: 10px;
-        """)
-        self.conditions_layout.addWidget(conditions_title)
-        
-        self.conditions_container = QWidget()
-        self.conditions_container.setStyleSheet(f"""
-            background-color: {AppColors.BG_MEDIUM};
-            border-radius: 6px;
-            padding: 5px;
-        """)
-        self.conditions_container_layout = QVBoxLayout(self.conditions_container)
-        self.conditions_container_layout.setContentsMargins(15, 10, 15, 10)
-        self.conditions_container_layout.setSpacing(8)
-        
+        self.status_text_label.setStyleSheet(EnhancedStyles.get_field_value_style())
+
+        status_layout.addWidget(self.status_badge)
+        status_layout.addWidget(self.status_text_label, 1)
+        self.status_card.layout().addLayout(status_layout)
+        self.overview_layout.addWidget(self.status_card)
+
+        # Conditions Section
+        conditions_header = QLabel("CONDITIONS")
+        conditions_header.setStyleSheet(EnhancedStyles.get_section_header_style())
+        self.overview_layout.addWidget(conditions_header)
+
+        self.conditions_card = InfoCard()
+        self.conditions_container_layout = QVBoxLayout()
+        self.conditions_container_layout.setSpacing(EnhancedStyles.FIELD_GAP)
+
         self.no_conditions_label = QLabel("No conditions available")
-        self.no_conditions_label.setStyleSheet(AppStyles.DETAIL_PAGE_CONDITION_NO_DATA_STYLE)
+        self.no_conditions_label.setStyleSheet(EnhancedStyles.get_secondary_text_style() + """
+            font-style: italic;
+            padding: 8px;
+        """)
         self.conditions_container_layout.addWidget(self.no_conditions_label)
-        
-        self.conditions_layout.addWidget(self.conditions_container)
-        self.overview_layout.addWidget(self.conditions_section)
-        
-        self.labels_section = QWidget()
-        self.labels_section.setStyleSheet(f"""
-            QWidget {{
-                background-color: {AppColors.BG_MEDIUM};
-                border-radius: 6px;
-            }}
-        """)
-        self.labels_layout = QVBoxLayout(self.labels_section)
-        self.labels_layout.setContentsMargins(15, 15, 15, 15)
-        self.labels_layout.setSpacing(10)
-        
-        labels_title = QLabel("LABELS")
-        labels_title.setStyleSheet(f"""
-            font-size: 12px;
-            font-weight: bold;
-            color: {AppColors.TEXT_SUBTLE};
-            text-transform: uppercase;
-            margin-top: 0px;
-        """)
-        self.labels_layout.addWidget(labels_title)
-        
+
+        self.conditions_card.layout().addLayout(self.conditions_container_layout)
+        self.overview_layout.addWidget(self.conditions_card)
+
+        # Labels Section
+        labels_header = QLabel("LABELS")
+        labels_header.setStyleSheet(EnhancedStyles.get_section_header_style())
+        self.overview_layout.addWidget(labels_header)
+
+        self.labels_card = InfoCard()
         self.labels_content = QLabel("No labels")
-        self.labels_content.setStyleSheet(f"""
-            font-family: Consolas, 'Courier New', monospace;
-            font-size: 14px;
-            color: {AppColors.TEXT_LIGHT};
-            padding: 5px 0px;
+        self.labels_content.setStyleSheet(EnhancedStyles.get_field_value_style() + """
+            font-family: 'Consolas', 'Courier New', monospace;
+            background-color: rgba(255, 255, 255, 0.05);
+            padding: 8px;
+            border-radius: 4px;
         """)
         self.labels_content.setWordWrap(True)
-        self.labels_layout.addWidget(self.labels_content)
-        
-        self.overview_layout.addWidget(self.labels_section)
-        
-        self.specific_section = QWidget()
-        self.specific_section.setStyleSheet(f"""
-            QWidget {{
-                background-color: {AppColors.BG_MEDIUM};
-                border-radius: 6px;
-            }}
-        """)
+        self.labels_card.layout().addWidget(self.labels_content)
+        self.overview_layout.addWidget(self.labels_card)
+
+        # Keep your existing specific section setup
+        self.specific_section = InfoCard()
         self.specific_layout = QVBoxLayout(self.specific_section)
-        self.specific_layout.setContentsMargins(15, 15, 15, 15)
-        self.specific_layout.setSpacing(10)
-        
+        self.specific_layout.setContentsMargins(0, 0, 0, 0)
+        self.specific_layout.setSpacing(EnhancedStyles.FIELD_GAP)
         self.specific_section.hide()
-        
         self.overview_layout.addWidget(self.specific_section)
+
         self.overview_layout.addStretch()
-    
+
     def create_yaml_editor(self):
         yaml_toolbar = QWidget()
         yaml_toolbar.setFixedHeight(40)
@@ -832,10 +977,10 @@ class DetailPage(QWidget):
             background-color: {AppColors.BG_DARK};
             border-bottom: 1px solid {AppColors.BORDER_COLOR};
         """)
-        
+
         toolbar_layout = QHBoxLayout(yaml_toolbar)
         toolbar_layout.setContentsMargins(10, 0, 10, 0)
-        
+
         self.yaml_edit_button = QPushButton("Edit")
         self.yaml_edit_button.setStyleSheet("""
             QPushButton {
@@ -857,7 +1002,7 @@ class DetailPage(QWidget):
             }
         """)
         self.yaml_edit_button.clicked.connect(self.toggle_yaml_edit_mode)
-        
+
         self.yaml_save_button = QPushButton("Save")
         self.yaml_save_button.setStyleSheet("""
             QPushButton {
@@ -880,7 +1025,7 @@ class DetailPage(QWidget):
         """)
         self.yaml_save_button.clicked.connect(self.save_yaml_changes)
         self.yaml_save_button.hide()
-        
+
         self.yaml_cancel_button = QPushButton("Cancel")
         self.yaml_cancel_button.setStyleSheet("""
             QPushButton {
@@ -899,86 +1044,57 @@ class DetailPage(QWidget):
         """)
         self.yaml_cancel_button.clicked.connect(self.cancel_yaml_edit)
         self.yaml_cancel_button.hide()
-        
-        # Add a font size indicator
-        self.yaml_font_size_label = QLabel(f"Font Size: {self.current_font_size}")
-        self.yaml_font_size_label.setStyleSheet("""
-            color: #aaaaaa;
-            font-size: 12px;
-            padding: 5px;
-        """)
-        
-        # Add a font family indicator 
-        self.yaml_font_family_label = QLabel(f"Font: {self.current_font_family}")
-        self.yaml_font_family_label.setStyleSheet("""
-            color: #aaaaaa;
-            font-size: 12px;
-            padding: 5px;
-        """)
-        
-        # Add a line numbers indicator
-        self.yaml_line_numbers_label = QLabel(f"Line Numbers: {'On' if self.show_line_numbers else 'Off'}")
-        self.yaml_line_numbers_label.setStyleSheet("""
-            color: #aaaaaa;
-            font-size: 12px;
-            padding: 5px;
-        """)
-        
-        # Add a tab size indicator
-        self.yaml_tab_size_label = QLabel(f"Tab Size: {self.current_tab_size}")
-        self.yaml_tab_size_label.setStyleSheet("""
-            color: #aaaaaa;
-            font-size: 12px;
-            padding: 5px;
-        """)
-        
+
+        # Remove all font setting indicators - they're available in preferences
+        # Removed: yaml_font_size_label, yaml_font_family_label, yaml_line_numbers_label, yaml_tab_size_label
+
         toolbar_layout.addWidget(self.yaml_edit_button)
         toolbar_layout.addWidget(self.yaml_save_button)
         toolbar_layout.addWidget(self.yaml_cancel_button)
         toolbar_layout.addStretch()
-        toolbar_layout.addWidget(self.yaml_font_family_label)
-        toolbar_layout.addWidget(self.yaml_font_size_label)
-        toolbar_layout.addWidget(self.yaml_line_numbers_label)
-        toolbar_layout.addWidget(self.yaml_tab_size_label)
-        
+        # Removed: toolbar_layout.addWidget() calls for font setting labels
+
         # Try to get font settings from parent window's preferences if available
         font_size = self.current_font_size
         font_family = self.current_font_family
         tab_size = self.current_tab_size
-        
+
         if hasattr(self, 'parent_window') and self.parent_window:
             if hasattr(self.parent_window, 'preferences_page'):
                 prefs = self.parent_window.preferences_page
                 if hasattr(prefs, 'get_current_font_size'):
                     font_size = prefs.get_current_font_size()
                     self.current_font_size = font_size
-                    self.yaml_font_size_label.setText(f"Font Size: {font_size}")
                 if hasattr(prefs, 'current_font_family'):
                     font_family = prefs.current_font_family
                     self.current_font_family = font_family
-                    self.yaml_font_family_label.setText(f"Font: {font_family}")
                 if hasattr(prefs, 'show_line_numbers'):
                     self.show_line_numbers = prefs.show_line_numbers
-                    self.yaml_line_numbers_label.setText(f"Line Numbers: {'On' if self.show_line_numbers else 'Off'}")
                 if hasattr(prefs, 'current_tab_size'):
                     tab_size = prefs.current_tab_size
                     self.current_tab_size = tab_size
-                    self.yaml_tab_size_label.setText(f"Tab Size: {tab_size}")
-        
+
         # Use custom editor with line numbers support
         self.yaml_editor = YamlEditorWithLineNumbers()
         self.yaml_editor.setReadOnly(True)
-        
+
         # Create a proper font with the right size and family
         font = QFont(self.current_font_family, self.current_font_size)
         self.yaml_editor.setFont(font)
-        
+
         # Set line numbers visibility based on preference
         self.yaml_editor.set_show_line_numbers(self.show_line_numbers)
-        
+
         # Set tab size based on preference
         self.yaml_editor.set_tab_size(self.current_tab_size)
-        
+
+        # Configure for external scrolling
+        self.yaml_editor.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)  # Allows horizontal scrolling
+        self.yaml_editor.document().setDocumentMargin(10)  # Add some margin
+
+        # Connect to update size when content changes
+        self.yaml_editor.document().contentsChanged.connect(self.update_yaml_editor_size)
+
         # Basic stylesheet without font settings (those are set directly with setFont)
         base_yaml_style = """
             background-color: #1E1E1E;
@@ -988,11 +1104,47 @@ class DetailPage(QWidget):
             selection-color: #D4D4D4;
         """
         self.yaml_editor.setStyleSheet(base_yaml_style)
-        
+
+        # Remove internal scrollbars since QScrollArea handles scrolling
+        self.yaml_editor.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.yaml_editor.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        # Ensure the editor expands to fit content
+        self.yaml_editor.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
+
         self.yaml_highlighter = YamlHighlighter(self.yaml_editor.document())
-        
+
+        # Add toolbar (stays fixed at top)
         self.yaml_layout.addWidget(yaml_toolbar)
-        self.yaml_layout.addWidget(self.yaml_editor)
+
+        # Create scroll area only for the editor
+        self.yaml_scroll_area = QScrollArea()
+        self.yaml_scroll_area.setStyleSheet(AppStyles.DETAIL_PAGE_OVERVIEW_STYLE)
+        self.yaml_scroll_area.setWidgetResizable(True)
+        self.yaml_scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        self.yaml_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.yaml_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
+        # Set the editor as the scroll area widget
+        self.yaml_scroll_area.setWidget(self.yaml_editor)
+
+        # Add scroll area to main layout
+        self.yaml_layout.addWidget(self.yaml_scroll_area)
+
+    def update_yaml_editor_size(self):
+        """Update the YAML editor size to fit its content"""
+        if not hasattr(self, 'yaml_editor'):
+            return
+
+        # Get the document size
+        doc = self.yaml_editor.document()
+        doc_size = doc.size()
+
+        # Set minimum size to ensure scrollbars appear when needed
+        min_width = int(doc_size.width()) + 20
+        min_height = int(doc_size.height()) + 20
+
+        self.yaml_editor.setMinimumSize(min_width, min_height)
     
     def update_yaml_font_size(self, font_size):
         """Update the YAML editor font size"""
@@ -1011,10 +1163,6 @@ class DetailPage(QWidget):
         try:
             # Update the internal state
             self.current_font_size = font_size
-            
-            # Update the font size label
-            if hasattr(self, 'yaml_font_size_label'):
-                self.yaml_font_size_label.setText(f"Font Size: {font_size}")
             
             # Get current font and update its size
             font = self.yaml_editor.font()
@@ -1044,10 +1192,6 @@ class DetailPage(QWidget):
             # Update the internal state
             self.current_font_family = font_family
             
-            # Update the font family label
-            if hasattr(self, 'yaml_font_family_label'):
-                self.yaml_font_family_label.setText(f"Font: {font_family}")
-            
             # Get current font and update its family
             font = self.yaml_editor.font()
             font.setFamily(font_family)
@@ -1070,11 +1214,7 @@ class DetailPage(QWidget):
         # Update property and apply to editor
         self.show_line_numbers = show_line_numbers
         self.yaml_editor.set_show_line_numbers(show_line_numbers)
-        
-        # Update the line numbers label
-        if hasattr(self, 'yaml_line_numbers_label'):
-            self.yaml_line_numbers_label.setText(f"Line Numbers: {'On' if show_line_numbers else 'Off'}")
-    
+
     def update_yaml_tab_size(self, tab_size):
         """Update the YAML editor tab size"""
         if not hasattr(self, 'yaml_editor'):
@@ -1095,10 +1235,7 @@ class DetailPage(QWidget):
             
             # Update the tab size in the editor
             self.yaml_editor.set_tab_size(tab_size)
-            
-            # Update the tab size label
-            if hasattr(self, 'yaml_tab_size_label'):
-                self.yaml_tab_size_label.setText(f"Tab Size: {tab_size}")
+
         finally:
             # Clear recursion guard
             self._currently_updating_tab_size = None
@@ -1385,7 +1522,8 @@ class DetailPage(QWidget):
         self.resource_name_label.setText("Resource Name")
         self.resource_info_label.setText("Type / Namespace")
         self.creation_time_label.setText("Created: unknown")
-        self.status_value_label.setText("Unknown")
+        self.status_badge.setText("Unknown")
+        self.status_badge.set_status_style("default")
         self.status_text_label.setText("Status not available")
         
         for i in reversed(range(self.conditions_container_layout.count())):
@@ -1845,7 +1983,7 @@ class DetailPage(QWidget):
             self.update_labels()
             self.add_resource_specific_fields()
 
-    # Add a new method for Helm chart-specific fields
+    # Add this method (it's missing from File 2):
     def add_helm_chart_fields(self):
         """Add Helm chart specific fields to the overview tab with robust error handling"""
         # Clear existing status indicators first
@@ -1853,29 +1991,23 @@ class DetailPage(QWidget):
             item = self.conditions_container_layout.itemAt(i)
             if item.widget():
                 item.widget().deleteLater()
-        
+
         # Clear specific section and prepare it for chart data
         for i in reversed(range(self.specific_layout.count())):
             item = self.specific_layout.itemAt(i)
             if item.widget():
                 item.widget().deleteLater()
-        
+
         # Set a fixed status for charts
-        self.status_value_label.setText("Available")
-        self.status_value_label.setStyleSheet("""
-            background-color: rgba(76, 175, 80, 0.1);
-            color: #4CAF50;
-            border-radius: 4px;
-            padding: 2px 8px;
-            font-weight: bold;
-        """)
+        self.status_badge.setText("Available")
+        self.status_badge.set_status_style("success")
         self.status_text_label.setText("Chart is available")
-        
+
         # Get chart metadata
         annotations = self.current_data.get("metadata", {}).get("annotations", {})
         labels = self.current_data.get("metadata", {}).get("labels", {})
         spec = self.current_data.get("spec", {})
-        
+
         # Add chart version info if available
         no_conditions_label = QLabel("No chart conditions available")
         no_conditions_label.setStyleSheet("""
@@ -1884,7 +2016,7 @@ class DetailPage(QWidget):
             padding: 5px;
         """)
         self.conditions_container_layout.addWidget(no_conditions_label)
-        
+
         # Set up the specific section for chart details
         section_header = QLabel("CHART DETAILS")
         section_header.setStyleSheet("""
@@ -1895,7 +2027,7 @@ class DetailPage(QWidget):
             margin-top: 10px;
         """)
         self.specific_layout.addWidget(section_header)
-        
+
         # Add version info from either spec or labels (support both structures)
         version = spec.get("version") or labels.get("version") or "Unknown"
         version_info = QLabel(f"Chart Version: {version}")
@@ -1905,7 +2037,7 @@ class DetailPage(QWidget):
             margin-top: 5px;
         """)
         self.specific_layout.addWidget(version_info)
-        
+
         app_version = spec.get("appVersion") or labels.get("appVersion") or "Unknown"
         app_version_info = QLabel(f"App Version: {app_version}")
         app_version_info.setStyleSheet("""
@@ -1914,7 +2046,7 @@ class DetailPage(QWidget):
             margin-top: 5px;
         """)
         self.specific_layout.addWidget(app_version_info)
-        
+
         # Add description if available
         description = annotations.get("description", "No description available")
         desc_label = QLabel("Description:")
@@ -1925,7 +2057,7 @@ class DetailPage(QWidget):
             margin-top: 10px;
         """)
         self.specific_layout.addWidget(desc_label)
-        
+
         desc_text = QLabel(description)
         desc_text.setWordWrap(True)
         desc_text.setStyleSheet("""
@@ -1935,7 +2067,7 @@ class DetailPage(QWidget):
             margin-left: 10px;
         """)
         self.specific_layout.addWidget(desc_text)
-        
+
         # Add repository info
         repository = spec.get("repository") or labels.get("repository") or "Unknown"
         repo_label = QLabel("Repository:")
@@ -1946,7 +2078,7 @@ class DetailPage(QWidget):
             margin-top: 10px;
         """)
         self.specific_layout.addWidget(repo_label)
-        
+
         repo_text = QLabel(repository)
         repo_text.setWordWrap(True)
         repo_text.setStyleSheet("""
@@ -1956,7 +2088,7 @@ class DetailPage(QWidget):
             margin-left: 10px;
         """)
         self.specific_layout.addWidget(repo_text)
-        
+
         # Add source information
         source = annotations.get("source", "Unknown")
         source_label = QLabel("Source:")
@@ -1967,7 +2099,7 @@ class DetailPage(QWidget):
             margin-top: 10px;
         """)
         self.specific_layout.addWidget(source_label)
-        
+
         source_text = QLabel(source)
         source_text.setStyleSheet("""
             font-size: 13px;
@@ -1976,7 +2108,7 @@ class DetailPage(QWidget):
             margin-left: 10px;
         """)
         self.specific_layout.addWidget(source_text)
-        
+
         # Add icon if available - with robust error handling
         try:
             icon_path = annotations.get("icon_path")
@@ -1985,7 +2117,7 @@ class DetailPage(QWidget):
                 if os.path.exists(icon_path):  # Check that file exists first
                     from PyQt6.QtGui import QPixmap
                     from PyQt6.QtWidgets import QLabel
-                    
+
                     icon_label = QLabel("Icon:")
                     icon_label.setStyleSheet("""
                         font-size: 13px;
@@ -1994,7 +2126,7 @@ class DetailPage(QWidget):
                         margin-top: 10px;
                     """)
                     self.specific_layout.addWidget(icon_label)
-                    
+
                     icon_widget = QLabel()
                     pixmap = QPixmap(icon_path)
                     if not pixmap.isNull():
@@ -2008,10 +2140,10 @@ class DetailPage(QWidget):
         except Exception as e:
             # Just skip icon display on error
             pass
-        
+
         # Show the specific section
         self.specific_section.show()
-        
+
         # Update the labels section
         chart_labels = self.current_data.get("metadata", {}).get("labels", {})
         if chart_labels:
@@ -2019,6 +2151,8 @@ class DetailPage(QWidget):
             self.labels_content.setText(labels_text)
         else:
             self.labels_content.setText("No labels")
+
+
     def update_ui_with_data(self):
         if not self.current_data:
             return
@@ -2030,32 +2164,6 @@ class DetailPage(QWidget):
             self.update_yaml_tab()
         if self.tab_widget.currentIndex() == 3:
             self.load_events()
-    
-    def update_overview_tab(self):
-        metadata = self.current_data.get("metadata", {})
-        
-        self.resource_name_label.setText(metadata.get("name", "Unnamed"))
-        
-        resource_info = f"{self.resource_type.capitalize()}"
-        if "namespace" in metadata:
-            resource_info += f" / {metadata.get('namespace')}"
-        self.resource_info_label.setText(resource_info)
-        
-        creation_timestamp = metadata.get("creationTimestamp", "")
-        if creation_timestamp:
-            import datetime
-            from dateutil import parser
-            try:
-                creation_time = parser.parse(creation_timestamp)
-                formatted_time = creation_time.strftime("%Y-%m-%d %H:%M:%S")
-                self.creation_time_label.setText(f"Created: {formatted_time}")
-            except Exception:
-                self.creation_time_label.setText("Created: unknown")
-        
-        self.update_resource_status()
-        self.update_conditions()
-        self.update_labels()
-        self.add_resource_specific_fields()
     
     def update_resource_status(self):
         status = self.current_data.get("status", {})
@@ -2246,64 +2354,48 @@ class DetailPage(QWidget):
                 latest_condition = status["conditions"][-1]
                 status_value = latest_condition.get("type", "Unknown")
                 status_text = latest_condition.get("message", "No status message")
-        
-        self.status_value_label.setText(status_value)
-        self.status_text_label.setText(status_text)
-        
-        # Set style based on status value
+
+        # Determine status type for coloring
+        status_type = "default"
         if status_value.lower() in ["running", "ready", "active", "available", "bound", "succeeded", "deployed"]:
-            self.status_value_label.setStyleSheet(AppStyles.DETAIL_PAGE_STATUS_VALUE_RUNNING_STYLE)
+            status_type = "success"
         elif status_value.lower() in ["pending", "progressing", "updating", "released", "superseded"]:
-            self.status_value_label.setStyleSheet(AppStyles.DETAIL_PAGE_STATUS_VALUE_PENDING_STYLE)
-        elif status_value.lower() in ["succeeded", "completed", "complete"]:
-            self.status_value_label.setStyleSheet(AppStyles.DETAIL_PAGE_STATUS_VALUE_SUCCEEDED_STYLE)
+            status_type = "warning"
+        elif status_value.lower() in ["failed", "error", "crashloopbackoff", "imagepullbackoff"]:
+            status_type = "error"
         else:
-            self.status_value_label.setStyleSheet(AppStyles.DETAIL_PAGE_STATUS_VALUE_FAILED_STYLE)
-            
+            status_type = "info"
+
+        # Update the status badge and text
+        self.status_badge.setText(status_value)
+        self.status_badge.set_status_style(status_type)
+        self.status_text_label.setText(status_text)
+
     def update_conditions(self):
+        # Clear existing conditions
         for i in reversed(range(self.conditions_container_layout.count())):
             item = self.conditions_container_layout.itemAt(i)
             if item.widget():
                 item.widget().deleteLater()
-        
+
         status = self.current_data.get("status", {})
         conditions = status.get("conditions", [])
-        
+
         if not conditions:
             self.no_conditions_label = QLabel("No conditions available")
-            self.no_conditions_label.setStyleSheet(AppStyles.DETAIL_PAGE_CONDITION_NO_DATA_STYLE)
+            self.no_conditions_label.setStyleSheet(EnhancedStyles.get_secondary_text_style() + """
+                font-style: italic;
+                padding: 8px;
+            """)
             self.conditions_container_layout.addWidget(self.no_conditions_label)
             return
-        
+
         for condition in conditions:
             condition_type = condition.get("type", "Unknown")
             condition_status = condition.get("status", "Unknown")
             condition_message = condition.get("message", "")
-            
-            condition_widget = QWidget()
-            condition_layout = QHBoxLayout(condition_widget)
-            condition_layout.setContentsMargins(0, 0, 0, 0)
-            condition_layout.setSpacing(5)
-            
-            type_label = QLabel(condition_type)
-            type_label.setFixedWidth(AppStyles.DETAIL_PAGE_CONDITION_TYPE_WIDTH)
-            type_label.setStyleSheet(AppStyles.DETAIL_PAGE_CONDITION_TYPE_STYLE)
-            
-            status_label = QLabel(condition_status)
-            status_label.setFixedWidth(AppStyles.DETAIL_PAGE_CONDITION_STATUS_WIDTH)
-            if condition_status == "True":
-                status_label.setStyleSheet(AppStyles.DETAIL_PAGE_CONDITION_STATUS_TRUE_STYLE)
-            else:
-                status_label.setStyleSheet(AppStyles.DETAIL_PAGE_CONDITION_STATUS_FALSE_STYLE)
-            
-            message_label = QLabel(condition_message)
-            message_label.setStyleSheet(AppStyles.DETAIL_PAGE_CONDITION_MESSAGE_STYLE)
-            message_label.setWordWrap(True)
-            
-            condition_layout.addWidget(type_label)
-            condition_layout.addWidget(status_label)
-            condition_layout.addWidget(message_label, 1)
-            
+
+            condition_widget = ConditionWidget(condition_type, condition_status, condition_message)
             self.conditions_container_layout.addWidget(condition_widget)
     
     def update_labels(self):
@@ -3049,14 +3141,22 @@ class DetailPage(QWidget):
         item.setSizeHint(event_widget.sizeHint())
         self.events_list.addItem(item)
         self.events_list.setItemWidget(item, event_widget)
-    
+
     def close_detail(self):
+        """Enhanced close detail method"""
+        # Emit signal before closing
+        self.detail_closed_signal.emit()
+
+        # Remove event filter to prevent issues
+        if self.parent_window:
+            self.parent_window.removeEventFilter(self)
+
         self.hide_with_animation()
-    
+
     def show_with_animation(self):
         if self.isVisible():
             return
-            
+
         if self.parent():
             self.move(self.parent().width(), 0)
             target_x = self.parent().width() - self.width()
@@ -3067,50 +3167,72 @@ class DetailPage(QWidget):
             self.move(screen_width, 0)
             target_x = screen_width - self.width()
             parent_height = screen_height
-        
+
         self.setFixedHeight(parent_height)
         self.show()
         self.raise_()
-        
+
         self.slide_animation.setStartValue(self.geometry())
         self.slide_animation.setEndValue(QRect(target_x, 0, self.width(), parent_height))
-        
+
         self.animation_group.setDirection(QAbstractAnimation.Direction.Forward)
         self.animation_group.start()
-    
+
+        # Install event filter on the main application window for better click detection
+        if self.parent_window:
+            # Remove any existing filter first to avoid duplicates
+            self.parent_window.removeEventFilter(self)
+            # Install our event filter on the main window
+            self.parent_window.installEventFilter(self)
+            print(f"Installed event filter on main window for detail panel")
+
     def hide_with_animation(self):
-        """Hide the detail page with animation sliding to the right"""
-        if not self.isVisible():
+        if not self.isVisible() or self.animation_in_progress:
             return
-            
-        # Create animation
-        self.animation = QPropertyAnimation(self, b"geometry")
-        self.animation.setDuration(AppStyles.DETAIL_PAGE_ANIMATION_DURATION)
-        self.animation.setStartValue(self.geometry())
-        
+
+        self.animation_in_progress = True
+
+        # Store as instance variable to prevent garbage collection
+        self.hide_animation = QPropertyAnimation(self, b"geometry")
+        self.hide_animation.setDuration(200)
+        self.hide_animation.setEasingCurve(QEasingCurve.Type.OutQuart)
+        self.hide_animation.setStartValue(self.geometry())
+
+        # Calculate end position
         if self.parent():
             end_rect = QRect(self.parent().width(), 0, self.width(), self.height())
         else:
             screen_width = QApplication.primaryScreen().geometry().width()
             end_rect = QRect(screen_width, 0, self.width(), self.height())
-            
-        self.animation.setEndValue(end_rect)
-        self.animation.setEasingCurve(QEasingCurve.Type.InQuint)
-        
-        # Connect finished signal to hide
-        self.animation.finished.connect(self.hide)
-        
-        # Start animation
-        self.animation.start()
-        
-        # Emit back signal
-        self.back_signal.emit()
-    
+
+        self.hide_animation.setEndValue(end_rect)
+
+        # Connect cleanup function
+        def finish_hiding():
+            self.hide()
+            self.animation_in_progress = False
+            self.hide_animation.deleteLater()
+
+        self.hide_animation.finished.connect(finish_hiding)
+        self.hide_animation.start()
+
+        # Emit back signal only if not programmatically closed
+        if not self._programmatic_close:
+            self.back_signal.emit()
+
+        # Reset the flag
+        self._programmatic_close = False
+
+
     def resizeEvent(self, event):
+        """Position the resize handle to cover the entire left side"""
         super().resizeEvent(event)
         if hasattr(self, 'resize_handle'):
+            # Make the resize handle cover the entire left side
             self.resize_handle.setFixedHeight(self.height())
             self.resize_handle.move(0, 0)
+            self.resize_handle.raise_()  # Bring to front
+            self.resize_handle.show()    # Ensure it's visible
     
     def moveEvent(self, event):
         super().moveEvent(event)
@@ -3129,35 +3251,58 @@ class DetailPage(QWidget):
         """Handle close event - hide with animation"""
         self.hide_with_animation()
         event.accept()
-    
+
     def eventFilter(self, obj, event):
-        """Filter events to close detail page when clicking outside"""
+        """Enhanced event filter to properly detect clicks outside the detail panel"""
         if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
-            # Use globalPosition() to get coordinates in screen space
-            global_pos = event.globalPosition().toPoint()
-            
-            # Check if click is outside detail page bounds
-            if not self.geometry().contains(global_pos):
-                # Check if the click is on a UI element we want to ignore
-                # (where we want to keep the detail page open)
-                widget = QApplication.widgetAt(global_pos)
-                
-                # Keep detail open if clicking on the resource table itself
-                # as this will handle resource switching
-                if widget and hasattr(widget, 'objectName'):
-                    parent_widgets = []
-                    parent = widget
-                    
-                    # Check parent chain to identify table and relevant widgets
-                    while parent:
-                        parent_widgets.append(parent)
-                        if parent.inherits('QTableWidget') or parent.inherits('QTreeWidget'):
-                            # Don't close when clicking directly on tables/trees (resources)
-                            return super().eventFilter(obj, event)
-                        parent = parent.parent()
-                
-                # For all other clicks outside, close the detail
-                self.close_detail()
-                return True  # Event handled
-        
+            try:
+                # Get the click position in global coordinates
+                if hasattr(event, 'globalPosition'):
+                    global_pos = event.globalPosition().toPoint()
+                elif hasattr(event, 'globalPos'):
+                    global_pos = event.globalPos()
+                else:
+                    return super().eventFilter(obj, event)
+
+                # Check if click is outside the detail panel bounds in global coordinates
+                detail_global_rect = self.geometry()
+                if self.parent():
+                    detail_global_rect.translate(self.parent().mapToGlobal(self.parent().pos()))
+
+                if not detail_global_rect.contains(global_pos):
+                    # Get the widget that was actually clicked
+                    clicked_widget = QApplication.widgetAt(global_pos)
+
+                    # Don't close if clicking on certain UI elements
+                    if clicked_widget:
+                        # Check if the clicked widget is part of a table/tree (resource list)
+                        parent = clicked_widget
+                        while parent:
+                            # Keep detail open if clicking on resource tables/trees
+                            if (parent.inherits('QTableWidget') or
+                                    parent.inherits('QTreeWidget') or
+                                    parent.inherits('QListWidget')):
+                                return super().eventFilter(obj, event)
+
+                            # Also keep open if clicking on other detail panels
+                            if isinstance(parent, DetailPage):
+                                return super().eventFilter(obj, event)
+
+                            parent = parent.parent()
+
+                    # Close the detail panel for any other outside clicks
+                    print(f"Clicking outside detail panel at {global_pos}")
+                    self.close_detail()
+                    return True  # Event handled
+
+            except Exception as e:
+                # Log the error but don't crash
+                print(f"Error in eventFilter: {e}")
+
         return super().eventFilter(obj, event)
+
+
+    def close_detail_panel(self):
+        """Public method to close the detail panel (for external calls)"""
+        self._programmatic_close = True
+        self.close_detail()

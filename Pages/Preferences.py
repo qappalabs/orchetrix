@@ -130,11 +130,10 @@ class PreferencesWidget(QWidget):
         
         print("PreferencesWidget: Initialized with terminal_panel=None")
         self.setup_ui()
-        
-        # Set timer to update the timezone display every second
+
+        # Create timer but don't start it yet - will start when app section is shown
         self.timezone_timer = QTimer(self)
         self.timezone_timer.timeout.connect(self.update_timezone_display)
-        self.timezone_timer.start(1000)  # Update every second
 
     def get_system_timezone(self):
         """Get the current system timezone"""
@@ -144,6 +143,84 @@ class PreferencesWidget(QWidget):
         except Exception:
             # Fallback
             return "Asia/Calcutta"  # Default timezone
+
+    def get_custom_scroll_style(self):
+        """Custom scroll bar style for preferences"""
+        return f"""
+            QScrollArea {{
+                background-color: {AppColors.BG_DARK};
+                border: none;
+                outline: none;
+            }}
+            
+            QScrollBar:vertical {{
+                background-color: transparent;
+                width: 12px;
+                margin: 0px;
+                border-radius: 4px;
+            }}
+            
+            QScrollBar::handle:vertical {{
+                background-color: #6B7280;
+                min-height: 30px;
+                border-radius: 4px;
+                margin: 2px;
+            }}
+            
+            QScrollBar::handle:vertical:hover {{
+                background-color: #9CA3AF;
+            }}
+            
+            QScrollBar::handle:vertical:pressed {{
+                background-color: #4B5563;
+            }}
+            
+            QScrollBar::add-line:vertical,
+            QScrollBar::sub-line:vertical {{
+                height: 0px;
+                width: 0px;
+                background: none;
+            }}
+            
+            QScrollBar::add-page:vertical,
+            QScrollBar::sub-page:vertical {{
+                background: none;
+            }}
+            
+            QScrollBar:horizontal {{
+                background-color: transparent;
+                height: 12px;
+                margin: 0px;
+                border-radius: 4px;
+            }}
+            
+            QScrollBar::handle:horizontal {{
+                background-color: #6B7280;
+                min-width: 30px;
+                border-radius: 4px;
+                margin: 2px;
+            }}
+            
+            QScrollBar::handle:horizontal:hover {{
+                background-color: #9CA3AF;
+            }}
+            
+            QScrollBar::handle:horizontal:pressed {{
+                background-color: #4B5563;
+            }}
+            
+            QScrollBar::add-line:horizontal,
+            QScrollBar::sub-line:horizontal {{
+                height: 0px;
+                width: 0px;
+                background: none;
+            }}
+            
+            QScrollBar::add-page:horizontal,
+            QScrollBar::sub-page:horizontal {{
+                background: none;
+            }}
+        """
 
     def setup_ui(self):
         self.setStyleSheet(AppStyles.PREFERENCES_MAIN_STYLE)
@@ -206,7 +283,9 @@ class PreferencesWidget(QWidget):
         self.content_scroll = QScrollArea()
         self.content_scroll.setWidgetResizable(True)
         self.content_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self.content_scroll.setStyleSheet(AppStyles.CONTENT_AREA_STYLE)
+        self.content_scroll.setStyleSheet(self.get_custom_scroll_style())
+        self.content_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.content_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
         main_layout.addWidget(sidebar)
         main_layout.addWidget(self.content_scroll)
@@ -228,6 +307,11 @@ class PreferencesWidget(QWidget):
         return back_btn
 
     def show_section(self, section):
+        # Stop timezone timer when leaving app section
+        if self.current_section == "app" and section != "app":
+            if hasattr(self, 'timezone_timer') and self.timezone_timer:
+                self.timezone_timer.stop()
+
         self.app_btn.setChecked(False)
         self.proxy_btn.setChecked(False)
         self.kubernetes_btn.setChecked(False)
@@ -238,6 +322,9 @@ class PreferencesWidget(QWidget):
         if section == "app":
             self.app_btn.setChecked(True)
             self.show_app_section()
+            # Start timezone timer for app section
+            if hasattr(self, 'timezone_timer') and self.timezone_timer:
+                self.timezone_timer.start(1000)
         elif section == "proxy":
             self.proxy_btn.setChecked(True)
             self.show_proxy_section()
@@ -699,15 +786,36 @@ class PreferencesWidget(QWidget):
     def update_timezone_display(self):
         """Update the timezone info label with current time in selected timezone"""
         try:
-            # Use the current selected timezone
-            timezone = self.timezone_combo.currentText() if hasattr(self, 'timezone_combo') else self.current_timezone
-            
+            # Check if timezone_info widget exists and is valid
+            if not hasattr(self, 'timezone_info') or self.timezone_info is None:
+                return
+
+            # Check if the widget hasn't been deleted
+            try:
+                self.timezone_info.isVisible()  # This will raise RuntimeError if deleted
+            except RuntimeError:
+                # Widget has been deleted, stop the timer
+                if hasattr(self, 'timezone_timer') and self.timezone_timer:
+                    self.timezone_timer.stop()
+                return
+
+            # Use the current selected timezone with proper validation
+            timezone = self.current_timezone  # Use stored timezone as default
+
+            # Only try to get from combo box if it exists and is valid
+            if hasattr(self, 'timezone_combo') and self.timezone_combo is not None:
+                try:
+                    timezone = self.timezone_combo.currentText()
+                except RuntimeError:
+                    # ComboBox has been deleted, use stored timezone
+                    pass
+
             # Get current time in UTC
             now_utc = datetime.utcnow()
-            
+
             # Format the time display
             time_str = now_utc.strftime("%Y-%m-%d %H:%M:%S UTC")
-            
+
             # Try to get local time in the selected timezone
             # Note: This is simplified and would need proper timezone handling in a real app
             if timezone == "Asia/Calcutta":
@@ -742,13 +850,20 @@ class PreferencesWidget(QWidget):
                 local_time = now_utc.replace(hour=(now_utc.hour + 12) % 24)
                 local_time_str = local_time.strftime("%Y-%m-%d %H:%M:%S")
                 time_str += f" | {local_time_str} NZST (+12:00)"
-            
-            if hasattr(self, 'timezone_info'):
+
+            # Try to set the text, but handle if widget has been deleted
+            try:
                 self.timezone_info.setText(time_str)
+            except RuntimeError:
+                # Widget has been deleted, stop the timer
+                if hasattr(self, 'timezone_timer') and self.timezone_timer:
+                    self.timezone_timer.stop()
+
         except Exception as e:
             print(f"Error updating timezone display: {e}")
-            if hasattr(self, 'timezone_info'):
-                self.timezone_info.setText(f"Current time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            # Stop the timer if there are persistent errors
+            if hasattr(self, 'timezone_timer') and self.timezone_timer:
+                self.timezone_timer.stop()
 
     def change_timezone(self, index):
         """Handle timezone selection change"""
@@ -1521,3 +1636,23 @@ class PreferencesWidget(QWidget):
                     print("PreferencesWidget: Font size change is pending until terminal panel is set or terminal widgets are found")
         except Exception as e:
             print(f"PreferencesWidget: Error applying font size: {e}")
+
+    def cleanup_timers(self):
+        """Stop all timers to prevent accessing deleted widgets"""
+        try:
+            if hasattr(self, 'timezone_timer') and self.timezone_timer:
+                self.timezone_timer.stop()
+                self.timezone_timer = None
+                print("PreferencesWidget: Timezone timer stopped")
+        except Exception as e:
+            print(f"Error stopping timezone timer: {e}")
+
+    def closeEvent(self, event):
+        """Handle widget close event"""
+        self.cleanup_timers()
+        super().closeEvent(event)
+
+    def deleteLater(self):
+        """Override deleteLater to ensure proper cleanup"""
+        self.cleanup_timers()
+        super().deleteLater()

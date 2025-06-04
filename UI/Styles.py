@@ -578,17 +578,61 @@ class AppStyles:
             background-color: transparent;
             border: none;
         }}
-        QScrollBar:horizontal {{
-            background-color: {AppColors.HEADER_BG};
-            height: 8px;
+        QScrollBar:vertical {{
+            background-color: transparent;
+            width: 12px;
             margin: 0px;
-        }}
-        QScrollBar::handle:horizontal {{
-            background-color: rgba(160, 160, 160, 150);
             border-radius: 4px;
         }}
-        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+        QScrollBar::handle:vertical {{
+            background-color: #6B7280;
+            min-height: 30px;
+            border-radius: 4px;
+            margin: 2px;
+        }}
+        QScrollBar::handle:vertical:hover {{
+            background-color: #9CA3AF;
+        }}
+        QScrollBar::handle:vertical:pressed {{
+            background-color: #4B5563;
+        }}
+        QScrollBar::add-line:vertical,
+        QScrollBar::sub-line:vertical {{
+            height: 0px;
             width: 0px;
+            background: none;
+        }}
+        QScrollBar::add-page:vertical,
+        QScrollBar::sub-page:vertical {{
+            background: none;
+        }}
+        QScrollBar:horizontal {{
+            background-color: transparent;
+            height: 12px;
+            margin: 0px;
+            border-radius: 4px;
+        }}
+        QScrollBar::handle:horizontal {{
+            background-color: #6B7280;
+            min-width: 30px;
+            border-radius: 4px;
+            margin: 2px;
+        }}
+        QScrollBar::handle:horizontal:hover {{
+            background-color: #9CA3AF;
+        }}
+        QScrollBar::handle:horizontal:pressed {{
+            background-color: #4B5563;
+        }}
+        QScrollBar::add-line:horizontal,
+        QScrollBar::sub-line:horizontal {{
+            height: 0px;
+            width: 0px;
+            background: none;
+        }}
+        QScrollBar::add-page:horizontal,
+        QScrollBar::sub-page:horizontal {{
+            background: none;
         }}
     """
 
@@ -1621,11 +1665,70 @@ class AppStyles:
     """
 
     DETAIL_PAGE_YAML_TEXT_STYLE = f"""
-        font-family: 'Consolas', 'Courier New', monospace;
-        font-size: 13px;
-        color: #E0E0E0;
-        padding: 20px;
-        background-color: {AppColors.BG_SIDEBAR};
+        QTextEdit {{
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 13px;
+            color: #E0E0E0;
+            padding: 20px;
+            background-color: {AppColors.BG_SIDEBAR};
+            border: none;
+        }}
+        QScrollBar:vertical {{
+            background-color: transparent;
+            width: 12px;
+            margin: 0px;
+            border-radius: 4px;
+        }}
+        QScrollBar::handle:vertical {{
+            background-color: #6B7280;
+            min-height: 30px;
+            border-radius: 4px;
+            margin: 2px;
+        }}
+        QScrollBar::handle:vertical:hover {{
+            background-color: #9CA3AF;
+        }}
+        QScrollBar::handle:vertical:pressed {{
+            background-color: #4B5563;
+        }}
+        QScrollBar::add-line:vertical,
+        QScrollBar::sub-line:vertical {{
+            height: 0px;
+            width: 0px;
+            background: none;
+        }}
+        QScrollBar::add-page:vertical,
+        QScrollBar::sub-page:vertical {{
+            background: none;
+        }}
+        QScrollBar:horizontal {{
+            background-color: transparent;
+            height: 12px;
+            margin: 0px;
+            border-radius: 4px;
+        }}
+        QScrollBar::handle:horizontal {{
+            background-color: #6B7280;
+            min-width: 30px;
+            border-radius: 4px;
+            margin: 2px;
+        }}
+        QScrollBar::handle:horizontal:hover {{
+            background-color: #9CA3AF;
+        }}
+        QScrollBar::handle:horizontal:pressed {{
+            background-color: #4B5563;
+        }}
+        QScrollBar::add-line:horizontal,
+        QScrollBar::sub-line:horizontal {{
+            height: 0px;
+            width: 0px;
+            background: none;
+        }}
+        QScrollBar::add-page:horizontal,
+        QScrollBar::sub-page:horizontal {{
+            background: none;
+        }}
     """
 
     DETAIL_PAGE_EVENTS_LIST_STYLE = f"""
@@ -1640,6 +1743,34 @@ class AppStyles:
         }}
         QListWidget::item:hover {{
             background-color: {AppColors.HOVER_BG_DARKER};
+        }}
+        QScrollBar:vertical {{
+            background-color: transparent;
+            width: 12px;
+            margin: 0px;
+            border-radius: 4px;
+        }}
+        QScrollBar::handle:vertical {{
+            background-color: #6B7280;
+            min-height: 30px;
+            border-radius: 4px;
+            margin: 2px;
+        }}
+        QScrollBar::handle:vertical:hover {{
+            background-color: #9CA3AF;
+        }}
+        QScrollBar::handle:vertical:pressed {{
+            background-color: #4B5563;
+        }}
+        QScrollBar::add-line:vertical,
+        QScrollBar::sub-line:vertical {{
+            height: 0px;
+            width: 0px;
+            background: none;
+        }}
+        QScrollBar::add-page:vertical,
+        QScrollBar::sub-page:vertical {{
+            background: none;
         }}
     """
 
@@ -1711,4 +1842,134 @@ class AppStyles:
         color: {AppColors.TEXT_SECONDARY};
         border-radius: 8px;
         border: 1px solid {AppColors.BORDER_COLOR};
+    """
+
+    # Add these two constants to your AppStyles class
+
+    DETAIL_PAGE_OVERVIEW_STYLE = f"""
+        QScrollArea {{
+            background-color: {AppColors.BG_SIDEBAR};
+            border: none;
+            outline: none;
+        }}
+        QScrollBar:vertical {{
+            background-color: transparent;
+            width: 12px;
+            margin: 0px;
+            border-radius: 4px;
+        }}
+        QScrollBar::handle:vertical {{
+            background-color: #6B7280;
+            min-height: 30px;
+            border-radius: 4px;
+            margin: 2px;
+        }}
+        QScrollBar::handle:vertical:hover {{
+            background-color: #9CA3AF;
+        }}
+        QScrollBar::handle:vertical:pressed {{
+            background-color: #4B5563;
+        }}
+        QScrollBar::add-line:vertical,
+        QScrollBar::sub-line:vertical {{
+            height: 0px;
+            width: 0px;
+            background: none;
+        }}
+        QScrollBar::add-page:vertical,
+        QScrollBar::sub-page:vertical {{
+            background: none;
+        }}
+        QScrollBar:horizontal {{
+            background-color: transparent;
+            height: 12px;
+            margin: 0px;
+            border-radius: 4px;
+        }}
+        QScrollBar::handle:horizontal {{
+            background-color: #6B7280;
+            min-width: 30px;
+            border-radius: 4px;
+            margin: 2px;
+        }}
+        QScrollBar::handle:horizontal:hover {{
+            background-color: #9CA3AF;
+        }}
+        QScrollBar::handle:horizontal:pressed {{
+            background-color: #4B5563;
+        }}
+        QScrollBar::add-line:horizontal,
+        QScrollBar::sub-line:horizontal {{
+            height: 0px;
+            width: 0px;
+            background: none;
+        }}
+        QScrollBar::add-page:horizontal,
+        QScrollBar::sub-page:horizontal {{
+            background: none;
+        }}
+    """
+
+    DETAIL_PAGE_DETAILS_STYLE = f"""
+        QScrollArea {{
+            background-color: {AppColors.BG_SIDEBAR};
+            border: none;
+            outline: none;
+        }}
+        QScrollBar:vertical {{
+            background-color: transparent;
+            width: 12px;
+            margin: 0px;
+            border-radius: 4px;
+        }}
+        QScrollBar::handle:vertical {{
+            background-color: #6B7280;
+            min-height: 30px;
+            border-radius: 4px;
+            margin: 2px;
+        }}
+        QScrollBar::handle:vertical:hover {{
+            background-color: #9CA3AF;
+        }}
+        QScrollBar::handle:vertical:pressed {{
+            background-color: #4B5563;
+        }}
+        QScrollBar::add-line:vertical,
+        QScrollBar::sub-line:vertical {{
+            height: 0px;
+            width: 0px;
+            background: none;
+        }}
+        QScrollBar::add-page:vertical,
+        QScrollBar::sub-page:vertical {{
+            background: none;
+        }}
+        QScrollBar:horizontal {{
+            background-color: transparent;
+            height: 12px;
+            margin: 0px;
+            border-radius: 4px;
+        }}
+        QScrollBar::handle:horizontal {{
+            background-color: #6B7280;
+            min-width: 30px;
+            border-radius: 4px;
+            margin: 2px;
+        }}
+        QScrollBar::handle:horizontal:hover {{
+            background-color: #9CA3AF;
+        }}
+        QScrollBar::handle:horizontal:pressed {{
+            background-color: #4B5563;
+        }}
+        QScrollBar::add-line:horizontal,
+        QScrollBar::sub-line:horizontal {{
+            height: 0px;
+            width: 0px;
+            background: none;
+        }}
+        QScrollBar::add-page:horizontal,
+        QScrollBar::sub-page:horizontal {{
+            background: none;
+        }}
     """

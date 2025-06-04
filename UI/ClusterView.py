@@ -10,6 +10,7 @@ from UI.Sidebar import Sidebar
 from UI.Styles import AppColors
 from UI.TerminalPanel import TerminalPanel
 from utils.cluster_connector import get_cluster_connector
+from DetailPageComponent import DetailPage
 
 # Import all page classes (required for PyInstaller compatibility)
 from Pages.ClusterPage import ClusterPage
@@ -750,3 +751,58 @@ class ClusterView(QWidget):
             self.terminal_panel.hide_terminal()
         
         super().closeEvent(event)
+
+    # In ClusterView.py, replace the close_any_open_detail_panels method with this:
+
+    def close_any_open_detail_panels(self):
+        """Close any open detail panels in the cluster view"""
+        try:
+            # Use the detail_manager to close detail panels
+            if hasattr(self, 'detail_manager') and self.detail_manager:
+                if self.detail_manager.is_detail_visible():
+                    print("Closing detail panel via detail_manager")
+                    self.detail_manager.hide_detail()
+
+            # Fallback: Also search for any DetailPage instances that might exist
+            detail_panels = self.findChildren(DetailPage)
+            for detail_panel in detail_panels:
+                if detail_panel.isVisible():
+                    print(f"Closing detail panel: {detail_panel}")
+                    detail_panel.close_detail_panel()
+
+            # Also check for detail panels that might be direct children of main window
+            if hasattr(self, 'parent') and self.parent():
+                main_window_detail_panels = self.parent().findChildren(DetailPage)
+                for detail_panel in main_window_detail_panels:
+                    if detail_panel.isVisible():
+                        print(f"Closing main window detail panel: {detail_panel}")
+                        detail_panel.close_detail_panel()
+
+        except Exception as e:
+            print(f"Error closing detail panels: {e}")
+
+    # Also add this method to ensure detail panels are closed in handle_page_change:
+
+    def handle_page_change(self, page_widget: QWidget) -> None:
+        """Handle page changes with optimized performance"""
+        # Close detail page first - this is the important part!
+        if hasattr(self, 'detail_manager') and self.detail_manager.is_detail_visible():
+            print("Closing detail panel on page change")
+            self.detail_manager.hide_detail()
+
+        # Find page name
+        page_name = None
+        for name, widget in self.pages.items():
+            if widget == page_widget:
+                page_name = name
+                break
+
+        if not page_name:
+            return
+
+        # Update navigation
+        self._reset_navigation_states()
+        self._set_active_navigation(page_name)
+
+        # Load data with delay to allow UI update
+        QTimer.singleShot(50, lambda: self._load_page_data(page_widget))
