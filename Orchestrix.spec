@@ -5,7 +5,7 @@ import os
 icon_path = os.path.abspath(os.path.join('icons', 'logoIcon.ico'))
 
 a = Analysis(
-    ['main.py', 'log_handler.py', 'subprocess_patch.py'],  # Add subprocess_wrapper.py
+    ['main.py', 'log_handler.py'],  # Add subprocess_wrapper.py
     pathex=[],      
     binaries=[],
     datas=[

@@ -318,6 +318,7 @@ class NodesPage(BaseResourcePage):
         self.resource_type = "nodes"
         self.selected_row = -1
         self.has_loaded_data = False
+        self.is_loading = False
         
         # Get the cluster connector
         self.cluster_connector = get_cluster_connector()
@@ -700,7 +701,7 @@ class NodesPage(BaseResourcePage):
                     
                     parent.detail_manager.show_detail(resource_type, resource_name, namespace)
             
-    def load_data(self):
+    def load_data(self, load_more=False):
         """Override to fetch node data from cluster connector"""
         # Skip if already loading
         if self.is_loading:

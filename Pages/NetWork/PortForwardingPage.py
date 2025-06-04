@@ -519,12 +519,7 @@ class PortForwardingPage(BaseResourcePage):
         
         # Reload data to reflect changes
         self.load_data()
-        
-    # def handle_row_click(self, row, column):
-    #     """Handle row selection when a table cell is clicked"""
-    #     if column != self.table.columnCount() - 1:  # Skip action column
-    #         # Select the row
-    #         self.table.selectRow(row)
+
 
     def handle_row_click(self, row, column):
         if column != self.table.columnCount() - 1:  # Skip action column

@@ -685,7 +685,7 @@ class ReleasesPage(BaseResourcePage):
     def on_resources_loaded(self, resources, resource_type):
         """Handle loaded resources with improved focus handling"""
         # Call parent method first
-        super().on_resources_loaded(resources, resource_type)
+        super().on_resources_loaded(resources, resource_type, next_continue_token="", load_more=False)
         
         # If we need to focus on a specific release, check if it's in the resources
         if self.focus_release and self.focus_namespace:
