@@ -436,6 +436,7 @@ class ClusterView(QWidget):
         
         return resource_name, namespace
     
+    
     def _handle_special_event_detail(self, page, row: int) -> bool:
         """Handle special case for Events page detail view"""
         if not (hasattr(page, 'resources') and row < len(page.resources)):

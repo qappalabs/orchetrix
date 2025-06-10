@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
     QAbstractItemView, QStackedWidget
 )
 from PyQt6.QtGui import QColor, QFont # Added QFont
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QProcess
 from base_components.base_components import BaseTablePage # Assuming base_components.py is in a package or accessible path
 from UI.Styles import AppStyles, AppColors # Assuming UI.Styles.py is accessible
 from utils.kubernetes_client import get_kubernetes_client # Assuming utils.kubernetes_client.py is accessible
@@ -988,17 +988,19 @@ class ResourceDeleterThread(QThread):
         self.namespace = namespace
         self.kube_client = get_kubernetes_client()
         self._is_running = True
+
     def stop(self): self._is_running = False
+
     def run(self):
         if not self._is_running: return
         try:
             delete_options = client.V1DeleteOptions() 
-            if self.resource_type == "pod":
+            if self.resource_type == "pods":
                 if self.namespace:
                     self.kube_client.v1.delete_namespaced_pod(name=self.resource_name, namespace=self.namespace, body=delete_options)
-            elif self.resource_type == "service":
+            elif self.resource_type == "services":
                  self.kube_client.v1.delete_namespaced_service(name=self.resource_name, namespace=self.namespace, body=delete_options)
-            elif self.resource_type == "deployment":
+            elif self.resource_type == "deployments":
                  self.kube_client.apps_v1.delete_namespaced_deployment(name=self.resource_name, namespace=self.namespace, body=delete_options)
             else:
                 if not self._is_running: return
@@ -1031,7 +1033,7 @@ class BatchResourceDeleterThread(QThread):
             if not self._is_running: break
             try:
                 delete_options = client.V1DeleteOptions()
-                if self.resource_type == "pod":
+                if self.resource_type == "pods":
                     self.kube_client.v1.delete_namespaced_pod(name=name, namespace=ns, body=delete_options)
                 else: raise NotImplementedError(f"Batch delete not implemented for {self.resource_type}")
                 successes.append((name, ns))
@@ -1537,7 +1539,7 @@ class BaseResourcePage(BaseTablePage):
             label_height = self._all_loaded_label.sizeHint().height()
             self._all_loaded_label.setGeometry(0, viewport_height - label_height, self.table.viewport().width(), label_height)
             self._all_loaded_label.show(); self._all_loaded_label.raise_()
-            QTimer.singleShot(1000, lambda: self._show_all_loaded_message_ui(False) if self._all_loaded_label and self._all_loaded_label.isVisible() else None)
+            QTimer.singleShot(3000, lambda: self._show_all_loaded_message_ui(False) if self._all_loaded_label and self._all_loaded_label.isVisible() else None)
         elif self._all_loaded_label: self._all_loaded_label.hide()
 
     def populate_table(self, resources_to_populate):
@@ -1552,6 +1554,543 @@ class BaseResourcePage(BaseTablePage):
     def populate_resource_row(self, row, resource): 
         raise NotImplementedError("Subclasses must implement populate_resource_row")
 
+    # def _create_action_button(self, row, resource_name, resource_namespace):
+    #     """Create an action button with edit and delete options only."""
+    #     return super()._create_action_button(row, [
+    #         {"text": "Edit", "icon": "icons/edit.png", "dangerous": False},
+    #         {"text": "Delete", "icon": "icons/delete.png", "dangerous": True}
+    #     ])
+
+    # def _handle_action(self, action, row):
+    #     """Handle action button clicks."""
+    #     if row >= len(self.resources):
+    #         return
+            
+    #     resource = self.resources[row]
+    #     resource_name = resource.get("name", "")
+    #     resource_namespace = resource.get("namespace", "")
+        
+    #     if action == "View Logs":
+    #         pass
+    #     elif action == "Delete":
+    #         self.delete_resource(resource_name, resource_namespace)
+            
+    def _handle_action(self, action, row):
+        """Handle action button clicks with pod-specific logic."""
+        if row >= len(self.resources):
+            return
+            
+        resource = self.resources[row]
+        resource_name = resource.get("name", "")
+        resource_namespace = resource.get("namespace", "")
+        
+        if action == "View Logs":
+            # Double-check this is a pod resource
+            if self.resource_type == "pods":
+                self._handle_view_logs(resource_name, resource_namespace, resource)
+            else:
+                self._show_logs_error("Logs are only available for pod resources.")
+        if action == "SSH":
+            # SSH action - only available for pods
+            if self.resource_type == "pods":
+                self._handle_ssh_into_pod(resource_name, resource_namespace, resource)
+            else:
+                self._show_ssh_error("SSH is only available for pod resources.")
+
+        elif action == "Edit":
+            self._handle_edit_resource(resource_name, resource_namespace, resource)
+        elif action == "Delete":
+            self.delete_resource(resource_name, resource_namespace)
+
+    def _handle_edit_resource(self, resource_name, resource_namespace, resource):
+        """Handle edit resource action - placeholder for future implementation"""
+        # TODO: Implement resource editing functionality
+        from PyQt6.QtWidgets import QMessageBox
+        QMessageBox.information(self, "Edit Resource", 
+                            f"Edit functionality for {resource_name} will be implemented soon.")
+
+    def _handle_ssh_into_pod(self, resource_name, resource_namespace, resource):
+        """Handle SSH into pod action with validation"""
+        try:
+            # Validate this is actually a pod and it's running
+            is_valid, message = self._validate_pod_for_ssh(resource_name, resource_namespace)
+            if not is_valid:
+                self._show_ssh_error(f"Cannot SSH into pod: {message}")
+                return
+            
+            # Get the terminal panel
+            terminal_panel = self._get_terminal_panel()
+            if not terminal_panel:
+                self._show_ssh_error("Terminal panel not available. Please ensure you're in cluster view.")
+                return
+            
+            # Show the terminal if it's hidden
+            if not terminal_panel.is_visible:
+                terminal_panel.show_terminal()
+            
+            # Create or switch to SSH tab
+            self._create_ssh_tab(terminal_panel, resource_name, resource_namespace, resource)
+            
+        except Exception as e:
+            logging.error(f"Error handling SSH for {resource_name}: {e}")
+            self._show_ssh_error(f"Error opening SSH session: {str(e)}")
+
+    def _validate_pod_for_ssh(self, resource_name, resource_namespace):
+        """Validate that the pod is suitable for SSH access"""
+        try:
+            kube_client = get_kubernetes_client()
+            if not kube_client or not kube_client.v1:
+                return False, "Kubernetes client not available"
+            
+            # Get the pod to validate it exists and is running
+            try:
+                pod = kube_client.v1.read_namespaced_pod(name=resource_name, namespace=resource_namespace)
+                
+                # Check if pod is running
+                if pod.status.phase != "Running":
+                    return False, f"Pod is not running (status: {pod.status.phase})"
+                
+                # Check if pod has at least one container
+                if not pod.spec.containers:
+                    return False, "Pod has no containers"
+                
+                return True, "Pod validated successfully"
+                
+            except ApiException as e:
+                if e.status == 404:
+                    return False, f"Pod '{resource_name}' not found in namespace '{resource_namespace}'"
+                elif e.status == 403:
+                    return False, "Access denied. Check RBAC permissions for pod access."
+                else:
+                    return False, f"API error: {e.reason}"
+                    
+        except Exception as e:
+            return False, f"Validation error: {str(e)}"
+
+    def _create_ssh_tab(self, terminal_panel, pod_name, namespace, resource):
+        """Create an SSH tab for pod access"""
+        try:
+            # Check if an SSH tab for this pod already exists
+            ssh_tab_name = f"SSH: {pod_name}"
+            existing_tab_index = None
+            
+            for i, tab_data in enumerate(terminal_panel.terminal_tabs):
+                if tab_data.get('is_ssh_tab') and tab_data.get('pod_name') == pod_name:
+                    existing_tab_index = i
+                    break
+            
+            if existing_tab_index is not None:
+                # Switch to existing SSH tab
+                terminal_panel.switch_to_terminal_tab(existing_tab_index)
+                # Optionally reconnect or refresh the session
+                ssh_session = terminal_panel.terminal_tabs[existing_tab_index].get('ssh_session')
+                if ssh_session and hasattr(ssh_session, 'reconnect'):
+                    ssh_session.reconnect()
+            else:
+                # Create new SSH tab
+                new_tab_index = terminal_panel.create_ssh_tab(pod_name, namespace)
+                if new_tab_index is not None:
+                    terminal_panel.switch_to_terminal_tab(new_tab_index)
+            
+        except Exception as e:
+            logging.error(f"Error creating SSH tab for {pod_name}: {e}")
+            self._show_ssh_error(f"Error creating SSH tab: {str(e)}")
+
+    def _show_ssh_error(self, error_message):
+        """Show error message for SSH functionality"""
+        try:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "SSH Error", error_message)
+        except Exception as e:
+            logging.error(f"Error showing SSH error message: {e}")
+
+
+    def _validate_pod_resource(self, resource_name, resource_namespace):
+        """Validate that the resource is actually a pod using Kubernetes API"""
+        try:
+            kube_client = get_kubernetes_client()
+            if not kube_client or not kube_client.v1:
+                return False, "Kubernetes client not available"
+            
+            # Try to get the pod to validate it exists
+            try:
+                pod = kube_client.v1.read_namespaced_pod(name=resource_name, namespace=resource_namespace)
+                return True, "Pod validated successfully"
+            except ApiException as e:
+                if e.status == 404:
+                    return False, f"Pod '{resource_name}' not found in namespace '{resource_namespace}'"
+                elif e.status == 403:
+                    return False, "Access denied. Check RBAC permissions for pod access."
+                else:
+                    return False, f"API error: {e.reason}"
+                    
+        except Exception as e:
+            return False, f"Validation error: {str(e)}"
+
+    def _handle_view_logs(self, resource_name, resource_namespace, resource):
+        """Handle View Logs action for pods with validation"""
+        try:
+            # Validate this is actually a pod
+            is_valid, message = self._validate_pod_resource(resource_name, resource_namespace)
+            if not is_valid:
+                self._show_logs_error(f"Cannot view logs: {message}")
+                return
+            
+            # Get the terminal panel
+            terminal_panel = self._get_terminal_panel()
+            if not terminal_panel:
+                self._show_logs_error("Terminal panel not available. Please ensure you're in cluster view.")
+                return
+            
+            # Show the terminal if it's hidden
+            if not terminal_panel.is_visible:
+                terminal_panel.show_terminal()
+            
+            # Create or switch to logs tab
+            self._create_enhanced_logs_tab(terminal_panel, resource_name, resource_namespace, resource)
+            
+        except Exception as e:
+            logging.error(f"Error handling view logs for {resource_name}: {e}")
+            self._show_logs_error(f"Error opening logs: {str(e)}")
+
+    def _get_terminal_panel(self):
+        """Get the terminal panel from the cluster view"""
+        try:
+            # Navigate up the widget hierarchy to find the cluster view
+            parent = self.parent()
+            while parent:
+                if hasattr(parent, 'terminal_panel'):
+                    return parent.terminal_panel
+                parent = parent.parent()
+            
+            # Alternative: check if we can access through the main window
+            from PyQt6.QtWidgets import QApplication
+            app = QApplication.instance()
+            if app:
+                for widget in app.allWidgets():
+                    if hasattr(widget, 'terminal_panel') and widget.terminal_panel:
+                        return widget.terminal_panel
+            
+            return None
+        except Exception as e:
+            logging.error(f"Error getting terminal panel: {e}")
+            return None
+
+    def _handle_checkbox_change(self, state, item_name):
+        """Handle checkbox state changes with namespace awareness."""
+        # Find the namespace for this item
+        namespace = None
+        for resource in self.resources:
+            if resource["name"] == item_name:
+                namespace = resource.get("namespace", "")
+                break
+                
+        # Store the (name, namespace) tuple for deletion
+        item_key = (item_name, namespace)
+        
+        if state == Qt.CheckState.Checked.value:
+            self.selected_items.add(item_key)
+        else:
+            self.selected_items.discard(item_key)
+            
+            # If any checkbox is unchecked, uncheck the select-all checkbox
+            if self.select_all_checkbox is not None and self.select_all_checkbox.isChecked():
+                # Block signals to prevent infinite recursion
+                self.select_all_checkbox.blockSignals(True)
+                self.select_all_checkbox.setChecked(False)
+                self.select_all_checkbox.blockSignals(False)
+
+    # Updated base_resource_page.py - Integration with Enhanced Logs Viewer
+
+    def _create_enhanced_logs_tab(self, terminal_panel, pod_name, namespace, resource):
+        """Create an enhanced logs tab with search, filter and live streaming"""
+        try:
+            # Check if a logs tab for this pod already exists
+            logs_tab_name = f"Logs: {pod_name}"
+            existing_tab_index = None
+            
+            for i, tab_data in enumerate(terminal_panel.terminal_tabs):
+                if tab_data.get('is_logs_tab') and tab_data.get('pod_name') == pod_name:
+                    existing_tab_index = i
+                    break
+            
+            if existing_tab_index is not None:
+                # Switch to existing logs tab and refresh
+                terminal_panel.switch_to_terminal_tab(existing_tab_index)
+                logs_viewer = terminal_panel.terminal_tabs[existing_tab_index].get('logs_viewer')
+                if logs_viewer:
+                    logs_viewer.refresh_logs()
+            else:
+                # Create new enhanced logs tab
+                new_tab_index = self._create_new_enhanced_logs_tab(terminal_panel, logs_tab_name, pod_name, namespace)
+                if new_tab_index is not None:
+                    terminal_panel.switch_to_terminal_tab(new_tab_index)
+            
+        except Exception as e:
+            logging.error(f"Error creating enhanced logs tab for {pod_name}: {e}")
+            self._show_logs_error(f"Error creating logs tab: {str(e)}")
+
+    def _show_logs_error(self, error_message):
+        """Show error message for logs functionality"""
+        try:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "View Logs Error", error_message)
+        except Exception as e:
+            logging.error(f"Error showing logs error message: {e}")
+
+    def _create_new_enhanced_logs_tab(self, terminal_panel, tab_name, pod_name, namespace):
+        """Create a new enhanced logs tab with search and streaming capabilities"""
+        try:
+            from PyQt6.QtWidgets import QLabel, QPushButton, QHBoxLayout, QWidget
+            from PyQt6.QtCore import Qt
+            from PyQt6.QtGui import QFont
+            
+            tab_index = len(terminal_panel.terminal_tabs)
+            
+            # Create tab widget
+            tab_widget = QWidget()
+            tab_widget.setFixedHeight(28)
+            tab_widget.setCursor(Qt.CursorShape.PointingHandCursor)
+            
+            tab_layout = QHBoxLayout(tab_widget)
+            tab_layout.setContentsMargins(8, 0, 8, 0)
+            tab_layout.setSpacing(6)
+            
+            # Create label with enhanced logs icon and name
+            label = QLabel(f"📋 {pod_name}")
+            label.setStyleSheet("""
+                color: #4CAF50;
+                background: transparent;
+                font-size: 12px;
+                font-weight: bold;
+                text-decoration: none;
+                border: none;
+                outline: none;
+            """)
+            
+            # Create close button
+            close_btn = QPushButton("✕")
+            close_btn.setFixedSize(16, 16)
+            close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            close_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: transparent;
+                    color: #9ca3af;
+                    border: none;
+                    font-size: 10px;
+                    font-weight: bold;
+                    padding: 0px;
+                    margin: 0px;
+                }
+                QPushButton:hover {
+                    background-color: #FF4D4D;
+                    color: white;
+                    border-radius: 8px;
+                }
+            """)
+            
+            tab_layout.addWidget(label)
+            tab_layout.addWidget(close_btn)
+            
+            # Create tab button
+            tab_btn = QPushButton()
+            tab_btn.setCheckable(True)
+            tab_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: transparent;
+                    border: none;
+                    border-right: 1px solid #3d3d3d;
+                    border-left: 1px solid #3d3d3d;
+                    border-bottom: 1px solid #3d3d3d;
+                    border-top: 1px solid #3d3d3d;
+                    padding: 0px 35px;
+                    margin: 0px;
+                }
+                QPushButton:hover {
+                    background-color: rgba(76, 175, 80, 0.1);
+                }
+                QPushButton:checked {
+                    background-color: #1E1E1E;
+                    border-bottom: 2px solid #4CAF50;
+                }
+            """)
+            tab_btn.setLayout(tab_layout)
+            
+            # Create tab container
+            tab_container = QWidget()
+            container_layout = QHBoxLayout(tab_container)
+            container_layout.setContentsMargins(0, 0, 0, 0)
+            container_layout.setSpacing(0)
+            container_layout.addWidget(tab_btn)
+            
+            # Connect signals
+            close_btn.clicked.connect(lambda: self._close_enhanced_logs_tab(terminal_panel, tab_index))
+            tab_btn.clicked.connect(lambda: terminal_panel.switch_to_terminal_tab(tab_index))
+            
+            # Add tab to header
+            terminal_panel.unified_header.add_tab(tab_container)
+            
+            # Create enhanced logs viewer widget
+            from UI.TerminalPanel import EnhancedLogsViewer  # Import the enhanced viewer
+            logs_viewer = EnhancedLogsViewer(pod_name, namespace)
+            
+            # Add the logs viewer to terminal stack
+            terminal_panel.stack_layout.addWidget(logs_viewer)
+            logs_viewer.setVisible(False)
+            
+            # Store tab data with enhanced information
+            terminal_data = {
+                'tab_button': tab_btn,
+                'tab_container': tab_container,
+                'content_widget': logs_viewer,  # Use logs_viewer as content
+                'logs_viewer': logs_viewer,     # Direct reference to logs viewer
+                'terminal_widget': None,        # No terminal widget for logs tabs
+                'process': None,                # No process for logs tabs
+                'started': True,                # Always "started" for logs
+                'active': False,
+                'is_logs_tab': True,           # Mark as enhanced logs tab
+                'pod_name': pod_name,
+                'namespace': namespace
+            }
+            terminal_panel.terminal_tabs.append(terminal_data)
+            
+            return tab_index
+            
+        except Exception as e:
+            logging.error(f"Error creating new enhanced logs tab: {e}")
+            return None
+
+    def _close_enhanced_logs_tab(self, terminal_panel, tab_index):
+        """Close an enhanced logs tab and cleanup resources"""
+        try:
+            if tab_index >= len(terminal_panel.terminal_tabs):
+                return
+            
+            terminal_data = terminal_panel.terminal_tabs[tab_index]
+            logs_viewer = terminal_data.get('logs_viewer')
+            
+            # Stop log streaming before closing
+            if logs_viewer and hasattr(logs_viewer, 'stop_log_stream'):
+                logs_viewer.stop_log_stream()
+            
+            # Close the tab using terminal panel's method
+            terminal_panel.close_terminal_tab(tab_index)
+            
+        except Exception as e:
+            logging.error(f"Error closing enhanced logs tab: {e}")
+
+    # Update the terminal panel switch method to handle enhanced logs tabs
+    def switch_to_enhanced_logs_tab(self, tab_index):
+        """Switch to enhanced logs tab - add this to TerminalPanel class"""
+        if tab_index >= len(self.terminal_tabs):
+            return
+        
+        # Hide all content widgets
+        for i, tab_data in enumerate(self.terminal_tabs):
+            content_widget = tab_data.get('content_widget')
+            if content_widget:
+                content_widget.setVisible(i == tab_index)
+            
+            # Update tab button states
+            tab_button = tab_data.get('tab_button')
+            if tab_button:
+                tab_button.setChecked(i == tab_index)
+            
+            tab_data['active'] = i == tab_index
+        
+        # Set focus and update active index
+        self.active_terminal_index = tab_index
+        terminal_data = self.terminal_tabs[tab_index]
+        
+        # Handle different tab types
+        if terminal_data.get('is_logs_tab'):
+            # For logs tabs, focus the logs viewer
+            logs_viewer = terminal_data.get('logs_viewer')
+            if logs_viewer:
+                logs_viewer.setFocus()
+        else:
+            # For regular terminal tabs, focus the terminal widget
+            terminal_widget = terminal_data.get('terminal_widget')
+            if terminal_widget:
+                terminal_widget.setFocus()
+                terminal_widget.ensure_cursor_at_input()
+            
+            # Start process if not started
+            if not terminal_data.get('started', False):
+                self.start_terminal_process(tab_index)
+
+    # Enhanced close method for terminal panel
+    def close_enhanced_terminal_tab(self, tab_index):
+        """Enhanced close method that handles both regular and logs tabs"""
+        if tab_index >= len(self.terminal_tabs):
+            return
+        
+        if len(self.terminal_tabs) <= 1:
+            self.hide_terminal()
+            return
+
+        terminal_data = self.terminal_tabs[tab_index]
+        
+        # Handle enhanced logs tab cleanup
+        if terminal_data.get('is_logs_tab'):
+            logs_viewer = terminal_data.get('logs_viewer')
+            if logs_viewer and hasattr(logs_viewer, 'stop_log_stream'):
+                logs_viewer.stop_log_stream()
+        else:
+            # Handle regular terminal tab cleanup
+            process = terminal_data.get('process')
+            if process and process.state() == QProcess.ProcessState.Running:
+                try:
+                    process.terminate()
+                    if not process.waitForFinished(500):
+                        process.kill()
+                except Exception as e:
+                    print(f"Error terminating process: {e}")
+
+        # Remove tab from UI
+        tab_container = terminal_data.get('tab_container')
+        if tab_container:
+            self.unified_header.remove_tab(tab_container)
+        
+        content_widget = terminal_data.get('content_widget')
+        if content_widget:
+            self.stack_layout.removeWidget(content_widget)
+            content_widget.deleteLater()
+
+        # Remove from tabs list
+        self.terminal_tabs.pop(tab_index)
+        self.active_terminal_index = min(max(0, self.active_terminal_index), len(self.terminal_tabs) - 1)
+
+        # Update remaining tabs' close button connections
+        for i, tab_data in enumerate(self.terminal_tabs):
+            tab_container = tab_data.get('tab_container')
+            if tab_container:
+                for child in tab_container.findChildren(QPushButton):
+                    if child.text() == "✕":
+                        try:
+                            child.clicked.disconnect()
+                        except TypeError:
+                            pass
+                        child.clicked.connect(lambda checked=False, idx=i: self.close_terminal_tab(idx))
+
+        # Switch to active tab if tabs remain
+        if self.terminal_tabs:
+            self.switch_to_terminal_tab(self.active_terminal_index)
+        
+        self.renumber_tabs()
+
+    def _handle_select_all(self, state):
+        """Handle select-all checkbox state changes."""
+        super()._handle_select_all(state)
+        
+        # Update selected_items set based on state
+        self.selected_items.clear()
+        
+        if state == Qt.CheckState.Checked.value:
+            # Add all items to selected set
+            for resource in self.resources:
+                self.selected_items.add((resource["name"], resource.get("namespace", "")))
+                 
 
     def delete_selected_resources(self):
         if hasattr(self, 'delete_thread') and self.delete_thread and self.delete_thread.isRunning():

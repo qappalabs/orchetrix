@@ -563,7 +563,7 @@ class ChartsPage(BaseResourcePage):
         # Make Description column stretch
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
     
-    def load_data(self, load_more=False):
+    def load_data(self):
         """Load initial chart data from ArtifactHub API"""
         if hasattr(self, 'is_loading') and self.is_loading:
             return
@@ -618,18 +618,6 @@ class ChartsPage(BaseResourcePage):
         self.chart_thread.data_loaded.connect(self.on_data_loaded)
         self.chart_thread.error_occurred.connect(self.on_load_error)
         self.chart_thread.start()
-
-    def _handle_scroll(self, value):
-        """
-        Override BaseResourcePage._handle_scroll to use ChartsPage's
-        own scroll handling mechanism (check_scroll_position).
-        """
-        # This method is intentionally left to let check_scroll_position handle it,
-        # or we can directly call it if needed, but check_scroll_position
-        # is already connected to scrollbar.valueChanged.
-        # The key is to prevent BaseResourcePage's _handle_scroll from running its logic.
-        pass # Or explicitly call self.check_scroll_position(value) if it's not redundant
-
 
     def load_more_data(self):
         """Load more chart data when user scrolls to bottom"""

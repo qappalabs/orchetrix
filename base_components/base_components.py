@@ -396,11 +396,18 @@ class BaseTablePage(QWidget):
         menu = QMenu(button)
         menu.setStyleSheet(STYLES["menu"])
         
+        actions  = []
+        # Only show "View Logs" for pods
+        if self.resource_type == "pods":
+            actions.append({"text": "View Logs", "icon": "icons/logs.png", "dangerous": False})
+            actions.append({"text": "SSH", "icon": "icons/terminal.png", "dangerous": False})
+        
         # Add default actions
-        actions = [
+        actions.extend([
             {"text": "Edit", "icon": "icons/edit.png", "dangerous": False},
             {"text": "Delete", "icon": "icons/delete.png", "dangerous": True}
-        ]
+        ])
+        
         
         # Add actions to menu
         for action_info in actions:
