@@ -2077,3 +2077,4 @@ class BaseResourcePage(BaseTablePage):
         else:
             # Show error message
             QMessageBox.critical(self, "Deletion Failed", message)
+            
