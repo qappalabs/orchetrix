@@ -146,6 +146,65 @@ class AppStyles:
         }}
     """
 
+    UNIFIED_SCROLL_BAR_STYLE = """
+        QScrollBar:vertical {
+            background-color: transparent;
+            width: 12px;
+            margin: 0px;
+            border-radius: 4px;
+        }
+        QScrollBar::handle:vertical {
+            background-color: #6B7280;
+            min-height: 30px;
+            border-radius: 4px;
+            margin: 2px;
+        }
+        QScrollBar::handle:vertical:hover {
+            background-color: #9CA3AF;
+        }
+        QScrollBar::handle:vertical:pressed {
+            background-color: #4B5563;
+        }
+        QScrollBar::add-line:vertical,
+        QScrollBar::sub-line:vertical {
+            height: 0px;
+            width: 0px;
+            background: none;
+        }
+        QScrollBar::add-page:vertical,
+        QScrollBar::sub-page:vertical {
+            background: none;
+        }
+        QScrollBar:horizontal {
+            background-color: transparent;
+            height: 12px;
+            margin: 0px;
+            border-radius: 4px;
+        }
+        QScrollBar::handle:horizontal {
+            background-color: #6B7280;
+            min-width: 30px;
+            border-radius: 4px;
+            margin: 2px;
+        }
+        QScrollBar::handle:horizontal:hover {
+            background-color: #9CA3AF;
+        }
+        QScrollBar::handle:horizontal:pressed {
+            background-color: #4B5563;
+        }
+        QScrollBar::add-line:horizontal,
+        QScrollBar::sub-line:horizontal {
+            height: 0px;
+            width: 0px;
+            background: none;
+        }
+        QScrollBar::add-page:horizontal,
+        QScrollBar::sub-page:horizontal {
+            background: none;
+        }
+    """
+
     # Preferences-specific styles
     PREFERENCES_MAIN_STYLE = f"""
         QWidget {{
@@ -383,12 +442,21 @@ class AppStyles:
             font-size: 12px;
             text-align: center;
         }}
+        {UNIFIED_SCROLL_BAR_STYLE}
     """
 
     FOCUS_STYLE = f"""
-        *:focus {{
+        QLineEdit:focus, QTextEdit:focus, QComboBox:focus, QPushButton:focus {{
             outline: 1px solid {AppColors.ACCENT_BLUE}99;
             outline-offset: -1px;
+        }}
+        QLabel, QTabWidget, QTabBar, QTabBar::tab {{
+            outline: none !important;
+            border: none !important;
+        }}
+        QTabBar::tab:focus, QTabBar::tab:selected:focus {{
+            outline: none !important;
+            border: none !important;
         }}
     """
 
@@ -547,30 +615,7 @@ class AppStyles:
         QHeaderView::section:hover {{
             background-color: {AppColors.BG_MEDIUM};
         }}
-        QScrollBar:vertical {{
-            background-color: {AppColors.HEADER_BG};
-            width: 8px;
-            margin: 0px;
-        }}
-        QScrollBar::handle:vertical {{
-            background-color: rgba(160, 160, 160, 150);
-            border-radius: 4px;
-        }}
-        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
-            height: 0px;
-        }}
-        QScrollBar:horizontal {{
-            background-color: {AppColors.HEADER_BG};
-            height: 8px;
-            margin: 0px;
-        }}
-        QScrollBar::handle:horizontal {{
-            background-color: rgba(160, 160, 160, 150);
-            border-radius: 4px;
-        }}
-        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
-            width: 0px;
-        }}
+        {UNIFIED_SCROLL_BAR_STYLE}
     """
 
     STATUS_SCROLL_STYLE = f"""
@@ -578,62 +623,7 @@ class AppStyles:
             background-color: transparent;
             border: none;
         }}
-        QScrollBar:vertical {{
-            background-color: transparent;
-            width: 12px;
-            margin: 0px;
-            border-radius: 4px;
-        }}
-        QScrollBar::handle:vertical {{
-            background-color: #6B7280;
-            min-height: 30px;
-            border-radius: 4px;
-            margin: 2px;
-        }}
-        QScrollBar::handle:vertical:hover {{
-            background-color: #9CA3AF;
-        }}
-        QScrollBar::handle:vertical:pressed {{
-            background-color: #4B5563;
-        }}
-        QScrollBar::add-line:vertical,
-        QScrollBar::sub-line:vertical {{
-            height: 0px;
-            width: 0px;
-            background: none;
-        }}
-        QScrollBar::add-page:vertical,
-        QScrollBar::sub-page:vertical {{
-            background: none;
-        }}
-        QScrollBar:horizontal {{
-            background-color: transparent;
-            height: 12px;
-            margin: 0px;
-            border-radius: 4px;
-        }}
-        QScrollBar::handle:horizontal {{
-            background-color: #6B7280;
-            min-width: 30px;
-            border-radius: 4px;
-            margin: 2px;
-        }}
-        QScrollBar::handle:horizontal:hover {{
-            background-color: #9CA3AF;
-        }}
-        QScrollBar::handle:horizontal:pressed {{
-            background-color: #4B5563;
-        }}
-        QScrollBar::add-line:horizontal,
-        QScrollBar::sub-line:horizontal {{
-            height: 0px;
-            width: 0px;
-            background: none;
-        }}
-        QScrollBar::add-page:horizontal,
-        QScrollBar::sub-page:horizontal {{
-            background: none;
-        }}
+        {UNIFIED_SCROLL_BAR_STYLE}
     """
 
     # Other existing styles
@@ -760,6 +750,7 @@ class AppStyles:
             border-image: none;
             outline: none;
         }}
+        {UNIFIED_SCROLL_BAR_STYLE}
     """
 
     HEADER_STYLE = f"""
@@ -1064,6 +1055,7 @@ class AppStyles:
             font-size: 12px;
             text-align: center;
         }}
+        {UNIFIED_SCROLL_BAR_STYLE}
     """
 
     RELEASES_NAME_STYLE = f"""
@@ -1136,8 +1128,12 @@ class AppStyles:
         }}
     """
 
-    # Terminal-specific styles
-    TERMINAL_OUTPUT_STYLE = f"""
+    # ================================
+    # TERMINAL-SPECIFIC STYLES
+    # ================================
+
+    # Terminal unified widget style
+    TERMINAL_TEXTEDIT = f"""
         QTextEdit {{
             background-color: #1E1E1E;
             color: #E0E0E0;
@@ -1146,22 +1142,134 @@ class AppStyles:
             selection-color: #E0E0E0;
             padding: 8px;
         }}
-        QScrollBar:vertical {{
-            border: none;
-            background: #2D2D2D;
-            width: 10px;
-            margin: 0px;
-        }}
-        QScrollBar::handle:vertical {{
-            background: #555555;
-            min-height: 20px;
-            border-radius: 5px;
-        }}
-        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
-            height: 0px;
+        {UNIFIED_SCROLL_BAR_STYLE}
+    """
+
+    # Terminal wrapper style
+    TERMINAL_WRAPPER = f"""
+        QWidget#terminal_wrapper {{
+            background-color: {AppColors.BG_DARKER};
+            border: 1px solid {AppColors.BORDER_COLOR};
+            border-bottom: none;
         }}
     """
 
+    # Terminal header content style
+    TERMINAL_HEADER_CONTENT = f"""
+        background-color: {AppColors.BG_DARKER};
+        border-bottom: 1px solid {AppColors.BORDER_COLOR};
+    """
+
+    # Terminal tab label style
+    TERMINAL_TAB_LABEL = f"""
+        color: {AppColors.TEXT_SECONDARY};
+        background: transparent;
+        font-size: 12px;
+        text-decoration: none;
+        border: none;
+        outline: none;
+    """
+
+    # Terminal tab close button style
+    TERMINAL_TAB_CLOSE_BUTTON = f"""
+        QPushButton {{
+            background-color: transparent;
+            color: {AppColors.TEXT_SECONDARY};
+            border: none;
+            font-size: 10px;
+            font-weight: bold;
+            padding: 0px;
+            margin: 0px;
+        }}
+        QPushButton:hover {{
+            background-color: #FF4D4D;
+            color: white;
+            border-radius: 8px;
+        }}
+    """
+
+    # Terminal tab button style
+    TERMINAL_TAB_BUTTON = f"""
+        QPushButton {{
+            background-color: transparent;
+            border: none;
+            border-right: 1px solid {AppColors.BORDER_COLOR};
+            border-left: 1px solid {AppColors.BORDER_COLOR};
+            border-bottom: 1px solid {AppColors.BORDER_COLOR};
+            border-top: 1px solid {AppColors.BORDER_COLOR};
+            padding: 0px 35px;
+            margin: 0px;
+        }}
+        QPushButton:hover {{
+            background-color: {AppColors.HOVER_BG};
+        }}
+        QPushButton:checked {{
+            background-color: #1E1E1E;
+            border-bottom: 2px solid {AppColors.ACCENT_BLUE};
+        }}
+    """
+
+    # Terminal header button style
+    TERMINAL_HEADER_BUTTON = f"""
+        QToolButton {{
+            background-color: transparent;
+            color: {AppColors.TEXT_SECONDARY};
+            border: none;
+            font-size: 12px;
+            padding: 4px;
+        }}
+        QToolButton:hover {{
+            background-color: {AppColors.HOVER_BG};
+            color: #ffffff;
+            border-radius: 4px;
+        }}
+    """
+
+    # Terminal resize handle style
+    TERMINAL_RESIZE_HANDLE = """
+        background-color: rgba(80, 80, 80, 0.3);
+        border: none;
+    """
+
+    # Terminal shell dropdown style
+    TERMINAL_SHELL_DROPDOWN = f"""
+        QComboBox {{
+            background-color: {AppColors.BG_DARKER};
+            color: {AppColors.TEXT_SECONDARY};
+            border: 1px solid {AppColors.BORDER_COLOR};
+            padding: 2px 4px;
+            font-size: 12px;
+        }}
+        QComboBox:hover {{
+            background-color: {AppColors.HOVER_BG};
+        }}
+        QComboBox::drop-down {{
+            border: none;
+            width: 20px;
+        }}
+        QComboBox::down-arrow {{
+            image: url(icons/down_btn.svg);
+            width: 12px;
+            height: 12px;
+        }}
+        QComboBox QAbstractItemView {{
+            background-color: {AppColors.BG_DARKER};
+            color: {AppColors.TEXT_SECONDARY};
+            selection-background-color: {AppColors.HOVER_BG};
+            border: 1px solid {AppColors.BORDER_COLOR};
+        }}
+        QComboBox QAbstractItemView::item {{
+            cursor: pointer;
+            padding: 6px 8px;
+        }}
+        QComboBox QAbstractItemView::item:hover {{
+            cursor: pointer;
+        }}
+    """
+
+    # Deprecated terminal styles - kept for backwards compatibility
+    # (These can be removed once all references are updated)
+    TERMINAL_OUTPUT_STYLE = TERMINAL_TEXTEDIT  # Alias for backwards compatibility
     TERMINAL_INPUT_STYLE = f"""
         QTextEdit {{
             background-color: #252525;
@@ -1173,20 +1281,9 @@ class AppStyles:
         }}
     """
 
-    TERMINAL_WRAPPER_STYLE = f"""
-        QWidget#terminal_wrapper {{
-            background-color: {AppColors.BG_DARKER};
-            border: 1px solid {AppColors.BORDER_COLOR};
-            border-bottom: none;
-        }}
-    """
+    TERMINAL_WRAPPER_STYLE = TERMINAL_WRAPPER  # Alias for backwards compatibility
 
-    TERMINAL_HEADER_STYLE = f"""
-        QWidget {{
-            background-color: {AppColors.BG_DARKER};
-            border-bottom: 1px solid {AppColors.BORDER_COLOR};
-        }}
-    """
+    TERMINAL_HEADER_STYLE = TERMINAL_HEADER_CONTENT  # Alias for backwards compatibility
 
     TERMINAL_HEADER_TITLE_STYLE = f"""
         QLabel {{
@@ -1196,20 +1293,7 @@ class AppStyles:
         }}
     """
 
-    TERMINAL_HEADER_BUTTON_STYLE = f"""
-        QToolButton {{
-            background-color: transparent;
-            color: {AppColors.TEXT_SECONDARY};
-            border: none;
-            font-size: 12px;
-            padding: 4px;
-        }}
-        QToolButton:hover {{
-            background-color: {AppColors.HOVER_BG};
-            color: {AppColors.TEXT_LIGHT};
-            border-radius: 4px;
-        }}
-    """
+    TERMINAL_HEADER_BUTTON_STYLE = TERMINAL_HEADER_BUTTON  # Alias for backwards compatibility
 
     TERMINAL_TABS_CONTAINER_STYLE = f"""
         QWidget {{
@@ -1235,47 +1319,11 @@ class AppStyles:
         }}
     """
 
-    TERMINAL_TAB_LABEL_STYLE = f"""
-        QLabel {{
-            color: {AppColors.TEXT_SECONDARY};
-            background: transparent;
-            font-size: 12px;
-        }}
-    """
+    TERMINAL_TAB_LABEL_STYLE = TERMINAL_TAB_LABEL  # Alias for backwards compatibility
 
-    TERMINAL_TAB_CLOSE_BUTTON_STYLE = f"""
-        QPushButton {{
-            background-color: transparent;
-            color: {AppColors.TEXT_SECONDARY};
-            border: none;
-            font-size: 10px;
-            font-weight: bold;
-            padding: 0px;
-            margin: 0px;
-        }}
-        QPushButton:hover {{
-            background-color: #FF4D4D;
-            color: white;
-            border-radius: 8px;
-        }}
-    """
+    TERMINAL_TAB_CLOSE_BUTTON_STYLE = TERMINAL_TAB_CLOSE_BUTTON  # Alias for backwards compatibility
 
-    TERMINAL_TAB_BUTTON_STYLE = f"""
-        QPushButton {{
-            background-color: transparent;
-            border: none;
-            border-right: 1px solid {AppColors.BORDER_COLOR};
-            padding: 0px 35px;
-            margin: 0px;
-        }}
-        QPushButton:hover {{
-            background-color: {AppColors.HOVER_BG};
-        }}
-        QPushButton:checked {{
-            background-color: #1E1E1E;
-            border-bottom: 2px solid {AppColors.ACCENT_BLUE};
-        }}
-    """
+    TERMINAL_TAB_BUTTON_STYLE = TERMINAL_TAB_BUTTON  # Alias for backwards compatibility
 
     # Splash Screen Styles
     SPLASH_CENTER_CONTAINER_STYLE = """
@@ -1673,62 +1721,7 @@ class AppStyles:
             background-color: {AppColors.BG_SIDEBAR};
             border: none;
         }}
-        QScrollBar:vertical {{
-            background-color: transparent;
-            width: 12px;
-            margin: 0px;
-            border-radius: 4px;
-        }}
-        QScrollBar::handle:vertical {{
-            background-color: #6B7280;
-            min-height: 30px;
-            border-radius: 4px;
-            margin: 2px;
-        }}
-        QScrollBar::handle:vertical:hover {{
-            background-color: #9CA3AF;
-        }}
-        QScrollBar::handle:vertical:pressed {{
-            background-color: #4B5563;
-        }}
-        QScrollBar::add-line:vertical,
-        QScrollBar::sub-line:vertical {{
-            height: 0px;
-            width: 0px;
-            background: none;
-        }}
-        QScrollBar::add-page:vertical,
-        QScrollBar::sub-page:vertical {{
-            background: none;
-        }}
-        QScrollBar:horizontal {{
-            background-color: transparent;
-            height: 12px;
-            margin: 0px;
-            border-radius: 4px;
-        }}
-        QScrollBar::handle:horizontal {{
-            background-color: #6B7280;
-            min-width: 30px;
-            border-radius: 4px;
-            margin: 2px;
-        }}
-        QScrollBar::handle:horizontal:hover {{
-            background-color: #9CA3AF;
-        }}
-        QScrollBar::handle:horizontal:pressed {{
-            background-color: #4B5563;
-        }}
-        QScrollBar::add-line:horizontal,
-        QScrollBar::sub-line:horizontal {{
-            height: 0px;
-            width: 0px;
-            background: none;
-        }}
-        QScrollBar::add-page:horizontal,
-        QScrollBar::sub-page:horizontal {{
-            background: none;
-        }}
+        {UNIFIED_SCROLL_BAR_STYLE}
     """
 
     DETAIL_PAGE_EVENTS_LIST_STYLE = f"""
@@ -1744,34 +1737,7 @@ class AppStyles:
         QListWidget::item:hover {{
             background-color: {AppColors.HOVER_BG_DARKER};
         }}
-        QScrollBar:vertical {{
-            background-color: transparent;
-            width: 12px;
-            margin: 0px;
-            border-radius: 4px;
-        }}
-        QScrollBar::handle:vertical {{
-            background-color: #6B7280;
-            min-height: 30px;
-            border-radius: 4px;
-            margin: 2px;
-        }}
-        QScrollBar::handle:vertical:hover {{
-            background-color: #9CA3AF;
-        }}
-        QScrollBar::handle:vertical:pressed {{
-            background-color: #4B5563;
-        }}
-        QScrollBar::add-line:vertical,
-        QScrollBar::sub-line:vertical {{
-            height: 0px;
-            width: 0px;
-            background: none;
-        }}
-        QScrollBar::add-page:vertical,
-        QScrollBar::sub-page:vertical {{
-            background: none;
-        }}
+        {UNIFIED_SCROLL_BAR_STYLE}
     """
 
     DETAIL_PAGE_EVENT_ITEM_MARGIN = 5
@@ -1852,62 +1818,7 @@ class AppStyles:
             border: none;
             outline: none;
         }}
-        QScrollBar:vertical {{
-            background-color: transparent;
-            width: 12px;
-            margin: 0px;
-            border-radius: 4px;
-        }}
-        QScrollBar::handle:vertical {{
-            background-color: #6B7280;
-            min-height: 30px;
-            border-radius: 4px;
-            margin: 2px;
-        }}
-        QScrollBar::handle:vertical:hover {{
-            background-color: #9CA3AF;
-        }}
-        QScrollBar::handle:vertical:pressed {{
-            background-color: #4B5563;
-        }}
-        QScrollBar::add-line:vertical,
-        QScrollBar::sub-line:vertical {{
-            height: 0px;
-            width: 0px;
-            background: none;
-        }}
-        QScrollBar::add-page:vertical,
-        QScrollBar::sub-page:vertical {{
-            background: none;
-        }}
-        QScrollBar:horizontal {{
-            background-color: transparent;
-            height: 12px;
-            margin: 0px;
-            border-radius: 4px;
-        }}
-        QScrollBar::handle:horizontal {{
-            background-color: #6B7280;
-            min-width: 30px;
-            border-radius: 4px;
-            margin: 2px;
-        }}
-        QScrollBar::handle:horizontal:hover {{
-            background-color: #9CA3AF;
-        }}
-        QScrollBar::handle:horizontal:pressed {{
-            background-color: #4B5563;
-        }}
-        QScrollBar::add-line:horizontal,
-        QScrollBar::sub-line:horizontal {{
-            height: 0px;
-            width: 0px;
-            background: none;
-        }}
-        QScrollBar::add-page:horizontal,
-        QScrollBar::sub-page:horizontal {{
-            background: none;
-        }}
+        {UNIFIED_SCROLL_BAR_STYLE}
     """
 
     DETAIL_PAGE_DETAILS_STYLE = f"""
@@ -1916,60 +1827,97 @@ class AppStyles:
             border: none;
             outline: none;
         }}
-        QScrollBar:vertical {{
-            background-color: transparent;
-            width: 12px;
-            margin: 0px;
-            border-radius: 4px;
-        }}
-        QScrollBar::handle:vertical {{
-            background-color: #6B7280;
-            min-height: 30px;
-            border-radius: 4px;
-            margin: 2px;
-        }}
-        QScrollBar::handle:vertical:hover {{
-            background-color: #9CA3AF;
-        }}
-        QScrollBar::handle:vertical:pressed {{
-            background-color: #4B5563;
-        }}
-        QScrollBar::add-line:vertical,
-        QScrollBar::sub-line:vertical {{
-            height: 0px;
-            width: 0px;
-            background: none;
-        }}
-        QScrollBar::add-page:vertical,
-        QScrollBar::sub-page:vertical {{
-            background: none;
-        }}
-        QScrollBar:horizontal {{
-            background-color: transparent;
-            height: 12px;
-            margin: 0px;
-            border-radius: 4px;
-        }}
-        QScrollBar::handle:horizontal {{
-            background-color: #6B7280;
-            min-width: 30px;
-            border-radius: 4px;
-            margin: 2px;
-        }}
-        QScrollBar::handle:horizontal:hover {{
-            background-color: #9CA3AF;
-        }}
-        QScrollBar::handle:horizontal:pressed {{
-            background-color: #4B5563;
-        }}
-        QScrollBar::add-line:horizontal,
-        QScrollBar::sub-line:horizontal {{
-            height: 0px;
-            width: 0px;
-            background: none;
-        }}
-        QScrollBar::add-page:horizontal,
-        QScrollBar::sub-page:horizontal {{
-            background: none;
-        }}
+        {UNIFIED_SCROLL_BAR_STYLE}
     """
+
+class EnhancedStyles:
+    # Typography hierarchy
+    SECTION_HEADER = {
+        'font_size': '16px',
+        'font_weight': 'bold',
+        'color': '#E8EAED',
+        'letter_spacing': '0.5px',
+        'text_transform': 'uppercase',
+        'margin_bottom': '12px'
+    }
+    FIELD_LABEL = {
+        'font_size': '13px',
+        'font_weight': '500',
+        'color': '#8AB4F8'
+    }
+    FIELD_VALUE = {
+        'font_size': '13px',
+        'font_weight': 'normal',
+        'color': '#DADCE0',
+        'line_height': '1.5'
+    }
+    PRIMARY_TEXT = {
+        'font_size': '20px',
+        'font_weight': 'bold',
+        'color': '#FFFFFF'
+    }
+    SECONDARY_TEXT = {
+        'font_size': '14px',
+        'font_weight': 'normal',
+        'color': '#9AA0A6'
+    }
+    # Spacing system
+    SECTION_GAP = 24
+    SUBSECTION_GAP = 16
+    FIELD_GAP = 8
+    CONTENT_PADDING = 20
+
+    @staticmethod
+    def get_section_header_style():
+        return f"""
+            QLabel {{
+                font-size: {EnhancedStyles.SECTION_HEADER['font_size']};
+                font-weight: {EnhancedStyles.SECTION_HEADER['font_weight']};
+                color: {EnhancedStyles.SECTION_HEADER['color']};
+                letter-spacing: {EnhancedStyles.SECTION_HEADER['letter_spacing']};
+                margin-bottom: {EnhancedStyles.SECTION_HEADER['margin_bottom']};
+            }}
+        """
+
+    @staticmethod
+    def get_field_label_style():
+        return f"""
+            QLabel {{
+                font-size: {EnhancedStyles.FIELD_LABEL['font_size']};
+                font-weight: {EnhancedStyles.FIELD_LABEL['font_weight']};
+                color: {EnhancedStyles.FIELD_LABEL['color']};
+            }}
+        """
+
+    @staticmethod
+    def get_field_value_style():
+        return f"""
+            QLabel {{
+                font-size: {EnhancedStyles.FIELD_VALUE['font_size']};
+                font-weight: {EnhancedStyles.FIELD_VALUE['font_weight']};
+                color: {EnhancedStyles.FIELD_VALUE['color']};
+                line-height: {EnhancedStyles.FIELD_VALUE['line_height']};
+            }}
+        """
+
+    @staticmethod
+    def get_primary_text_style():
+        return f"""
+            QLabel {{
+                font-size: {EnhancedStyles.PRIMARY_TEXT['font_size']};
+                font-weight: {EnhancedStyles.PRIMARY_TEXT['font_weight']};
+                color: {EnhancedStyles.PRIMARY_TEXT['color']};
+                padding: 4px 0px;
+            }}
+        """
+
+    @staticmethod
+    def get_secondary_text_style():
+        return f"""
+            QLabel {{
+                font-size: {EnhancedStyles.SECONDARY_TEXT['font_size']};
+                font-weight: {EnhancedStyles.SECONDARY_TEXT['font_weight']};
+                color: {EnhancedStyles.SECONDARY_TEXT['color']};
+                padding: 2px 0px;
+            }}
+        """

@@ -1,8 +1,10 @@
 import os
 import sys
+import platform
+import shutil
 from PyQt6.QtWidgets import (
-    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton, QLabel,
-    QToolButton, QSizePolicy, QFileDialog, QMenu
+    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QToolButton, QSizePolicy,
+    QFileDialog, QMenu, QLabel, QPushButton, QComboBox
 )
 from PyQt6.QtGui import QAction, QColor, QTextCursor, QFont, QIcon, QTextCharFormat, QTextDocument
 from PyQt6.QtCore import Qt, QProcess, QTimer, pyqtSignal, QSize, QEvent, QPropertyAnimation, QEasingCurve, QPoint
@@ -11,105 +13,6 @@ from enum import Enum
 
 from Styles import AppColors, AppStyles
 from Icons import Icons
-
-class StyleConstants:
-    """Centralized stylesheet constants"""
-    TERMINAL_TEXTEDIT = f"""
-        QTextEdit {{
-            background-color: #1E1E1E;
-            color: #E0E0E0;
-            border: none;
-            selection-background-color: #264F78;
-            selection-color: #E0E0E0;
-            padding: 8px;
-        }}
-        QScrollBar:vertical {{
-            border: none;
-            background: #2D2D2D;
-            width: 10px;
-            margin: 0px;
-        }}
-        QScrollBar::handle:vertical {{
-            background: #555555;
-            min-height: 20px;
-            border-radius: 5px;
-        }}
-        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
-            height: 0px;
-        }}
-    """
-    TERMINAL_WRAPPER = f"""
-        QWidget#terminal_wrapper {{
-            background-color: {AppColors.BG_DARKER};
-            border: 1px solid {AppColors.BORDER_COLOR};
-            border-bottom: none;
-        }}
-    """
-    HEADER_CONTENT = f"""
-        background-color: {AppColors.BG_DARKER};
-        border-bottom: 1px solid {AppColors.BORDER_COLOR};
-    """
-    TAB_LABEL = f"""
-        color: {AppColors.TEXT_SECONDARY};
-        background: transparent;
-        font-size: 12px;
-        text-decoration: none;
-        border: none;
-        outline: none;
-    """
-    TAB_CLOSE_BUTTON = f"""
-        QPushButton {{
-            background-color: transparent;
-            color: {AppColors.TEXT_SECONDARY};
-            border: none;
-            font-size: 10px;
-            font-weight: bold;
-            padding: 0px;
-            margin: 0px;
-        }}
-        QPushButton:hover {{
-            background-color: #FF4D4D;
-            color: white;
-            border-radius: 8px;
-        }}
-    """
-    TAB_BUTTON = f"""
-        QPushButton {{
-            background-color: transparent;
-            border: none;
-            border-right: 1px solid {AppColors.BORDER_COLOR};
-            border-left: 1px solid {AppColors.BORDER_COLOR};
-            border-bottom: 1px solid {AppColors.BORDER_COLOR};
-            border-top: 1px solid {AppColors.BORDER_COLOR};
-            padding: 0px 35px;
-            margin: 0px;
-        }}
-        QPushButton:hover {{
-            background-color: {AppColors.HOVER_BG};
-        }}
-        QPushButton:checked {{
-            background-color: #1E1E1E;
-            border-bottom: 2px solid {AppColors.ACCENT_BLUE};
-        }}
-    """
-    HEADER_BUTTON = f"""
-        QToolButton {{
-            background-color: transparent;
-            color: {AppColors.TEXT_SECONDARY};
-            border: none;
-            font-size: 12px;
-            padding: 4px;
-        }}
-        QToolButton:hover {{
-            background-color: {AppColors.HOVER_BG};
-            color: #ffffff;
-            border-radius: 4px;
-        }}
-    """
-    RESIZE_HANDLE = """
-        background-color: rgba(80, 80, 80, 0.3);
-        border: none;
-    """
 
 class CommandConstants(Enum):
     CLEAR = "clear"
@@ -132,9 +35,9 @@ class UnifiedTerminalWidget(QTextEdit):
         self.edit_file_path = None
         self.edit_start_pos = 0
         self.edit_end_pos = 0
-        self.font_size = 9  # Changed from 12 to 9 - default terminal font size
-        self.font_family = "Consolas"
-        self.copy_paste_enabled = False  # For copy-paste toggle
+        self.font_size = 9
+        self.font_family = "Monospace"
+        self.copy_paste_enabled = False
         self.setup_ui()
         self.update_prompt_with_working_directory()
         self.append_prompt()
@@ -143,19 +46,17 @@ class UnifiedTerminalWidget(QTextEdit):
     def setup_ui(self):
         self.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
         self.setFont(QFont(self.font_family, self.font_size))
-        self.setStyleSheet(StyleConstants.TERMINAL_TEXTEDIT)
+        self.setStyleSheet(AppStyles.TERMINAL_TEXTEDIT)
         self.setAcceptRichText(False)
 
     def __del__(self):
         self.is_valid = False
 
     def set_copy_paste_enabled(self, enabled):
-        """Enable or disable copy-paste functionality."""
         self.copy_paste_enabled = enabled
         print(f"UnifiedTerminalWidget.set_copy_paste_enabled: copy_paste_enabled={enabled}")
 
     def set_font(self, font_family, font_size=None):
-        """Set the font family and size for the terminal"""
         print(f"UnifiedTerminalWidget.set_font: font_family={font_family}, font_size={font_size}")
         self.font_family = font_family
         if font_size is not None:
@@ -165,7 +66,6 @@ class UnifiedTerminalWidget(QTextEdit):
         new_font = QFont(self.font_family, self.font_size)
         self.setFont(new_font)
 
-        # Preserve current content and cursor position
         current_text = self.toPlainText()
         cursor_pos = self.textCursor().position()
         scroll_pos = self.verticalScrollBar().value()
@@ -188,14 +88,12 @@ class UnifiedTerminalWidget(QTextEdit):
         print(f"Font updated: {self.font().family()}, size {self.font().pointSize()}")
 
     def update_prompt_with_working_directory(self):
-        """Update prompt with current working directory"""
         terminal_panel = self.parent()
         while terminal_panel and not isinstance(terminal_panel, TerminalPanel):
             terminal_panel = terminal_panel.parent()
         self.current_prompt = f"PS {terminal_panel.working_directory} > " if terminal_panel and hasattr(terminal_panel, 'working_directory') else "PS > "
 
     def append_output(self, text, color=None):
-        """Append text to terminal with optional color"""
         if not self.is_valid:
             return
         try:
@@ -214,13 +112,11 @@ class UnifiedTerminalWidget(QTextEdit):
             self.is_valid = False
 
     def append_prompt(self):
-        """Append new prompt"""
         self.update_prompt_with_working_directory()
         self.append_output(self.current_prompt)
         self.input_position = self.textCursor().position()
 
     def clear_output(self):
-        """Clear terminal output and reset state"""
         if not self.is_valid:
             return
         try:
@@ -247,20 +143,18 @@ class UnifiedTerminalWidget(QTextEdit):
             self.is_valid = False
 
     def ensure_cursor_at_input(self):
-        """Position cursor at input area"""
         if not self.is_valid:
             return
         try:
             cursor = self.textCursor()
             cursor.setPosition(self.edit_start_pos if self.edit_mode and cursor.position() < self.edit_start_pos else
-                              self.edit_end_pos if self.edit_mode and cursor.position() > self.edit_end_pos else
-                              self.input_position)
+                               self.edit_end_pos if self.edit_mode and cursor.position() > self.edit_end_pos else
+                               self.input_position)
             self.setTextCursor(cursor)
         except RuntimeError:
             self.is_valid = False
 
     def contextMenuEvent(self, event):
-        """Customize context menu to respect copy_paste_enabled and edit_mode"""
         print(f"UnifiedTerminalWidget.contextMenuEvent: copy_paste_enabled={self.copy_paste_enabled}, edit_mode={self.edit_mode}")
         menu = QMenu(self)
 
@@ -285,7 +179,6 @@ class UnifiedTerminalWidget(QTextEdit):
         print("UnifiedTerminalWidget: Context menu executed")
 
     def mousePressEvent(self, event):
-        """Handle mouse press events for copy-paste and focus"""
         print(f"UnifiedTerminalWidget.mousePressEvent: copy_paste_enabled={self.copy_paste_enabled}, button={event.button()}, edit_mode={self.edit_mode}")
         self.setFocus()
         if event.button() == Qt.MouseButton.RightButton:
@@ -312,7 +205,6 @@ class UnifiedTerminalWidget(QTextEdit):
 
     def mouseReleaseEvent(self, event):
         if self.copy_paste_enabled and event.button() == Qt.MouseButton.LeftButton:
-            # Copy on selection
             cursor = self.textCursor()
             if cursor.hasSelection():
                 clipboard = QApplication.clipboard()
@@ -324,7 +216,6 @@ class UnifiedTerminalWidget(QTextEdit):
         event.accept()
 
     def keyPressEvent(self, event):
-        """Handle key press events"""
         cursor = self.textCursor()
         cursor_pos = cursor.position()
         key = event.key()
@@ -387,7 +278,6 @@ class UnifiedTerminalWidget(QTextEdit):
         super().keyPressEvent(event)
 
     def _handle_edit_mode_keys(self, event, cursor, cursor_pos):
-        """Handle key events in edit mode"""
         key = event.key()
         if cursor_pos < self.edit_start_pos or cursor_pos > self.edit_end_pos:
             if key not in {Qt.Key.Key_Home, Qt.Key.Key_End, Qt.Key.Key_Up, Qt.Key.Key_Down,
@@ -424,7 +314,6 @@ class UnifiedTerminalWidget(QTextEdit):
             self.update_edit_positions()
 
     def _handle_history_navigation(self, key, cursor):
-        """Navigate command history"""
         cursor.setPosition(self.input_position)
         cursor.movePosition(QTextCursor.MoveOperation.End, QTextCursor.MoveMode.KeepAnchor)
         cursor.removeSelectedText()
@@ -461,7 +350,6 @@ class UnifiedTerminalWidget(QTextEdit):
         self.current_prompt = prompt
 
     def start_edit_mode(self, file_path, file_content):
-        """Start file editing mode"""
         self.edit_mode = True
         self.edit_file_path = file_path
         self.setReadOnly(False)
@@ -476,7 +364,6 @@ class UnifiedTerminalWidget(QTextEdit):
         self.setFocus()
 
     def exit_edit_mode(self):
-        """Exit edit mode"""
         self.edit_mode = False
         self.edit_file_path = None
         self.edit_start_pos = self.edit_end_pos = 0
@@ -485,7 +372,6 @@ class UnifiedTerminalWidget(QTextEdit):
         self.ensure_cursor_at_input()
 
     def update_edit_positions(self):
-        """Update edit mode position markers"""
         all_text = self.toPlainText()
         self.edit_start_pos = all_text.find(f"# Editing {self.edit_file_path}\n") + len(f"# Editing {self.edit_file_path}\n")
         self.edit_end_pos = all_text.find("\n# COMMANDS:", self.edit_start_pos)
@@ -498,21 +384,92 @@ class UnifiedTerminalWidget(QTextEdit):
             self.setTextCursor(cursor)
 
 class ResizeHandle(QWidget):
-    """Resize handle for terminal header"""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedHeight(5)
         self.setCursor(Qt.CursorShape.SizeVerCursor)
-        self.setStyleSheet(StyleConstants.RESIZE_HANDLE)
+        self.setStyleSheet(AppStyles.TERMINAL_RESIZE_HANDLE)
+        self.is_dragging = False
+        self.drag_start_y = 0
+        self.drag_start_height = 0
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.is_dragging = True
+            self.drag_start_y = event.globalPosition().y()
+            terminal_panel = self.parent()
+            while terminal_panel and not isinstance(terminal_panel, TerminalPanel):
+                terminal_panel = terminal_panel.parent()
+            self.terminal_panel = terminal_panel
+            self.drag_start_height = terminal_panel.height() if terminal_panel else 0
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if self.is_dragging and self.terminal_panel:
+            delta = self.drag_start_y - event.globalPosition().y()
+            top_level_window = self.terminal_panel.window()
+            parent_height = top_level_window.height() if top_level_window else 1080
+            new_height = max(150, min(self.drag_start_height + delta, parent_height - 50))
+            self.terminal_panel.setFixedHeight(int(new_height))
+            self.terminal_panel.normal_height = int(new_height)
+            self.terminal_panel.reposition()
+            event.accept()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.is_dragging = False
+            self.terminal_panel = None
+            event.accept()
 
 class UnifiedTerminalHeader(QWidget):
-    """Header and tabs bar for terminal panel"""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.parent_terminal = parent
         self.edit_mode = False
         self.current_file = None
+        self.available_shells = self._detect_available_shells()
+        self.selected_shell = self.available_shells[0][1] if self.available_shells else '/bin/bash'  # Store path only
         self.setup_ui()
+
+    def _detect_available_shells(self):
+        os_name = platform.system()
+        shells = []
+        default_shell = os.environ.get('SHELL', '/bin/bash') if os_name != 'Windows' else 'powershell.exe'
+
+        if os_name == 'Windows':
+            candidates = [
+                ('PowerShell', 'powershell.exe'),
+                ('PowerShell Core', 'pwsh.exe'),
+                ('Command Prompt', 'cmd.exe')
+            ]
+            for name, shell in candidates:
+                if shutil.which(shell):
+                    shells.append((name, shutil.which(shell)))
+        else:
+            candidates = [
+                ('Bash', '/bin/bash'),
+                ('Zsh', '/bin/zsh'),
+                ('Fish', '/bin/fish'),
+                ('PowerShell Core', 'pwsh'),
+                ('Sh', '/bin/sh')
+            ]
+            for name, shell in candidates:
+                if shutil.which(shell):
+                    shells.append((name, shutil.which(shell)))
+            try:
+                with open('/etc/shells', 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith('#') and shutil.which(line):
+                            shell_name = os.path.basename(line)
+                            if not any(s[1] == line for s in shells):
+                                shells.append((shell_name.capitalize(), line))
+            except FileNotFoundError:
+                pass
+
+        shells = [(name, path) for name, path in shells if path != default_shell]
+        shells.insert(0, (os.path.basename(default_shell).capitalize(), default_shell))
+        return shells
 
     def setup_ui(self):
         main_layout = QVBoxLayout(self)
@@ -524,11 +481,11 @@ class UnifiedTerminalHeader(QWidget):
 
         self.header_content = QWidget()
         self.header_content.setFixedHeight(36)
-        self.header_content.setStyleSheet(StyleConstants.HEADER_CONTENT)
+        self.header_content.setStyleSheet(AppStyles.TERMINAL_HEADER_CONTENT)
 
         self.content_layout = QHBoxLayout(self.header_content)
         self.content_layout.setContentsMargins(8, 0, 16, 0)
-        self.content_layout.setSpacing(0)
+        self.content_layout.setSpacing(4)
 
         self.tabs_container = QWidget()
         self.tabs_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -540,13 +497,26 @@ class UnifiedTerminalHeader(QWidget):
         self.controls = QWidget()
         self.controls_layout = QHBoxLayout(self.controls)
         self.controls_layout.setContentsMargins(0, 0, 0, 0)
-        self.controls_layout.setSpacing(8)
+        self.controls_layout.setSpacing(4)
+
+        self.shell_dropdown = QComboBox()
+        self.shell_dropdown.setFixedSize(120, 24)
+        self.shell_dropdown.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.shell_dropdown.setStyleSheet(AppStyles.TERMINAL_SHELL_DROPDOWN)
+        for name, _ in self.available_shells:
+            self.shell_dropdown.addItem(name)
+        self.shell_dropdown.currentIndexChanged.connect(self._update_selected_shell)
+
+        dropdown_view = self.shell_dropdown.view()
+        dropdown_view.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        self.controls_layout.addWidget(self.shell_dropdown)
 
         buttons = [
             ("icons/terminal_add.svg", "New Terminal", self.add_new_tab),
             ("icons/terminal_refresh.svg", "Refresh Terminal", self.refresh_terminal),
             ("icons/terminal_download.svg", "Download Terminal Output", self.download_terminal_output),
-            ("💾", "save File", self.save_current_file),
+            ("💾", "Save File", self.save_current_file),
             ("icons/terminal_up_down.svg", "Maximize/Restore Terminal", self.toggle_maximize),
             ("icons/terminal_close.svg", "Hide Terminal Panel", self.hide_terminal)
         ]
@@ -562,23 +532,30 @@ class UnifiedTerminalHeader(QWidget):
         self.content_layout.addWidget(self.controls)
         main_layout.addWidget(self.header_content)
 
+    def _update_selected_shell(self, index):
+        if index >= 0 and index < len(self.available_shells):
+            self.selected_shell = self.available_shells[index][1]  # Store path only
+            print(f"Selected shell updated to: {self.selected_shell}")
+            # Automatically create a new terminal tab with the selected shell
+            self.add_new_tab()
+
     def create_header_button(self, text, tooltip, callback):
         button = QToolButton()
         if text.endswith('.svg'):
             button.setIcon(QIcon(text))
-            button.setIconSize(QSize(10, 10))  # Set icon size to 10px
+            button.setIconSize(QSize(10, 10))
         else:
             button.setText(text)
         button.setToolTip(tooltip)
         button.setCursor(Qt.CursorShape.PointingHandCursor)
         button.setFixedSize(28, 28)
-        button.setStyleSheet(StyleConstants.HEADER_BUTTON)
+        button.setStyleSheet(AppStyles.TERMINAL_HEADER_BUTTON)
         button.clicked.connect(callback)
         return button
 
     def add_new_tab(self):
         if hasattr(self.parent_terminal, 'add_terminal_tab'):
-            self.parent_terminal.add_terminal_tab()
+            self.parent_terminal.add_terminal_tab(shell=self.selected_shell)
 
     def enter_edit_mode(self, file_path):
         self.edit_mode = True
@@ -600,7 +577,7 @@ class UnifiedTerminalHeader(QWidget):
         self.edit_mode = False
         self.current_file = None
         self.save_btn.hide()
-        self.refresh_btn.setIcon(QIcon("icons/Terminal_Refresh.svg"))
+        self.refresh_btn.setIcon(QIcon("icons/terminal_refresh.svg"))
         self.refresh_btn.setToolTip("Refresh Terminal")
         if self._active_terminal_widget():
             self._active_terminal_widget().exit_edit_mode()
@@ -668,7 +645,6 @@ class UnifiedTerminalHeader(QWidget):
         return None
 
 class TerminalPanel(QWidget):
-    """Terminal panel that slides up from the bottom"""
     def __init__(self, parent, working_directory=""):
         super().__init__(parent)
         self.parent_window = parent
@@ -679,12 +655,11 @@ class TerminalPanel(QWidget):
         self.sidebar_width = 0
         self.working_directory = self._resolve_working_directory(working_directory)
         self.normal_height = 300
-        self.resize_start_y = None
-        self.original_height = None
-        self.copy_paste_enabled = False  # Initialize as disabled
+        self.copy_paste_enabled = False
         self.setup_ui()
         self.add_terminal_tab()
         self.parent_window.installEventFilter(self)
+        QApplication.instance().aboutToQuit.connect(self.terminate_all_processes)
         print(f"TerminalPanel initialized with copy_paste_enabled={self.copy_paste_enabled}")
 
     def _resolve_working_directory(self, relative_path):
@@ -707,7 +682,7 @@ class TerminalPanel(QWidget):
 
         self.terminal_wrapper = QWidget()
         self.terminal_wrapper.setObjectName("terminal_wrapper")
-        self.terminal_wrapper.setStyleSheet(StyleConstants.TERMINAL_WRAPPER)
+        self.terminal_wrapper.setStyleSheet(AppStyles.TERMINAL_WRAPPER)
 
         self.wrapper_layout = QVBoxLayout(self.terminal_wrapper)
         self.wrapper_layout.setContentsMargins(0, 0, 0, 0)
@@ -725,20 +700,15 @@ class TerminalPanel(QWidget):
         self.main_layout.addWidget(self.terminal_wrapper)
 
         self.unified_header.resize_handle.installEventFilter(self)
-        self.hide()
 
     def set_preferences(self, preferences):
-        """Connect preferences signals to terminal panel"""
         self.preferences = preferences
         self.preferences.copy_paste_changed.connect(self.apply_copy_paste_to_terminals)
         self.preferences.font_changed.connect(self.apply_font_to_terminals)
         self.preferences.font_size_changed.connect(self.apply_font_size_to_terminals)
         print("TerminalPanel: Preferences set, connected copy_paste_changed, font_changed, and font_size_changed signals")
-        # Note: Not applying initial copy-paste state due to missing current_copy_paste_enabled
-        # Rely on copy_paste_changed signal for updates
 
     def apply_font_to_terminals(self, font_family):
-        """Apply the selected font to all terminal widgets"""
         print(f"TerminalPanel.apply_font_to_terminals: font_family={font_family}")
         for terminal_data in self.terminal_tabs:
             terminal_widget = terminal_data.get('terminal_widget')
@@ -746,7 +716,6 @@ class TerminalPanel(QWidget):
                 terminal_widget.set_font(font_family)
 
     def apply_font_size_to_terminals(self, font_size):
-        """Apply the selected font size to all terminal widgets"""
         print(f"TerminalPanel.apply_font_size_to_terminals: font_size={font_size}, terminals={len(self.terminal_tabs)}")
         for i, terminal_data in enumerate(self.terminal_tabs):
             terminal_widget = terminal_data.get('terminal_widget')
@@ -757,7 +726,6 @@ class TerminalPanel(QWidget):
                 print(f"Terminal {i} is invalid or not found")
 
     def apply_copy_paste_to_terminals(self, enabled):
-        """Apply copy-paste setting to all terminal widgets"""
         self.copy_paste_enabled = enabled
         print(f"TerminalPanel.apply_copy_paste_to_terminals: enabled={enabled}, terminals={len(self.terminal_tabs)}")
         for i, terminal_data in enumerate(self.terminal_tabs):
@@ -776,25 +744,32 @@ class TerminalPanel(QWidget):
         self.terminate_all_processes()
 
     def terminate_all_processes(self):
-        """Terminate all running terminal processes"""
         for terminal_data in self.terminal_tabs:
             process = terminal_data.get('process')
             if process and process.state() == QProcess.ProcessState.Running:
                 try:
-                    if sys.platform == 'win32':
+                    if platform.system() == 'Windows':
                         process.write(b"exit\r\n")
-                        process.waitForFinished(500)
+                        process.waitForFinished(1000)
                     else:
-                        process.terminate()
-                        if not process.waitForFinished(500):
+                        process.write(b"exit\n")
+                        process.waitForFinished(500)
+                        if process.state() == QProcess.ProcessState.Running:
+                            process.terminate()
+                            process.waitForFinished(500)
+                        if process.state() == QProcess.ProcessState.Running:
                             process.kill()
                             process.waitForFinished(200)
                     print(f"Terminated process for terminal {terminal_data.get('tab_button').text()}")
                 except Exception as e:
                     print(f"Error terminating process for terminal {terminal_data.get('tab_button').text()}: {e}")
 
-    def add_terminal_tab(self):
+    def add_terminal_tab(self, shell=None):
         tab_index = len(self.terminal_tabs)
+        selected_shell = shell or self.unified_header.selected_shell
+        if not shutil.which(selected_shell):
+            selected_shell = os.environ.get('SHELL', '/bin/bash') if platform.system() != 'Windows' else 'powershell.exe'
+            print(f"Selected shell {shell} not found, falling back to {selected_shell}")
 
         tab_widget = QWidget()
         tab_widget.setFixedHeight(28)
@@ -805,19 +780,19 @@ class TerminalPanel(QWidget):
         tab_layout.setSpacing(6)
 
         label = QLabel(f"Terminal {tab_index + 1}")
-        label.setStyleSheet(StyleConstants.TAB_LABEL)
+        label.setStyleSheet(AppStyles.TERMINAL_TAB_LABEL)
 
         close_btn = QPushButton("✕")
         close_btn.setFixedSize(16, 16)
         close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        close_btn.setStyleSheet(StyleConstants.TAB_CLOSE_BUTTON)
+        close_btn.setStyleSheet(AppStyles.TERMINAL_TAB_CLOSE_BUTTON)
 
         tab_layout.addWidget(label)
         tab_layout.addWidget(close_btn)
 
         tab_btn = QPushButton()
         tab_btn.setCheckable(True)
-        tab_btn.setStyleSheet(StyleConstants.TAB_BUTTON)
+        tab_btn.setStyleSheet(AppStyles.TERMINAL_TAB_BUTTON)
         tab_btn.setLayout(tab_layout)
 
         tab_container = QWidget()
@@ -837,7 +812,7 @@ class TerminalPanel(QWidget):
         content_layout.setSpacing(0)
 
         terminal_widget = UnifiedTerminalWidget()
-        terminal_widget.set_copy_paste_enabled(self.copy_paste_enabled)  # Explicitly set copy-paste state
+        terminal_widget.set_copy_paste_enabled(self.copy_paste_enabled)
         content_layout.addWidget(terminal_widget, 1)
         self.stack_layout.addWidget(content_widget)
         content_widget.setVisible(False)
@@ -854,13 +829,14 @@ class TerminalPanel(QWidget):
             'content_widget': content_widget,
             'terminal_widget': terminal_widget,
             'process': process,
+            'shell': selected_shell,
             'started': False,
             'active': False
         }
         self.terminal_tabs.append(terminal_data)
 
         welcome_msg = (
-            f"Kubernetes Terminal {tab_index + 1}\n"
+            f"Kubernetes Terminal {tab_index + 1} ({os.path.basename(selected_shell)})\n"
             f"Working directory: {self.working_directory}\n"
             "--------------------\n"
             "Enter 'kubectl' commands to interact with your cluster.\n"
@@ -872,7 +848,7 @@ class TerminalPanel(QWidget):
         self.switch_to_terminal_tab(tab_index)
         if self.is_visible:
             self.start_terminal_process(tab_index)
-        print(f"TerminalPanel: Added terminal tab {tab_index}, copy_paste_enabled={self.copy_paste_enabled}")
+        print(f"TerminalPanel: Added terminal tab {tab_index} with shell {selected_shell}, copy_paste_enabled={self.copy_paste_enabled}")
         return tab_index
 
     def safe_handle_process_finished(self, tab_index, exit_code, exit_status):
@@ -901,11 +877,33 @@ class TerminalPanel(QWidget):
             return
         terminal_data = self.terminal_tabs[tab_index]
         process = terminal_data.get('process')
+        shell = terminal_data.get('shell')
         if process and process.state() == QProcess.ProcessState.NotRunning:
-            shell = 'powershell.exe' if sys.platform == 'win32' else os.environ.get('SHELL', '/bin/bash')
-            process.start(shell)
-            process.waitForStarted(1000)
-            terminal_data['started'] = True
+            if not shutil.which(shell):
+                os_name = platform.system()
+                shell = os.environ.get('SHELL', '/bin/bash') if os_name != 'Windows' else 'powershell.exe'
+                terminal_data['shell'] = shell
+                terminal_data['terminal_widget'].append_output(
+                    f"\nShell {shell} not found. Falling back to {shell}\n", "#FFA500"
+                )
+                print(f"Shell {shell} not found, falling back to {shell} for terminal {tab_index}")
+
+            try:
+                process.setWorkingDirectory(self.working_directory)
+                process.start(shell)
+                if process.waitForStarted(1000):
+                    terminal_data['started'] = True
+                    print(f"Started {shell} for terminal {tab_index} in {self.working_directory}")
+                else:
+                    terminal_data['terminal_widget'].append_output(
+                        f"\nFailed to start {shell}. Ensure it is installed and in PATH.\n", "#FF6B68"
+                    )
+                    print(f"Failed to start {shell} for terminal {tab_index}")
+            except Exception as e:
+                terminal_data['terminal_widget'].append_output(
+                    f"\nError starting {shell}: {str(e)}\n", "#FF6B68"
+                )
+                print(f"Error starting {shell} for terminal {tab_index}: {e}")
 
     def execute_command(self, command, tab_index=None):
         tab_index = tab_index if tab_index is not None else self.active_terminal_index
@@ -931,7 +929,8 @@ class TerminalPanel(QWidget):
         if process.state() == QProcess.ProcessState.NotRunning:
             self.start_terminal_process(tab_index)
         if process.state() == QProcess.ProcessState.Running:
-            process.write((command + "\n").encode())
+            newline = b"\r\n" if platform.system() == 'Windows' else b"\n"
+            process.write((command + newline.decode()).encode())
 
     def handle_stdout(self, tab_index=None):
         tab_index = tab_index if tab_index is not None else self.active_terminal_index
@@ -981,9 +980,15 @@ class TerminalPanel(QWidget):
         if process := terminal_data.get('process'):
             if process.state() == QProcess.ProcessState.Running:
                 try:
-                    process.terminate()
-                    if not process.waitForFinished(500):
+                    newline = b"\r\n" if platform.system() == 'Windows' else b"\n"
+                    process.write(b"exit" + newline)
+                    process.waitForFinished(500)
+                    if process.state() == QProcess.ProcessState.Running:
+                        process.terminate()
+                        process.waitForFinished(500)
+                    if process.state() == QProcess.ProcessState.Running:
                         process.kill()
+                        process.waitForFinished(200)
                 except Exception as e:
                     print(f"Error terminating process: {e}")
 
@@ -1026,9 +1031,15 @@ class TerminalPanel(QWidget):
             return
 
         if process.state() == QProcess.ProcessState.Running:
-            process.terminate()
-            if not process.waitForFinished(500):
+            newline = b"\r\n" if platform.system() == 'Windows' else b"\n"
+            process.write(b"exit" + newline)
+            process.waitForFinished(500)
+            if process.state() == QProcess.ProcessState.Running:
+                process.terminate()
+                process.waitForFinished(500)
+            if process.state() == QProcess.ProcessState.Running:
                 process.kill()
+                process.waitForFinished(200)
 
         terminal_widget.clear_output()
         QTimer.singleShot(300, lambda: self.start_terminal_process(self.active_terminal_index))
@@ -1065,13 +1076,15 @@ class TerminalPanel(QWidget):
         if self.is_visible:
             self.hide()
             self.is_visible = False
+            self.terminate_all_processes()
 
     def toggle_maximize(self):
         self.is_maximized = not self.is_maximized
+        top_level_window = self.window()
         if self.is_maximized:
             self.normal_height = self.height()
-            max_height = self.parent_window.height() - 50
-            self.setFixedHeight(max_height)
+            max_height = top_level_window.height() - 50 if top_level_window else 1030
+            self.setFixedHeight(int(max_height))
             self.unified_header.maximize_btn.setIcon(QIcon("icons/terminal_up_down.svg"))
             self.unified_header.maximize_btn.setToolTip("Restore Terminal")
         else:
@@ -1081,9 +1094,10 @@ class TerminalPanel(QWidget):
         self.reposition()
 
     def reposition(self):
-        if self.parent_window:
-            parent_width = self.parent_window.width()
-            parent_height = self.parent_window.height()
+        top_level_window = self.window()
+        if top_level_window:
+            parent_width = top_level_window.width()
+            parent_height = top_level_window.height()
             if self.sidebar_width == 0:
                 self.get_sidebar_width()
             terminal_width = max(parent_width - self.sidebar_width, 300)
@@ -1101,10 +1115,11 @@ class TerminalPanel(QWidget):
         self.position_animation.start()
 
     def update_width_with_sidebar(self, sidebar_width):
-        if self.parent_window:
+        top_level_window = self.window()
+        if top_level_window:
             self.sidebar_width = sidebar_width
-            self.setFixedWidth(max(self.parent_window.width() - sidebar_width, 300))
-            self.move(self.sidebar_width, self.parent_window.height() - self.height())
+            self.setFixedWidth(max(top_level_window.width() - sidebar_width, 300))
+            self.move(self.sidebar_width, top_level_window.height() - self.height())
             self.raise_()
 
     def download_terminal_output(self):
@@ -1124,22 +1139,4 @@ class TerminalPanel(QWidget):
                 terminal_widget.append_output(f"\nError saving terminal output: {str(e)}\n", "#FF6B68")
 
     def eventFilter(self, obj, event):
-        if obj == self.unified_header.resize_handle and event.type() == QEvent.Type.MouseButtonPress:
-            self.resize_start_y = event.globalPosition().y()
-            self.original_height = self.height()
-            return True
-        elif obj == self.unified_header.resize_handle and event.type() == QEvent.Type.MouseMove and self.resize_start_y is not None:
-            delta = self.resize_start_y - event.globalPosition().y()
-            new_height = max(150, min(self.original_height + delta, self.parent_window.height() - 50))
-            self.setFixedHeight(new_height)
-            self.normal_height = new_height
-            self.reposition()
-            return True
-        elif obj == self.unified_header.resize_handle and event.type() == QEvent.Type.MouseButtonRelease:
-            self.resize_start_y = None
-            self.original_height = None
-            return True
-        elif obj == self.parent_window and event.type() == QEvent.Type.Resize:
-            if self.is_visible:
-                self.reposition()
         return super().eventFilter(obj, event)

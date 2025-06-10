@@ -554,7 +554,7 @@ class OrchestrixGUI(QMainWindow):
             "Browse All": [
                 {"name": "Welcome Page", "kind": "General", "source": "app", "label": "",
                  "status": "active", "badge_color": None, "action": self.navigate_to_welcome},
-                {"name": "Preference", "kind": "General", "source": "app", "label": "",
+                {"name": "Settings", "kind": "General", "source": "app", "label": "",
                  "status": "active", "badge_color": None, "action": self.navigate_to_preferences},
                 {"name": "OxW Orchetrix Website", "kind": "Weblinks", "source": "local", "label": "",
                  "status": "available", "badge_color": "#f0ad4e", "action": self.open_web_link},

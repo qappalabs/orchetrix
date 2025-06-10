@@ -51,7 +51,8 @@ try:
     from utils.cluster_connector import get_cluster_connector
     from UI.ProfileScreen import ProfileScreen
     from UI.NotificationScreen import NotificationScreen
-    from UI.DetailPageComponent import DetailPage
+    from UI.DetailPageComponent import DetailPageComponent
+    from UI.detail_sections.detailpage_yamlsection import DetailPageYAMLSection
 
     logging.info("All modules imported successfully")
 
@@ -139,51 +140,12 @@ def initialize_resources():
     else:
         logging.info("Running in normal Python environment")
 
-# Define Update Checker thread
-class UpdateCheckerThread(QThread):
-    """Thread for checking updates in the background"""
-    update_available = pyqtSignal(str, str, str)  # version, channel, notes
-    update_not_found = pyqtSignal()
-    update_error = pyqtSignal(str)
-
-    def __init__(self, channel):
-        super().__init__()
-        self.channel = channel
-
-    def run(self):
-        try:
-            # Simulate a network request
-            time.sleep(2)
-
-            # Simulate different results based on channel
-            if self.channel == "Alpha":
-                # Alpha has frequent updates
-                version = "2.1.0-alpha.3"
-                notes = "New experimental features added:\n- Cloud synchronization\n- Advanced terminal capabilities\n- Extended API support\n\nWarning: This is an alpha build with known issues."
-                self.update_available.emit(version, self.channel, notes)
-            elif self.channel == "Beta":
-                # Beta has occasional updates
-                version = "2.0.5-beta"
-                notes = "Beta features ready for testing:\n- Performance improvements\n- Bug fixes for recent issues\n- UI enhancements\n\nThis version has been tested but may have minor issues."
-                self.update_available.emit(version, self.channel, notes)
-            else:  # Stable
-                # Stable has rare updates
-                version = "2.0.0"
-                notes = "You are running the latest stable version."
-                self.update_not_found.emit()
-        except Exception as e:
-            self.update_error.emit(str(e))
-
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.previous_page = None
         self.drag_position = None
         self.app_timezone = None
-        self.update_channel = "Stable"  # Default to Stable channel
-        self.update_checker = None
-        self.pending_update_info = None
-        self._current_update_dialog = None  # Track update dialogs
         self._error_shown = False
         self._shutting_down = False  # Add shutdown flag
         self._is_switching_to_cluster = False # Flag for managing cluster switch state
@@ -485,86 +447,6 @@ class MainWindow(QMainWindow):
         # Connect new timezone changed signal
         self.preferences_page.timezone_changed.connect(self.apply_timezone_change)
 
-        # Connect new update channel changed signal
-        self.preferences_page.update_channel_changed.connect(self.apply_update_channel_change)
-
-    def apply_update_channel_change(self, channel):
-        """Apply update channel changes throughout the application"""
-        try:
-            old_channel = self.update_channel
-            self.update_channel = channel
-            logging.info(f"Setting application update channel from {old_channel} to: {channel}")
-
-            # Apply channel-specific behavior
-            if channel == "Alpha":
-                self.apply_alpha_channel_behavior()
-            elif channel == "Beta":
-                self.apply_beta_channel_behavior()
-            else:  # Stable
-                self.apply_stable_channel_behavior()
-
-            # Save the update channel preference to a settings file
-            self.save_update_channel_preference(channel)
-
-            # Check for updates on channel change
-            self.check_for_updates_background()
-
-        except Exception as e:
-            logging.error(f"Error applying update channel change: {e}")
-            self.show_error_message(f"Failed to change update channel: {str(e)}")
-
-    def apply_alpha_channel_behavior(self):
-        """Apply alpha channel specific behavior"""
-        logging.info("Applying Alpha channel behavior")
-
-        # Customize app appearance for alpha channel
-        alpha_style = f"{AppStyles.MAIN_STYLE} QMainWindow {{ border: 2px solid #FF5733; }}"
-        self.setStyleSheet(alpha_style)
-
-        # Update title to indicate alpha channel
-        self.setWindowTitle("Orchestrix (Alpha)")
-
-        # Enable experimental features
-        self.enable_experimental_features(True)
-
-        # Show simple notification instead of using notification screen
-        self.show_simple_notification("Alpha Channel Activated",
-                                      "You are now using the Alpha channel with experimental features.")
-
-    def apply_beta_channel_behavior(self):
-        """Apply beta channel specific behavior"""
-        logging.info("Applying Beta channel behavior")
-
-        # Customize app appearance for beta channel
-        beta_style = f"{AppStyles.MAIN_STYLE} QMainWindow {{ border: 2px solid #FFC300; }}"
-        self.setStyleSheet(beta_style)
-
-        # Update title to indicate beta channel
-        self.setWindowTitle("Orchestrix (Beta)")
-
-        # Enable some experimental features
-        self.enable_experimental_features(False) # Or True for some beta features
-
-        # Show simple notification instead of using notification screen
-        self.show_simple_notification("Beta Channel Activated",
-                                      "You are now using the Beta channel with new features.")
-
-    def apply_stable_channel_behavior(self):
-        """Apply stable channel specific behavior"""
-        logging.info("Applying Stable channel behavior")
-
-        # Reset app appearance to standard style
-        self.setStyleSheet(AppStyles.MAIN_STYLE)
-
-        # Reset title
-        self.setWindowTitle("Orchestrix")
-
-        # Disable experimental features
-        self.enable_experimental_features(False)
-
-        # Show simple notification instead of using notification screen
-        self.show_simple_notification("Stable Channel Activated",
-                                      "You are now using the Stable channel.")
 
     def show_simple_notification(self, title, message):
         """Show a simple notification without using the notification screen"""
@@ -622,7 +504,6 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logging.error(f"Error showing notification: {e}")
 
-
     def enable_experimental_features(self, enable=False):
         """Enable or disable experimental features"""
         logging.info(f"{'Enabling' if enable else 'Disabling'} experimental features")
@@ -634,309 +515,6 @@ class MainWindow(QMainWindow):
         # Example: Enable/disable experimental features in home page
         if hasattr(self.home_page, 'enable_experimental_features'):
             self.home_page.enable_experimental_features(enable)
-
-    def check_for_updates_background(self):
-        """Check for updates in the background based on current channel"""
-        try:
-            # Cancel any existing update checker thread
-            if self.update_checker and self.update_checker.isRunning():
-                self.update_checker.terminate() # Request termination
-                self.update_checker.wait(2000) # Wait for up to 2 seconds
-
-            # Create new update checker thread
-            self.update_checker = UpdateCheckerThread(self.update_channel)
-
-            # Connect signals
-            self.update_checker.update_available.connect(self.handle_update_available)
-            self.update_checker.update_not_found.connect(self.handle_update_not_found)
-            self.update_checker.update_error.connect(self.handle_update_error)
-
-            # Start the thread
-            self.update_checker.start()
-
-            logging.info(f"Started background update check for {self.update_channel} channel")
-
-        except Exception as e:
-            logging.error(f"Error starting update check: {e}")
-
-    def handle_update_available(self, version, channel, notes):
-        """Handle update available notification from background check"""
-        logging.info(f"Update available: {version} on {channel} channel")
-
-        # Store update info for later
-        self.pending_update_info = {
-            'version': version,
-            'channel': channel,
-            'notes': notes
-        }
-
-        # Show a simple notification about the available update
-        self.show_simple_notification(
-            f"Update Available: {version}",
-            f"A new {channel} update is available.\nClick settings or the notification icon to view details and install."
-        )
-        # Also add it to the notification screen
-        if hasattr(self, 'notification_screen'):
-            self.notification_screen.add_notification(
-                title=f"Update: {version} ({channel})",
-                message="A new software update is available. Click to view details.",
-                timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                on_click=self.show_update_details_from_notification_screen # Pass a callable
-            )
-
-
-    def show_update_details_from_notification_screen(self):
-        """Callback for notification screen to show update details"""
-        self.show_update_details()
-
-
-    def handle_update_not_found(self):
-        """Handle no update available notification from background check"""
-        logging.info(f"No updates available for {self.update_channel} channel")
-
-        # Clear any pending update info
-        self.pending_update_info = None
-        # Optionally, notify user or update preferences page status
-        if hasattr(self.preferences_page, 'update_update_status_label'):
-            self.preferences_page.update_update_status_label("You are up to date.", "success")
-
-
-    def handle_update_error(self, error_message):
-        """Handle error in update check"""
-        logging.error(f"Error checking for updates: {error_message}")
-
-        # Show a simple error notification
-        self.show_simple_notification(
-            "Update Check Failed",
-            f"Failed to check for updates: {error_message}"
-        )
-        # Optionally, update preferences page status
-        if hasattr(self.preferences_page, 'update_update_status_label'):
-            self.preferences_page.update_update_status_label(f"Error: {error_message}", "error")
-
-
-    def show_update_details(self):
-        """Show details about pending update"""
-        if not self.pending_update_info:
-            QMessageBox.information(self, "No Update", "No pending update information available.")
-            return
-
-        update_info = self.pending_update_info
-
-        # Prevent multiple dialogs
-        if self._current_update_dialog and self._current_update_dialog.isVisible():
-            self._current_update_dialog.raise_()
-            self._current_update_dialog.activateWindow()
-            return
-
-        # Show update details dialog
-        update_msg = QMessageBox(self)
-        update_msg.setWindowTitle("Update Available")
-        update_msg.setText(f"A new {update_info['channel']} update is available!")
-        update_msg.setInformativeText(
-            f"Version: {update_info['version']}\n\n"
-            f"Release notes:\n{update_info['notes']}"
-        )
-        update_msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        update_msg.setDefaultButton(QMessageBox.StandardButton.Yes)
-        update_msg.button(QMessageBox.StandardButton.Yes).setText("Download and Install")
-        update_msg.button(QMessageBox.StandardButton.No).setText("Not Now")
-        update_msg.setModal(True) # Ensure it's modal
-
-        # Store reference to current dialog
-        self._current_update_dialog = update_msg
-
-        result = update_msg.exec()
-
-        # Clear the reference after dialog is closed
-        self._current_update_dialog = None
-
-        if result == QMessageBox.StandardButton.Yes:
-            # User chose to download and install
-            self.download_and_install_update(
-                update_info['version'],
-                update_info['channel']
-            )
-
-    def download_and_install_update(self, version, channel):
-        """Download and install the update"""
-        try:
-            # Prevent multiple dialogs
-            if self._current_update_dialog and self._current_update_dialog.isVisible():
-                return
-
-            # Show download progress
-            progress_msg = QMessageBox(self)
-            progress_msg.setWindowTitle("Downloading Update")
-            progress_msg.setText(f"Downloading {channel} version {version}...")
-            # progress_msg.setStandardButtons(QMessageBox.StandardButton.Cancel) # Can be problematic with auto-close
-            progress_msg.setStandardButtons(QMessageBox.StandardButton.NoButton) # No buttons, auto-close
-            progress_msg.setModal(True)
-
-            # Connect cancel button (if using one)
-            # progress_msg.button(QMessageBox.StandardButton.Cancel).clicked.connect(self._handle_update_cancel)
-
-            # Store reference to current dialog
-            self._current_update_dialog = progress_msg
-
-            # Show the message
-            # progress_msg.show() # exec() is better for modality
-
-            # Simulate download and installation process
-            # For a real download, use QNetworkAccessManager or requests in a thread
-            # Here, we use a timer to simulate progress
-            self._download_progress_timer = QTimer(self)
-            self._download_progress_value = 0
-
-            def update_progress():
-                self._download_progress_value += 20
-                if self._current_update_dialog and self._current_update_dialog.isVisible():
-                    if self._download_progress_value <= 100:
-                        self._current_update_dialog.setText(f"Downloading {channel} version {version}... {self._download_progress_value}%")
-                    else:
-                        self._download_progress_timer.stop()
-                        self._current_update_dialog.setText("Download complete. Installing...")
-                        QTimer.singleShot(1500, lambda: self.finish_update_installation(self._current_update_dialog, version, channel))
-
-            self._download_progress_timer.timeout.connect(update_progress)
-            self._download_progress_timer.start(500) # Update every 0.5 seconds
-
-            progress_msg.exec() # Use exec() to make it truly modal and block until closed
-
-        except Exception as e:
-            logging.error(f"Error downloading update: {e}")
-            self.show_error_message(f"Failed to download and install update: {str(e)}")
-
-            # Clean up dialog reference if an error occurs
-            if hasattr(self, '_current_update_dialog') and self._current_update_dialog:
-                try:
-                    self._current_update_dialog.close()
-                except: pass # Might already be closed
-            self._current_update_dialog = None
-            if hasattr(self, '_download_progress_timer') and self._download_progress_timer.isActive():
-                self._download_progress_timer.stop()
-
-
-    def _handle_update_cancel(self):
-        logging.info("Update download cancelled by user.")
-        if hasattr(self, '_download_progress_timer') and self._download_progress_timer.isActive():
-            self._download_progress_timer.stop()
-        if self._current_update_dialog and self._current_update_dialog.isVisible():
-            self._current_update_dialog.close()
-        self._current_update_dialog = None
-        self.show_simple_notification("Update Cancelled", "The update download was cancelled.")
-
-
-    def finish_update_installation(self, progress_msg_ref, version, channel):
-        """Finish the update installation process"""
-        # Close the progress message
-        try:
-            if progress_msg_ref and progress_msg_ref.isVisible(): # Use the reference passed
-                progress_msg_ref.accept() # Or close() if it was opened with show()
-        except RuntimeError:
-            # Widget might have been deleted
-            pass
-
-        # Clear the dialog reference
-        self._current_update_dialog = None
-
-        # Show completion message
-        completion_msg = QMessageBox(self)
-        completion_msg.setWindowTitle("Update Complete")
-        completion_msg.setText(f"Successfully updated to {channel} version {version}!\n\nThe application will restart to apply changes.")
-        completion_msg.setStandardButtons(QMessageBox.StandardButton.Ok)
-        completion_msg.setModal(True)
-
-        # Ensure it's cleaned up if the app closes before this dialog
-        self._current_update_dialog = completion_msg
-        completion_msg.exec()
-        self._current_update_dialog = None
-
-
-        # Clear pending update info
-        self.pending_update_info = None
-
-        # In a real implementation, you would restart the application here
-        logging.info(f"Application would restart now to apply {channel} version {version}")
-
-        # Simulate restart by closing and reopening
-        # QApplication.instance().quit() # This will exit the app
-        # For a true restart, need to launch a new process.
-        # For now, let's just log and maybe close the window.
-        QTimer.singleShot(100, self.restart_application)
-
-
-    def restart_application(self):
-        """Restart the application"""
-        try:
-            logging.info("Preparing to restart application...")
-            # This is a simplified restart. A robust restart involves
-            # launching a new instance of the application and exiting the current one.
-
-            # Ensure all cleanup is done
-            # self.close() # This might be too soon if exec is running
-
-            q_app = QApplication.instance()
-            if q_app:
-                # Store restart command if needed (e.g., for a launcher script)
-                # For now, we just quit and rely on the OS or user to restart,
-                # or a more sophisticated mechanism if implemented.
-                logging.info("Application will quit. Please restart manually or implement a launcher.")
-                q_app.quit()
-
-                # Attempt to relaunch (this is OS-dependent and can be complex)
-                # This is a basic example and might not work perfectly in all environments
-                if getattr(sys, 'frozen', False): # PyInstaller
-                    executable = sys.executable
-                    os.execl(executable, executable, *sys.argv)
-                else: # Development
-                    python = sys.executable
-                    os.execl(python, python, *sys.argv)
-
-        except Exception as e:
-            logging.error(f"Error attempting to restart application: {e}")
-            self.show_error_message(f"Failed to restart application automatically: {str(e)}. Please restart manually.")
-            QApplication.instance().quit() # Ensure exit even if restart fails
-
-
-    def save_update_channel_preference(self, channel):
-        """Save the update channel preference to a settings file"""
-        try:
-            # Determine settings file path
-            if getattr(sys, 'frozen', False):
-                # Running in PyInstaller bundle
-                base_dir = os.path.dirname(sys.executable)
-            else:
-                # Running in normal Python environment
-                base_dir = os.path.dirname(os.path.abspath(__file__))
-
-            settings_dir = os.path.join(base_dir, "settings")
-            os.makedirs(settings_dir, exist_ok=True)
-
-            settings_file = os.path.join(settings_dir, "app_settings.json") # Use JSON for settings
-
-            # Read existing settings
-            settings = {}
-            if os.path.exists(settings_file):
-                try:
-                    with open(settings_file, 'r') as f:
-                        settings = json.load(f)
-                except json.JSONDecodeError:
-                    logging.warning(f"Could not decode existing settings file: {settings_file}. Starting fresh.")
-
-
-            # Update update channel
-            settings['update_channel'] = channel
-
-            # Write back all settings
-            with open(settings_file, 'w') as f:
-                json.dump(settings, f, indent=4)
-
-
-            logging.info(f"Saved update channel preference to {settings_file}")
-
-        except Exception as e:
-            logging.error(f"Failed to save update channel preference: {e}")
 
     def apply_timezone_change(self, timezone):
         """Apply timezone changes throughout the application"""
@@ -1040,33 +618,8 @@ class MainWindow(QMainWindow):
                     if hasattr(self.preferences_page, 'set_initial_timezone'):
                         self.preferences_page.set_initial_timezone(loaded_timezone)
 
-
-                # Handle update channel setting
-                loaded_channel = settings.get('update_channel', 'Stable') # Default to Stable
-                self.update_channel = loaded_channel
-                logging.info(f"Loaded update channel from settings: {loaded_channel}")
-
-                if hasattr(self.preferences_page, 'set_initial_update_channel'):
-                    self.preferences_page.set_initial_update_channel(loaded_channel)
-
-                # Apply channel-specific behavior post-load
-                if loaded_channel == "Alpha":
-                    self.apply_alpha_channel_behavior()
-                elif loaded_channel == "Beta":
-                    self.apply_beta_channel_behavior()
-                else:  # Stable
-                    self.apply_stable_channel_behavior()
             else:
                 logging.info("No settings file found, using default settings (Timezone: System, Channel: Stable)")
-                # Set defaults explicitly if file not found
-                self.update_channel = "Stable"
-                if hasattr(self.preferences_page, 'set_initial_update_channel'):
-                    self.preferences_page.set_initial_update_channel("Stable")
-                self.apply_stable_channel_behavior()
-
-                # For timezone, could try to get system default or leave as None
-                # For now, we don't set os.environ['TZ'] if not in settings to use system default.
-                # self.app_timezone = # get system default if desired.
 
         except Exception as e:
             logging.error(f"Error loading application settings: {e}")
@@ -1081,12 +634,16 @@ class MainWindow(QMainWindow):
             if hasattr(self.cluster_view, 'update_yaml_editor_font_size'):
                 self.cluster_view.update_yaml_editor_font_size(font_size)
 
-        # Find and update all DetailPage instances in the application
-        # This is a bit broad, consider a more targeted approach if performance is an issue
-        # e.g., maintain a list of active DetailPage instances.
+        # Find and update all DetailPage instances and YAML sections
         for widget in QApplication.allWidgets():
-            if isinstance(widget, DetailPage) and hasattr(widget, 'update_yaml_font_size'):
+            # Check for DetailPageComponent instances
+            if isinstance(widget, DetailPageComponent) and hasattr(widget, 'update_yaml_font_size'):
                 logging.debug(f"Found DetailPage {widget.objectName()}, updating font size to {font_size}")
+                widget.update_yaml_font_size(font_size)
+
+            # Also check for direct YAML section instances
+            elif isinstance(widget, DetailPageYAMLSection) and hasattr(widget, 'update_yaml_font_size'):
+                logging.debug(f"Found YAML Section, updating font size to {font_size}")
                 widget.update_yaml_font_size(font_size)
 
 
@@ -1104,12 +661,20 @@ class MainWindow(QMainWindow):
                     self.cluster_view.update_yaml_editor_font_family(font_family)
 
             for widget in QApplication.allWidgets():
-                if isinstance(widget, DetailPage):
+                # Check for DetailPageComponent instances
+                if isinstance(widget, DetailPageComponent):
                     if hasattr(widget, 'update_yaml_font_family'):
                         logging.debug(f"Found DetailPage {widget.objectName()}, updating font family to {font_family}")
                         widget.update_yaml_font_family(font_family)
                     elif hasattr(widget, 'update_yaml_editor_font_family'): # Fallback for older name
                         widget.update_yaml_editor_font_family(font_family)
+
+                # Also check for direct YAML section instances
+                elif isinstance(widget, DetailPageYAMLSection):
+                    if hasattr(widget, 'update_yaml_font_family'):
+                        logging.debug(f"Found YAML Section, updating font family to {font_family}")
+                        widget.update_yaml_font_family(font_family)
+
         finally:
             delattr(self, '_updating_font_family')
 
@@ -1123,8 +688,14 @@ class MainWindow(QMainWindow):
                 self.cluster_view.update_yaml_editor_line_numbers(show_line_numbers)
 
         for widget in QApplication.allWidgets():
-            if isinstance(widget, DetailPage) and hasattr(widget, 'update_yaml_line_numbers'):
+            # Check for DetailPageComponent instances
+            if isinstance(widget, DetailPageComponent) and hasattr(widget, 'update_yaml_line_numbers'):
                 logging.debug(f"Found DetailPage {widget.objectName()}, updating line numbers to {show_line_numbers}")
+                widget.update_yaml_line_numbers(show_line_numbers)
+
+            # Also check for direct YAML section instances
+            elif isinstance(widget, DetailPageYAMLSection) and hasattr(widget, 'update_yaml_line_numbers'):
+                logging.debug(f"Found YAML Section, updating line numbers to {show_line_numbers}")
                 widget.update_yaml_line_numbers(show_line_numbers)
 
 
@@ -1137,8 +708,14 @@ class MainWindow(QMainWindow):
                 self.cluster_view.update_yaml_editor_tab_size(tab_size)
 
         for widget in QApplication.allWidgets():
-            if isinstance(widget, DetailPage) and hasattr(widget, 'update_yaml_tab_size'):
+            # Check for DetailPageComponent instances
+            if isinstance(widget, DetailPageComponent) and hasattr(widget, 'update_yaml_tab_size'):
                 logging.debug(f"Found DetailPage {widget.objectName()}, updating tab size to {tab_size}")
+                widget.update_yaml_tab_size(tab_size)
+
+            # Also check for direct YAML section instances
+            elif isinstance(widget, DetailPageYAMLSection) and hasattr(widget, 'update_yaml_tab_size'):
+                logging.debug(f"Found YAML Section, updating tab size to {tab_size}")
                 widget.update_yaml_tab_size(tab_size)
 
 
@@ -1291,23 +868,6 @@ class MainWindow(QMainWindow):
         self._shutting_down = True # Set flag
 
         try:
-            # Close any open modal dialogs first (like update dialogs)
-            if hasattr(self, '_current_update_dialog') and self._current_update_dialog and self._current_update_dialog.isVisible():
-                logging.debug("Closing active update dialog.")
-                try:
-                    self._current_update_dialog.reject() # Or accept() or close() depending on type
-                except Exception as e_diag:
-                    logging.warning(f"Error closing update dialog: {e_diag}")
-                self._current_update_dialog = None
-
-
-            # Terminate update checker thread if running
-            if hasattr(self, 'update_checker') and self.update_checker and self.update_checker.isRunning():
-                logging.debug("Terminating update checker thread.")
-                self.update_checker.terminate()
-                if not self.update_checker.wait(1000): # Wait max 1 sec
-                    logging.warning("Update checker thread did not terminate gracefully.")
-
             # Step 1: Stop all cluster operations immediately
             logging.debug("Shutting down cluster operations.")
             self.shutdown_cluster_operations()
@@ -1478,6 +1038,53 @@ class MainWindow(QMainWindow):
         logging.debug("Allowing a brief moment for threads to finish if any were missed...")
         QThread.msleep(100) # Brief pause for any other threads to wind down.
 
+    def apply_current_preferences_to_yaml_editor(self, yaml_editor_widget):
+        """Apply current preferences to a newly created YAML editor"""
+        try:
+            if not hasattr(self, 'preferences_page'):
+                return
+
+            # Get current preference values
+            current_font_size = getattr(self.preferences_page, 'current_font_size', 9)
+            current_font_family = getattr(self.preferences_page, 'current_font_family', 'Consolas')
+            current_tab_size = getattr(self.preferences_page, 'current_tab_size', 2)
+            show_line_numbers = getattr(self.preferences_page, 'show_line_numbers', True)
+
+            # Apply preferences if the widget has the methods
+            if isinstance(yaml_editor_widget, DetailPageYAMLSection):
+                logging.debug(f"Applying current preferences to new YAML editor")
+
+                if hasattr(yaml_editor_widget, 'update_yaml_font_size'):
+                    yaml_editor_widget.update_yaml_font_size(current_font_size)
+
+                if hasattr(yaml_editor_widget, 'update_yaml_font_family'):
+                    yaml_editor_widget.update_yaml_font_family(current_font_family)
+
+                if hasattr(yaml_editor_widget, 'update_yaml_tab_size'):
+                    yaml_editor_widget.update_yaml_tab_size(current_tab_size)
+
+                if hasattr(yaml_editor_widget, 'update_yaml_line_numbers'):
+                    yaml_editor_widget.update_yaml_line_numbers(show_line_numbers)
+
+            elif isinstance(yaml_editor_widget, DetailPageComponent):
+                # Handle DetailPageComponent that contains YAML sections
+                if hasattr(yaml_editor_widget, 'update_yaml_font_size'):
+                    yaml_editor_widget.update_yaml_font_size(current_font_size)
+
+                if hasattr(yaml_editor_widget, 'update_yaml_font_family'):
+                    yaml_editor_widget.update_yaml_font_family(current_font_family)
+
+                if hasattr(yaml_editor_widget, 'update_yaml_tab_size'):
+                    yaml_editor_widget.update_yaml_tab_size(current_tab_size)
+
+                if hasattr(yaml_editor_widget, 'update_yaml_line_numbers'):
+                    yaml_editor_widget.update_yaml_line_numbers(show_line_numbers)
+
+            logging.debug(f"Applied preferences - Font: {current_font_family} {current_font_size}pt, Tab: {current_tab_size}, Lines: {show_line_numbers}")
+
+        except Exception as e:
+            logging.error(f"Error applying current preferences to YAML editor: {e}")
+
 def main():
     """Application entry point"""
     # Install the global exception handler
@@ -1577,11 +1184,6 @@ def main():
 
                 logging.info("Main window shown successfully (after splash).")
 
-                # Start background update check a bit after window is shown and responsive
-                if window:
-                    QTimer.singleShot(2500, window.check_for_updates_background)
-
-
             # Simulate some loading tasks for the splash screen
             # In a real app, this timer would be replaced by actual initialization steps
             # or splash.start_loading_simulation() could be called
@@ -1596,8 +1198,6 @@ def main():
                 window.show()
                 window.activateWindow()
                 logging.info("Main window shown directly (no splash).")
-                # Start background update check
-                QTimer.singleShot(2000, window.check_for_updates_background)
             else:
                 logging.critical("Main window is None and no splash, application cannot start UI.")
                 return 1 # Exit if window creation failed catastrophically
