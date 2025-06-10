@@ -398,7 +398,7 @@ class BaseTablePage(QWidget):
         
         # Add default actions
         actions = [
-            {"text": "Edit", "icon": "icons/edit.png", "dangerous": False},
+            {"text": "Logs", "icon": "icons/edit.png", "dangerous": False},
             {"text": "Delete", "icon": "icons/delete.png", "dangerous": True}
         ]
         
