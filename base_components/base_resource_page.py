@@ -2,9 +2,6 @@
 Extended BaseTablePage for handling Kubernetes resources with live data using Python kubernetes library.
 This module handles common resource operations like listing, deletion, and editing.
 Updated to default to 'default' namespace and improved namespace handling.
-Includes infinite scrolling capabilities and restored filter controls.
-Error fixes for COMBO_BOX_STYLE and __del__.
-Improved skeleton loading and empty state message handling.
 """
 
 import os
