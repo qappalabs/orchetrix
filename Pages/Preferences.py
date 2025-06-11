@@ -108,7 +108,6 @@ class PreferencesWidget(QWidget):
     line_numbers_changed = pyqtSignal(bool)  # Signal for line numbers toggle changes
     tab_size_changed = pyqtSignal(int)  # Signal for tab size changes
     timezone_changed = pyqtSignal(str)  # Signal for timezone changes
-    update_channel_changed = pyqtSignal(str)  # Signal for update channel changes
 
     def __init__(self):
         super().__init__()
@@ -120,21 +119,16 @@ class PreferencesWidget(QWidget):
         self.copy_paste_enabled = False  # Track copy-paste state
         self.show_line_numbers = True  # Default to showing line numbers
         self.last_emitted_size = self.current_font_size  # Keep track of last emitted size to avoid duplicates
-        self._current_update_dialog = None  # Track current update dialog
         
         # Initialize timezone
         self.current_timezone = self.get_system_timezone()
         
-        # Initialize update channel
-        self.current_update_channel = "Stable"  # Default to Stable
-        
         print("PreferencesWidget: Initialized with terminal_panel=None")
         self.setup_ui()
-        
-        # Set timer to update the timezone display every second
+
+        # Create timer but don't start it yet - will start when app section is shown
         self.timezone_timer = QTimer(self)
         self.timezone_timer.timeout.connect(self.update_timezone_display)
-        self.timezone_timer.start(1000)  # Update every second
 
     def get_system_timezone(self):
         """Get the current system timezone"""
@@ -144,6 +138,84 @@ class PreferencesWidget(QWidget):
         except Exception:
             # Fallback
             return "Asia/Calcutta"  # Default timezone
+
+    def get_custom_scroll_style(self):
+        """Custom scroll bar style for preferences"""
+        return f"""
+            QScrollArea {{
+                background-color: {AppColors.BG_DARK};
+                border: none;
+                outline: none;
+            }}
+            
+            QScrollBar:vertical {{
+                background-color: transparent;
+                width: 12px;
+                margin: 0px;
+                border-radius: 4px;
+            }}
+            
+            QScrollBar::handle:vertical {{
+                background-color: #6B7280;
+                min-height: 30px;
+                border-radius: 4px;
+                margin: 2px;
+            }}
+            
+            QScrollBar::handle:vertical:hover {{
+                background-color: #9CA3AF;
+            }}
+            
+            QScrollBar::handle:vertical:pressed {{
+                background-color: #4B5563;
+            }}
+            
+            QScrollBar::add-line:vertical,
+            QScrollBar::sub-line:vertical {{
+                height: 0px;
+                width: 0px;
+                background: none;
+            }}
+            
+            QScrollBar::add-page:vertical,
+            QScrollBar::sub-page:vertical {{
+                background: none;
+            }}
+            
+            QScrollBar:horizontal {{
+                background-color: transparent;
+                height: 12px;
+                margin: 0px;
+                border-radius: 4px;
+            }}
+            
+            QScrollBar::handle:horizontal {{
+                background-color: #6B7280;
+                min-width: 30px;
+                border-radius: 4px;
+                margin: 2px;
+            }}
+            
+            QScrollBar::handle:horizontal:hover {{
+                background-color: #9CA3AF;
+            }}
+            
+            QScrollBar::handle:horizontal:pressed {{
+                background-color: #4B5563;
+            }}
+            
+            QScrollBar::add-line:horizontal,
+            QScrollBar::sub-line:horizontal {{
+                height: 0px;
+                width: 0px;
+                background: none;
+            }}
+            
+            QScrollBar::add-page:horizontal,
+            QScrollBar::sub-page:horizontal {{
+                background: none;
+            }}
+        """
 
     def setup_ui(self):
         self.setStyleSheet(AppStyles.PREFERENCES_MAIN_STYLE)
@@ -172,7 +244,7 @@ class PreferencesWidget(QWidget):
         header_layout.addWidget(back_btn)
 
         # Preferences label
-        preferences_label = QLabel("PREFERENCES")
+        preferences_label = QLabel("SETTINGS")
         preferences_label.setStyleSheet(AppStyles.PREFERENCES_HEADER_STYLE)
         header_layout.addWidget(preferences_label)
 
@@ -206,7 +278,9 @@ class PreferencesWidget(QWidget):
         self.content_scroll = QScrollArea()
         self.content_scroll.setWidgetResizable(True)
         self.content_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self.content_scroll.setStyleSheet(AppStyles.CONTENT_AREA_STYLE)
+        self.content_scroll.setStyleSheet(self.get_custom_scroll_style())
+        self.content_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.content_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
         main_layout.addWidget(sidebar)
         main_layout.addWidget(self.content_scroll)
@@ -228,6 +302,11 @@ class PreferencesWidget(QWidget):
         return back_btn
 
     def show_section(self, section):
+        # Stop timezone timer when leaving app section
+        if self.current_section == "app" and section != "app":
+            if hasattr(self, 'timezone_timer') and self.timezone_timer:
+                self.timezone_timer.stop()
+
         self.app_btn.setChecked(False)
         self.proxy_btn.setChecked(False)
         self.kubernetes_btn.setChecked(False)
@@ -238,6 +317,9 @@ class PreferencesWidget(QWidget):
         if section == "app":
             self.app_btn.setChecked(True)
             self.show_app_section()
+            # Start timezone timer for app section
+            if hasattr(self, 'timezone_timer') and self.timezone_timer:
+                self.timezone_timer.start(1000)
         elif section == "proxy":
             self.proxy_btn.setChecked(True)
             self.show_proxy_section()
@@ -345,36 +427,6 @@ class PreferencesWidget(QWidget):
         divider3.setStyleSheet(AppStyles.DIVIDER_STYLE)
         content_layout.addWidget(divider3)
 
-        # Update channel section
-        update_label = QLabel("UPDATE CHANNEL")
-        update_label.setObjectName("sectionHeader")
-        update_label.setStyleSheet(AppStyles.SUBSECTION_HEADER_STYLE)
-        content_layout.addWidget(update_label)
-
-        # Update channel combo box
-        self.update_channel_combo = QComboBox()
-        self.update_channel_combo.addItems(["Stable", "Beta", "Alpha"])
-        
-        # Set current value from settings if available
-        try:
-            # Try to set the combo box to the current update channel
-            index = self.update_channel_combo.findText(self.current_update_channel)
-            if index >= 0:
-                self.update_channel_combo.setCurrentIndex(index)
-        except Exception as e:
-            print(f"Error setting current update channel: {e}")
-            
-        self.update_channel_combo.setStyleSheet(AppStyles.DROPDOWN_STYLE)
-        self.update_channel_combo.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.update_channel_combo.currentTextChanged.connect(self.on_update_channel_changed)
-        content_layout.addWidget(self.update_channel_combo)
-
-        divider4 = QFrame()
-        divider4.setObjectName("divider")
-        divider4.setFrameShape(QFrame.Shape.HLine)
-        divider4.setStyleSheet(AppStyles.DIVIDER_STYLE)
-        content_layout.addWidget(divider4)
-
         # Local Timezone section
         timezone_label = QLabel("LOCAL TIMEZONE")
         timezone_label.setObjectName("sectionHeader")
@@ -427,287 +479,39 @@ class PreferencesWidget(QWidget):
 
         self.content_scroll.setWidget(content_widget)
 
-    def on_update_channel_changed(self, channel):
-        """Handle update channel selection change - apply changes immediately"""
-        if channel != self.current_update_channel:
-            old_channel = self.current_update_channel
-            self.current_update_channel = channel
-            print(f"Update channel selection changed from {old_channel} to: {channel}")
-            
-            # Apply the channel change immediately
-            self.apply_update_channel(channel)
-            
-            # Check for updates automatically
-            QTimer.singleShot(300, self.check_for_updates)
-
-    def apply_update_channel(self, channel):
-        """Apply the selected update channel"""
-        try:
-            print(f"Applying update channel change to {channel}")
-            
-            # Emit signal to notify application of update channel change
-            self.update_channel_changed.emit(channel)
-            
-            # Show notification message with appropriate warning based on channel
-            if channel == "Stable":
-                message = f"Update channel has been changed to {channel}.\nYou are now using the production-ready stable version."
-            elif channel == "Beta":
-                message = f"Update channel has been changed to {channel}.\nYou may encounter some minor issues. Use for testing."
-            elif channel == "Alpha":
-                message = f"Update channel has been changed to {channel}.\nWARNING: Alpha version may have significant bugs. Use with caution!"
-            else:
-                message = f"Update channel has been changed to {channel}."
-            
-            # Show a notification toast instead of a modal dialog to be less intrusive
-            # For now, we'll show a small, non-modal message box
-            msg = QMessageBox(self)
-            msg.setWindowTitle("Update Channel Changed")
-            msg.setText(message)
-            msg.setStandardButtons(QMessageBox.StandardButton.Ok)
-            msg.setWindowFlags(Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
-            msg.setWindowOpacity(0.9)
-            
-            # Position it in the bottom right corner of the app section
-            QTimer.singleShot(0, lambda: self.position_notification(msg))
-            
-            # Automatically close after 3 seconds
-            QTimer.singleShot(3000, msg.close)
-            
-            # Show the notification
-            msg.show()
-            
-            # Save the preference to settings
-            self.save_update_channel_preference(channel)
-            
-        except Exception as e:
-            print(f"Error applying update channel: {e}")
-            QMessageBox.warning(self, "Update Channel Error", 
-                               f"Failed to change update channel: {str(e)}")
-
-    def position_notification(self, msg):
-        """Position the notification in the bottom right of the app section"""
-        if hasattr(self, 'content_scroll') and self.content_scroll:
-            # Calculate position
-            pos = self.content_scroll.mapToGlobal(self.content_scroll.rect().bottomRight())
-            pos.setX(pos.x() - msg.width() - 20)
-            pos.setY(pos.y() - msg.height() - 20)
-            msg.move(pos)
-
-    def check_for_updates(self):
-        """Check for updates based on the selected channel"""
-        try:
-            channel = self.current_update_channel
-            print(f"Checking for updates on {channel} channel")
-            
-            # Create a progress message with a Cancel button
-            checking_msg = QMessageBox(self)
-            checking_msg.setWindowTitle("Checking for Updates")
-            checking_msg.setText(f"Checking for updates on {channel} channel...")
-            checking_msg.setStandardButtons(QMessageBox.StandardButton.Cancel)
-            checking_msg.setModal(True)  # Make it modal to ensure it stays in focus
-            
-            # Connect the rejected signal (triggered when Cancel is clicked or dialog is closed)
-            checking_msg.rejected.connect(checking_msg.close)
-            
-            # Store the message box reference
-            self._current_update_dialog = checking_msg
-            
-            # Show the message and process events to update UI
-            checking_msg.show()
-            
-            # Simulate a network request here
-            QTimer.singleShot(1500, lambda: self.handle_update_check_result(checking_msg, channel))
-            
-        except Exception as e:
-            print(f"Error checking for updates: {e}")
-            QMessageBox.warning(self, "Update Check Error", 
-                               f"Failed to check for updates: {str(e)}")
-            # Ensure any open dialog is closed
-            if hasattr(self, '_current_update_dialog') and self._current_update_dialog:
-                try:
-                    self._current_update_dialog.close()
-                except:
-                    pass
-
-    def handle_update_check_result(self, message_box, channel):
-        """Handle the result of the update check"""
-        # Check if the message box is still valid and open
-        try:
-            if message_box and message_box.isVisible():
-                message_box.close()
-        except RuntimeError:
-            # Widget might have been deleted
-            pass
-        
-        # Clear the reference
-        if hasattr(self, '_current_update_dialog'):
-            self._current_update_dialog = None
-        
-        # Simulate different results based on channel
-        update_available = False
-        
-        if channel == "Alpha":
-            # Alpha has frequent updates
-            update_available = True
-            version = "2.1.0-alpha.3"
-            notes = "New experimental features added:\n- Cloud synchronization\n- Advanced terminal capabilities\n- Extended API support\n\nWarning: This is an alpha build with known issues."
-        elif channel == "Beta":
-            # Beta has occasional updates
-            update_available = True
-            version = "2.0.5-beta"
-            notes = "Beta features ready for testing:\n- Performance improvements\n- Bug fixes for recent issues\n- UI enhancements\n\nThis version has been tested but may have minor issues."
-        else:  # Stable
-            # Stable has rare updates
-            update_available = False
-            version = "2.0.0"
-            notes = "You are running the latest stable version."
-        
-        if update_available:
-            # Show update available message with details
-            update_msg = QMessageBox(self)
-            update_msg.setWindowTitle("Update Available")
-            update_msg.setText(f"A new {channel} update is available!")
-            update_msg.setInformativeText(f"Version: {version}\n\nRelease notes:\n{notes}")
-            update_msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-            update_msg.setDefaultButton(QMessageBox.StandardButton.Yes)
-            update_msg.button(QMessageBox.StandardButton.Yes).setText("Download and Install")
-            update_msg.button(QMessageBox.StandardButton.No).setText("Not Now")
-            update_msg.setModal(True)  # Make it modal
-            
-            # Store reference to the dialog
-            self._current_update_dialog = update_msg
-            
-            result = update_msg.exec()
-            
-            # Clear the reference after dialog is closed
-            self._current_update_dialog = None
-            
-            if result == QMessageBox.StandardButton.Yes:
-                # User chose to download and install
-                self.download_and_install_update(version, channel)
-        else:
-            # No update available - just show a brief notification
-            msg = QMessageBox(self)
-            msg.setWindowTitle("No Updates Available")
-            msg.setText(f"You're running the latest {channel} version: {version}")
-            msg.setStandardButtons(QMessageBox.StandardButton.Ok)
-            msg.setWindowFlags(Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
-            msg.setWindowOpacity(0.9)
-            
-            # Position it in the bottom right corner of the app section
-            QTimer.singleShot(0, lambda: self.position_notification(msg))
-            
-            # Automatically close after 2 seconds
-            QTimer.singleShot(2000, msg.close)
-            
-            # Show the notification
-            msg.show()
-
-    def download_and_install_update(self, version, channel):
-        """Download and install the update"""
-        try:
-            # Show download progress
-            progress_msg = QMessageBox(self)
-            progress_msg.setWindowTitle("Downloading Update")
-            progress_msg.setText(f"Downloading {channel} version {version}...")
-            progress_msg.setStandardButtons(QMessageBox.StandardButton.Cancel)
-            progress_msg.setModal(True)  # Make it modal
-            
-            # Store reference
-            self._current_update_dialog = progress_msg
-            
-            # Show the message and process events to update UI
-            progress_msg.show()
-            
-            # Simulate download and installation process
-            QTimer.singleShot(3000, lambda: self.finish_update_installation(progress_msg, version, channel))
-            
-        except Exception as e:
-            print(f"Error downloading update: {e}")
-            QMessageBox.warning(self, "Update Error", 
-                               f"Failed to download and install update: {str(e)}")
-            # Ensure any open dialog is closed
-            if hasattr(self, '_current_update_dialog') and self._current_update_dialog:
-                try:
-                    self._current_update_dialog.close()
-                except:
-                    pass
-
-    def finish_update_installation(self, progress_msg, version, channel):
-        """Finish the update installation process"""
-        # Close the progress message if it's still valid
-        try:
-            if progress_msg and progress_msg.isVisible():
-                progress_msg.close()
-        except RuntimeError:
-            # Widget might have been deleted
-            pass
-        
-        # Clear the reference
-        self._current_update_dialog = None
-        
-        # Show completion message
-        completion_msg = QMessageBox(self)
-        completion_msg.setWindowTitle("Update Complete")
-        completion_msg.setText(f"Successfully updated to {channel} version {version}!\n\nThe application will restart to apply changes.")
-        completion_msg.setStandardButtons(QMessageBox.StandardButton.Ok)
-        completion_msg.setModal(True)
-        completion_msg.exec()
-        
-        # In a real implementation, you would restart the application here
-        # For this demo, we'll just print a message
-        print(f"Application would restart now to apply {channel} version {version}")
-
-    def save_update_channel_preference(self, channel):
-        """Save the update channel preference to settings file"""
-        try:
-            # Determine settings file path
-            if getattr(sys, 'frozen', False):
-                # Running in PyInstaller bundle
-                base_dir = os.path.dirname(sys.executable)
-            else:
-                # Running in normal Python environment
-                base_dir = os.path.dirname(os.path.abspath(__file__))
-                
-            settings_dir = os.path.join(base_dir, "settings")
-            os.makedirs(settings_dir, exist_ok=True)
-            
-            settings_file = os.path.join(settings_dir, "app_settings.txt")
-            
-            # Read existing settings
-            settings = {}
-            if os.path.exists(settings_file):
-                with open(settings_file, 'r') as f:
-                    for line in f:
-                        if '=' in line:
-                            key, value = line.strip().split('=', 1)
-                            settings[key] = value
-            
-            # Update update channel
-            settings['update_channel'] = channel
-            
-            # Write back all settings
-            with open(settings_file, 'w') as f:
-                for key, value in settings.items():
-                    f.write(f"{key}={value}\n")
-                    
-            print(f"Saved update channel preference to {settings_file}")
-            
-        except Exception as e:
-            print(f"Failed to save update channel preference: {e}")
-
     def update_timezone_display(self):
         """Update the timezone info label with current time in selected timezone"""
         try:
-            # Use the current selected timezone
-            timezone = self.timezone_combo.currentText() if hasattr(self, 'timezone_combo') else self.current_timezone
-            
+            # Check if timezone_info widget exists and is valid
+            if not hasattr(self, 'timezone_info') or self.timezone_info is None:
+                return
+
+            # Check if the widget hasn't been deleted
+            try:
+                self.timezone_info.isVisible()  # This will raise RuntimeError if deleted
+            except RuntimeError:
+                # Widget has been deleted, stop the timer
+                if hasattr(self, 'timezone_timer') and self.timezone_timer:
+                    self.timezone_timer.stop()
+                return
+
+            # Use the current selected timezone with proper validation
+            timezone = self.current_timezone  # Use stored timezone as default
+
+            # Only try to get from combo box if it exists and is valid
+            if hasattr(self, 'timezone_combo') and self.timezone_combo is not None:
+                try:
+                    timezone = self.timezone_combo.currentText()
+                except RuntimeError:
+                    # ComboBox has been deleted, use stored timezone
+                    pass
+
             # Get current time in UTC
             now_utc = datetime.utcnow()
-            
+
             # Format the time display
             time_str = now_utc.strftime("%Y-%m-%d %H:%M:%S UTC")
-            
+
             # Try to get local time in the selected timezone
             # Note: This is simplified and would need proper timezone handling in a real app
             if timezone == "Asia/Calcutta":
@@ -742,13 +546,20 @@ class PreferencesWidget(QWidget):
                 local_time = now_utc.replace(hour=(now_utc.hour + 12) % 24)
                 local_time_str = local_time.strftime("%Y-%m-%d %H:%M:%S")
                 time_str += f" | {local_time_str} NZST (+12:00)"
-            
-            if hasattr(self, 'timezone_info'):
+
+            # Try to set the text, but handle if widget has been deleted
+            try:
                 self.timezone_info.setText(time_str)
+            except RuntimeError:
+                # Widget has been deleted, stop the timer
+                if hasattr(self, 'timezone_timer') and self.timezone_timer:
+                    self.timezone_timer.stop()
+
         except Exception as e:
             print(f"Error updating timezone display: {e}")
-            if hasattr(self, 'timezone_info'):
-                self.timezone_info.setText(f"Current time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            # Stop the timer if there are persistent errors
+            if hasattr(self, 'timezone_timer') and self.timezone_timer:
+                self.timezone_timer.stop()
 
     def change_timezone(self, index):
         """Handle timezone selection change"""
@@ -1521,3 +1332,23 @@ class PreferencesWidget(QWidget):
                     print("PreferencesWidget: Font size change is pending until terminal panel is set or terminal widgets are found")
         except Exception as e:
             print(f"PreferencesWidget: Error applying font size: {e}")
+
+    def cleanup_timers(self):
+        """Stop all timers to prevent accessing deleted widgets"""
+        try:
+            if hasattr(self, 'timezone_timer') and self.timezone_timer:
+                self.timezone_timer.stop()
+                self.timezone_timer = None
+                print("PreferencesWidget: Timezone timer stopped")
+        except Exception as e:
+            print(f"Error stopping timezone timer: {e}")
+
+    def closeEvent(self, event):
+        """Handle widget close event"""
+        self.cleanup_timers()
+        super().closeEvent(event)
+
+    def deleteLater(self):
+        """Override deleteLater to ensure proper cleanup"""
+        self.cleanup_timers()
+        super().deleteLater()
