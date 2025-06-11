@@ -2,7 +2,8 @@
 Dynamic implementation of the Namespaces page with live Kubernetes data.
 """
 
-from PyQt6.QtWidgets import (QHeaderView, QWidget, QLabel, QHBoxLayout)
+from PyQt6.QtWidgets import (QHeaderView, QWidget, QLabel, QHBoxLayout, QPushButton,
+                             QMessageBox, QInputDialog)
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor
 
@@ -10,6 +11,8 @@ from base_components.base_components import SortableTableWidgetItem
 from base_components.base_resource_page import BaseResourcePage
 from UI.Styles import AppStyles, AppColors
 
+import subprocess
+import json
 
 class StatusLabel(QWidget):
     """Widget that displays a status with consistent styling and background handling."""
@@ -59,6 +62,54 @@ class NamespacesPage(BaseResourcePage):
         
         # Set up the base UI components
         layout = super().setup_ui("Namespaces", headers, sortable_columns)
+
+                # Search for the button layout (QHBoxLayout) to insert our button before Refresh
+        button_layout = None
+        for i in range(layout.count()):
+            item = layout.itemAt(i)
+            if isinstance(item, QHBoxLayout):
+                button_layout = item
+                break
+            elif isinstance(item, QWidget):
+                widget_layout = item.layout()
+                if isinstance(widget_layout, QHBoxLayout):
+                    button_layout = widget_layout
+                    break
+
+        if button_layout:
+            # Create the Add NewNameSpace button
+            self.add_namespace_button = QPushButton("Add Namespaces")
+            try:
+                self.add_namespace_button.setStyleSheet(AppStyles.BUTTON_STYLE)
+            except AttributeError:
+                self.add_namespace_button.setStyleSheet("""
+                    QPushButton {
+                        background-color: #3d3d3d;
+                        color: white;
+                        padding: 5px 15px;
+                        border-radius: 2px;
+                    }
+                    QPushButton:hover {
+                        background-color: #333333;
+                    }
+                    QPushButton:pressed {
+                        background-color: #388E3C;
+                    }
+                """)
+            self.add_namespace_button.clicked.connect(self.add_new_namespace)
+
+            # Insert before Refresh button
+            refresh_index = -1
+            for i in range(button_layout.count()):
+                widget = button_layout.itemAt(i).widget()
+                if isinstance(widget, QPushButton) and "Refresh" in widget.text():
+                    refresh_index = i
+                    break
+
+            if refresh_index != -1:
+                button_layout.insertWidget(refresh_index, self.add_namespace_button)
+            else:
+                button_layout.addWidget(self.add_namespace_button)
         
         # Apply table style
         self.table.setStyleSheet(AppStyles.TABLE_STYLE)
@@ -173,11 +224,51 @@ class NamespacesPage(BaseResourcePage):
         action_container = self._create_action_container(row, action_button)
         action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
         self.table.setCellWidget(row, len(columns) + 2, action_container)  # +2 for checkbox and status
-    # def handle_row_click(self, row, column):
-    #     """Handle row selection when a table cell is clicked"""
-    #     if column != self.table.columnCount() - 1:  # Skip action column
-    #         # Select the row
-    #         self.table.selectRow(row)
+
+    def refresh_table(self):
+        try:
+            cmd = ["kubectl", "get", "namespaces", "-o", "json"]
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+
+            namespaces_data = json.loads(result.stdout)
+            items = namespaces_data.get("items", [])
+
+            self.table.setRowCount(0)
+            for row, item in enumerate(items):
+                self.table.insertRow(row)
+                resource = {
+                    "name": item["metadata"]["name"],
+                    "age": self._calculate_age(item["metadata"]["creationTimestamp"]),
+                    "raw_data": item
+                }
+                self.populate_resource_row(row, resource)
+
+        except subprocess.CalledProcessError as e:
+            QMessageBox.critical(self, "Error", f"Failed to refresh namespaces: {e.stderr.strip()}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Unexpected error while refreshing: {str(e)}")
+    
+    
+    def _calculate_age(self, creation_timestamp):
+        return "1d"  # Placeholder
+
+    def add_new_namespace(self):
+        namespace_name, ok = QInputDialog.getText(self, "Add New Namespace", "Enter namespace name:")
+
+        if ok and namespace_name:
+            try:
+                cmd = ["kubectl", "create", "namespace", namespace_name]
+                result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+
+                if result.returncode == 0:
+                    self.refresh_table()
+                else:
+                    QMessageBox.critical(self, "Error", f"Failed to create namespace: {result.stderr.strip()}")
+
+            except subprocess.CalledProcessError as e:
+                QMessageBox.critical(self, "Error", f"Error creating namespace: {e.stderr.strip()}")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Unexpected error: {str(e)}")
 
     def handle_row_click(self, row, column):
         if column != self.table.columnCount() - 1:  # Skip action column

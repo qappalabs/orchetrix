@@ -6,7 +6,7 @@ Includes icon detection, better error handling, and more metadata from the API.
 from PyQt6.QtWidgets import (
     QHeaderView, QWidget, QLabel, QHBoxLayout,
     QToolButton, QMenu, QVBoxLayout, QTableWidgetItem, 
-    QProgressBar, QAbstractSlider, QPushButton,QMessageBox,QDialog
+    QProgressBar, QLineEdit, QPushButton,QMessageBox,QDialog
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QColor, QPixmap
@@ -515,34 +515,61 @@ class ChartsPage(BaseResourcePage):
             # Show or hide the row based on matches
             self.table.setRowHidden(row, not row_matches)
 
-    def check_scroll_position(self, value):
-        """Check if user has scrolled to the bottom and load more data if needed"""
-        # Don't load more data if we're in search mode or if we're already loading
-        if self.is_searching or self.is_loading or self.is_loading_more:
-            return
+
+    def _handle_scroll(self, value):
+        """
+        FIX 2: Disable the base class's scroll handler.
+        This prevents the Kubernetes-based data loading from interfering with this page's
+        custom ArtifactHub API loading logic. We achieve this by overriding the method
+        and making it do nothing.
+        """
+        pass # Intentionally left blank to disable the parent's scroll logic.
+
+
+    # def check_scroll_position(self, value):
+    #     """Check if user has scrolled to the bottom and load more data if needed"""
+    #     # Don't load more data if we're in search mode or if we're already loading
+    #     if self.is_searching or self.is_loading or self.is_loading_more:
+    #         return
             
-        scrollbar = self.table.verticalScrollBar()
+    #     scrollbar = self.table.verticalScrollBar()
         
-        # Get scrollbar values
-        max_value = scrollbar.maximum()
-        current_value = value
+    #     # Get scrollbar values
+    #     max_value = scrollbar.maximum()
+    #     current_value = value
         
-        # Calculate how far we've scrolled as a percentage (0.0 to 1.0)
-        # Avoid division by zero if max_value is 0
-        if max_value <= 0:
-            return
+    #     # Calculate how far we've scrolled as a percentage (0.0 to 1.0)
+    #     # Avoid division by zero if max_value is 0
+    #     if max_value <= 0:
+    #         return
             
-        scroll_percentage = current_value / max_value
+    #     scroll_percentage = current_value / max_value
         
-        # ALWAYS try to load more data when we're over 65% scrolled
-        if scroll_percentage >= 0.65:
-            # Force is_more_available to True to ensure we try loading more
-            self.is_more_available = True
+    #     # ALWAYS try to load more data when we're over 65% scrolled
+    #     if scroll_percentage >= 0.65:
+    #         # Force is_more_available to True to ensure we try loading more
+    #         self.is_more_available = True
             
-            # Call load_more_data if we're not already loading
-            if not self.is_loading_more and not self.is_loading:
-                self.load_more_data()
+    #         # Call load_more_data if we're not already loading
+    #         if not self.is_loading_more and not self.is_loading:
+    #             self.load_more_data()
     
+    def check_scroll_position(self, value):
+        """
+        FIX 3: This is now the ONLY active scroll handler.
+        It correctly checks if the user has scrolled to the bottom and loads more data
+        only if it's available and not already loading.
+        """
+        # Do not load more if we are already loading or if there's no more data
+        if self.is_loading or self.is_loading_more or not self.is_more_available:
+            return
+
+        scrollbar = self.table.verticalScrollBar()
+
+        # Trigger 'load more' only when the scrollbar is very near the bottom
+        if value >= scrollbar.maximum() - (2 * self.table.rowHeight(0)): # Trigger within last 2 rows
+            self.load_more_data()
+
     def configure_columns(self):
         """Configure column widths and behaviors"""
         # Configure columns with fixed widths
@@ -563,7 +590,7 @@ class ChartsPage(BaseResourcePage):
         # Make Description column stretch
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
     
-    def load_data(self):
+    def load_data(self, load_more=False):
         """Load initial chart data from ArtifactHub API"""
         if hasattr(self, 'is_loading') and self.is_loading:
             return
