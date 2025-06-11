@@ -326,9 +326,109 @@ class OrchestrixGUI(QMainWindow):
         else:
             item_text = name
 
-        item.setText(1, kind)
-        item.setText(2, source)
-        item.setText(3, label)
+        # --- Modified Name column widget to include cluster icon ---
+        name_widget = QWidget()
+        name_widget.setStyleSheet("background: transparent; padding: 0px; margin: 0px;")
+        name_widget.setCursor(Qt.CursorShape.PointingHandCursor)
+        name_layout = QHBoxLayout(name_widget)
+        name_layout.setContentsMargins(0, 0, 0, 0)
+        name_layout.setSpacing(6)  # Spacing between icon, text, and pin button
+        name_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+
+        is_cluster = "Cluster" in kind
+
+        # Add colored cluster icon if it's a cluster
+        if is_cluster:
+            cluster_icon_label = QLabel()
+            icon_size = AppConstants.SIZES.get("ICON_SIZE_SMALL", 16)
+
+            # Load and color the cluster icon
+            try:
+                cluster_color = self.get_cluster_color(name)
+                colored_pixmap = self.create_colored_icon("icons/Cluster_Logo.svg", cluster_color, icon_size)
+
+                if not colored_pixmap.isNull():
+                    cluster_icon_label.setPixmap(colored_pixmap)
+                    cluster_icon_label.setFixedSize(icon_size, icon_size)
+                    name_layout.addWidget(cluster_icon_label)
+                else:
+                    print(f"Warning: Could not create colored icon for {name}")
+            except Exception as e:
+                print(f"Error processing cluster icon for {name}: {e}")
+
+        name_label = QLabel(name if not badge_color else item_text)
+        font = QFont("Segoe UI", 10)
+        font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
+        name_label.setFont(font)
+        name_label.setStyleSheet("color: #FFFFFF; background: transparent; padding: 0px; margin: 0px;")
+        name_layout.addWidget(name_label)
+
+        if original_data and 'cluster_data' in original_data:
+            pin_btn = QPushButton()
+            pin_btn.setFixedSize(20, 20)
+            pin_icon_path = resource_path("icons/pin.png") if name not in self.pinned_items else resource_path("icons/unpin.png")
+            pin_btn.setIcon(QIcon(pin_icon_path))
+            pin_btn.setIconSize(QSize(16, 16))
+            pin_btn.setStyleSheet("""
+                QPushButton { background: transparent; border: none; padding: 0px; margin: 0px; }
+                QPushButton:hover { background: #3e3e3e; }
+            """)
+            pin_btn.clicked.connect(lambda checked=False, n=name: self.toggle_pin_item(n))
+            name_layout.addWidget(pin_btn)
+
+        self.tree_widget.setItemWidget(item, 0, name_widget)
+
+        # --- NEW: Create custom widgets for Kind, Source, and Label columns with hand cursor ---
+
+        # Kind column (column 1)
+        kind_widget = QWidget()
+        kind_widget.setStyleSheet("background: transparent; padding: 0px; margin: 0px;")
+        kind_widget.setCursor(Qt.CursorShape.PointingHandCursor)
+        kind_layout = QHBoxLayout(kind_widget)
+        kind_layout.setContentsMargins(8, 0, 8, 0)  # Add some padding
+        kind_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+
+        kind_label = QLabel(kind)
+        font = QFont("Segoe UI", 10)
+        font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
+        kind_label.setFont(font)
+        kind_label.setStyleSheet("color: #FFFFFF; background: transparent; padding: 0px; margin: 0px;")
+        kind_layout.addWidget(kind_label)
+        self.tree_widget.setItemWidget(item, 1, kind_widget)
+
+        # Source column (column 2)
+        source_widget = QWidget()
+        source_widget.setStyleSheet("background: transparent; padding: 0px; margin: 0px;")
+        source_widget.setCursor(Qt.CursorShape.PointingHandCursor)
+        source_layout = QHBoxLayout(source_widget)
+        source_layout.setContentsMargins(8, 0, 8, 0)  # Add some padding
+        source_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+
+        source_label = QLabel(source)
+        font = QFont("Segoe UI", 10)
+        font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
+        source_label.setFont(font)
+        source_label.setStyleSheet("color: #FFFFFF; background: transparent; padding: 0px; margin: 0px;")
+        source_layout.addWidget(source_label)
+        self.tree_widget.setItemWidget(item, 2, source_widget)
+
+        # Label column (column 3)
+        label_widget = QWidget()
+        label_widget.setStyleSheet("background: transparent; padding: 0px; margin: 0px;")
+        label_widget.setCursor(Qt.CursorShape.PointingHandCursor)
+        label_layout = QHBoxLayout(label_widget)
+        label_layout.setContentsMargins(8, 0, 8, 0)  # Add some padding
+        label_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+
+        label_label = QLabel(label)
+        font = QFont("Segoe UI", 10)
+        font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
+        label_label.setFont(font)
+        label_label.setStyleSheet("color: #FFFFFF; background: transparent; padding: 0px; margin: 0px;")
+        label_layout.addWidget(label_label)
+        self.tree_widget.setItemWidget(item, 3, label_widget)
+
+        # --- END of new custom widgets for Kind, Source, and Label ---
 
         status_colors = {
             "available": AppColors.STATUS_AVAILABLE,
@@ -339,11 +439,10 @@ class OrchestrixGUI(QMainWindow):
             "loading": AppColors.STATUS_WARNING
         }
 
-        is_cluster = "Cluster" in kind
-
         status_widget = QWidget()
         status_widget.setObjectName("statusCell")
         status_widget.setStyleSheet("QWidget#statusCell { background: transparent; }")
+        status_widget.setCursor(Qt.CursorShape.PointingHandCursor)
         status_layout = QHBoxLayout(status_widget)
         status_layout.setContentsMargins(5, 0, 0, 0)
         status_layout.setSpacing(5)
@@ -434,56 +533,12 @@ class OrchestrixGUI(QMainWindow):
         self.tree_widget.setItemWidget(item, 5, action_widget)
         item.setSizeHint(5, QSize(AppConstants.SIZES["ACTION_WIDTH"], AppConstants.SIZES["ROW_HEIGHT"]))
 
-        # --- Modified Name column widget to include cluster icon ---
-        name_widget = QWidget()
-        name_widget.setStyleSheet("background: transparent; padding: 0px; margin: 0px;")
-        name_layout = QHBoxLayout(name_widget)
-        name_layout.setContentsMargins(0, 0, 0, 0)
-        name_layout.setSpacing(6)  # Spacing between icon, text, and pin button
-        name_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-
-        # Add colored cluster icon if it's a cluster
-        if is_cluster:
-            cluster_icon_label = QLabel()
-            icon_size = AppConstants.SIZES.get("ICON_SIZE_SMALL", 16)
-
-            # Load and color the cluster icon
-            try:
-                cluster_color = self.get_cluster_color(name)
-                colored_pixmap = self.create_colored_icon("icons/Cluster_Logo.svg", cluster_color, icon_size)
-
-                if not colored_pixmap.isNull():
-                    cluster_icon_label.setPixmap(colored_pixmap)
-                    cluster_icon_label.setFixedSize(icon_size, icon_size)
-                    name_layout.addWidget(cluster_icon_label)
-                else:
-                    print(f"Warning: Could not create colored icon for {name}")
-            except Exception as e:
-                print(f"Error processing cluster icon for {name}: {e}")
-
-        name_label = QLabel(name if not badge_color else item_text)
-        font = QFont("Segoe UI", 10)
-        font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
-        name_label.setFont(font)
-        name_label.setStyleSheet("color: #FFFFFF; background: transparent; padding: 0px; margin: 0px;")
-        name_layout.addWidget(name_label)
-
-        if original_data and 'cluster_data' in original_data:
-            pin_btn = QPushButton()
-            pin_btn.setFixedSize(20, 20)
-            pin_icon_path = resource_path("icons/pin.png") if name not in self.pinned_items else resource_path("icons/unpin.png")
-            pin_btn.setIcon(QIcon(pin_icon_path))
-            pin_btn.setIconSize(QSize(16, 16))
-            pin_btn.setStyleSheet("""
-                QPushButton { background: transparent; border: none; padding: 0px; margin: 0px; }
-                QPushButton:hover { background: #3e3e3e; }
-            """)
-            pin_btn.clicked.connect(lambda checked=False, n=name: self.toggle_pin_item(n))
-            name_layout.addWidget(pin_btn)
-        # --- End of modified Name column widget ---
-
-        self.tree_widget.setItemWidget(item, 0, name_widget)
+        # Set size hints for all columns
         item.setSizeHint(0, QSize(0, AppConstants.SIZES["ROW_HEIGHT"]))
+        item.setSizeHint(1, QSize(0, AppConstants.SIZES["ROW_HEIGHT"]))
+        item.setSizeHint(2, QSize(0, AppConstants.SIZES["ROW_HEIGHT"]))
+        item.setSizeHint(3, QSize(0, AppConstants.SIZES["ROW_HEIGHT"]))
+        item.setSizeHint(4, QSize(0, AppConstants.SIZES["ROW_HEIGHT"]))
 
     def create_colored_icon(self, icon_path: str, color: QColor, size: int) -> QPixmap:
         """
@@ -599,7 +654,11 @@ class OrchestrixGUI(QMainWindow):
         font = QFont("Segoe UI", 13)
         font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
         tree_widget.setFont(font)
-        tree_widget.setStyleSheet(AppStyles.TREE_WIDGET_STYLE)
+        tree_widget.setStyleSheet(AppStyles.TREE_WIDGET_STYLE + """
+            QTreeWidget::item {
+                cursor: pointer;
+            }
+        """)
         tree_widget.setIconSize(QSize(20, 20))
         tree_widget.setIndentation(0)
         tree_widget.setAlternatingRowColors(False)

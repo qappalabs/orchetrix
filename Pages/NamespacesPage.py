@@ -1,18 +1,21 @@
 """
-Dynamic implementation of the Namespaces page with live Kubernetes data.
+Dynamic implementation of the Namespaces page with live Kubernetes data using API.
 """
 
 from PyQt6.QtWidgets import (
     QHeaderView, QWidget, QLabel, QHBoxLayout, QPushButton, QInputDialog, QMessageBox, QLayout
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTimer
 from PyQt6.QtGui import QColor
 
 from base_components.base_components import SortableTableWidgetItem
 from base_components.base_resource_page import BaseResourcePage
 from UI.Styles import AppStyles, AppColors
-import subprocess
-import json
+from utils.kubernetes_client import get_kubernetes_client
+from kubernetes.client.rest import ApiException
+from kubernetes import client
+import datetime
+import logging
 
 
 class StatusLabel(QWidget):
@@ -40,14 +43,80 @@ class StatusLabel(QWidget):
         super().mousePressEvent(event)
 
 
+class NamespaceOperationThread(QThread):
+    """Thread for performing namespace operations asynchronously"""
+    operation_completed = pyqtSignal(bool, str)  # success, message
+
+    def __init__(self, operation, namespace_name=None, parent=None):
+        super().__init__(parent)
+        self.operation = operation
+        self.namespace_name = namespace_name
+        self.kube_client = get_kubernetes_client()
+
+    def run(self):
+        try:
+            if self.operation == "create":
+                self._create_namespace()
+            elif self.operation == "delete":
+                self._delete_namespace()
+            elif self.operation == "refresh":
+                self._refresh_namespaces()
+        except Exception as e:
+            self.operation_completed.emit(False, str(e))
+
+    def _create_namespace(self):
+        """Create a new namespace"""
+        try:
+            if not self.kube_client.v1:
+                self.operation_completed.emit(False, "Kubernetes client not initialized")
+                return
+
+            # Create namespace object
+            namespace_body = client.V1Namespace(
+                metadata=client.V1ObjectMeta(name=self.namespace_name)
+            )
+
+            # Create the namespace
+            self.kube_client.v1.create_namespace(body=namespace_body)
+            self.operation_completed.emit(True, f"Namespace '{self.namespace_name}' created successfully")
+
+        except ApiException as e:
+            if e.status == 409:
+                self.operation_completed.emit(False, f"Namespace '{self.namespace_name}' already exists")
+            else:
+                self.operation_completed.emit(False, f"API error: {e.reason}")
+        except Exception as e:
+            self.operation_completed.emit(False, f"Failed to create namespace: {str(e)}")
+
+    def _delete_namespace(self):
+        """Delete a namespace"""
+        try:
+            if not self.kube_client.v1:
+                self.operation_completed.emit(False, "Kubernetes client not initialized")
+                return
+
+            # Delete the namespace
+            self.kube_client.v1.delete_namespace(name=self.namespace_name)
+            self.operation_completed.emit(True, f"Namespace '{self.namespace_name}' deletion initiated")
+
+        except ApiException as e:
+            if e.status == 404:
+                self.operation_completed.emit(False, f"Namespace '{self.namespace_name}' not found")
+            else:
+                self.operation_completed.emit(False, f"API error: {e.reason}")
+        except Exception as e:
+            self.operation_completed.emit(False, f"Failed to delete namespace: {str(e)}")
+
 class NamespacesPage(BaseResourcePage):
     """
-    Displays Kubernetes namespaces with live data and resource operations.
+    Displays Kubernetes namespaces with live data and resource operations using API.
     """
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.resource_type = "namespaces"
+        self.kube_client = get_kubernetes_client()
+        self.operation_thread = None
         self.setup_page_ui()
 
     def setup_page_ui(self):
@@ -138,7 +207,7 @@ class NamespacesPage(BaseResourcePage):
 
             if col == 2:
                 try:
-                    num = int(value.replace('d', ''))
+                    num = int(value.replace('d', '').replace('h', '').replace('m', ''))
                 except ValueError:
                     num = 0
                 item = SortableTableWidgetItem(value, num)
@@ -166,55 +235,99 @@ class NamespacesPage(BaseResourcePage):
         status_widget.clicked.connect(lambda: self.table.selectRow(row))
         self.table.setCellWidget(row, status_col, status_widget)
 
+        # Replace the action button creation section with this:
         action_button = self._create_action_button(row, resource["name"], "")
         action_button.setStyleSheet(AppStyles.ACTION_BUTTON_STYLE)
+
+        # Connect the action button to handle the click properly
+        action_button.clicked.connect(lambda checked, name=resource_name: self._handle_action_button_click(name))
+
         action_container = self._create_action_container(row, action_button)
         action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
         self.table.setCellWidget(row, len(columns) + 2, action_container)
 
     def refresh_table(self):
+        """Refresh the namespaces table using Kubernetes API"""
         try:
-            cmd = ["kubectl", "get", "namespaces", "-o", "json"]
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            if not self.kube_client.v1:
+                QMessageBox.critical(self, "Error", "Kubernetes client not initialized. Please connect to a cluster first.")
+                return
 
-            namespaces_data = json.loads(result.stdout)
-            items = namespaces_data.get("items", [])
+            # Get namespaces using API
+            namespaces_list = self.kube_client.v1.list_namespace()
 
             self.table.setRowCount(0)
-            for row, item in enumerate(items):
+            for row, namespace_item in enumerate(namespaces_list.items):
                 self.table.insertRow(row)
+
+                # Convert API object to dict for consistency
+                namespace_dict = self.kube_client.v1.api_client.sanitize_for_serialization(namespace_item)
+
                 resource = {
-                    "name": item["metadata"]["name"],
-                    "age": self._calculate_age(item["metadata"]["creationTimestamp"]),
-                    "raw_data": item
+                    "name": namespace_item.metadata.name,
+                    "age": self._calculate_age(namespace_item.metadata.creation_timestamp),
+                    "raw_data": namespace_dict
                 }
                 self.populate_resource_row(row, resource)
 
-        except subprocess.CalledProcessError as e:
-            QMessageBox.critical(self, "Error", f"Failed to refresh namespaces: {e.stderr.strip()}")
+        except ApiException as e:
+            QMessageBox.critical(self, "API Error", f"Failed to refresh namespaces: {e.reason}")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Unexpected error while refreshing: {str(e)}")
 
     def _calculate_age(self, creation_timestamp):
-        return "1d"  # Placeholder
+        """Calculate age from creation timestamp"""
+        if not creation_timestamp:
+            return "Unknown"
+
+        try:
+            # Convert to datetime if it's a string
+            if isinstance(creation_timestamp, str):
+                created_time = datetime.datetime.fromisoformat(creation_timestamp.replace('Z', '+00:00'))
+            else:
+                # Assume it's already a datetime object
+                created_time = creation_timestamp.replace(tzinfo=datetime.timezone.utc)
+
+            now = datetime.datetime.now(datetime.timezone.utc)
+            diff = now - created_time
+
+            days = diff.days
+            hours = diff.seconds // 3600
+            minutes = (diff.seconds % 3600) // 60
+
+            if days > 0:
+                return f"{days}d"
+            elif hours > 0:
+                return f"{hours}h"
+            else:
+                return f"{minutes}m"
+        except Exception as e:
+            logging.warning(f"Error calculating age: {e}")
+            return "Unknown"
 
     def add_new_namespace(self):
+        """Add a new namespace using Kubernetes API"""
         namespace_name, ok = QInputDialog.getText(self, "Add New Namespace", "Enter namespace name:")
 
         if ok and namespace_name:
-            try:
-                cmd = ["kubectl", "create", "namespace", namespace_name]
-                result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            # Validate namespace name
+            if not namespace_name.strip():
+                QMessageBox.warning(self, "Invalid Name", "Namespace name cannot be empty")
+                return
 
-                if result.returncode == 0:
-                    self.refresh_table()
-                else:
-                    QMessageBox.critical(self, "Error", f"Failed to create namespace: {result.stderr.strip()}")
+            # Check for valid namespace name (basic validation)
+            if not namespace_name.replace('-', '').replace('.', '').isalnum():
+                QMessageBox.warning(self, "Invalid Name", "Namespace name can only contain alphanumeric characters, hyphens, and periods")
+                return
 
-            except subprocess.CalledProcessError as e:
-                QMessageBox.critical(self, "Error", f"Error creating namespace: {e.stderr.strip()}")
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Unexpected error: {str(e)}")
+            # Start the operation in a separate thread
+            self.operation_thread = NamespaceOperationThread("create", namespace_name, self)
+            self.operation_thread.operation_completed.connect(self._on_operation_completed)
+            self.operation_thread.start()
+
+            # Disable the button while operation is in progress
+            self.add_namespace_button.setEnabled(False)
+            self.add_namespace_button.setText("Creating...")
 
     def handle_row_click(self, row, column):
         if column != self.table.columnCount() - 1:
@@ -237,3 +350,137 @@ class NamespacesPage(BaseResourcePage):
                     if resource_type.endswith('s'):
                         resource_type = resource_type[:-1]
                     parent.detail_manager.show_detail(resource_type, resource_name, namespace)
+
+    def _handle_action_button_click(self, resource_name):
+        """Handle action button click to show context menu with edit and delete options"""
+        from PyQt6.QtWidgets import QMenu
+
+        menu = QMenu(self)
+
+        # Add edit action
+        edit_action = menu.addAction("Edit")
+        edit_action.triggered.connect(lambda: self._edit_namespace_yaml(resource_name))
+
+        # Add separator
+        menu.addSeparator()
+
+        # Add delete action
+        delete_action = menu.addAction("Delete")
+        delete_action.triggered.connect(lambda: self._delete_namespace(resource_name))
+
+        # Show menu at cursor position
+        menu.exec(self.cursor().pos())
+
+    def _delete_namespace(self, namespace_name):
+        """Delete a specific namespace using Kubernetes API"""
+        # Check if it's a system namespace and warn user
+        system_namespaces = ["default", "kube-system", "kube-public", "kube-node-lease"]
+        if namespace_name in system_namespaces:
+            reply = QMessageBox.warning(
+                self,
+                "Delete System Namespace",
+                f"'{namespace_name}' is a system namespace. Deleting it may cause cluster issues.\n\nAre you sure you want to continue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+        # Confirm deletion
+        result = QMessageBox.warning(
+            self,
+            "Confirm Deletion",
+            f"Are you sure you want to delete namespace '{namespace_name}'?\n\nThis will also delete all resources within this namespace.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        if result != QMessageBox.StandardButton.Yes:
+            return
+
+        # Start the deletion operation in a separate thread
+        self.operation_thread = NamespaceOperationThread("delete", namespace_name, self)
+        self.operation_thread.operation_completed.connect(self._on_operation_completed)
+        self.operation_thread.start()
+
+    def _edit_namespace_yaml(self, namespace_name):
+        """Edit namespace by opening YAML section in detail panel"""
+        try:
+            # Find the parent window that has detail_manager
+            parent = self.parent()
+            while parent and not hasattr(parent, 'detail_manager'):
+                parent = parent.parent()
+
+            if parent and hasattr(parent, 'detail_manager'):
+                # Show detail panel for the namespace
+                parent.detail_manager.show_detail("namespace", namespace_name, "")
+
+                # Switch to YAML tab and enable edit mode after a short delay
+                QTimer.singleShot(100, lambda: self._enable_yaml_edit_mode(parent.detail_manager))
+            else:
+                QMessageBox.warning(self, "Error", "Could not access detail panel for editing.")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open YAML editor: {str(e)}")
+
+    def _enable_yaml_edit_mode(self, detail_manager):
+        """Enable YAML edit mode in the detail panel"""
+        try:
+            if detail_manager._detail_page and detail_manager._detail_page.isVisible():
+                detail_page = detail_manager._detail_page
+
+                # Switch to YAML tab (index 2: Overview=0, Details=1, YAML=2, Events=3)
+                detail_page.tab_widget.setCurrentIndex(2)
+
+                # Enable edit mode in YAML section after tab loads
+                QTimer.singleShot(200, lambda: self._activate_yaml_editor(detail_page))
+        except Exception as e:
+            logging.error(f"Error enabling YAML edit mode: {e}")
+
+    def _activate_yaml_editor(self, detail_page):
+        """Activate the YAML editor for editing"""
+        try:
+            # Get the YAML section (index 2)
+            yaml_section = detail_page.tab_widget.widget(2)
+
+            if yaml_section and hasattr(yaml_section, 'toggle_yaml_edit_mode'):
+                # Check if already in edit mode
+                if yaml_section.yaml_editor.isReadOnly():
+                    # Enable edit mode
+                    yaml_section.toggle_yaml_edit_mode()
+
+                    # Optional: Show a message that edit mode is enabled
+                    logging.info("YAML edit mode enabled for namespace")
+        except Exception as e:
+            logging.error(f"Error activating YAML editor: {e}")
+
+    def _on_operation_completed(self, success, message):
+        """Handle completion of namespace operation"""
+        # Re-enable the add button if it was disabled
+        if hasattr(self, 'add_namespace_button'):
+            self.add_namespace_button.setEnabled(True)
+            self.add_namespace_button.setText("Add Namespaces")
+
+        if success:
+            QMessageBox.information(self, "Success", message)
+            # Refresh the table to show changes
+            self.refresh_table()
+        else:
+            QMessageBox.critical(self, "Error", message)
+
+        # Clean up thread
+        if self.operation_thread:
+            self.operation_thread.deleteLater()
+            self.operation_thread = None
+
+    def delete_resource(self, resource_name, resource_namespace):
+        """Override to handle namespace deletion specifics - called by base class"""
+        self._delete_namespace(resource_name)
+
+    def closeEvent(self, event):
+        """Clean up when the widget is closed"""
+        # Stop any running operations
+        if self.operation_thread and self.operation_thread.isRunning():
+            self.operation_thread.quit()
+            self.operation_thread.wait(1000)
+
+        super().closeEvent(event)
