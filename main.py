@@ -519,11 +519,11 @@ class MainWindow(QMainWindow):
             self.profile_screen.setFixedHeight(self.height())
             self.profile_screen.move(self.width() - self.profile_screen.width(), 0)
 
-        # Update terminal position if visible
-        # if (hasattr(self, 'cluster_view') and 
-        #     hasattr(self.cluster_view, 'terminal_panel') and 
-        #     self.cluster_view.terminal_panel.is_visible):
-        #     self.cluster_view.adjust_terminal_position()
+        # Update notification screen position
+        if hasattr(self, 'notification_screen') and self.notification_screen.is_visible:
+            # Notification screen might have its own logic via update_position or similar
+            if hasattr(self.notification_screen, 'update_position'):
+                self.notification_screen.update_position()
             
     def moveEvent(self, event):
         """Handle move event"""

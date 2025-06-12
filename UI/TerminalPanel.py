@@ -245,7 +245,6 @@ class UnifiedTerminalWidget(QTextEdit):
         self.current_prompt = f"PS {terminal_panel.working_directory} > " if terminal_panel and hasattr(terminal_panel, 'working_directory') else "PS > "
 
     def append_output(self, text, color=None):
-        """Enhanced append_output method with proper background handling"""
         if not self.is_valid:
             return
         try:
@@ -330,7 +329,6 @@ class UnifiedTerminalWidget(QTextEdit):
             self.is_valid = False
 
     def contextMenuEvent(self, event):
-        """Enhanced context menu for copy, paste, and other actions."""
         print(f"UnifiedTerminalWidget.contextMenuEvent: copy_paste_enabled={self.copy_paste_enabled}, edit_mode={self.edit_mode}")
         menu = self.createStandardContextMenu()
 

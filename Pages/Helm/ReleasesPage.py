@@ -1,6 +1,6 @@
 """
 Optimized implementation of the Releases page that loads Helm releases data dynamically
-with proper empty state handling and robust error detection.
+with proper threading for operations to prevent UI freezing and automatic refresh.
 """
 
 from PyQt6.QtWidgets import (
@@ -19,10 +19,331 @@ import platform
 import shutil
 import tempfile
 import time
+import logging
 
 from base_components.base_resource_page import BaseResourcePage
 from base_components.base_components import SortableTableWidgetItem
 from UI.Styles import AppColors, AppStyles
+
+
+class HelmOperationThread(QThread):
+    """Base thread class for Helm operations"""
+    
+    progress_update = pyqtSignal(str)  # Progress message
+    progress_percentage = pyqtSignal(int)  # Progress percentage (0-100)
+    operation_complete = pyqtSignal(bool, str)  # Success, message
+    
+    def __init__(self, operation_type, *args, **kwargs):
+        super().__init__()
+        self.operation_type = operation_type
+        self.args = args
+        self.kwargs = kwargs
+        self._is_cancelled = False
+        
+    def cancel(self):
+        """Cancel the operation"""
+        self._is_cancelled = True
+        
+    def run(self):
+        """Execute the operation in a separate thread"""
+        try:
+            if self.operation_type == "delete":
+                self._delete_release()
+            elif self.operation_type == "upgrade":
+                self._upgrade_release()
+            elif self.operation_type == "batch_delete":
+                self._batch_delete_releases()
+        except Exception as e:
+            logging.error(f"Error in helm operation thread: {e}")
+            self.operation_complete.emit(False, f"Operation error: {str(e)}")
+            
+    def _delete_release(self):
+        """Delete a single release with improved error handling and monitoring"""
+        release_name, namespace = self.args
+        
+        self.progress_update.emit(f"Locating Helm executable...")
+        self.progress_percentage.emit(10)
+        
+        helm_path = find_helm_executable()
+        if not helm_path:
+            self.operation_complete.emit(False, "Helm CLI not found. Please install Helm to uninstall releases.")
+            return
+            
+        if self._is_cancelled:
+            return
+            
+        self.progress_update.emit(f"Uninstalling release {release_name}...")
+        self.progress_percentage.emit(30)
+        
+        try:
+            cmd = [helm_path, "uninstall", release_name, "-n", namespace]
+            logging.info(f"Executing delete command: {' '.join(cmd)}")
+            
+            # Start the process
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            
+            self.progress_percentage.emit(50)
+            
+            # Monitor process with timeout
+            check_interval = 1.0  # Check every second
+            max_wait_time = 120  # 2 minutes maximum for deletion
+            elapsed_time = 0
+            
+            while process.poll() is None and elapsed_time < max_wait_time:
+                if self._is_cancelled:
+                    logging.info(f"Delete operation cancelled by user for {release_name}")
+                    try:
+                        process.terminate()
+                        process.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait()
+                    return
+                
+                # Update progress
+                if elapsed_time > 30:
+                    self.progress_percentage.emit(70)
+                elif elapsed_time > 60:
+                    self.progress_percentage.emit(80)
+                elif elapsed_time > 90:
+                    self.progress_percentage.emit(90)
+                
+                self.msleep(int(check_interval * 1000))
+                elapsed_time += check_interval
+            
+            # Handle timeout
+            if elapsed_time >= max_wait_time and process.poll() is None:
+                logging.error(f"Delete operation timed out for {release_name}")
+                try:
+                    process.terminate()
+                    process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+                
+                self.operation_complete.emit(False, f"Delete operation timed out for release {release_name}")
+                return
+            
+            stdout, stderr = process.communicate()
+            
+            self.progress_percentage.emit(100)
+            
+            if process.returncode == 0:
+                logging.info(f"Successfully deleted release {release_name}")
+                self.operation_complete.emit(True, f"Successfully uninstalled release {release_name}")
+            else:
+                error_msg = stderr.strip() if stderr.strip() else stdout.strip()
+                logging.error(f"Failed to delete release {release_name}: {error_msg}")
+                
+                # Handle specific error cases
+                if "not found" in error_msg.lower():
+                    # Release doesn't exist, consider it successful
+                    self.operation_complete.emit(True, f"Release {release_name} was not found (may have been already deleted)")
+                else:
+                    self.operation_complete.emit(False, f"Failed to uninstall release: {error_msg}")
+                
+        except Exception as e:
+            logging.error(f"Exception during delete operation for {release_name}: {str(e)}")
+            self.operation_complete.emit(False, f"Error uninstalling release: {str(e)}")
+            
+    def _upgrade_release(self):
+        """Upgrade a release"""
+        release_name, namespace, upgrade_options = self.args
+        
+        self.progress_update.emit("Locating Helm executable...")
+        self.progress_percentage.emit(5)
+        
+        helm_path = find_helm_executable()
+        if not helm_path:
+            self.operation_complete.emit(False, "Helm CLI not found. Please install Helm to upgrade releases.")
+            return
+            
+        if self._is_cancelled:
+            return
+            
+        try:
+            self.progress_update.emit("Building upgrade command...")
+            self.progress_percentage.emit(15)
+            
+            # Build the upgrade command
+            cmd = [helm_path, "upgrade", release_name]
+            
+            # Add chart reference
+            chart = upgrade_options.get("chart")
+            if not chart:
+                # Get current chart from release
+                self.progress_update.emit("Getting current release information...")
+                self.progress_percentage.emit(25)
+                
+                info_cmd = [helm_path, "list", "--filter", f"^{release_name}$", "-n", namespace, "-o", "json"]
+                result = subprocess.run(info_cmd, capture_output=True, text=True, timeout=15)
+                
+                if result.returncode == 0 and result.stdout.strip():
+                    try:
+                        releases = json.loads(result.stdout)
+                        if releases and len(releases) > 0:
+                            release_info = releases[0]
+                            chart_full = release_info.get("chart", "")
+                            
+                            if '/' in chart_full:
+                                repo, chart_with_version = chart_full.split('/', 1)
+                                if '-' in chart_with_version:
+                                    version_parts = chart_with_version.split('-')
+                                    if len(version_parts) > 1 and version_parts[-1][0].isdigit():
+                                        chart = f"{repo}/{'-'.join(version_parts[:-1])}"
+                                    else:
+                                        chart = chart_full
+                                else:
+                                    chart = chart_full
+                            else:
+                                chart = chart_full.split('-')[0]
+                                chart = f"bitnami/{chart}"  # Default to bitnami
+                    except json.JSONDecodeError:
+                        pass
+            
+            if not chart:
+                self.operation_complete.emit(False, "Could not determine chart name. Please specify the chart explicitly.")
+                return
+                
+            cmd.append(chart)
+            cmd.extend(["-n", namespace])
+            
+            # Add version if specified
+            if upgrade_options.get("version"):
+                cmd.extend(["--version", upgrade_options.get("version")])
+            
+            # Add values file if provided
+            values_file = None
+            if upgrade_options.get("values"):
+                self.progress_update.emit("Creating values file...")
+                self.progress_percentage.emit(35)
+                
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".yaml", mode="w") as temp:
+                    temp.write(upgrade_options.get("values"))
+                    values_file = temp.name
+                cmd.extend(["-f", values_file])
+            
+            # Add --atomic flag for atomic upgrades
+            if upgrade_options.get("atomic", True):
+                cmd.append("--atomic")
+            
+            if self._is_cancelled:
+                if values_file and os.path.exists(values_file):
+                    os.unlink(values_file)
+                return
+                
+            self.progress_update.emit(f"Executing upgrade for {release_name}...")
+            self.progress_percentage.emit(60)
+            
+            logging.info(f"Executing upgrade command: {' '.join(cmd)}")
+            
+            # Start the process
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            
+            # Monitor progress
+            progress_steps = [70, 80, 90, 95]
+            step_index = 0
+            
+            while process.poll() is None:
+                if self._is_cancelled:
+                    process.terminate()
+                    process.wait()
+                    if values_file and os.path.exists(values_file):
+                        os.unlink(values_file)
+                    return
+                    
+                if step_index < len(progress_steps):
+                    self.progress_percentage.emit(progress_steps[step_index])
+                    step_index += 1
+                    
+                self.msleep(500)
+            
+            stdout, stderr = process.communicate()
+            
+            # Clean up values file
+            if values_file and os.path.exists(values_file):
+                os.unlink(values_file)
+            
+            self.progress_percentage.emit(100)
+            
+            if process.returncode == 0:
+                self.operation_complete.emit(True, f"Successfully upgraded release {release_name}")
+            else:
+                self.operation_complete.emit(False, f"Failed to upgrade release: {stderr}")
+                
+        except Exception as e:
+            # Clean up values file if it exists
+            if 'values_file' in locals() and values_file and os.path.exists(values_file):
+                os.unlink(values_file)
+            self.operation_complete.emit(False, f"Error upgrading release: {str(e)}")
+            
+    def _batch_delete_releases(self):
+        """Delete multiple releases"""
+        releases_to_delete = self.args[0]
+        
+        self.progress_update.emit("Locating Helm executable...")
+        self.progress_percentage.emit(5)
+        
+        helm_path = find_helm_executable()
+        if not helm_path:
+            self.operation_complete.emit(False, "Helm CLI not found. Please install Helm to uninstall releases.")
+            return
+            
+        total_releases = len(releases_to_delete)
+        successful_deletions = []
+        failed_deletions = []
+        
+        for i, (release_name, namespace) in enumerate(releases_to_delete):
+            if self._is_cancelled:
+                break
+                
+            self.progress_update.emit(f"Uninstalling {release_name} ({i+1}/{total_releases})...")
+            progress = int(10 + (80 * (i+1) / total_releases))
+            self.progress_percentage.emit(progress)
+            
+            try:
+                cmd = [helm_path, "uninstall", release_name, "-n", namespace]
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                
+                if result.returncode == 0:
+                    successful_deletions.append((release_name, namespace))
+                else:
+                    failed_deletions.append((release_name, namespace, result.stderr))
+                    
+            except Exception as e:
+                failed_deletions.append((release_name, namespace, str(e)))
+        
+        self.progress_percentage.emit(100)
+        
+        # Generate result message
+        success_count = len(successful_deletions)
+        error_count = len(failed_deletions)
+        
+        if error_count == 0:
+            self.operation_complete.emit(True, f"Successfully deleted all {success_count} releases.")
+        else:
+            message = f"Deleted {success_count} of {success_count + error_count} releases."
+            if error_count > 0:
+                message += f"\n\nFailed to delete {error_count} releases:"
+                for name, namespace, error in failed_deletions[:5]:
+                    ns_text = f" in namespace {namespace}" if namespace else ""
+                    message += f"\n- {name}{ns_text}: {error}"
+                if error_count > 5:
+                    message += f"\n... and {error_count - 5} more."
+            
+            # Consider it successful if at least some were deleted
+            self.operation_complete.emit(success_count > 0, message)
+
 
 class HelmReleasesLoader(QThread):
     """Thread to load Helm releases without blocking the UI"""
@@ -57,7 +378,8 @@ class HelmReleasesLoader(QThread):
                 cmd,
                 capture_output=True,
                 text=True,
-                check=True
+                check=True,
+                timeout=30
             )
             
             # Process the result
@@ -504,9 +826,8 @@ class ReleaseUpgradeDialog(QDialog):
                 # Failed to get values
                 self.values_editor.setPlainText("# Could not retrieve current values")
                 
-                
         except Exception as e:
-            pass
+            logging.warning(f"Error loading current values: {e}")
             self.values_editor.setPlainText("# Error loading current values")
     
     def get_values(self):
@@ -517,9 +838,11 @@ class ReleaseUpgradeDialog(QDialog):
             "values": self.values_editor.toPlainText().strip(),
             "atomic": self.atomic_checkbox.isChecked()
         }
+
+
 class ReleasesPage(BaseResourcePage):
     """
-    Displays Helm releases with dynamic data loading and optimizations for performance.
+    Displays Helm releases with dynamic data loading and threaded operations to prevent UI freezing.
     """
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -530,6 +853,9 @@ class ReleasesPage(BaseResourcePage):
         self.focus_namespace = None
         self.force_refresh_for_focus = False
         self.focus_retry_attempted = False
+        
+        # Track active operations
+        self.active_operation = None
         
         # Initialize UI
         self.setup_page_ui()
@@ -569,9 +895,9 @@ class ReleasesPage(BaseResourcePage):
         self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)  # Version
         self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)  # App Version
 
-    def load_data(self):
+    def load_data(self, load_more=False):
         """Load resource data with improved detection of all releases including partial ones"""
-        if self.is_loading:
+        if hasattr(self, 'is_loading') and self.is_loading:
             return
         
         # Clean up any existing loading thread
@@ -627,60 +953,6 @@ class ReleasesPage(BaseResourcePage):
         self.loading_thread.releases_loaded.connect(self.on_resources_loaded)
         self.loading_thread.error_occurred.connect(self.on_load_error)
         self.loading_thread.start()
-        
-        # After starting the normal loader, look for partial releases as well
-        QTimer.singleShot(1500, self.find_partial_installations)
-
-    def find_partial_installations(self):
-        """Find partial installations by looking for Helm secrets"""
-        if not hasattr(self, 'resources') or not self.resources:
-            return
-        
-        try:
-            # Get namespace filter
-            namespace = None
-            if hasattr(self, 'namespace_combo') and self.namespace_combo.currentText() != "All Namespaces":
-                namespace = self.namespace_combo.currentText()
-            
-            # Get all Helm secrets that might represent releases
-            cmd = ["kubectl", "get", "secrets"]
-            
-            if namespace:
-                cmd.extend(["-n", namespace])
-            else:
-                cmd.append("--all-namespaces")
-                
-            cmd.extend(["-o", "wide", "--field-selector", "metadata.name~=sh.helm.release"])
-            
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
-            
-            if result.returncode == 0 and result.stdout.strip():
-                lines = result.stdout.strip().split('\n')
-                
-                # Skip header
-                if len(lines) > 1:
-                    for line in lines[1:]:
-                        parts = line.split()
-                        if len(parts) >= 2:
-                            secret_name = parts[0]
-                            secret_namespace = parts[0] if namespace else parts[0]
-                            
-                            # Extract release name from secret name
-                            if "sh.helm.release.v1." in secret_name:
-                                # Format: sh.helm.release.v1.RELEASE_NAME.v1
-                                release_name = secret_name.split("sh.helm.release.v1.")[1].split(".v")[0]
-                                
-                                # Check if this release is already in our resources
-                                existing = False
-                                for resource in self.resources:
-                                    if resource["name"] == release_name and resource.get("namespace") == secret_namespace:
-                                        existing = True
-                                        break
-                                
-                                if not existing:
-                                    self._fetch_release_directly(release_name, secret_namespace)
-        except Exception as e:
-            pass
 
     def on_resources_loaded(self, resources, resource_type):
         """Handle loaded resources with improved focus handling"""
@@ -742,44 +1014,7 @@ class ReleasesPage(BaseResourcePage):
                         self._process_direct_release(releases[0], namespace)
                         return True
             except Exception as e:
-                pass
-        
-        # Method 2: Check for Helm secrets directly
-        try:
-            # Look for Helm 3 secrets
-            secret_cmd = [
-                "kubectl", "get", "secret",
-                "-n", namespace,
-                "--field-selector", f"metadata.name=sh.helm.release.v1.{release_name}.v*",
-                "--no-headers"
-            ]
-            
-            result = subprocess.run(secret_cmd, capture_output=True, text=True, timeout=15)
-            
-            if result.returncode == 0 and "No resources found" not in result.stdout:
-                # Create a minimal release object
-                self._create_minimal_release(release_name, namespace, "failed/partial")
-                return True
-        except Exception as e:
-            pass
-        
-        # Method 3: Check with kubectl get all resources by common labels
-        try:
-            label_cmd = [
-                "kubectl", "get", "all",
-                "-n", namespace,
-                "-l", f"app.kubernetes.io/instance={release_name}",
-                "--no-headers"
-            ]
-            
-            result = subprocess.run(label_cmd, capture_output=True, text=True, timeout=15)
-            
-            if result.returncode == 0 and result.stdout.strip():
-                # Create minimal release object
-                self._create_minimal_release(release_name, namespace, "deployed")
-                return True
-        except Exception as e:
-            pass
+                logging.warning(f"Error fetching release directly: {e}")
         
         return False
 
@@ -808,25 +1043,6 @@ class ReleasesPage(BaseResourcePage):
         }
         
         # Add to resources if not already present
-        self._add_release_to_resources(new_resource)
-
-    def _create_minimal_release(self, release_name, namespace, status):
-        """Create a minimal release object and add to resources"""
-        # Create minimal release object
-        new_resource = {
-            "name": release_name,
-            "namespace": namespace,
-            "age": "0m",  # Just installed
-            "raw_data": {
-                "chart": "unknown",
-                "revision": 1,
-                "version": "unknown",
-                "appVersion": "unknown",
-                "status": status,
-                "updated": "Just now"
-            }
-        }
-        # Add to resources
         self._add_release_to_resources(new_resource)
 
     def _add_release_to_resources(self, new_resource):
@@ -979,14 +1195,8 @@ class ReleasesPage(BaseResourcePage):
             # Add the item to the table
             self.table.setItem(row, cell_col, item)
             
-        # Create action button with appropriate options based on status
-        action_button = None
-        if status.lower() == "failed/partial":
-            # For failed/partial installations, offer cleanup option
-            action_button = self._create_failed_action_button(row, resource["name"], resource["namespace"])
-        else:
-            # For normal installations, use standard actions
-            action_button = self._create_action_button(row, resource["name"], resource["namespace"])
+        # Create action button
+        action_button = self._create_action_button(row, resource["name"], resource["namespace"])
         
         action_container = QWidget()
         action_layout = QHBoxLayout(action_container)
@@ -995,312 +1205,6 @@ class ReleasesPage(BaseResourcePage):
         action_layout.addWidget(action_button)
         action_container.setStyleSheet("background-color: transparent;")
         self.table.setCellWidget(row, len(columns) + 1, action_container)
-
-    def _create_failed_action_button(self, row, resource_name, resource_namespace):
-        """Create an action button specifically for failed/partial installations"""
-        button = QToolButton()
-        button.setText("⋮")
-        button.setFixedWidth(30)
-        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
-        button.setStyleSheet("""
-            QToolButton {
-                color: #ff9800;  /* Orange for warning */
-                font-size: 18px;
-                background: transparent;
-                padding: 2px;
-                margin: 0;
-                border: none;
-                font-weight: bold;
-            }
-            QToolButton:hover {
-                background-color: rgba(255, 255, 255, 0.1);
-                border-radius: 3px;
-                color: #ffffff;
-            }
-            QToolButton::menu-indicator {
-                image: none;
-            }
-        """)
-        button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        button.setCursor(Qt.CursorShape.PointingHandCursor)
-        
-        # Create menu
-        menu = QMenu(button)
-        menu.setStyleSheet("""
-            QMenu {
-                background-color: #2d2d2d;
-                border: 1px solid #3d3d3d;
-                border-radius: 4px;
-                padding: 4px;
-            }
-            QMenu::item {
-                color: #ffffff;
-                padding: 8px 24px 8px 36px;
-                border-radius: 4px;
-                font-size: 13px;
-            }
-            QMenu::item:selected {
-                background-color: rgba(33, 150, 243, 0.2);
-                color: #ffffff;
-            }
-            QMenu::item[dangerous="true"] {
-                color: #ff4444;
-            }
-            QMenu::item[dangerous="true"]:selected {
-                background-color: rgba(255, 68, 68, 0.1);
-            }
-        """)
-        
-        # Add special actions for failed/partial installations
-        retry_action = menu.addAction("Retry Installation")
-        retry_action.setIcon(QIcon("icons/refresh.png"))
-        
-        cleanup_action = menu.addAction("Clean Up")
-        cleanup_action.setIcon(QIcon("icons/delete.png"))
-        cleanup_action.setProperty("dangerous", True)
-        
-        # Connect actions
-        retry_action.triggered.connect(
-            lambda: self._handle_retry_installation(row, resource_name, resource_namespace)
-        )
-        
-        cleanup_action.triggered.connect(
-            lambda: self._handle_cleanup_installation(row, resource_name, resource_namespace)
-        )
-        
-        button.setMenu(menu)
-        return button
-
-    def _handle_retry_installation(self, row, resource_name, resource_namespace):
-        """Handle retry installation action for failed/partial installations"""
-        # Show confirmation dialog
-        result = QMessageBox.question(
-            self,
-            "Retry Installation",
-            f"Do you want to retry the installation of release {resource_name}?\n\n"
-            f"This will attempt to reinstall the chart.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        
-        if result != QMessageBox.StandardButton.Yes:
-            return
-        
-        # Find helm binary
-        helm_path = find_helm_executable()
-        
-        if not helm_path:
-            QMessageBox.critical(
-                self,
-                "Helm Not Found",
-                "Helm CLI not found. Please install Helm to retry installation."
-            )
-            return
-        
-        # Create progress dialog
-        progress = QProgressDialog("Retrying installation...", "Cancel", 0, 100, self)
-        progress.setWindowTitle("Retrying Installation")
-        progress.setModal(True)
-        progress.setValue(10)
-        progress.show()
-        QApplication.processEvents()
-        
-        try:
-            # First, uninstall the existing release
-            progress.setLabelText("Cleaning up previous installation...")
-            progress.setValue(30)
-            QApplication.processEvents()
-            
-            uninstall_cmd = [
-                helm_path, "uninstall",
-                resource_name,
-                "--namespace", resource_namespace,
-                "--keep-history"  # Keep history for debugging
-            ]
-            
-            subprocess.run(uninstall_cmd, capture_output=True, text=True, timeout=30)
-            
-            # Wait a moment for cleanup
-            progress.setLabelText("Preparing to reinstall...")
-            progress.setValue(50)
-            QApplication.processEvents()
-            
-            time.sleep(2)
-            
-            # Then reinstall using bitnami as reliable repository
-            progress.setLabelText("Reinstalling chart...")
-            progress.setValue(70)
-            QApplication.processEvents()
-            
-            # First make sure bitnami repo is added
-            try:
-                add_cmd = [helm_path, "repo", "add", "bitnami", "https://charts.bitnami.com/bitnami"]
-                subprocess.run(add_cmd, capture_output=True, text=True, timeout=15)
-                
-                update_cmd = [helm_path, "repo", "update"]
-                subprocess.run(update_cmd, capture_output=True, text=True, timeout=30)
-            except:
-                pass
-            
-            # Try to find a suitable chart in bitnami
-            chart_name = resource_name.lower()
-            install_cmd = [
-                helm_path, "install",
-                resource_name,
-                f"bitnami/{chart_name}",
-                "--namespace", resource_namespace,
-                "--create-namespace"
-            ]
-            
-            result = subprocess.run(install_cmd, capture_output=True, text=True, timeout=60)
-            
-            progress.setValue(100)
-            progress.close()
-            
-            if result.returncode == 0:
-                QMessageBox.information(
-                    self,
-                    "Reinstallation Successful",
-                    f"Release {resource_name} has been successfully reinstalled."
-                )
-                
-                # Refresh the data
-                self.load_data()
-            else:
-                QMessageBox.critical(
-                    self,
-                    "Reinstallation Failed",
-                    f"Failed to reinstall release {resource_name}.\n\n"
-                    f"Error: {result.stderr}"
-                )
-        except Exception as e:
-            progress.close()
-            
-            QMessageBox.critical(
-                self,
-                "Reinstallation Error",
-                f"Error reinstalling release: {str(e)}"
-            )
-
-    def _handle_cleanup_installation(self, row, resource_name, resource_namespace):
-        """Handle cleanup action for failed/partial installations"""
-        # Show confirmation dialog
-        result = QMessageBox.warning(
-            self,
-            "Confirm Cleanup",
-            f"Are you sure you want to clean up the failed installation of {resource_name}?\n\n"
-            f"This will remove all resources associated with this release.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
-        )
-        
-        if result != QMessageBox.StandardButton.Yes:
-            return
-        
-        # Create progress dialog
-        progress = QProgressDialog("Cleaning up installation...", "Cancel", 0, 100, self)
-        progress.setWindowTitle("Cleaning Up")
-        progress.setModal(True)
-        progress.setValue(10)
-        progress.show()
-        QApplication.processEvents()
-        
-        try:
-            # First try regular helm uninstall
-            progress.setLabelText("Attempting helm uninstall...")
-            progress.setValue(20)
-            QApplication.processEvents()
-            
-            helm_path = find_helm_executable()
-            
-            if helm_path:
-                uninstall_cmd = [
-                    helm_path, "uninstall",
-                    resource_name,
-                    "--namespace", resource_namespace
-                ]
-                
-                subprocess.run(uninstall_cmd, capture_output=True, text=True, timeout=30)
-            
-            # Then clean up Helm secrets directly
-            progress.setLabelText("Cleaning up Helm secrets...")
-            progress.setValue(50)
-            QApplication.processEvents()
-            
-            secret_cmd = [
-                "kubectl", "delete", "secret",
-                "-n", resource_namespace,
-                "--field-selector", f"metadata.name=sh.helm.release.v1.{resource_name}.v*"
-            ]
-            
-            subprocess.run(secret_cmd, capture_output=True, text=True, timeout=30)
-            
-            # Finally check for any resources with the release name
-            progress.setLabelText("Cleaning up related resources...")
-            progress.setValue(80)
-            QApplication.processEvents()
-            
-            # Common resource types that might be created by Helm charts
-            resource_types = [
-                "deployment", "statefulset", "service", "configmap", 
-                "secret", "pod", "job", "daemonset", "replicaset"
-            ]
-            
-            for resource_type in resource_types:
-                try:
-                    # Try to find resources with common Helm labels
-                    label_cmd = [
-                        "kubectl", "delete", resource_type,
-                        "-n", resource_namespace,
-                        "-l", f"app.kubernetes.io/instance={resource_name}"
-                    ]
-                    
-                    subprocess.run(label_cmd, capture_output=True, text=True, timeout=15)
-                    
-                    # Also try by name pattern
-                    name_cmd = [
-                        "kubectl", "get", resource_type,
-                        "-n", resource_namespace,
-                        "--no-headers"
-                    ]
-                    
-                    result = subprocess.run(name_cmd, capture_output=True, text=True, timeout=15)
-                    
-                    if result.returncode == 0 and result.stdout.strip():
-                        # Look for resources with the release name in their name
-                        for line in result.stdout.strip().split('\n'):
-                            if line.strip():
-                                parts = line.strip().split()
-                                if parts and resource_name.lower() in parts[0].lower():
-                                    # Delete this resource
-                                    delete_cmd = [
-                                        "kubectl", "delete", resource_type,
-                                        parts[0],
-                                        "-n", resource_namespace
-                                    ]
-                                    
-                                    subprocess.run(delete_cmd, capture_output=True, text=True, timeout=15)
-                except:
-                    continue
-            
-            progress.setValue(100)
-            progress.close()
-            
-            QMessageBox.information(
-                self,
-                "Cleanup Successful",
-                f"Release {resource_name} has been cleaned up successfully."
-            )
-            
-            # Refresh the data
-            self.load_data()
-        except Exception as e:
-            progress.close()
-            
-            QMessageBox.critical(
-                self,
-                "Cleanup Error",
-                f"Error cleaning up release: {str(e)}"
-            )
 
     def _create_action_button(self, row, resource_name, resource_namespace):
         """Create an action button with enhanced upgrade and delete options"""
@@ -1378,7 +1282,12 @@ class ReleasesPage(BaseResourcePage):
         return button
     
     def upgrade_release(self, release_name, namespace):
-        """Upgrade a Helm release with user input for parameters"""
+        """Upgrade a Helm release with user input for parameters using threading"""
+        # Check if there's already an active operation
+        if self.active_operation and self.active_operation.isRunning():
+            QMessageBox.warning(self, "Operation in Progress", "Another operation is currently in progress. Please wait for it to complete.")
+            return
+        
         # Find Helm executable
         helm_path = find_helm_executable()
         
@@ -1396,204 +1305,238 @@ class ReleasesPage(BaseResourcePage):
             # Get upgrade options from dialog
             options = dialog.get_values()
             
-            # Show progress dialog
-            progress = QProgressDialog("Upgrading release...", "Cancel", 0, 100, self)
+            # Create and show progress dialog
+            progress = QProgressDialog("Preparing upgrade...", "Cancel", 0, 100, self)
             progress.setWindowTitle("Upgrading Release")
-            progress.setModal(True)
-            progress.setValue(10)
+            progress.setWindowModality(Qt.WindowModality.WindowModal)
+            progress.setMinimumDuration(0)
+            progress.setAutoClose(False)
+            progress.setValue(0)
             progress.show()
             QApplication.processEvents()
             
-            try:
-                # Build the upgrade command
-                cmd = [helm_path, "upgrade", release_name]
-                
-                # Add chart reference
-                chart = options.get("chart")
-                if not chart:
-                    # If chart not specified, use current chart from release
-                    # First get current chart name with repository
-                    info_cmd = [helm_path, "list", "--filter", f"^{release_name}$", "-n", namespace, "-o", "json"]
-                    result = subprocess.run(info_cmd, capture_output=True, text=True, timeout=15)
-                    release_info = None
-                    
-                    if result.returncode == 0 and result.stdout.strip():
-                        try:
-                            releases = json.loads(result.stdout)
-                            if releases and len(releases) > 0:
-                                release_info = releases[0]
-                                # Use chart name without version, but keep repository prefix
-                                chart_full = release_info.get("chart", "")
-                                # We need to handle two possible formats:
-                                # 1. repo/chart-version
-                                # 2. chart-version (need to find repo from another command)
-                                
-                                if '/' in chart_full:  # Format: repo/chart-version
-                                    repo, chart_with_version = chart_full.split('/', 1)
-                                    # Keep just repo/chart without version
-                                    if '-' in chart_with_version:
-                                        version_parts = chart_with_version.split('-')
-                                        if len(version_parts) > 1 and version_parts[-1][0].isdigit():
-                                            chart = f"{repo}/{'-'.join(version_parts[:-1])}"
-                                        else:
-                                            chart = chart_full
-                                    else:
-                                        chart = chart_full
-                                else:  # Format: chart-version, need to find repo
-                                    # Try to get repository from status command
-                                    status_cmd = [helm_path, "status", release_name, "-n", namespace, "--output", "json"]
-                                    status_result = subprocess.run(status_cmd, capture_output=True, text=True, timeout=15)
-                                    
-                                    # Look for repository information in status output
-                                    if status_result.returncode == 0:
-                                        try:
-                                            status_data = json.loads(status_result.stdout)
-                                            chart_meta = status_data.get("chart", {}).get("metadata", {})
-                                            
-                                            # Get repository URL/name from chart metadata if available
-                                            repo_url = chart_meta.get("home", "")
-                                            sources = chart_meta.get("sources", [])
-                                            if sources and len(sources) > 0:
-                                                repo_url = sources[0]
-                                            
-                                            # Extract repo name from URL if possible
-                                            if repo_url:
-                                                import re
-                                                # Try to extract repo name from URL pattern
-                                                match = re.search(r'github\.com/([^/]+/[^/]+)', repo_url)
-                                                if match:
-                                                    repo_name = match.group(1)
-                                                    chart = f"{repo_name}/{chart_meta.get('name', '')}"
-                                                else:
-                                                    match = re.search(r'([^/\.]+)\.github\.io', repo_url)
-                                                    if match:
-                                                        repo_name = match.group(1)
-                                                        chart = f"{repo_name}/{chart_meta.get('name', '')}"
-                                                    else:
-                                                        # Just use bitnami as a fallback for common charts
-                                                        if "bitnami" in status_result.stdout.lower():
-                                                            repo_name = "bitnami"
-                                                            chart = f"{repo_name}/{chart_meta.get('name', '')}"
-                                                        else:
-                                                            # As a last resort, use the chart name directly
-                                                            chart = chart_meta.get('name', chart_full.split('-')[0])
-                                            else:
-                                                # No repo info, try with chart name alone
-                                                chart = chart_meta.get('name', chart_full.split('-')[0])
-                                        except json.JSONDecodeError:
-                                            # If can't get repo info, use chart name alone
-                                            chart = chart_full.split('-')[0]
-                                    else:
-                                        # If can't get repo info, use chart name alone
-                                        chart = chart_full.split('-')[0]
-                        except json.JSONDecodeError:
-                            pass
-                
-                if not chart:
-                    progress.close()
-                    QMessageBox.critical(
-                        self,
-                        "Error",
-                        f"Could not determine chart name. Please specify the chart explicitly."
-                    )
-                    return
-                
-                # If chart doesn't contain a slash, prepend the most likely repo
-                if chart and '/' not in chart:
-                    # Common repositories to try
-                    common_repos = ["bitnami", "stable", "prometheus-community", "jetstack", "hashicorp"]
-                    
-                    # Try to detect the most likely repo if we have release info
-                    detected_repo = None
-                    if release_info:
-                        chart_name = release_info.get("chart", "").lower()
-                        if "bitnami" in chart_name:
-                            detected_repo = "bitnami"
-                        elif "prometheus" in chart_name:
-                            detected_repo = "prometheus-community" 
-                        elif "grafana" in chart_name:
-                            detected_repo = "grafana"
-                        elif "nginx" in chart_name:
-                            detected_repo = "nginx-stable"
-                        elif "cert-manager" in chart_name:
-                            detected_repo = "jetstack"
-                        elif "consul" in chart_name or "vault" in chart_name:
-                            detected_repo = "hashicorp"
-                    
-                    # Use detected repo or default to bitnami
-                    repo_prefix = detected_repo or common_repos[0]
-                    chart = f"{repo_prefix}/{chart}"
-                    
-                    # Log the chart reference for debugging
-                    
-                    
-                # Add chart to command
-                cmd.append(chart)
-                
-                # Add namespace
-                cmd.extend(["-n", namespace])
-                
-                # Add version if specified
-                if options.get("version"):
-                    cmd.extend(["--version", options.get("version")])
-                
-                # Add values file if provided
-                values_file = None
-                if options.get("values"):
-                    # Create temporary file for values
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".yaml", mode="w") as temp:
-                        temp.write(options.get("values"))
-                        values_file = temp.name
-                    cmd.extend(["-f", values_file])
-                
-                # Add --atomic flag for atomic upgrades (rollback on failure)
-                if options.get("atomic", True):
-                    cmd.append("--atomic")
-                
-                # Update progress
-                progress.setValue(30)
-                progress.setLabelText("Executing upgrade command...")
-                QApplication.processEvents()
-                
-                #  the command for debugging
-              
-                
-                # Execute the command
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-                
-                # Clean up values file
-                if values_file and os.path.exists(values_file):
-                    os.unlink(values_file)
-                
-                progress.setValue(100)
+            # Create and start the operation thread
+            self.active_operation = HelmOperationThread("upgrade", release_name, namespace, options)
+            
+            def on_progress_update(message):
+                if not progress.wasCanceled():
+                    progress.setLabelText(message)
+                    QApplication.processEvents()
+            
+            def on_progress_percentage(percentage):
+                if not progress.wasCanceled():
+                    progress.setValue(percentage)
+                    QApplication.processEvents()
+            
+            def on_operation_complete(success, message):
                 progress.close()
+                self.active_operation = None
                 
-                if result.returncode == 0:
-                    QMessageBox.information(
-                        self,
-                        "Upgrade Successful",
-                        f"Successfully upgraded release {release_name}"
-                    )
-                    self.load_data()  # Refresh the list
+                if success:
+                    QMessageBox.information(self, "Upgrade Successful", message)
                 else:
-                    QMessageBox.critical(
-                        self,
-                        "Upgrade Failed",
-                        f"Failed to upgrade release:\n{result.stderr}"
-                    )
-                    
-            except Exception as e:
-                progress.close()
+                    QMessageBox.critical(self, "Upgrade Failed", message)
                 
-                # Clean up values file if it exists
-                if 'values_file' in locals() and values_file and os.path.exists(values_file):
-                    os.unlink(values_file)
-                    
-                QMessageBox.critical(
-                    self,
-                    "Error",
-                    f"Error upgrading release:\n{str(e)}"
-                )
+                # Automatically refresh the data
+                QTimer.singleShot(1000, self.load_data)
+            
+            def on_progress_cancelled():
+                if self.active_operation:
+                    self.active_operation.cancel()
+                progress.close()
+                self.active_operation = None
+            
+            # Connect signals
+            self.active_operation.progress_update.connect(on_progress_update)
+            self.active_operation.progress_percentage.connect(on_progress_percentage)
+            self.active_operation.operation_complete.connect(on_operation_complete)
+            progress.canceled.connect(on_progress_cancelled)
+            
+            # Start the thread
+            self.active_operation.start()
+    
+    def delete_release(self, resource_name, resource_namespace):
+        """Delete a Helm release with confirmation dialog using threading"""
+        # Check if there's already an active operation
+        if self.active_operation and self.active_operation.isRunning():
+            QMessageBox.warning(self, "Operation in Progress", "Another operation is currently in progress. Please wait for it to complete.")
+            return
+        
+        # Find Helm executable
+        helm_path = find_helm_executable()
+        
+        if not helm_path:
+            QMessageBox.warning(
+                self,
+                "Helm Not Found",
+                "Helm CLI not found. Please install Helm to uninstall releases."
+            )
+            return
+            
+        result = QMessageBox.warning(
+            self,
+            "Confirm Deletion",
+            f"Are you sure you want to uninstall Helm release {resource_name} in namespace {resource_namespace}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if result != QMessageBox.StandardButton.Yes:
+            return
+        
+        # Create and show progress dialog with improved settings
+        progress = QProgressDialog("Preparing to uninstall...", "Cancel", 0, 100, self)
+        progress.setWindowTitle("Uninstalling Release")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setAutoClose(False)
+        progress.setAutoReset(False)
+        progress.setValue(0)
+        progress.show()
+        QApplication.processEvents()
+        
+        # Track completion state
+        operation_completed = {"completed": False}
+        user_cancelled = {"cancelled": False}
+        
+        # Create and start the operation thread
+        self.active_operation = HelmOperationThread("delete", resource_name, resource_namespace)
+        
+        def on_progress_update(message):
+            try:
+                if not operation_completed["completed"] and not user_cancelled["cancelled"]:
+                    progress.setLabelText(message)
+                    QApplication.processEvents()
+                    logging.info(f"Helm delete progress: {message}")
+            except RuntimeError:
+                pass
+        
+        def on_progress_percentage(percentage):
+            try:
+                if not operation_completed["completed"] and not user_cancelled["cancelled"]:
+                    progress.setValue(percentage)
+                    QApplication.processEvents()
+            except RuntimeError:
+                pass
+        
+        def on_operation_complete(success, message):
+            operation_completed["completed"] = True
+            self.active_operation = None
+            
+            logging.info(f"Helm delete completed: success={success}, message={message}")
+            
+            try:
+                if progress and not progress.wasCanceled():
+                    progress.setValue(100)
+                    progress.setLabelText("Deletion completed!")
+                    QApplication.processEvents()
+            except RuntimeError:
+                pass
+            
+            # Close progress dialog after showing completion
+            QTimer.singleShot(1000, lambda: progress.close() if progress else None)
+            
+            # Show result message
+            QTimer.singleShot(1100, lambda: self._show_delete_result(success, message))
+            
+            # Automatically refresh the data
+            QTimer.singleShot(2000, self.load_data)
+        
+        def on_progress_cancelled():
+            if not operation_completed["completed"]:
+                user_cancelled["cancelled"] = True
+                logging.info("User cancelled Helm delete operation")
+                if self.active_operation:
+                    self.active_operation.cancel()
+                self.active_operation = None
+        
+        # Connect signals
+        self.active_operation.progress_update.connect(on_progress_update)
+        self.active_operation.progress_percentage.connect(on_progress_percentage)
+        self.active_operation.operation_complete.connect(on_operation_complete)
+        progress.canceled.connect(on_progress_cancelled)
+        
+        # Start the thread
+        self.active_operation.start()
+        logging.info(f"Started Helm delete thread for {resource_name}")
+    
+    def _show_delete_result(self, success, message):
+        """Show the result of delete operation"""
+        try:
+            if success:
+                QMessageBox.information(self, "Deletion Successful", message)
+            else:
+                QMessageBox.critical(self, "Deletion Failed", message)
+        except Exception as e:
+            logging.error(f"Error showing delete result: {e}")
+
+    def delete_selected_resources(self):
+        """Delete multiple selected releases using threading"""
+        # Check if there's already an active operation
+        if self.active_operation and self.active_operation.isRunning():
+            QMessageBox.warning(self, "Operation in Progress", "Another operation is currently in progress. Please wait for it to complete.")
+            return
+            
+        if not self.selected_items:
+            QMessageBox.information(self, "No Selection", "No resources selected for deletion.")
+            return
+            
+        count = len(self.selected_items)
+        result = QMessageBox.warning(self, "Confirm Deletion",
+            f"Are you sure you want to delete {count} selected {self.resource_type}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+        if result != QMessageBox.StandardButton.Yes: 
+            return
+        
+        resources_list = list(self.selected_items)
+        
+        # Create and show progress dialog
+        progress = QProgressDialog(f"Deleting {count} {self.resource_type}...", "Cancel", 0, 100, self)
+        progress.setWindowTitle("Deleting Resources")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setAutoClose(False)
+        progress.setValue(0)
+        progress.show()
+        QApplication.processEvents()
+        
+        # Create and start the operation thread
+        self.active_operation = HelmOperationThread("batch_delete", resources_list)
+        
+        def on_progress_update(message):
+            if not progress.wasCanceled():
+                progress.setLabelText(message)
+                QApplication.processEvents()
+        
+        def on_progress_percentage(percentage):
+            if not progress.wasCanceled():
+                progress.setValue(percentage)
+                QApplication.processEvents()
+        
+        def on_operation_complete(success, message):
+            progress.close()
+            self.active_operation = None
+            
+            QMessageBox.information(self, "Deletion Results", message)
+            
+            # Clear selected items and refresh
+            self.selected_items.clear()
+            QTimer.singleShot(1000, self.load_data)
+        
+        def on_progress_cancelled():
+            if self.active_operation:
+                self.active_operation.cancel()
+            progress.close()
+            self.active_operation = None
+        
+        # Connect signals
+        self.active_operation.progress_update.connect(on_progress_update)
+        self.active_operation.progress_percentage.connect(on_progress_percentage)
+        self.active_operation.operation_complete.connect(on_operation_complete)
+        progress.canceled.connect(on_progress_cancelled)
+        
+        # Start the thread
+        self.active_operation.start()
 
     def _handle_action(self, action, row):
         """Handle specific actions for Helm releases"""
@@ -1703,60 +1646,6 @@ class ReleasesPage(BaseResourcePage):
         highlight_timer = QTimer(self)
         highlight_timer.timeout.connect(toggle_highlight)
         highlight_timer.start(300)  # Toggle every 300ms
-
-    def delete_release(self, release_name, namespace):
-        """Delete a Helm release with confirmation dialog"""
-        # Find Helm executable
-        helm_path = find_helm_executable()
-        
-        if not helm_path:
-            QMessageBox.warning(
-                self,
-                "Helm Not Found",
-                "Helm CLI not found. Please install Helm to uninstall releases."
-            )
-            return
-            
-        result = QMessageBox.warning(
-            self,
-            "Confirm Deletion",
-            f"Are you sure you want to uninstall Helm release {release_name} in namespace {namespace}?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
-        )
-        
-        if result != QMessageBox.StandardButton.Yes:
-            return
-            
-        # Start the deletion process
-        try:
-            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-            
-            cmd = [helm_path, "uninstall", release_name, "-n", namespace]
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            
-            QApplication.restoreOverrideCursor()
-            
-            if result.returncode == 0:
-                QMessageBox.information(
-                    self,
-                    "Success",
-                    f"Successfully uninstalled release {release_name}"
-                )
-                self.load_data()  # Refresh the list
-            else:
-                QMessageBox.critical(
-                    self,
-                    "Error",
-                    f"Failed to uninstall release:\n{result.stderr}"
-                )
-        except Exception as e:
-            QApplication.restoreOverrideCursor()
-            QMessageBox.critical(
-                self,
-                "Error",
-                f"Error uninstalling release:\n{str(e)}"
-            )
     
     def handle_row_click(self, row, column):
         """Handle row selection and open detail view"""
@@ -1795,5 +1684,21 @@ class ReleasesPage(BaseResourcePage):
         # Reset loading state
         self.is_loading = False
         
-        # Load data from kubernetes
+        # Cancel any active operation that might interfere
+        if self.active_operation and self.active_operation.isRunning():
+            self.active_operation.cancel()
+            self.active_operation.wait(1000)
+        
+        # Load data from helm
         self.load_data()
+    
+    def closeEvent(self, event):
+        """Handle close event and cleanup active operations"""
+        # Cancel any active operation
+        if self.active_operation and self.active_operation.isRunning():
+            self.active_operation.cancel()
+            self.active_operation.wait(2000)
+            if self.active_operation.isRunning():
+                self.active_operation.terminate()
+        
+        super().closeEvent(event)
