@@ -889,6 +889,7 @@ class UnifiedTerminalWidget(QTextEdit):
             cursor.setPosition(min(max(cursor_pos, self.edit_start_pos), self.edit_end_pos))
             self.setTextCursor(cursor)
 
+
 class SSHTerminalWidget(UnifiedTerminalWidget):
     """Specialized terminal widget for SSH sessions with improved command handling"""
 
