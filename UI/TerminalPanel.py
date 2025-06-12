@@ -528,17 +528,6 @@ class UnifiedTerminalWidget(QTextEdit):
         self.append_prompt()
         self.ensure_cursor_at_input()
 
-    def update_edit_positions(self):
-        all_text = self.toPlainText()
-        self.edit_start_pos = all_text.find(f"# Editing {self.edit_file_path}\n") + len(f"# Editing {self.edit_file_path}\n")
-        self.edit_end_pos = all_text.find("\n# COMMANDS:", self.edit_start_pos)
-        if self.edit_end_pos == -1:
-            self.edit_end_pos = len(all_text)
-        cursor = self.textCursor()
-        cursor_pos = cursor.position()
-        if cursor_pos < self.edit_start_pos or cursor_pos > self.edit_end_pos:
-            cursor.setPosition(min(max(cursor_pos, self.edit_start_pos), self.edit_end_pos))
-            self.setTextCursor(cursor)
     def search_in_terminal(self, search_text):
         """Non-destructive search and highlight text in terminal output"""
         if not self.is_valid:
