@@ -163,6 +163,7 @@ class StyleConstants:
         }}
     """
 
+
 class CommandConstants(Enum):
     CLEAR = "clear"
     EXIT = "exit"
@@ -1494,7 +1495,7 @@ class UnifiedTerminalHeader(QWidget):
         self.content_layout.addWidget(self.search_input)
         self.content_layout.addWidget(self.controls)
         main_layout.addWidget(self.header_content)
-
+        
     def _update_selected_shell(self, index):
         if index >= 0 and index < len(self.available_shells):
             self.selected_shell = self.available_shells[index][1]  # Store path only
