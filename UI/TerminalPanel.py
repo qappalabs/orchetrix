@@ -889,7 +889,6 @@ class UnifiedTerminalWidget(QTextEdit):
             cursor.setPosition(min(max(cursor_pos, self.edit_start_pos), self.edit_end_pos))
             self.setTextCursor(cursor)
 
-
 class SSHTerminalWidget(UnifiedTerminalWidget):
     """Specialized terminal widget for SSH sessions with improved command handling"""
 
@@ -1503,7 +1502,7 @@ class UnifiedTerminalHeader(QWidget):
             print(f"Selected shell updated to: {self.selected_shell}")
             # Automatically create a new terminal tab with the selected shell
             self.add_new_tab()
-
+            
     def _on_search_changed(self, text):
         """Handle search text change for both terminal and logs tabs"""
         if self._is_active_tab_logs():
