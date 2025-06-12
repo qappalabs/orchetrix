@@ -1088,6 +1088,44 @@ class SSHTerminalWidget(UnifiedTerminalWidget):
         self.cleanup_ssh_session()
         super().__del__()
 
+class ResizeHandle(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(5)
+        self.setCursor(Qt.CursorShape.SizeVerCursor)
+        self.setStyleSheet(StyleConstants.RESIZE_HANDLE)
+        self.is_dragging = False
+        self.drag_start_y = 0
+        self.drag_start_height = 0
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.is_dragging = True
+            self.drag_start_y = event.globalPosition().y()
+            terminal_panel = self.parent()
+            while terminal_panel and not isinstance(terminal_panel, TerminalPanel):
+                terminal_panel = terminal_panel.parent()
+            self.terminal_panel = terminal_panel
+            self.drag_start_height = terminal_panel.height() if terminal_panel else 0
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if self.is_dragging and self.terminal_panel:
+            delta = self.drag_start_y - event.globalPosition().y()
+            top_level_window = self.terminal_panel.window()
+            parent_height = top_level_window.height() if top_level_window else 1080
+            new_height = max(150, min(self.drag_start_height + delta, parent_height - 50))
+            self.terminal_panel.setFixedHeight(int(new_height))
+            self.terminal_panel.normal_height = int(new_height)
+            self.terminal_panel.reposition()
+            event.accept()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.is_dragging = False
+            self.terminal_panel = None
+            event.accept()
+
 class UnifiedTerminalHeader(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
