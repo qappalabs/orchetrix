@@ -524,7 +524,7 @@ class MainWindow(QMainWindow):
             # Notification screen might have its own logic via update_position or similar
             if hasattr(self.notification_screen, 'update_position'):
                 self.notification_screen.update_position()
-            
+
     def moveEvent(self, event):
         """Handle move event"""
         super().moveEvent(event)

@@ -554,6 +554,7 @@ class UnifiedTerminalWidget(QTextEdit):
             return []
 
     def mousePressEvent(self, event):
+        print(f"UnifiedTerminalWidget.mousePressEvent: copy_paste_enabled={self.copy_paste_enabled}, button={event.button()}, edit_mode={self.edit_mode}")
         self.setFocus()
         if event.button() == Qt.MouseButton.RightButton:
             # The context menu will handle pasting.
@@ -1383,7 +1384,7 @@ class UnifiedTerminalHeader(QWidget):
         self.edit_mode = False
         self.current_file = None
         self.available_shells = self._detect_available_shells()
-        self.selected_shell = self.available_shells[0][1] if self.available_shells else '/bin/bash'
+        self.selected_shell = self.available_shells[0][1] if self.available_shells else '/bin/bash'  # Store path only
         self.setup_ui()
 
     def _detect_available_shells(self):
@@ -1464,7 +1465,7 @@ class UnifiedTerminalHeader(QWidget):
 
         # Shell dropdown (for regular terminals)
         self.shell_dropdown = QComboBox()
-        self.shell_dropdown.setFixedSize(100, 24)
+        self.shell_dropdown.setFixedSize(120, 24)
         self.shell_dropdown.setStyleSheet(StyleConstants.SHELL_DROPDOWN)
         for name, _ in self.available_shells:
             self.shell_dropdown.addItem(name)
@@ -1496,8 +1497,10 @@ class UnifiedTerminalHeader(QWidget):
 
     def _update_selected_shell(self, index):
         if index >= 0 and index < len(self.available_shells):
-            self.selected_shell = self.available_shells[index][1]
+            self.selected_shell = self.available_shells[index][1]  # Store path only
             print(f"Selected shell updated to: {self.selected_shell}")
+            # Automatically create a new terminal tab with the selected shell
+            self.add_new_tab()
 
     def _on_search_changed(self, text):
         """Handle search text change for both terminal and logs tabs"""

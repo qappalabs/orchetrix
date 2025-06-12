@@ -111,7 +111,7 @@ class NamespacesPage(BaseResourcePage):
                 button_layout.insertWidget(refresh_index, self.add_namespace_button)
             else:
                 button_layout.addWidget(self.add_namespace_button)
-        
+
         self.table.setStyleSheet(AppStyles.TABLE_STYLE)
         self.table.horizontalHeader().setStyleSheet(AppStyles.CUSTOM_HEADER_STYLE)
         
@@ -247,7 +247,7 @@ class NamespacesPage(BaseResourcePage):
             QMessageBox.critical(self, "Error", f"Failed to refresh namespaces: {e.stderr.strip()}")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Unexpected error while refreshing: {str(e)}")
-    
+
     def _calculate_age(self, creation_timestamp):
         return "1d"  # Placeholder
 
