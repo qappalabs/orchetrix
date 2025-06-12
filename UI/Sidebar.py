@@ -88,6 +88,7 @@ class SidebarToggleButton(QToolButton):
 class NavIconButton(QToolButton):
     def __init__(self, icon_id, text, active=False, has_dropdown=False, parent=None, expanded=True, coming_soon=False):
         super().__init__(parent)
+        self.font_size = 14
         self.parent_window = parent
         self.icon_id = icon_id  # Store the icon ID to load icon from local file
         self.item_text = text
@@ -97,7 +98,7 @@ class NavIconButton(QToolButton):
         self.dropdown_menu = None
         self.expanded = expanded  # Track if sidebar is expanded
         self.coming_soon = coming_soon  # New flag for coming soon features
-        
+
         # Track signal connections to prevent multiple connections
         self._dropdown_connections = []
 
@@ -113,7 +114,7 @@ class NavIconButton(QToolButton):
             self.setup_dropdown()
 
     def setup_ui(self):
-        self.setFixedHeight(35)
+        self.setFixedHeight(40)
 
         # Clear any existing layout first
         if self.layout():
@@ -150,15 +151,17 @@ class NavIconButton(QToolButton):
             text_label = QLabel(self.item_text)
             text_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
             text_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            text_label.setFont(QFont("Segoe UI", 14))
 
             # Apply styles to labels - don't override background for coming soon
             if self.coming_soon:
-                # For coming soon buttons, don't set background on labels
-                icon_label.setStyleSheet("color: inherit; background: transparent;")
-                text_label.setStyleSheet("color: inherit; background: transparent;")
+                # For coming soon buttons, use same text color as regular buttons
+                text_color = AppColors.TEXT_SECONDARY
+                icon_label.setStyleSheet(f"color: {text_color}; background: transparent; font-size: 14px;")
+                text_label.setStyleSheet(f"color: {text_color}; background: transparent; font-size: 14px;")
             else:
-                icon_label.setStyleSheet(AppStyles.NAV_ICON_BUTTON_ICON_LABEL_STYLE)
-                text_label.setStyleSheet(AppStyles.NAV_ICON_BUTTON_TEXT_LABEL_STYLE)
+                icon_label.setStyleSheet(AppStyles.NAV_ICON_BUTTON_ICON_LABEL_STYLE + "; font-size: 14px;")
+                text_label.setStyleSheet(AppStyles.NAV_ICON_BUTTON_TEXT_LABEL_STYLE + "; font-size: 14px;")
 
             # Add coming soon indicator if needed
             if self.coming_soon:
@@ -226,7 +229,7 @@ class NavIconButton(QToolButton):
                 icon_label.setText(self.icon_text)
 
             if self.coming_soon:
-                icon_label.setStyleSheet("color: inherit; background: transparent;")
+                icon_label.setStyleSheet(f"color: {AppColors.TEXT_SECONDARY}; background: transparent;")
             else:
                 icon_label.setStyleSheet(AppStyles.NAV_ICON_BUTTON_ICON_LABEL_STYLE)
 
@@ -245,7 +248,7 @@ class NavIconButton(QToolButton):
             self.setToolTip(self.item_text)
 
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFont(QFont("Segoe UI", 12))
+        self.setFont(QFont("Segoe UI", 14))
         self.setAutoRaise(True)
         self.update_style()
 

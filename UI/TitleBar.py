@@ -83,8 +83,21 @@ class TitleBar(QWidget):
         self.pinned_clusters_container = QWidget()
         self.pinned_clusters_container.setFixedSize(300, 30)
         pinned_layout = QHBoxLayout(self.pinned_clusters_container)
-        pinned_layout.setContentsMargins(0, 0, 0, 0)
-        pinned_layout.setSpacing(0)
+        pinned_layout.setContentsMargins(8, 0, 0, 0)  # Add left margin for the container
+        pinned_layout.setSpacing(8)  # Increase spacing between icon and text
+
+        # Icon label for cluster icon
+        self.pinned_clusters_icon = QLabel()
+        self.pinned_clusters_icon.setFixedSize(16, 16)
+        self.pinned_clusters_icon.setStyleSheet("""
+            QLabel {
+                background-color: #2A2A2A;
+                border: none;
+                margin: 0px;
+            }
+        """)
+        self.pinned_clusters_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.pinned_clusters_icon.hide()  # Hidden by default
 
         # Label for "Pinned Clusters" text or current cluster name
         self.pinned_clusters_label = QLabel("Pinned Clusters")
@@ -92,9 +105,11 @@ class TitleBar(QWidget):
             QLabel {
                 background-color: #2A2A2A;
                 color: #FFFFFF;
-                padding: 0px 10px;
+                padding: 0px 4px;
                 font-size: 14px;
                 font-family: 'Segoe UI', sans-serif;
+                border: none;
+                margin: 0px;
             }
         """)
         self.pinned_clusters_label.setFixedHeight(30)
@@ -110,6 +125,7 @@ class TitleBar(QWidget):
                 border: none;
                 border-left: 1px solid #4A4A4A;
                 border-radius: 0 4px 4px 0;
+                margin: 0px;
             }
             QToolButton:hover {
                 background-color: #3e3e3e;
@@ -118,12 +134,16 @@ class TitleBar(QWidget):
         self.pinned_clusters_arrow_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.pinned_clusters_arrow_btn.clicked.connect(self.toggle_pinned_clusters_dropdown)
 
-        # Container widget to hold the label and arrow button
+        # Container widget styling
         self.pinned_clusters_container.setStyleSheet("""
             QWidget {
                 background-color: #2A2A2A;
+                border-radius: 4px;
             }
         """)
+
+        # Add widgets to layout in correct order
+        pinned_layout.addWidget(self.pinned_clusters_icon)
         pinned_layout.addWidget(self.pinned_clusters_label)
         pinned_layout.addStretch()
         pinned_layout.addWidget(self.pinned_clusters_arrow_btn)
@@ -188,15 +208,50 @@ class TitleBar(QWidget):
             self.open_cluster_signal.connect(self.update_current_cluster)
 
     def update_current_cluster(self, cluster_name):
-        """Update the pinned clusters label with the selected cluster name"""
+        """Update the pinned clusters label with the selected cluster name and icon"""
         self.current_cluster = cluster_name
         if cluster_name:
             # Truncate if necessary to prevent overflow
-            display_name = cluster_name[:30] + "..." if len(cluster_name) > 30 else cluster_name
+            display_name = cluster_name[:25] + "..." if len(cluster_name) > 25 else cluster_name
             self.pinned_clusters_label.setText(display_name)
+
+            # Get the cluster icon using existing HomePage system
+            cluster_icon = self.get_cluster_icon(cluster_name)
+            if cluster_icon and not cluster_icon.isNull():
+                self.pinned_clusters_icon.setPixmap(cluster_icon)
+                self.pinned_clusters_icon.show()
+            else:
+                self.pinned_clusters_icon.hide()
         else:
             self.pinned_clusters_label.setText("Pinned Clusters")
+            self.pinned_clusters_icon.hide()
         logging.debug(f"Updated pinned clusters label to: {self.pinned_clusters_label.text()}")
+
+    def get_cluster_icon(self, cluster_name):
+        """Get cluster icon using the HomePage's color system"""
+        try:
+            # Access the HomePage's color and icon creation methods
+            if hasattr(self.parent, 'home_page'):
+                home_page = self.parent.home_page
+
+                # Get the cluster color using existing system
+                cluster_color = home_page.get_cluster_color(cluster_name)
+
+                # Create colored icon using same size as HomePage (16x16)
+                colored_pixmap = home_page.create_colored_icon(
+                    "icons/Cluster_Logo.svg",
+                    cluster_color,
+                    16  # Changed from 20 to 16
+                )
+
+                return colored_pixmap
+
+            # Fallback if home_page not accessible
+            return None
+
+        except Exception as e:
+            logging.debug(f"Error getting cluster icon for {cluster_name}: {e}")
+            return None
 
     def create_down_arrow_icon(self):
         """Create a downward arrow icon for the dropdown"""
@@ -225,16 +280,12 @@ class TitleBar(QWidget):
         """Toggle the visibility of the pinned clusters dropdown"""
         if self.dropdown_menu and self.dropdown_menu.isVisible():
             self.dropdown_menu.hide()
-            # Reset label to current cluster or "Pinned Clusters" when closing dropdown
-            if self.current_cluster:
-                display_name = self.current_cluster[:30] + "..." if len(self.current_cluster) > 30 else self.current_cluster
-                self.pinned_clusters_label.setText(display_name)
-            else:
-                self.pinned_clusters_label.setText("Pinned Clusters")
+            # Keep the current cluster name displayed when closing dropdown
+            # No need to reset the label here as it should maintain its current state
         else:
             self.create_or_update_dropdown()
-            # Set label to "Pinned Clusters" when opening dropdown
-            self.pinned_clusters_label.setText("Pinned Clusters")
+            # Remove the line that was setting label to "Pinned Clusters"
+            # The label should maintain the current cluster name
             if self.search_input:
                 self.search_input.setFocus()  # Set focus to the search input when opening
 
@@ -330,7 +381,20 @@ class TitleBar(QWidget):
     def handle_item_selection(self, item):
         """Handle the selection of a pinned item"""
         self.current_cluster = item
-        self.pinned_clusters_label.setText(item[:30] + "..." if len(item) > 30 else item)
+
+        # Update both text and icon
+        display_name = item[:25] + "..." if len(item) > 25 else item
+        self.pinned_clusters_label.setText(display_name)
+
+        # Set the cluster icon using existing system
+        cluster_icon = self.get_cluster_icon(item)
+        if cluster_icon and not cluster_icon.isNull():
+            self.pinned_clusters_icon.setPixmap(cluster_icon)
+            self.pinned_clusters_icon.show()
+        else:
+            self.pinned_clusters_icon.hide()
+
+        # Emit signal to open cluster
         if self.open_cluster_signal and hasattr(self.parent.home_page, 'all_data'):
             for view_type in self.parent.home_page.all_data:
                 for data_item in self.parent.home_page.all_data[view_type]:
@@ -511,6 +575,7 @@ class TitleBar(QWidget):
             self.parent.switch_to_home()
             self.current_cluster = None
             self.pinned_clusters_label.setText("Pinned Clusters")
+            self.pinned_clusters_icon.hide()
 
     def eventFilter(self, obj, event):
         if event.type() == QEvent.Type.MouseButtonDblClick:

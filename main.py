@@ -255,8 +255,8 @@ class MainWindow(QMainWindow):
             def post_switch_operations():
                 self.cluster_view.set_active_cluster(loaded_cluster_name)
                 if (hasattr(self.cluster_view, 'terminal_panel') and
-                    self.cluster_view.terminal_panel.is_visible and
-                    hasattr(self.cluster_view.terminal_panel, 'reposition')):
+                        self.cluster_view.terminal_panel.is_visible and
+                        hasattr(self.cluster_view.terminal_panel, 'reposition')):
                     self.cluster_view.terminal_panel.reposition()
                 if hasattr(self.cluster_view, 'handle_page_change'):
                     self.cluster_view.handle_page_change(self.cluster_view.stacked_widget.currentWidget())
@@ -317,8 +317,8 @@ class MainWindow(QMainWindow):
             def post_switch_ops_cached():
                 self.cluster_view.set_active_cluster(cluster_name)
                 if (hasattr(self.cluster_view, 'terminal_panel') and
-                    self.cluster_view.terminal_panel.is_visible and
-                    hasattr(self.cluster_view.terminal_panel, 'reposition')):
+                        self.cluster_view.terminal_panel.is_visible and
+                        hasattr(self.cluster_view.terminal_panel, 'reposition')):
                     self.cluster_view.terminal_panel.reposition()
                 if hasattr(self.cluster_view, 'handle_page_change'):
                     self.cluster_view.handle_page_change(self.cluster_view.stacked_widget.currentWidget())
@@ -780,8 +780,8 @@ class MainWindow(QMainWindow):
                 hasattr(self.cluster_view, 'terminal_panel') and
                 self.cluster_view.terminal_panel.is_visible):
             if (hasattr(self.cluster_view, 'terminal_panel') and
-                self.cluster_view.terminal_panel.is_visible and
-                hasattr(self.cluster_view.terminal_panel, 'reposition')):
+                    self.cluster_view.terminal_panel.is_visible and
+                    hasattr(self.cluster_view.terminal_panel, 'reposition')):
                 self.cluster_view.terminal_panel.reposition()
 
     def moveEvent(self, event):
