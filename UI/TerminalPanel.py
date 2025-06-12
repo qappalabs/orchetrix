@@ -363,13 +363,11 @@ class UnifiedTerminalWidget(QTextEdit):
         event.accept()
 
     def mouseReleaseEvent(self, event):
-        if self.copy_paste_enabled and event.button() == Qt.MouseButton.LeftButton:
-            cursor = self.textCursor()
-            if cursor.hasSelection():
-                clipboard = QApplication.clipboard()
-                clipboard.setText(cursor.selectedText())
-        self.ensure_cursor_at_input()
-        event.accept()
+        super().mouseReleaseEvent(event)
+        # After releasing the mouse, ensure the cursor is in the right place
+        # if no text has been selected.
+        if not self.textCursor().hasSelection():
+            self.ensure_cursor_at_input()
 
     def mouseDoubleClickEvent(self, event):
         event.accept()
@@ -541,13 +539,572 @@ class UnifiedTerminalWidget(QTextEdit):
         if cursor_pos < self.edit_start_pos or cursor_pos > self.edit_end_pos:
             cursor.setPosition(min(max(cursor_pos, self.edit_start_pos), self.edit_end_pos))
             self.setTextCursor(cursor)
+    def search_in_terminal(self, search_text):
+        """Non-destructive search and highlight text in terminal output"""
+        if not self.is_valid:
+            return
+
+        try:
+            # Clear previous search highlights only
+            self.clear_terminal_search()
+
+            if not search_text.strip():
+                return
+
+            document = self.document()
+            text_content = document.toPlainText()
+
+            # Store search highlights for future clearing
+            self.search_highlights = []
+
+            # Search for all occurrences case-insensitively
+            search_lower = search_text.lower()
+            text_lower = text_content.lower()
+
+            start_index = 0
+            while True:
+                found_index = text_lower.find(search_lower, start_index)
+                if found_index == -1:
+                    break
+
+                # Create cursor for this match
+                cursor = QTextCursor(document)
+                cursor.setPosition(found_index)
+                cursor.setPosition(found_index + len(search_text), QTextCursor.MoveMode.KeepAnchor)
+
+                # Store original format completely - including background
+                original_format = QTextCharFormat(cursor.charFormat())
+
+                # If original format has no background, set it to terminal background
+                if not original_format.background().color().isValid():
+                    original_format.setBackground(self.terminal_bg_color)
+
+                # Create new format preserving colors but adding highlight
+                highlight_format = QTextCharFormat(original_format)
+                highlight_format.setBackground(QColor("#FFFF00"))  # Yellow background
+                highlight_format.setForeground(QColor("#000000"))  # Black text for visibility
+
+                # Apply the highlight
+                cursor.setCharFormat(highlight_format)
+
+                # Store highlight info for restoration
+                self.search_highlights.append({
+                    'start': found_index,
+                    'end': found_index + len(search_text),
+                    'original_format': original_format,
+                    'original_background': original_format.background().color() if original_format.background().color().isValid() else self.terminal_bg_color
+                })
+
+                start_index = found_index + 1
+
+        except Exception as e:
+            logging.error(f"Error searching in terminal: {e}")
+
+
+    def clear_terminal_search(self):
+        """Clear search highlights while preserving other formatting"""
+        if not self.is_valid:
+            return
+
+        try:
+            # Restore original formatting for each highlight
+            for highlight in self.search_highlights:
+                cursor = self.textCursor()
+                cursor.setPosition(highlight['start'])
+                cursor.setPosition(highlight['end'], QTextCursor.MoveMode.KeepAnchor)
+
+                # Restore original format with proper background
+                restored_format = QTextCharFormat(highlight['original_format'])
+
+                # Ensure background is properly restored
+                original_bg = highlight.get('original_background', self.terminal_bg_color)
+                if original_bg.isValid():
+                    restored_format.setBackground(original_bg)
+                else:
+                    restored_format.setBackground(self.terminal_bg_color)
+
+                cursor.setCharFormat(restored_format)
+
+            # Clear the highlights list
+            self.search_highlights.clear()
+
+            # Force a repaint to ensure changes are visible
+            self.update()
+
+        except Exception as e:
+            logging.error(f"Error clearing terminal search: {e}")
+
+
+
+    def update_edit_positions(self):
+        all_text = self.toPlainText()
+        self.edit_start_pos = all_text.find(f"# Editing {self.edit_file_path}\n") + len(f"# Editing {self.edit_file_path}\n")
+        self.edit_end_pos = all_text.find("\n# COMMANDS:", self.edit_start_pos)
+        if self.edit_end_pos == -1:
+            self.edit_end_pos = len(all_text)
+        cursor = self.textCursor()
+        cursor_pos = cursor.position()
+        if cursor_pos < self.edit_start_pos or cursor_pos > self.edit_end_pos:
+            cursor.setPosition(min(max(cursor_pos, self.edit_start_pos), self.edit_end_pos))
+            self.setTextCursor(cursor)
+
+
+class SSHTerminalWidget(UnifiedTerminalWidget):
+    """Specialized terminal widget for SSH sessions with improved command handling"""
+
+    def __init__(self, pod_name, namespace, parent=None):
+        super().__init__(parent)
+        self.pod_name = pod_name
+        self.namespace = namespace
+        self.ssh_session = None
+        self.is_ssh_connected = False
+        self.pending_input = ""  # Store what user is typing
+        self.last_output_position = 0
+        self.input_start_position = 0
+        self.welcome_shown = False
+        self.initial_prompt_received = False
+        self.waiting_for_output = False
+
+        # Override some behaviors for SSH
+        self.current_prompt = f"Connecting to {pod_name}..."
+        self.setReadOnly(False)  # Allow input for SSH
+
+        # Initialize SSH session
+        self.init_ssh_session()
+
+    def init_ssh_session(self):
+        """Initialize the SSH session to the pod"""
+        try:
+            from utils.kubernetes_client import KubernetesPodSSH
+
+            self.ssh_session = KubernetesPodSSH(self.pod_name, self.namespace)
+
+            # Connect signals
+            self.ssh_session.data_received.connect(self.handle_ssh_data)
+            self.ssh_session.error_occurred.connect(self.handle_ssh_error)
+            self.ssh_session.session_status.connect(self.handle_ssh_status)
+            self.ssh_session.session_closed.connect(self.handle_ssh_closed)
+
+            # Start connection
+            if self.ssh_session.connect_to_pod():
+                self.append_output(f"🔄 Establishing SSH connection to {self.pod_name}...\n", "#4CAF50")
+            else:
+                self.append_output(f"❌ Failed to connect to {self.pod_name}\n", "#FF6B68")
+
+        except Exception as e:
+            logging.error(f"Error initializing SSH session: {e}")
+            self.append_output(f"SSH initialization error: {str(e)}\n", "#FF6B68")
+
+    def clean_terminal_output(self, data):
+        """Clean terminal output by removing escape sequences and control characters"""
+        if not data:
+            return ""
+
+        # Remove ANSI escape sequences but preserve content
+        # Remove cursor movement and color codes
+        data = re.sub(r'\x1b\[[0-9;]*[mK]', '', data)
+        data = re.sub(r'\x1b\[[0-9;]*[ABCDEFGH]', '', data)
+
+        # Remove bracketed paste mode sequences
+        data = re.sub(r'\x1b\[?\?2004[hl]', '', data)
+
+        # Remove other escape sequences
+        data = re.sub(r'\x1b\][^\x07]*\x07', '', data)
+        data = re.sub(r'\x1b[PX^_].*?\x1b\\', '', data)
+
+        # Remove most control characters but keep newlines and tabs
+        data = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', data)
+
+        # Normalize line endings
+        data = data.replace('\r\n', '\n').replace('\r', '\n')
+
+        return data
+
+    def is_shell_prompt(self, data):
+        """Check if data contains a shell prompt"""
+        if not data:
+            return False
+
+        # Look for common prompt patterns
+        prompt_patterns = [
+            r'.*[$#%>]\s*$',  # Ends with shell prompt characters
+            r'.*@.*:.*[$#]\s*$',  # user@host:path$ format
+            r'.*have no name.*[$#]\s*$',  # "I have no name" prompt
+        ]
+
+        lines = data.strip().split('\n')
+        last_line = lines[-1] if lines else ''
+
+        for pattern in prompt_patterns:
+            if re.match(pattern, last_line.strip()):
+                return True
+
+        return False
+
+    def handle_ssh_data(self, data):
+        """Handle data received from SSH session"""
+        if not data or not self.is_valid:
+            return
+
+        # Check for ANSI clear screen sequences before any other processing
+        if '\x1b[2J' in data or '\x1b[3J' in data:
+            self.clear_output()
+            # Remove the clear codes from the data string
+            # so we can still process the prompt that might be attached
+            data = re.sub(r'\x1b\[[23]J', '', data)
+
+        # Clean the rest of the data
+        clean_data = self.clean_terminal_output(data)
+
+        if not clean_data:
+            return
+
+        # Show welcome message only once when we get the first prompt
+        if not self.welcome_shown and self.is_ssh_connected and self.is_shell_prompt(clean_data):
+            if not self.initial_prompt_received:
+                self._show_ssh_welcome()
+                self.welcome_shown = True
+                self.initial_prompt_received = True
+
+        # Clear pending input display if we're showing output
+        if self.pending_input and not self.is_shell_prompt(clean_data):
+            self._clear_pending_input_display()
+
+        # Display the output
+        self.append_output(clean_data, "#E0E0E0")
+
+        # Update positions
+        cursor = self.textCursor()
+        self.last_output_position = cursor.position()
+        self.input_position = cursor.position()
+        self.input_start_position = cursor.position()
+
+        # If this looks like a prompt, we're ready for input
+        if self.is_shell_prompt(clean_data):
+            self.waiting_for_output = False
+            # Redisplay pending input if any
+            if self.pending_input:
+                self._display_pending_input()
+
+    def _clear_pending_input_display(self):
+        """Clear the currently displayed pending input"""
+        if not self.pending_input:
+            return
+
+        cursor = self.textCursor()
+        cursor.setPosition(self.input_start_position)
+        cursor.movePosition(QTextCursor.MoveOperation.End, QTextCursor.MoveMode.KeepAnchor)
+        selected_text = cursor.selectedText()
+
+        if self.pending_input in selected_text:
+            cursor.removeSelectedText()
+
+        cursor.setPosition(self.input_start_position)
+        self.setTextCursor(cursor)
+
+    def _display_pending_input(self):
+        """Display the pending input"""
+        if not self.pending_input or self.waiting_for_output:
+            return
+
+        cursor = self.textCursor()
+        cursor.setPosition(self.input_start_position)
+        self.setTextCursor(cursor)
+
+        # Insert the pending input with proper formatting
+        char_format = QTextCharFormat()
+        char_format.setForeground(QColor("#E0E0E0"))
+        char_format.setBackground(self.terminal_bg_color)
+        cursor.setCharFormat(char_format)
+        cursor.insertText(self.pending_input)
+
+        # Move cursor to end
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        self.setTextCursor(cursor)
+
+    def handle_ssh_error(self, error_message):
+        """Handle SSH session errors"""
+        if self.is_valid:
+            self.append_output(f"\n❌ SSH Error: {error_message}\n", "#FF6B68")
+
+    def handle_ssh_status(self, status_message):
+        """Handle SSH session status updates"""
+        if self.is_valid:
+            if "Connected" in status_message:
+                self.is_ssh_connected = True
+                self.append_output(f"✅ {status_message}\n", "#4CAF50")
+
+                # Set initial positions
+                cursor = self.textCursor()
+                self.input_position = cursor.position()
+                self.last_output_position = cursor.position()
+                self.input_start_position = cursor.position()
+            elif "Establishing" in status_message or "Failed" in status_message:
+                self.append_output(f"{status_message}\n", "#4CAF50" if "Establishing" in status_message else "#FF6B68")
+
+    def handle_ssh_closed(self):
+        """Handle SSH session closure"""
+        if self.is_valid:
+            self.is_ssh_connected = False
+            self.append_output("\n🔴 SSH session closed\n", "#FFA500")
+            self.append_output("Connection to pod terminated.\n", "#9ca3af")
+
+    def execute_ssh_command(self, command):
+        """Execute command in SSH session"""
+        if not self.ssh_session or not self.is_ssh_connected:
+            self.append_output("❌ Not connected to pod. Please check connection.\n", "#FF6B68")
+            return
+
+        # Handle local exit commands
+        command_lower = command.strip().lower()
+        if command_lower in ['exit', 'logout', 'quit']:
+            self.ssh_session.disconnect()
+            return
+
+        # Handle clear command - use alternative if clear doesn't exist
+        if command_lower == 'clear':
+            # Try multiple clear methods
+            commands_to_try = ['clear', 'printf "\\033c"', 'tput clear', 'reset']
+            for cmd in commands_to_try:
+                try:
+                    success = self.ssh_session.send_command(cmd + '\n')
+                    if success:
+                        self.waiting_for_output = True
+                        return
+                except:
+                    continue
+            # If all fail, do local clear
+            self.clear_output()
+            return
+
+        # For all other commands
+        self.waiting_for_output = True
+
+        try:
+            if command.strip():
+                success = self.ssh_session.send_command(command + '\n')
+            else:
+                success = self.ssh_session.send_command('\n')
+
+            if not success:
+                self.append_output("❌ Failed to send command to pod.\n", "#FF6B68")
+                self.waiting_for_output = False
+        except Exception as e:
+            self.append_output(f"❌ Error sending command: {str(e)}\n", "#FF6B68")
+            self.waiting_for_output = False
+
+    def keyPressEvent(self, event):
+        """Handle key events for SSH terminal"""
+        if not self.is_ssh_connected:
+             # Still allow copy/paste even if not connected
+            if event.matches(QKeySequence.StandardKey.Copy) or event.matches(QKeySequence.StandardKey.Paste):
+                super().keyPressEvent(event)
+            else:
+                event.accept()
+            return
+
+        key = event.key()
+
+        # Allow copy/paste shortcuts to be handled by the parent
+        if event.matches(QKeySequence.StandardKey.Copy) or event.matches(QKeySequence.StandardKey.Paste):
+            super().keyPressEvent(event)
+            return
+
+        # Handle Ctrl+C and Ctrl+D
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            if key == Qt.Key.Key_C:
+                try:
+                    if self.ssh_session:
+                        self.ssh_session.send_command('\x03')
+                        self.waiting_for_output = False
+                except:
+                    pass
+                self._clear_all_pending_input()
+                event.accept()
+                return
+            elif key == Qt.Key.Key_D:
+                try:
+                    if self.ssh_session:
+                        self.ssh_session.send_command('\x04')
+                except:
+                    pass
+                self._clear_all_pending_input()
+                event.accept()
+                return
+
+        # Handle Enter key
+        if key == Qt.Key.Key_Return and not event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+            command_to_send = self.pending_input
+            self.append_output(f"\n")
+            
+            # Add to history if not empty
+            if command_to_send.strip():
+                self.command_history.append(command_to_send)
+                self.history_index = len(self.command_history)
+
+            # Execute the command
+            self.execute_ssh_command(command_to_send)
+            
+            self._clear_all_pending_input()
+            event.accept()
+            return
+
+        # Handle backspace
+        if key == Qt.Key.Key_Backspace:
+            if self.pending_input:
+                self.pending_input = self.pending_input[:-1]
+                self._update_input_display()
+            event.accept()
+            return
+
+        # Handle history navigation
+        if key in (Qt.Key.Key_Up, Qt.Key.Key_Down):
+            self._handle_ssh_history_navigation(key)
+            event.accept()
+            return
+
+        # Handle regular character input
+        if event.text() and event.text().isprintable():
+            self.pending_input += event.text()
+            self._update_input_display()
+            event.accept()
+            return
+
+        # Handle Tab key
+        if key == Qt.Key.Key_Tab:
+            try:
+                if self.ssh_session:
+                    self.ssh_session.send_command('\t')
+            except:
+                pass
+            event.accept()
+            return
+
+        event.accept()
+
+    def _update_input_display(self):
+        """Update the display to show current pending input"""
+        if not self.is_valid or self.waiting_for_output:
+            return
+
+        # Clear current display from input start position
+        cursor = self.textCursor()
+        cursor.setPosition(self.input_start_position)
+        cursor.movePosition(QTextCursor.MoveOperation.End, QTextCursor.MoveMode.KeepAnchor)
+        cursor.removeSelectedText()
+
+        # Display the pending input if any
+        if self.pending_input:
+            cursor.setPosition(self.input_start_position)
+            self.setTextCursor(cursor)
+
+            char_format = QTextCharFormat()
+            char_format.setForeground(QColor("#E0E0E0"))
+            char_format.setBackground(self.terminal_bg_color)
+            cursor.setCharFormat(char_format)
+            cursor.insertText(self.pending_input)
+
+        # Position cursor at end
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        self.setTextCursor(cursor)
+
+    def _clear_all_pending_input(self):
+        """Clear all pending input and reset state"""
+        if self.pending_input:
+            cursor = self.textCursor()
+            cursor.setPosition(self.input_start_position)
+            cursor.movePosition(QTextCursor.MoveOperation.End, QTextCursor.MoveMode.KeepAnchor)
+            cursor.removeSelectedText()
+
+        self.pending_input = ""
+        cursor = self.textCursor()
+        self.input_start_position = cursor.position()
+
+    def _show_ssh_welcome(self):
+        """Show SSH welcome message once"""
+        welcome_msg = (
+            f"🔑 SSH Connected to Pod: {self.pod_name}\n"
+            f"📍 Namespace: {self.namespace}\n"
+            "────────────────────────────────────────\n"
+            "✅ Shell session active. Type 'exit' to disconnect.\n"
+            "💡 Note: Some containers may show 'I have no name' - this is normal.\n\n"
+        )
+        self.append_output(welcome_msg, "#4CAF50")
+
+        # Update positions after welcome
+        cursor = self.textCursor()
+        self.input_start_position = cursor.position()
+        self.input_position = cursor.position()
+        self.last_output_position = cursor.position()
+
+    def _handle_ssh_history_navigation(self, key):
+        """Handle command history navigation"""
+        if not self.command_history:
+            return
+
+        if key == Qt.Key.Key_Up and self.history_index > 0:
+            self.history_index -= 1
+            self.pending_input = self.command_history[self.history_index]
+        elif key == Qt.Key.Key_Down:
+            if self.history_index < len(self.command_history) - 1:
+                self.history_index += 1
+                self.pending_input = self.command_history[self.history_index]
+            elif self.history_index == len(self.command_history) - 1:
+                self.history_index = len(self.command_history)
+                self.pending_input = ""
+
+        self._update_input_display()
+
+    def cleanup_ssh_session(self):
+        """Clean up SSH session"""
+        try:
+            if self.ssh_session:
+                self.ssh_session.disconnect()
+                self.ssh_session = None
+        except Exception as e:
+            logging.error(f"Error cleaning up SSH session: {e}")
+
+    def clear_output(self):
+        """Override clear_output for SSH terminal"""
+        if not self.is_valid:
+            return
+        try:
+            # Clear the widget
+            self.clear()
+
+            # Reset state
+            self.pending_input = ""
+            self.last_output_position = 0
+            self.input_position = 0
+            self.input_start_position = 0
+            self.welcome_shown = False
+            self.initial_prompt_received = False
+            self.waiting_for_output = False
+            self.search_highlights.clear()
+
+            if self.is_ssh_connected:
+                self.append_output("🧹 Terminal cleared\n", "#4CAF50")
+                cursor = self.textCursor()
+                self.input_start_position = cursor.position()
+                self.input_position = cursor.position()
+                self.last_output_position = cursor.position()
+            else:
+                self.append_output(f"🔄 Connecting to {self.pod_name}...\n", "#4CAF50")
+
+        except RuntimeError:
+            self.is_valid = False
+
+    def __del__(self):
+        """Cleanup when widget is destroyed"""
+        self.cleanup_ssh_session()
+        super().__del__()
 
 class ResizeHandle(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedHeight(5)
         self.setCursor(Qt.CursorShape.SizeVerCursor)
-        self.setStyleSheet(AppStyles.TERMINAL_RESIZE_HANDLE)
+        self.setStyleSheet(StyleConstants.RESIZE_HANDLE)
         self.is_dragging = False
         self.drag_start_y = 0
         self.drag_start_height = 0
@@ -658,23 +1215,20 @@ class UnifiedTerminalHeader(QWidget):
         self.controls_layout.setContentsMargins(0, 0, 0, 0)
         self.controls_layout.setSpacing(4)
 
+        # Shell dropdown (for regular terminals)
         self.shell_dropdown = QComboBox()
         self.shell_dropdown.setFixedSize(120, 24)
-        self.shell_dropdown.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.shell_dropdown.setStyleSheet(AppStyles.TERMINAL_SHELL_DROPDOWN)
+        self.shell_dropdown.setStyleSheet(StyleConstants.SHELL_DROPDOWN)
         for name, _ in self.available_shells:
             self.shell_dropdown.addItem(name)
         self.shell_dropdown.currentIndexChanged.connect(self._update_selected_shell)
-
-        dropdown_view = self.shell_dropdown.view()
-        dropdown_view.setCursor(Qt.CursorShape.PointingHandCursor)
-
         self.controls_layout.addWidget(self.shell_dropdown)
 
+        # Create buttons
         buttons = [
             ("icons/terminal_add.svg", "New Terminal", self.add_new_tab),
-            ("icons/terminal_refresh.svg", "Refresh Terminal", self.refresh_terminal),
-            ("icons/terminal_download.svg", "Download Terminal Output", self.download_terminal_output),
+            ("icons/terminal_refresh.svg", "Refresh Terminal / Refresh Logs", self.refresh_terminal),
+            ("icons/terminal_download.svg", "Download Terminal Output / Download Logs", self.download_terminal_output),
             ("💾", "Save File", self.save_current_file),
             ("icons/terminal_up_down.svg", "Maximize/Restore Terminal", self.toggle_maximize),
             ("icons/terminal_close.svg", "Hide Terminal Panel", self.hide_terminal)
@@ -697,6 +1251,199 @@ class UnifiedTerminalHeader(QWidget):
             print(f"Selected shell updated to: {self.selected_shell}")
             # Automatically create a new terminal tab with the selected shell
             self.add_new_tab()
+            
+    def _on_search_changed(self, text):
+        """Handle search text change for both terminal and logs tabs"""
+        if self._is_active_tab_logs():
+            # Search in logs
+            active_logs = self._get_active_logs_tab()
+            if active_logs and hasattr(active_logs, 'set_search_filter'):
+                active_logs.set_search_filter(text)
+        else:
+            # Search in terminal output
+            active_terminal = self._get_active_terminal_widget()
+            if active_terminal and hasattr(active_terminal, 'search_in_terminal'):
+                active_terminal.search_in_terminal(text)
+
+    def _get_active_terminal_widget(self):
+        """Get the active terminal widget"""
+        try:
+            if (self.parent_terminal and
+                hasattr(self.parent_terminal, 'active_terminal_index') and
+                self.parent_terminal.active_terminal_index < len(self.parent_terminal.terminal_tabs)):
+
+                active_tab_data = self.parent_terminal.terminal_tabs[self.parent_terminal.active_terminal_index]
+                return active_tab_data.get('terminal_widget')
+        except Exception as e:
+            logging.error(f"Error getting active terminal widget: {e}")
+        return None
+
+    def update_header_for_tab_type(self, is_logs_tab):
+        """Update header visibility based on tab type"""
+        try:
+            # Update search placeholder based on tab type
+            if is_logs_tab:
+                self.search_input.setPlaceholderText("Search in logs...")
+            else:
+                self.search_input.setPlaceholderText("Search in terminal...")
+
+            # Show/hide shell dropdown (only for regular terminals)
+            self.shell_dropdown.setVisible(not is_logs_tab)
+
+            # Update button tooltips
+            if is_logs_tab:
+                self.refresh_btn.setToolTip("Refresh Logs")
+                self.download_btn.setToolTip("Download Logs")
+            else:
+                self.refresh_btn.setToolTip("Refresh Terminal")
+                self.download_btn.setToolTip("Download Terminal Output")
+        except Exception as e:
+            logging.error(f"Error checking if update header tab is logs: {e}")
+        return False
+
+    def _is_active_tab_logs(self):
+        """Check if the active tab is a logs tab"""
+        try:
+            if (self.parent_terminal and
+                hasattr(self.parent_terminal, 'active_terminal_index') and
+                self.parent_terminal.active_terminal_index < len(self.parent_terminal.terminal_tabs)):
+
+                active_tab_data = self.parent_terminal.terminal_tabs[self.parent_terminal.active_terminal_index]
+                return active_tab_data.get('is_logs_tab', False)
+        except Exception as e:
+            logging.error(f"Error checking if active tab is logs: {e}")
+        return False
+
+    def _get_active_logs_tab(self):
+        """Get the active logs tab viewer"""
+        try:
+            if (self.parent_terminal and
+                hasattr(self.parent_terminal, 'active_terminal_index') and
+                self.parent_terminal.active_terminal_index < len(self.parent_terminal.terminal_tabs)):
+
+                active_tab_data = self.parent_terminal.terminal_tabs[self.parent_terminal.active_terminal_index]
+                if active_tab_data.get('is_logs_tab', False):
+                    return active_tab_data.get('logs_viewer')
+        except Exception as e:
+            logging.error(f"Error getting active logs tab: {e}")
+        return None
+
+    def update_header_for_ssh_tab(self):
+        """Update header for SSH tab"""
+        try:
+            self.search_input.setPlaceholderText("Search in SSH session...")
+            self.shell_dropdown.setVisible(False)  # Hide shell dropdown for SSH
+
+            # Update button tooltips
+            self.refresh_btn.setToolTip("Reconnect SSH Session")
+            self.download_btn.setToolTip("Download SSH Session Log")
+
+        except Exception as e:
+            logging.error(f"Error updating header for SSH tab: {e}")
+
+    def refresh_terminal(self):
+        """Refresh terminal, logs, or SSH based on active tab"""
+        if self.edit_mode:
+            self.exit_edit_mode()
+            return
+
+        if self._is_active_tab_ssh():
+            # Refresh SSH session
+            self.refresh_ssh_session()
+        elif self._is_active_tab_logs():
+            # Refresh logs
+            active_logs = self._get_active_logs_tab()
+            if active_logs and hasattr(active_logs, 'refresh_logs'):
+                active_logs.refresh_logs()
+        else:
+            # Refresh terminal
+            if hasattr(self.parent_terminal, 'restart_active_terminal'):
+                self.parent_terminal.restart_active_terminal()
+
+    def refresh_ssh_session(self):
+        """Refresh/reconnect SSH session"""
+        if self._is_active_tab_ssh():
+            active_ssh = self._get_active_ssh_tab()
+            if active_ssh and hasattr(active_ssh, 'init_ssh_session'):
+                active_ssh.cleanup_ssh_session()
+                active_ssh.init_ssh_session()
+
+    def download_terminal_output(self):
+        """Download terminal output, logs, or SSH session based on active tab"""
+        if self._is_active_tab_ssh():
+            # Download SSH session log
+            active_ssh = self._get_active_ssh_tab()
+            if active_ssh:
+                self._download_ssh_session(active_ssh)
+        elif self._is_active_tab_logs():
+            # Download logs
+            active_logs = self._get_active_logs_tab()
+            if active_logs:
+                self._download_logs(active_logs)
+        else:
+            # Download terminal output
+            if hasattr(self.parent_terminal, 'download_terminal_output'):
+                self.parent_terminal.download_terminal_output()
+
+    def _download_ssh_session(self, ssh_terminal):
+        """Download SSH session content"""
+        try:
+            # Get SSH session content
+            if hasattr(ssh_terminal, 'toPlainText'):
+                session_content = ssh_terminal.toPlainText()
+
+                # Get pod name for filename
+                pod_name = getattr(ssh_terminal, 'pod_name', 'unknown-pod')
+                namespace = getattr(ssh_terminal, 'namespace', 'default')
+
+                # Open file dialog
+                from PyQt6.QtWidgets import QFileDialog
+                filename, _ = QFileDialog.getSaveFileName(
+                    self.parent_terminal,
+                    f"Save SSH Session for {pod_name}",
+                    f"{pod_name}_{namespace}_ssh_session.txt",
+                    "Text Files (*.txt);;All Files (*)"
+                )
+
+                if filename:
+                    with open(filename, 'w', encoding='utf-8') as f:
+                        f.write(f"# SSH Session for Pod: {pod_name}\n")
+                        f.write(f"# Namespace: {namespace}\n")
+                        f.write(f"# Downloaded: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                        f.write("# " + "="*50 + "\n\n")
+                        f.write(session_content)
+
+                    print(f"SSH session saved to: {filename}")
+
+        except Exception as e:
+            logging.error(f"Error downloading SSH session: {e}")
+
+    def _is_active_tab_ssh(self):
+        """Check if the active tab is an SSH tab"""
+        try:
+            if (self.parent_terminal and
+                hasattr(self.parent_terminal, 'active_terminal_index') and
+                self.parent_terminal.active_terminal_index < len(self.parent_terminal.terminal_tabs)):
+
+                active_tab_data = self.parent_terminal.terminal_tabs[self.parent_terminal.active_terminal_index]
+                return active_tab_data.get('is_ssh_tab', False)
+        except Exception as e:
+            logging.error(f"Error checking if active tab is SSH: {e}")
+        return False
+
+    def _get_active_ssh_tab(self):
+        """Get the active SSH tab widget"""
+        try:
+            if (self.parent_terminal and
+                hasattr(self.parent_terminal, 'active_terminal_index') and
+                self.parent_terminal.active_terminal_index < len(self.parent_terminal.terminal_tabs)):
+
+                active_tab_data = self.parent_terminal.terminal_tabs[self.parent_terminal.active_terminal_index]
+                if active_tab_data.get('is_ssh_tab', False):
+                    return active_tab_data.get('terminal_widget')
+        except Exception as e:
+            logging.error(f"Error getting active SSH tab: {e}")
+        return None
 
     def create_header_button(self, text, tooltip, callback):
         button = QToolButton()
@@ -1136,20 +1883,33 @@ class TerminalPanel(QWidget):
             return
 
         terminal_data = self.terminal_tabs[tab_index]
-        if process := terminal_data.get('process'):
-            if process.state() == QProcess.ProcessState.Running:
-                try:
-                    newline = b"\r\n" if platform.system() == 'Windows' else b"\n"
-                    process.write(b"exit" + newline)
-                    process.waitForFinished(500)
-                    if process.state() == QProcess.ProcessState.Running:
-                        process.terminate()
+        # Handle different tab types
+        if terminal_data.get('is_logs_tab', False):
+            # Stop log streaming for logs tabs
+            logs_viewer = terminal_data.get('logs_viewer')
+            if logs_viewer and hasattr(logs_viewer, 'stop_log_stream'):
+                logs_viewer.stop_log_stream()
+        elif terminal_data.get('is_ssh_tab', False):
+            # Cleanup SSH session for SSH tabs
+            ssh_terminal = terminal_data.get('terminal_widget')
+            if ssh_terminal and hasattr(ssh_terminal, 'cleanup_ssh_session'):
+                ssh_terminal.cleanup_ssh_session()
+        else:
+            # Handle regular terminal process
+            if process := terminal_data.get('process'):
+                if process.state() == QProcess.ProcessState.Running:
+                    try:
+                        newline = b"\r\n" if platform.system() == 'Windows' else b"\n"
+                        process.write(b"exit" + newline)
                         process.waitForFinished(500)
-                    if process.state() == QProcess.ProcessState.Running:
-                        process.kill()
-                        process.waitForFinished(200)
-                except Exception as e:
-                    print(f"Error terminating process: {e}")
+                        if process.state() == QProcess.ProcessState.Running:
+                            process.terminate()
+                            process.waitForFinished(500)
+                        if process.state() == QProcess.ProcessState.Running:
+                            process.kill()
+                            process.waitForFinished(200)
+                    except Exception as e:
+                        print(f"Error terminating process: {e}")
 
         if tab_container := terminal_data.get('tab_container'):
             self.unified_header.remove_tab(tab_container)
@@ -1299,3 +2059,104 @@ class TerminalPanel(QWidget):
 
     def eventFilter(self, obj, event):
         return super().eventFilter(obj, event)
+    def create_ssh_tab(self, pod_name, namespace):
+        """Create an SSH tab for pod access"""
+        try:
+            tab_index = len(self.terminal_tabs)
+
+            # Create tab widget
+            tab_widget = QWidget()
+            tab_widget.setFixedHeight(28)
+            tab_widget.setCursor(Qt.CursorShape.PointingHandCursor)
+
+            tab_layout = QHBoxLayout(tab_widget)
+            tab_layout.setContentsMargins(8, 0, 8, 0)
+            tab_layout.setSpacing(6)
+
+            # Create label with SSH icon and pod name
+            label = QLabel(f"🔑 {pod_name}")
+            label.setStyleSheet("""
+                color: #FF9800;
+                background: transparent;
+                font-size: 12px;
+                font-weight: bold;
+                text-decoration: none;
+                border: none;
+                outline: none;
+            """)
+
+            # Create close button
+            close_btn = QPushButton("✕")
+            close_btn.setFixedSize(16, 16)
+            close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            close_btn.setStyleSheet(StyleConstants.TAB_CLOSE_BUTTON)
+
+            tab_layout.addWidget(label)
+            tab_layout.addWidget(close_btn)
+
+            # Create tab button
+            tab_btn = QPushButton()
+            tab_btn.setCheckable(True)
+            tab_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: transparent;
+                    border: none;
+                    border-right: 1px solid #3d3d3d;
+                    border-left: 1px solid #3d3d3d;
+                    border-bottom: 1px solid #3d3d3d;
+                    border-top: 1px solid #3d3d3d;
+                    padding: 0px 35px;
+                    margin: 0px;
+                }
+                QPushButton:hover {
+                    background-color: rgba(255, 152, 0, 0.1);
+                }
+                QPushButton:checked {
+                    background-color: #1E1E1E;
+                    border-bottom: 2px solid #FF9800;
+                }
+            """)
+            tab_btn.setLayout(tab_layout)
+
+            # Create tab container
+            tab_container = QWidget()
+            container_layout = QHBoxLayout(tab_container)
+            container_layout.setContentsMargins(0, 0, 0, 0)
+            container_layout.setSpacing(0)
+            container_layout.addWidget(tab_btn)
+
+            # Connect signals
+            close_btn.clicked.connect(lambda: self.close_terminal_tab(tab_index))
+            tab_btn.clicked.connect(lambda: self.switch_to_terminal_tab(tab_index))
+
+            # Add tab to header
+            self.unified_header.add_tab(tab_container)
+
+            # Create SSH terminal widget
+            ssh_terminal = SSHTerminalWidget(pod_name, namespace)
+
+            # Add the SSH terminal to terminal stack
+            self.stack_layout.addWidget(ssh_terminal)
+            ssh_terminal.setVisible(False)
+
+            # Store tab data
+            terminal_data = {
+                'tab_button': tab_btn,
+                'tab_container': tab_container,
+                'content_widget': ssh_terminal,
+                'terminal_widget': ssh_terminal,  # SSH terminal acts as regular terminal
+                'ssh_session': ssh_terminal.ssh_session,  # Direct reference to SSH session
+                'process': None,                # No process for SSH tabs
+                'started': True,                # Always "started" for SSH
+                'active': False,
+                'is_ssh_tab': True,            # Mark as SSH tab
+                'pod_name': pod_name,
+                'namespace': namespace
+            }
+            self.terminal_tabs.append(terminal_data)
+
+            return tab_index
+
+        except Exception as e:
+            logging.error(f"Error creating SSH tab: {e}")
+            return None
