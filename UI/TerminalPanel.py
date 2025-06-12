@@ -1087,7 +1087,7 @@ class SSHTerminalWidget(UnifiedTerminalWidget):
         """Cleanup when widget is destroyed"""
         self.cleanup_ssh_session()
         super().__del__()
-
+        
 class ResizeHandle(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
