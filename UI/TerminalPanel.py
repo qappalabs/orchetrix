@@ -1495,7 +1495,7 @@ class UnifiedTerminalHeader(QWidget):
         self.content_layout.addWidget(self.search_input)
         self.content_layout.addWidget(self.controls)
         main_layout.addWidget(self.header_content)
-        
+
     def _update_selected_shell(self, index):
         if index >= 0 and index < len(self.available_shells):
             self.selected_shell = self.available_shells[index][1]  # Store path only
@@ -2851,7 +2851,6 @@ class TerminalPanel(QWidget):
             return
 
         terminal_data = self.terminal_tabs[tab_index]
-
         # Handle different tab types
         if terminal_data.get('is_logs_tab', False):
             # Stop log streaming for logs tabs
@@ -3191,7 +3190,6 @@ class TerminalPanel(QWidget):
 
     def eventFilter(self, obj, event):
         return super().eventFilter(obj, event)
-
     def create_ssh_tab(self, pod_name, namespace):
         """Create an SSH tab for pod access"""
         try:
