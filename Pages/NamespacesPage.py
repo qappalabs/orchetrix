@@ -14,6 +14,8 @@ from UI.Styles import AppStyles, AppColors
 import subprocess
 import json
 
+import subprocess
+import json
 
 class StatusLabel(QWidget):
     """Widget that displays a status with consistent styling and background handling."""

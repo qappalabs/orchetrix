@@ -1,12 +1,12 @@
 """
-Enhanced implementation of the Charts page with comprehensive data from ArtifactHub API.
-Includes icon detection, better error handling, and more metadata from the API.
+Enhanced implementation of the Charts page displaying only Bitnami charts.
+Includes icon detection, better error handling, and Bitnami-specific filtering.
 """
 
 from PyQt6.QtWidgets import (
     QHeaderView, QWidget, QLabel, QHBoxLayout,
     QToolButton, QMenu, QVBoxLayout, QTableWidgetItem, 
-    QProgressBar, QAbstractSlider, QPushButton,QMessageBox,QDialog
+    QProgressBar, QLineEdit, QPushButton,QMessageBox,QDialog
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QColor, QPixmap
@@ -25,7 +25,7 @@ from utils.helm_utils import ChartInstallDialog, install_helm_chart
 
 
 class ChartDataThread(QThread):
-    """Thread for loading Helm charts from ArtifactHub API without blocking the UI."""
+    """Thread for loading Bitnami Helm charts from ArtifactHub API without blocking the UI."""
     data_loaded = pyqtSignal(list, bool)  # Data, is_more_available
     error_occurred = pyqtSignal(str)
     
@@ -52,155 +52,119 @@ class ChartDataThread(QThread):
         self.default_icons_dir = os.path.join(os.path.expanduser('~'), '.artifacthub', 'default_icons')
         os.makedirs(self.default_icons_dir, exist_ok=True)
         
-        # Download default Helm icon if not present
-        self.default_helm_icon_path = os.path.join(self.default_icons_dir, 'default_helm_icon.png')
-        if not os.path.exists(self.default_helm_icon_path):
+        # Download default Bitnami icon if not present
+        self.default_bitnami_icon_path = os.path.join(self.default_icons_dir, 'bitnami_icon.png')
+        if not os.path.exists(self.default_bitnami_icon_path):
             try:
-                # Create a session for cookies and headers
                 session = requests.Session()
                 headers = {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                     'Accept': 'application/json'
                 }
                 
-                # Try to get the Helm icon from Artifact Hub
-                default_icon_url = "https://artifacthub.io/static/media/helm-chart.svg"
-                icon_response = session.get(default_icon_url, headers=headers, timeout=10)
+                # Try to get the Bitnami icon from Artifact Hub
+                bitnami_icon_url = "https://bitnami.com/assets/stacks/bitnami/img/bitnami-mark.png"
+                icon_response = session.get(bitnami_icon_url, headers=headers, timeout=10)
                 if icon_response.status_code == 200:
-                    with open(self.default_helm_icon_path, 'wb') as f:
+                    with open(self.default_bitnami_icon_path, 'wb') as f:
                         f.write(icon_response.content)
 
             except Exception as e:
                 pass
 
     def run(self):
-        """Execute the API request and emit results."""
+        """Execute the API request and emit results for Bitnami charts only."""
         try:
-            # Create a session for cookies and headers
             session = requests.Session()
             
-            # Use a more browser-like user agent
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 'Accept': 'application/json',
                 'Content-Type': 'application/json'
             }
             
-            # Try different API methods: POST first (seems more reliable)
             charts_data = []
             is_more_available = True
             
-            # First try POST method
+            # Build Bitnami-specific search query
+            if self.use_search and self.search_term:
+                # If user provides search term, search within Bitnami charts
+                search_query = f"bitnami {self.search_term}"
+            else:
+                # Default to showing popular Bitnami charts
+                search_query = "bitnami"
+            
+            # Try POST method first (more reliable for ArtifactHub)
             try:
                 post_endpoint = 'https://artifacthub.io/api/v1/packages/search'
                 
-                # Build search parameters
-                search_query = "apache -solr -hadoop"  # Default query
-                if self.use_search and self.search_term:
-                    search_query = self.search_term
-                
                 post_data = {
                     "filters": {
-                        "kind": [0]  # 0 is for Helm charts
+                        "kind": [0],  # 0 is for Helm charts
+                        "repo": ["bitnami"]  # Filter specifically for Bitnami repository
                     },
                     "offset": self.offset,
                     "limit": self.limit,
-                    "sort": "last_updated", 
+                    "sort": "relevance",  # Sort by relevance for better results
                     "ts_query_web": search_query
                 }
                 
-
                 response = session.post(post_endpoint, json=post_data, headers=headers, timeout=30)
                 
                 if response.status_code == 200:
                     page_data = response.json()
-                    
-                    # Process the data
                     charts_data = self.process_api_data(page_data, session, headers)
-                    
-                    # We'll assume more data is available if we got a full page
                     is_more_available = len(charts_data) >= self.limit
-                    
 
-                else:
-                    pass
             except Exception as e:
                 pass
             
-            # If POST failed and we have no data, try GET method
+            # If POST failed, try GET method with Bitnami-specific parameters
             if not charts_data:
                 try:
-                    # Try different API endpoints
-                    possible_api_endpoints = [
-                        'https://artifacthub.io/api/v1/packages/search',
-                        'https://artifacthub.io/api/packages/search',
-                        'https://artifacthub.io/packages/api/v1/search'
-                    ]
+                    endpoint = 'https://artifacthub.io/api/v1/packages/search'
                     
-                    for endpoint in possible_api_endpoints:
-                        # Parameters for the search
-                        search_query = "apache -solr -hadoop"  # Default query
-                        if self.use_search and self.search_term:
-                            search_query = self.search_term
-                            
-                        params = {
-                            'kind': '0',  # Helm charts
-                            'ts_query_web': search_query,
-                            'sort': 'last_updated',
-                            'page': (self.offset // self.limit) + 1,
-                            'limit': self.limit
-                        }
-                        
-                       
-                        response = session.get(endpoint, params=params, headers=headers, timeout=30)
-                        
-                        if response.status_code == 200:
-                            page_data = response.json()
-                            
-                            # Process the data
-                            charts_data = self.process_api_data(page_data, session, headers)
-                            
-                            # We'll assume more data is available if we got a full page
-                            is_more_available = len(charts_data) >= self.limit
+                    params = {
+                        'kind': '0',  # Helm charts
+                        'ts_query_web': search_query,
+                        'repo': 'bitnami',  # Specific repository filter
+                        'sort': 'relevance',
+                        'page': (self.offset // self.limit) + 1,
+                        'limit': self.limit
+                    }
+                    
+                    response = session.get(endpoint, params=params, headers=headers, timeout=30)
+                    
+                    if response.status_code == 200:
+                        page_data = response.json()
+                        charts_data = self.process_api_data(page_data, session, headers)
+                        is_more_available = len(charts_data) >= self.limit
 
-                            break  # Exit the loop if we got data
                 except Exception as e:
                     pass
             
-            # Force more data available flag to true if we got any data at all
-            if charts_data:
-                is_more_available = True
+            # Final fallback: Use a curated list of popular Bitnami charts if API fails
+            if not charts_data:
+                charts_data = self.get_fallback_bitnami_charts()
+                is_more_available = False
             
-            # Do a second pass to add default icons for charts missing them
-            charts_missing_icons = [chart for chart in charts_data if not chart.get('icon_path')]
-            if charts_missing_icons:
-                pass
-                
-                for chart in charts_missing_icons:
-                    # First try repository icon
-                    repo_name = chart.get('repository', 'Unknown')
-                    if repo_name in self.repository_icons and self.repository_icons[repo_name] != 'N/A':
-                        chart['icon_path'] = self.repository_icons[repo_name]
-                    else:
-                        # Use default Helm icon as last resort
-                        if os.path.exists(self.default_helm_icon_path):
-                            chart['icon_path'] = self.default_helm_icon_path
+            # Filter to ensure only Bitnami charts are included
+            bitnami_charts = [chart for chart in charts_data if 
+                            chart.get('repository', '').lower() == 'bitnami' or
+                            'bitnami' in chart.get('repository', '').lower()]
             
-            # Emit the result with more data available flag
-            
-            self.data_loaded.emit(charts_data, is_more_available)
+            self.data_loaded.emit(bitnami_charts, is_more_available)
             
         except Exception as e:
-            self.error_occurred.emit(f"Error fetching charts: {str(e)}")
+            self.error_occurred.emit(f"Error fetching Bitnami charts: {str(e)}")
     
     def process_api_data(self, api_data, session, headers):
-        """Process API data to extract helm charts with icons"""
-        helm_charts = []
+        """Process API data to extract Bitnami helm charts with icons"""
+        bitnami_charts = []
         
         if not api_data:
-            return helm_charts
+            return bitnami_charts
         
-        # Handle different possible data structures
         packages = []
         
         if isinstance(api_data, dict):
@@ -213,10 +177,22 @@ class ChartDataThread(QThread):
         elif isinstance(api_data, list):
             packages = api_data
         
-        # Process packages
+        # Process packages and filter for Bitnami
         for package in packages:
             try:
-                # Extract data (adjust based on actual API response structure)
+                # Extract repository info first to filter
+                repository = 'Unknown'
+                repository_url = ''
+                if 'repository' in package and isinstance(package.get('repository'), dict):
+                    repo = package.get('repository', {})
+                    repository = repo.get('name', 'Unknown')
+                    repository_url = repo.get('url', '')
+                
+                # Only process if it's a Bitnami chart
+                if repository.lower() != 'bitnami':
+                    continue
+                
+                # Extract chart data
                 name = package.get('name', 'Unknown')
                 if isinstance(name, dict) and 'name' in name:
                     name = name['name']
@@ -227,21 +203,13 @@ class ChartDataThread(QThread):
                 if app_version is None and 'appVersion' in package:
                     app_version = package.get('appVersion', 'N/A')
                 
-                # Extract repository info
-                repository = 'Unknown'
-                repository_url = ''
-                if 'repository' in package and isinstance(package.get('repository'), dict):
-                    repo = package.get('repository', {})
-                    repository = repo.get('name', 'Unknown')
-                    repository_url = repo.get('url', '')
-                
                 # Get stars and last updated
                 stars = str(package.get('stars', 0))
                 last_updated = package.get('last_updated', None)
                 if not last_updated:
                     last_updated = package.get('created_at', '')
                 
-                # Store package_id for potential later use to get detailed info
+                # Store package_id for potential later use
                 package_id = package.get('package_id', 'N/A')
                 if package_id == 'N/A' and 'packageId' in package:
                     package_id = package.get('packageId', 'N/A')
@@ -249,8 +217,8 @@ class ChartDataThread(QThread):
                 # Download icon if available
                 icon_url, icon_path = self.download_icon(package, session, headers)
                 
-                # Add to our list
-                helm_charts.append({
+                # Add to Bitnami charts list
+                bitnami_charts.append({
                     'name': name,
                     'description': description,
                     'version': version,
@@ -266,7 +234,79 @@ class ChartDataThread(QThread):
             except Exception as e:
                 pass
         
-        return helm_charts
+        return bitnami_charts
+    
+    def get_fallback_bitnami_charts(self):
+        """Provide a curated list of popular Bitnami charts as fallback"""
+        fallback_charts = [
+            {
+                'name': 'apache',
+                'description': 'Chart for Apache HTTP Server',
+                'version': 'latest',
+                'app_version': 'N/A',
+                'repository': 'bitnami',
+                'repository_url': 'https://charts.bitnami.com/bitnami',
+                'stars': '0',
+                'last_updated': '',
+                'package_id': 'N/A',
+                'icon_url': None,
+                'icon_path': self.default_bitnami_icon_path if os.path.exists(self.default_bitnami_icon_path) else None
+            },
+            {
+                'name': 'mysql',
+                'description': 'Chart for MySQL database',
+                'version': 'latest',
+                'app_version': 'N/A',
+                'repository': 'bitnami',
+                'repository_url': 'https://charts.bitnami.com/bitnami',
+                'stars': '0',
+                'last_updated': '',
+                'package_id': 'N/A',
+                'icon_url': None,
+                'icon_path': self.default_bitnami_icon_path if os.path.exists(self.default_bitnami_icon_path) else None
+            },
+            {
+                'name': 'nginx',
+                'description': 'Chart for NGINX web server',
+                'version': 'latest',
+                'app_version': 'N/A',
+                'repository': 'bitnami',
+                'repository_url': 'https://charts.bitnami.com/bitnami',
+                'stars': '0',
+                'last_updated': '',
+                'package_id': 'N/A',
+                'icon_url': None,
+                'icon_path': self.default_bitnami_icon_path if os.path.exists(self.default_bitnami_icon_path) else None
+            },
+            {
+                'name': 'postgresql',
+                'description': 'Chart for PostgreSQL database',
+                'version': 'latest',
+                'app_version': 'N/A',
+                'repository': 'bitnami',
+                'repository_url': 'https://charts.bitnami.com/bitnami',
+                'stars': '0',
+                'last_updated': '',
+                'package_id': 'N/A',
+                'icon_url': None,
+                'icon_path': self.default_bitnami_icon_path if os.path.exists(self.default_bitnami_icon_path) else None
+            },
+            {
+                'name': 'redis',
+                'description': 'Chart for Redis in-memory database',
+                'version': 'latest',
+                'app_version': 'N/A',
+                'repository': 'bitnami',
+                'repository_url': 'https://charts.bitnami.com/bitnami',
+                'stars': '0',
+                'last_updated': '',
+                'package_id': 'N/A',
+                'icon_url': None,
+                'icon_path': self.default_bitnami_icon_path if os.path.exists(self.default_bitnami_icon_path) else None
+            }
+        ]
+        
+        return fallback_charts
     
     def download_icon(self, package, session, headers):
         """Download and save the package icon if available"""
@@ -274,7 +314,6 @@ class ChartDataThread(QThread):
         icon_path = None
         
         try:
-            # Get package name for debugging
             package_name = package.get('name', 'unknown')
             
             # Check for logo_image_id first (most reliable)
@@ -285,7 +324,6 @@ class ChartDataThread(QThread):
             
             # If no logo_image_id, check other possible icon fields
             if not icon_url:
-                # Check for direct logoURL or logo field
                 for field in ['logoURL', 'logo_url', 'logoImageId', 'logo', 'icon']:
                     if field in package and package[field]:
                         if field == 'logoImageId':
@@ -296,48 +334,13 @@ class ChartDataThread(QThread):
                             icon_url = package.get(field)
                         break
                     
-                # Check for nested structures if still no icon
-                if not icon_url:
-                    # Check repository
-                    if 'repository' in package and isinstance(package['repository'], dict):
-                        repo = package['repository']
-                        
-                        # Save repository logo for future use as fallback
-                        repo_name = repo.get('name')
-                        if repo_name:
-                            # Look for repository logo
-                            repo_logo_id = repo.get('logo_image_id') or repo.get('logoImageId')
-                            
-                            if repo_logo_id and repo_name not in self.repository_icons:
-                                repo_icon_url = f"https://artifacthub.io/image/{repo_logo_id}"
-                                # Download the repository icon
-                                try:
-                                    repo_icon_filename = f"repo_{repo_name}_{hashlib.md5(repo_icon_url.encode()).hexdigest()[:8]}.png"
-                                    repo_icon_path = os.path.join(self.icons_dir, repo_icon_filename)
-                                    
-                                    if not os.path.exists(repo_icon_path):
-                                        repo_icon_response = session.get(repo_icon_url, headers=headers, timeout=10)
-                                        if repo_icon_response.status_code == 200:
-                                            with open(repo_icon_path, 'wb') as f:
-                                                f.write(repo_icon_response.content)
-                                            self.repository_icons[repo_name] = repo_icon_path
-                                    else:
-                                        self.repository_icons[repo_name] = repo_icon_path
-                                except Exception as e:
-                                    
-                                    self.repository_icons[repo_name] = 'N/A'
-                        
-                        # Try to use repo logo fields for the package icon if not found elsewhere
-                        if not icon_url:
-                            for field in ['logoURL', 'logo_url', 'logo_image_id', 'logo']:
-                                if field in repo and repo[field]:
-                                    if field == 'logo_image_id':
-                                        logo_id = repo.get(field)
-                                        if logo_id:
-                                            icon_url = f"https://artifacthub.io/image/{logo_id}"
-                                    else:
-                                        icon_url = repo.get(field)
-                                    break
+                # Check for nested repository structures
+                if not icon_url and 'repository' in package and isinstance(package['repository'], dict):
+                    repo = package['repository']
+                    repo_logo_id = repo.get('logo_image_id') or repo.get('logoImageId')
+                    
+                    if repo_logo_id:
+                        icon_url = f"https://artifacthub.io/image/{repo_logo_id}"
             
             # If icon URL starts with /, it's a relative URL
             if icon_url and icon_url.startswith('/'):
@@ -345,17 +348,14 @@ class ChartDataThread(QThread):
             
             # If we found an icon URL, download it
             if icon_url:
-                # Create a filename based on package name and URL hash
                 url_hash = hashlib.md5(icon_url.encode()).hexdigest()[:8]
                 
-                # Determine file extension from URL or default to .png
                 file_ext = os.path.splitext(icon_url)[1].lower()
-                if not file_ext or len(file_ext) > 5:  # If no extension or suspicious extension
+                if not file_ext or len(file_ext) > 5:
                     file_ext = '.png'
                 
-                # Clean package name for filename
                 safe_name = re.sub(r'[^\w\-\.]', '_', package_name)
-                icon_filename = f"{safe_name}_{url_hash}{file_ext}"
+                icon_filename = f"bitnami_{safe_name}_{url_hash}{file_ext}"
                 icon_path = os.path.join(self.icons_dir, icon_filename)
                 
                 # Download the icon if it doesn't exist
@@ -367,21 +367,22 @@ class ChartDataThread(QThread):
                             with open(icon_path, 'wb') as f:
                                 f.write(icon_response.content)
                         else:
-                            
-                            icon_path = None
+                            # Use default Bitnami icon
+                            icon_path = self.default_bitnami_icon_path if os.path.exists(self.default_bitnami_icon_path) else None
                     except Exception as e:
-                        icon_path = None
+                        icon_path = self.default_bitnami_icon_path if os.path.exists(self.default_bitnami_icon_path) else None
             else:
-                icon_path = None
+                # No icon URL found, use default Bitnami icon
+                icon_path = self.default_bitnami_icon_path if os.path.exists(self.default_bitnami_icon_path) else None
         
         except Exception as e:
-            icon_path = None
+            icon_path = self.default_bitnami_icon_path if os.path.exists(self.default_bitnami_icon_path) else None
         
         return icon_url, icon_path
 
 
 class ChartSearchThread(QThread):
-    """Thread for searching Helm charts from ArtifactHub API."""
+    """Thread for searching Bitnami Helm charts from ArtifactHub API."""
     search_completed = pyqtSignal(list, str)
     error_occurred = pyqtSignal(str)
     
@@ -391,26 +392,25 @@ class ChartSearchThread(QThread):
         
     def run(self):
         """Execute the search request and emit results."""
-        # Create and start a ChartDataThread with search parameters
         data_thread = ChartDataThread(limit=25, offset=0, use_search=True, search_term=self.search_term)
         data_thread.data_loaded.connect(lambda data, is_more: self.search_completed.emit(data, self.search_term))
         data_thread.error_occurred.connect(self.error_occurred)
         data_thread.start()
-        data_thread.wait()  # Wait for thread to complete
+        data_thread.wait()
 
 
 class ChartsPage(BaseResourcePage):
     """
-    Displays Helm charts with enhanced data from ArtifactHub API.
+    Displays Bitnami Helm charts with enhanced data from ArtifactHub API.
     """
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.resource_type = "charts"  # Set resource type for detail page
-        self.resources = []  # Store loaded chart data
-        self.offset = 0  # Current offset for pagination
-        self.is_more_available = True  # Flag to indicate if more data can be loaded
-        self.is_loading_more = False  # Flag to prevent multiple load-more operations
-        self.is_searching = False  # Flag to indicate search mode
+        self.resource_type = "charts"
+        self.resources = []
+        self.offset = 0
+        self.is_more_available = True
+        self.is_loading_more = False
+        self.is_searching = False
         
         # Add a safety mechanism to recover from stuck loading states
         self._loading_timer = QTimer()
@@ -428,45 +428,35 @@ class ChartsPage(BaseResourcePage):
         if hasattr(self, 'is_loading_more') and self.is_loading_more:
             self.is_loading_more = False
             
-        # Always ensure is_more_available is True to allow trying to load more
         if hasattr(self, 'resources') and len(self.resources) > 0:
             self.is_more_available = True
             
-        # Re-enable the table if it was disabled
         if hasattr(self, 'table'):
             self.table.setEnabled(True)
             
-        # If we had a loading indicator row, remove it
         if hasattr(self, 'table') and self.table.rowCount() > 0:
             last_row = self.table.rowCount() - 1
             cell_widget = self.table.cellWidget(last_row, 0)
             if cell_widget and hasattr(cell_widget, 'findChild'):
                 progress_bar = cell_widget.findChild(QProgressBar)
                 if progress_bar:
-                    # This is likely a loading indicator row, remove it
                     self.table.setRowCount(last_row)
         
     def setup_page_ui(self):
-        """Set up the main UI elements for the Charts page"""
-        # Define headers and sortable columns
+        """Set up the main UI elements for the Bitnami Charts page"""
         headers = ["", "Name", "Description", "Version", "App Version", "Repository", ""]
         sortable_columns = {1, 3, 4, 5}
         
-        # Create base UI
-        layout = super().setup_ui("Charts", headers, sortable_columns)
+        layout = super().setup_ui("Bitnami Charts", headers, sortable_columns)
         
-        # Apply table style
         self.table.setStyleSheet(AppStyles.TABLE_STYLE)
         self.table.horizontalHeader().setStyleSheet(AppStyles.CUSTOM_HEADER_STYLE)
         
-        # Configure column widths
         self.configure_columns()
         
-        # Connect vertical scrollbar to detect when user reaches bottom
         scrollbar = self.table.verticalScrollBar()
         scrollbar.valueChanged.connect(self.check_scroll_position)
         
-        # Remove checkbox column if present in the base class
         if hasattr(self, 'select_all_checkbox') and self.select_all_checkbox:
             self.select_all_checkbox.hide()
         
@@ -477,34 +467,27 @@ class ChartsPage(BaseResourcePage):
         if not hasattr(self, 'table') or self.table.rowCount() == 0:
             return
                 
-        # Get the search text
         search_text = ""
         if hasattr(self, 'search_bar'):
             search_text = self.search_bar.text().lower()
         
         if not search_text:
-            # If no search text, show all rows
             for row in range(self.table.rowCount()):
                 self.table.setRowHidden(row, False)
             return
             
-        # Hide rows that don't match the filters
         for row in range(self.table.rowCount()):
             row_matches = False
             
-            # Search through all displayed columns, skipping icon and actions columns
             for col in range(1, self.table.columnCount() - 1):
-                # Check regular table items
                 item = self.table.item(row, col)
                 if item and search_text in item.text().lower():
                     row_matches = True
                     break
                 
-                # Check for cell widgets (like status labels)
                 cell_widget = self.table.cellWidget(row, col)
                 if cell_widget:
                     widget_text = ""
-                    # Handle widgets which contain QLabels
                     for label in cell_widget.findChildren(QLabel):
                         widget_text += label.text() + " "
                     
@@ -512,40 +495,24 @@ class ChartsPage(BaseResourcePage):
                         row_matches = True
                         break
             
-            # Show or hide the row based on matches
             self.table.setRowHidden(row, not row_matches)
 
+    def _handle_scroll(self, value):
+        """Disable the base class's scroll handler"""
+        pass
+
     def check_scroll_position(self, value):
-        """Check if user has scrolled to the bottom and load more data if needed"""
-        # Don't load more data if we're in search mode or if we're already loading
-        if self.is_searching or self.is_loading or self.is_loading_more:
+        """Check if the user has scrolled to the bottom and load more Bitnami charts"""
+        if self.is_loading or self.is_loading_more or not self.is_more_available:
             return
-            
+
         scrollbar = self.table.verticalScrollBar()
-        
-        # Get scrollbar values
-        max_value = scrollbar.maximum()
-        current_value = value
-        
-        # Calculate how far we've scrolled as a percentage (0.0 to 1.0)
-        # Avoid division by zero if max_value is 0
-        if max_value <= 0:
-            return
-            
-        scroll_percentage = current_value / max_value
-        
-        # ALWAYS try to load more data when we're over 65% scrolled
-        if scroll_percentage >= 0.65:
-            # Force is_more_available to True to ensure we try loading more
-            self.is_more_available = True
-            
-            # Call load_more_data if we're not already loading
-            if not self.is_loading_more and not self.is_loading:
-                self.load_more_data()
-    
+
+        if value >= scrollbar.maximum() - (2 * self.table.rowHeight(0)):
+            self.load_more_data()
+
     def configure_columns(self):
         """Configure column widths and behaviors"""
-        # Configure columns with fixed widths
         fixed_widths = {
             0: 50,   # Icon
             1: 180,  # Name
@@ -555,16 +522,14 @@ class ChartsPage(BaseResourcePage):
             6: 40    # Actions
         }
         
-        # Set column widths
         for col, width in fixed_widths.items():
             self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
             self.table.setColumnWidth(col, width)
         
-        # Make Description column stretch
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
     
     def load_data(self, load_more=False):
-        """Load initial chart data from ArtifactHub API"""
+        """Load initial Bitnami chart data from ArtifactHub API"""
         if hasattr(self, 'is_loading') and self.is_loading:
             return
             
@@ -573,14 +538,11 @@ class ChartsPage(BaseResourcePage):
         self.offset = 0
         self.is_more_available = True
         
-        # Start the safety timer to recover from potential stuck states
-        self._loading_timer.start(15000)  # 15 seconds timeout
+        self._loading_timer.start(15000)
         
-        # Clear the table first
         self.table.setRowCount(0)
         self.table.setSortingEnabled(False)
         
-        # Show loading indicator
         loading_row = self.table.rowCount()
         self.table.setRowCount(loading_row + 1)
         self.table.setSpan(loading_row, 0, 1, self.table.columnCount())
@@ -590,7 +552,7 @@ class ChartsPage(BaseResourcePage):
         loading_layout.setContentsMargins(20, 20, 20, 20)
         
         loading_bar = QProgressBar()
-        loading_bar.setRange(0, 0)  # Indeterminate
+        loading_bar.setRange(0, 0)
         loading_bar.setTextVisible(False)
         loading_bar.setStyleSheet("""
             QProgressBar {
@@ -604,7 +566,7 @@ class ChartsPage(BaseResourcePage):
             }
         """)
         
-        loading_text = QLabel(f"Loading charts from ArtifactHub API...")
+        loading_text = QLabel(f"Loading Bitnami charts from ArtifactHub API...")
         loading_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
         loading_text.setStyleSheet("color: #ffffff; font-size: 14px;")
         
@@ -613,38 +575,22 @@ class ChartsPage(BaseResourcePage):
         
         self.table.setCellWidget(loading_row, 0, loading_widget)
         
-        # Create and start the data loading thread
         self.chart_thread = ChartDataThread(limit=25, offset=self.offset)
         self.chart_thread.data_loaded.connect(self.on_data_loaded)
         self.chart_thread.error_occurred.connect(self.on_load_error)
         self.chart_thread.start()
 
-    def _handle_scroll(self, value):
-        """
-        Override BaseResourcePage._handle_scroll to use ChartsPage's
-        own scroll handling mechanism (check_scroll_position).
-        """
-        # This method is intentionally left to let check_scroll_position handle it,
-        # or we can directly call it if needed, but check_scroll_position
-        # is already connected to scrollbar.valueChanged.
-        # The key is to prevent BaseResourcePage's _handle_scroll from running its logic.
-        pass # Or explicitly call self.check_scroll_position(value) if it's not redundant
-
-
     def load_more_data(self):
-        """Load more chart data when user scrolls to bottom"""
+        """Load more Bitnami chart data when user scrolls to bottom"""
         if not self.is_more_available or self.is_loading_more:
             return
             
         self.is_loading_more = True
         
-        # Start the safety timer to recover from potential stuck states
-        self._loading_timer.start(15000)  # 15 seconds timeout
+        self._loading_timer.start(15000)
         
-        # Calculate the new offset for next batch of data
         self.offset = len(self.resources)
         
-        # Add a loading indicator row at the bottom
         loading_row = self.table.rowCount()
         self.table.setRowCount(loading_row + 1)
         self.table.setSpan(loading_row, 0, 1, self.table.columnCount())
@@ -654,7 +600,7 @@ class ChartsPage(BaseResourcePage):
         loading_layout.setContentsMargins(10, 5, 10, 5)
         
         loading_bar = QProgressBar()
-        loading_bar.setRange(0, 0)  # Indeterminate
+        loading_bar.setRange(0, 0)
         loading_bar.setTextVisible(False)
         loading_bar.setMaximumHeight(10)
         loading_bar.setStyleSheet("""
@@ -669,7 +615,7 @@ class ChartsPage(BaseResourcePage):
             }
         """)
         
-        loading_text = QLabel("Loading more charts...")
+        loading_text = QLabel("Loading more Bitnami charts...")
         loading_text.setStyleSheet("color: #aaaaaa; font-size: 12px;")
         
         loading_layout.addWidget(loading_text)
@@ -677,110 +623,80 @@ class ChartsPage(BaseResourcePage):
         
         self.table.setCellWidget(loading_row, 0, loading_widget)
         
-        # Create and start the data loading thread for additional data
         self.more_thread = ChartDataThread(limit=25, offset=self.offset)
         self.more_thread.data_loaded.connect(self.on_more_data_loaded)
         self.more_thread.error_occurred.connect(self.on_load_more_error)
         self.more_thread.start()
     
     def on_data_loaded(self, data, is_more_available):
-        """Handle loaded chart data for initial load"""
-        # Stop the safety timer
+        """Handle loaded Bitnami chart data for initial load"""
         self._loading_timer.stop()
         
         self.is_loading = False
         self.resources = data
         
-        # Force is_more_available to True for better UX until we reach the true end
         self.is_more_available = True if data else False
         
+        self.items_count.setText(f"{len(data)} Bitnami items (scroll for more)")
         
-        # Update the item count
-        self.items_count.setText(f"{len(data)} items (scroll for more)")
-        
-        # Clear the table and populate with data
         self.table.setRowCount(0)
         self.populate_table(data)
         
-        # Re-enable sorting
         self.table.setSortingEnabled(True)
         
-        # Apply any existing filters
         self._apply_filters()
     
     def on_more_data_loaded(self, data, is_more_available):
-        """Handle loaded chart data for load-more operation"""
-        # Stop the safety timer
+        """Handle loaded Bitnami chart data for load-more operation"""
         self._loading_timer.stop()
         
-        # Remove the loading indicator row
         self.table.setRowCount(self.table.rowCount() - 1)
         
-        # Update tracking variables
         self.is_loading_more = False
         
-        
         if data:
-            # Keep trying to load more as long as we get some data
             self.is_more_available = True
             
-            # Add new data to existing resources
             self.resources.extend(data)
             
-            # Disable sorting temporarily while adding rows
             was_sorting_enabled = self.table.isSortingEnabled()
             self.table.setSortingEnabled(False)
             
-            # Add new rows
             start_row = self.table.rowCount()
             self.table.setRowCount(start_row + len(data))
             
-            # Populate new rows
             for i, chart in enumerate(data):
                 self.populate_chart_row(start_row + i, chart)
             
-            # Restore sorting state
             self.table.setSortingEnabled(was_sorting_enabled)
             
-            # Make sure we update the offset for next pagination request
             self.offset = len(self.resources)
             
-            # Update the item count with pagination indication
-            self.items_count.setText(f"{len(self.resources)} items (scroll for more)")
+            self.items_count.setText(f"{len(self.resources)} Bitnami items (scroll for more)")
         else:
-            # No data returned means we've likely reached the end
             self.is_more_available = False
-            
-            # Update the item count without pagination indication
-            self.items_count.setText(f"{len(self.resources)} items (end of results)")
+            self.items_count.setText(f"{len(self.resources)} Bitnami items (end of results)")
         
-        # Apply any existing filters
         self._apply_filters()
     
     def on_search_completed(self, search_results, search_term):
-        """Handle search results"""
-        # Clear the search indicator
+        """Handle Bitnami search results"""
         self.table.setRowCount(0)
         
-        # Store results
         self.resources = search_results
         self.is_searching = False
         
-        # Display results
         self.table.setSortingEnabled(False)
         self.populate_table(search_results)
         self.table.setSortingEnabled(True)
         
-        # Update item count to show search context
-        self.items_count.setText(f"{len(search_results)} results for '{search_term}'")
+        self.items_count.setText(f"{len(search_results)} Bitnami results for '{search_term}'")
         
     def on_search_error(self, error_message):
         """Handle search error"""
-        # Clear the loading indicator
         self.table.setRowCount(0)
         self.is_searching = False
         
-        # Show error message
         error_row = 0
         self.table.setRowCount(1)
         self.table.setSpan(error_row, 0, 1, self.table.columnCount())
@@ -790,7 +706,7 @@ class ChartsPage(BaseResourcePage):
         error_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         error_layout.setContentsMargins(20, 30, 20, 30)
         
-        error_text = QLabel(f"Search error: {error_message}")
+        error_text = QLabel(f"Bitnami search error: {error_message}")
         error_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
         error_text.setStyleSheet("color: #ff6b6b; font-size: 14px;")
         error_text.setWordWrap(True)
@@ -798,20 +714,15 @@ class ChartsPage(BaseResourcePage):
         error_layout.addWidget(error_text)
         
         self.table.setCellWidget(error_row, 0, error_widget)
-        
-        # Log 
     
     def on_load_error(self, error_message):
-        """Handle error loading data"""
-        # Stop the safety timer
+        """Handle error loading Bitnami data"""
         self._loading_timer.stop()
         
         self.is_loading = False
         
-        # Clear the table
         self.table.setRowCount(0)
         
-        # Show error message
         error_row = self.table.rowCount()
         self.table.setRowCount(error_row + 1)
         self.table.setSpan(error_row, 0, 1, self.table.columnCount())
@@ -821,7 +732,7 @@ class ChartsPage(BaseResourcePage):
         error_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         error_layout.setContentsMargins(20, 30, 20, 30)
         
-        error_text = QLabel(f"Error: {error_message}")
+        error_text = QLabel(f"Error loading Bitnami charts: {error_message}")
         error_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
         error_text.setStyleSheet("color: #ff6b6b; font-size: 14px;")
         error_text.setWordWrap(True)
@@ -829,20 +740,15 @@ class ChartsPage(BaseResourcePage):
         error_layout.addWidget(error_text)
         
         self.table.setCellWidget(error_row, 0, error_widget)
-        
-        # Log the error
     
     def on_load_more_error(self, error_message):
-        """Handle error when loading more data"""
-        # Stop the safety timer
+        """Handle error when loading more Bitnami data"""
         self._loading_timer.stop()
         
-        # Remove the loading indicator row
         self.table.setRowCount(self.table.rowCount() - 1)
         
         self.is_loading_more = False
         
-        # Show a temporary error message at the bottom of the table
         row = self.table.rowCount()
         self.table.setRowCount(row + 1)
         self.table.setSpan(row, 0, 1, self.table.columnCount())
@@ -851,7 +757,7 @@ class ChartsPage(BaseResourcePage):
         error_layout = QHBoxLayout(error_widget)
         error_layout.setContentsMargins(10, 5, 10, 5)
         
-        error_text = QLabel(f"Error loading more charts: {error_message}")
+        error_text = QLabel(f"Error loading more Bitnami charts: {error_message}")
         error_text.setStyleSheet("color: #ff6b6b; font-size: 12px;")
         error_text.setWordWrap(True)
         
@@ -859,39 +765,25 @@ class ChartsPage(BaseResourcePage):
         
         self.table.setCellWidget(row, 0, error_widget)
         
-        # Log the error
-        
-        # Remove the error message after 5 seconds
         QTimer.singleShot(5000, lambda: self.table.setRowCount(self.table.rowCount() - 1))
     
     def populate_table(self, data):
-        """Populate the table with chart data"""
-        # Set row count
+        """Populate the table with Bitnami chart data"""
         self.table.setRowCount(len(data))
         
-        # Fill the table
         for row, chart in enumerate(data):
             self.populate_chart_row(row, chart)
     
     def populate_chart_row(self, row, chart):
-        """
-        Populate a single row with chart data, including icons
-        
-        Args:
-            row: The row index
-            chart: Chart data dictionary
-        """
-        # Set row height
+        """Populate a single row with Bitnami chart data, including icons"""
         self.table.setRowHeight(row, 42)
         
-        # Extract chart data with proper defaults
         chart_name = chart.get("name", "Unknown")
         description = chart.get("description", "No description available")
         version = chart.get("version", "N/A")
         app_version = chart.get("app_version", "N/A")
-        repository = chart.get("repository", "Unknown")
+        repository = chart.get("repository", "bitnami")  # Default to bitnami
         
-        # If description is too long, truncate it
         if len(description) > 100:
             description = description[:100] + "..."
         
@@ -902,7 +794,6 @@ class ChartsPage(BaseResourcePage):
         icon_layout.setSpacing(0)
         icon_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
-        # Add icon if available
         icon_label = QLabel()
         icon_label.setFixedSize(28, 28)
         icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -924,11 +815,10 @@ class ChartsPage(BaseResourcePage):
                     pixmap = pixmap.scaled(24, 24, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
                     icon_label.setPixmap(pixmap)
                 else:
-                    # If pixmap is null, show a placeholder text
-                    icon_label.setText("📦")
+                    icon_label.setText("🔸")  # Bitnami icon
                     icon_label.setStyleSheet("""
                         QLabel {
-                            color: #aaaaaa;
+                            color: #f39c12;
                             font-size: 14px;
                             border-radius: 3px;
                             background-color: rgba(255, 255, 255, 0.05);
@@ -938,10 +828,10 @@ class ChartsPage(BaseResourcePage):
                         }
                     """)
             except Exception as e:
-                icon_label.setText("📦")
+                icon_label.setText("🔸")
                 icon_label.setStyleSheet("""
                     QLabel {
-                        color: #aaaaaa;
+                        color: #f39c12;
                         font-size: 14px;
                         border-radius: 3px;
                         background-color: rgba(255, 255, 255, 0.05);
@@ -951,11 +841,10 @@ class ChartsPage(BaseResourcePage):
                     }
                 """)
         else:
-            # No icon available, show placeholder
-            icon_label.setText("📦")
+            icon_label.setText("🔸")  # Bitnami-style icon
             icon_label.setStyleSheet("""
                 QLabel {
-                    color: #aaaaaa;
+                    color: #f39c12;
                     font-size: 14px;
                     border-radius: 3px;
                     background-color: rgba(255, 255, 255, 0.05);
@@ -971,11 +860,9 @@ class ChartsPage(BaseResourcePage):
         # Create data items for the text columns
         columns = [chart_name, description, version, app_version, repository]
         
-        for col, value in enumerate(columns, 1):  # Start at column 1 (after icon)
-            # Create item
+        for col, value in enumerate(columns, 1):
             item = SortableTableWidgetItem(value)
             
-            # Set text alignment
             if col == 1:  # Name column
                 item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
                 item.setForeground(QColor("#e2e8f0"))
@@ -983,10 +870,8 @@ class ChartsPage(BaseResourcePage):
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 item.setForeground(QColor("#e2e8f0"))
             
-            # Make cells non-editable
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             
-            # Add the item to the table
             self.table.setItem(row, col, item)
         
         # Create and add action button
@@ -1056,13 +941,11 @@ class ChartsPage(BaseResourcePage):
         install_action = menu.addAction("Install")
         install_action.triggered.connect(lambda: self._handle_action("Install", row))
     
-        
         button.setMenu(menu)
         return button
     
-    # Update the _handle_action method
     def _handle_action(self, action, row):
-        """Handle action button clicks in the charts page"""
+        """Handle action button clicks in the Bitnami charts page"""
         if row >= len(self.resources):
             return
             
@@ -1074,26 +957,32 @@ class ChartsPage(BaseResourcePage):
         elif action == "Install":
             self._install_chart(chart)
 
-    # Add the installation method
     def _install_chart(self, chart):
-        """Display installation dialog and install the chart"""
+        """Display installation dialog and install the Bitnami chart"""
         chart_name = chart.get("name", "Unknown")
-        repository = chart.get("repository", "")
+        repository = "bitnami"  # Force Bitnami repository
         
-        # Create and show the installation dialog
+        # Create and show the installation dialog with Bitnami defaults
         dialog = ChartInstallDialog(chart_name, repository, self)
+        
+        # Pre-configure for Bitnami
+        if hasattr(dialog, 'repo_name_input'):
+            dialog.repo_name_input.setText("bitnami")
+        if hasattr(dialog, 'use_existing_repo'):
+            dialog.use_existing_repo.setChecked(True)
+        
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            # Get installation options
             options = dialog.get_values()
             
-            # Install the chart
-            success, message = install_helm_chart(chart_name, repository, options, self)
+            # Ensure Bitnami repository is used
+            if options.get("repository", {}).get("type") == "name":
+                options["repository"]["value"] = "bitnami"
             
-            # Show result message
+            success, message = install_helm_chart(chart_name, "bitnami", options, self)
+            
             if success:
                 QMessageBox.information(self, "Installation Successful", message)
                 
-                # Try to find the parent ClusterView to refresh releases page
                 parent = self.parent()
                 while parent and not hasattr(parent, 'stacked_widget'):
                     parent = parent.parent()
@@ -1101,14 +990,13 @@ class ChartsPage(BaseResourcePage):
                 if parent and hasattr(parent, 'pages') and "Releases" in parent.pages:
                     releases_page = parent.pages["Releases"]
                     if hasattr(releases_page, 'load_data'):
-                        # Schedule refresh to give the cluster time to register the release
                         from PyQt6.QtCore import QTimer
                         QTimer.singleShot(1000, releases_page.load_data)
             else:
                 QMessageBox.critical(self, "Installation Failed", message)
     
     def _handle_view_details(self, row):
-        """Handle view details action with robust file path handling for Windows compatibility"""
+        """Handle view details action for Bitnami charts"""
         if row >= len(self.resources):
             return
             
@@ -1121,7 +1009,6 @@ class ChartsPage(BaseResourcePage):
             parent = parent.parent()
         
         if parent and hasattr(parent, 'detail_manager'):
-            # Prepare enhanced data for the detail page with more careful file handling
             resource_data = {
                 "kind": "HelmChart",
                 "apiVersion": "helm.sh/v1",
@@ -1129,29 +1016,28 @@ class ChartsPage(BaseResourcePage):
                     "name": chart_name,
                     "creationTimestamp": chart.get("last_updated", ""),
                     "labels": {
-                        "repository": chart.get("repository", "Unknown"),
+                        "repository": "bitnami",
                         "version": chart.get("version", ""),
                         "appVersion": chart.get("app_version", ""),
                         "stars": chart.get("stars", "0")
                     },
                     "annotations": {
                         "description": chart.get("description", ""),
-                        "repository_url": chart.get("repository_url", ""),
+                        "repository_url": "https://charts.bitnami.com/bitnami",
                         "package_id": chart.get("package_id", ""),
-                        "source": "ArtifactHub"
+                        "source": "Bitnami via ArtifactHub"
                     }
                 },
                 "spec": {
                     "version": chart.get("version", ""),
                     "appVersion": chart.get("app_version", ""),
-                    "repository": chart.get("repository", "Unknown"),
+                    "repository": "bitnami",
                 },
                 "status": {
                     "phase": "Available"
                 }
             }
             
-            # Add icon data only if file exists to prevent file not found errors
             try:
                 icon_path = chart.get("icon_path")
                 if icon_path and isinstance(icon_path, str) and os.path.exists(icon_path):
@@ -1159,36 +1045,29 @@ class ChartsPage(BaseResourcePage):
             except Exception as e:
                 pass
             
-            # Create a global reference to the current chart data for detail page
             import json
             global current_chart_data
             current_chart_data = json.dumps(resource_data)
             
-            # Call the detail page
             parent.detail_manager.show_detail("chart", chart_name)
     
     def handle_search(self):
-        """Handle search button click or enter key press in search bar"""
+        """Handle search button click or enter key press in search bar for Bitnami charts"""
         if hasattr(self, 'is_searching') and self.is_searching:
             return
             
-        # Get search text
         search_text = self.search_bar.text().strip()
         
         if not search_text:
-            # If search bar is empty, reload all data
             self.is_searching = False
             self.load_data()
             return
         
-        # Set searching flag
         self.is_searching = True
         
-        # Clear the table and show loading indicator
         self.table.setRowCount(0)
         self.table.setSortingEnabled(False)
         
-        # Add loading indicator
         loading_row = self.table.rowCount()
         self.table.setRowCount(loading_row + 1)
         self.table.setSpan(loading_row, 0, 1, self.table.columnCount())
@@ -1198,7 +1077,7 @@ class ChartsPage(BaseResourcePage):
         loading_layout.setContentsMargins(20, 20, 20, 20)
         
         loading_bar = QProgressBar()
-        loading_bar.setRange(0, 0)  # Indeterminate
+        loading_bar.setRange(0, 0)
         loading_bar.setTextVisible(False)
         loading_bar.setStyleSheet("""
             QProgressBar {
@@ -1212,7 +1091,7 @@ class ChartsPage(BaseResourcePage):
             }
         """)
         
-        loading_text = QLabel(f"Searching for '{search_text}'...")
+        loading_text = QLabel(f"Searching Bitnami charts for '{search_text}'...")
         loading_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
         loading_text.setStyleSheet("color: #ffffff; font-size: 14px;")
         
@@ -1221,7 +1100,6 @@ class ChartsPage(BaseResourcePage):
         
         self.table.setCellWidget(loading_row, 0, loading_widget)
         
-        # Start search thread
         self.search_thread = ChartSearchThread(search_text)
         self.search_thread.search_completed.connect(self.on_search_completed)
         self.search_thread.error_occurred.connect(self.on_search_error)
@@ -1229,10 +1107,8 @@ class ChartsPage(BaseResourcePage):
     
     def handle_row_click(self, row, column):
         """Handle row selection when a table cell is clicked"""
-        if column != self.table.columnCount() - 1:  # Skip action column
-            # Select the row
+        if column != self.table.columnCount() - 1:
             self.table.selectRow(row)
             
-            # If this is a direct click (not on action), show details
             if row < len(self.resources):
                 self._handle_view_details(row)

@@ -318,12 +318,7 @@ class ServicesPage(BaseResourcePage):
         
         # Default status if we can't determine
         return "Unknown"
-    
-    # def handle_row_click(self, row, column):
-    #     """Handle row selection when a table cell is clicked"""
-    #     if column != self.table.columnCount() - 1:  # Skip action column
-    #         # Select the row
-    #         self.table.selectRow(row)
+
 
     def handle_row_click(self, row, column):
         if column != self.table.columnCount() - 1:  # Skip action column

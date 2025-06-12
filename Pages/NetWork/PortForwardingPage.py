@@ -44,6 +44,7 @@ class StatusLabel(QWidget):
         """Emit clicked signal when widget is clicked"""
         self.clicked.emit()
         super().mousePressEvent(event)
+
 class PortForwardingPage(BaseResourcePage):
     """
     Displays Kubernetes port forwarding configurations with live data.
@@ -61,6 +62,7 @@ class PortForwardingPage(BaseResourcePage):
         # We need to set resource_type even for pseudo-resources
         self.resource_type = "portforwarding"
         self.port_forward_processes = {}  # Store running port-forward processes
+        self.is_loading = False
         super().__init__(parent)
         self.setup_page_ui()
         
@@ -134,7 +136,7 @@ class PortForwardingPage(BaseResourcePage):
         self.table.horizontalHeader().setSectionResizeMode(8, QHeaderView.ResizeMode.Fixed)
         self.table.setColumnWidth(8, 40)
     
-    def load_data(self):
+    def load_data(self, load_more=False):
         """Load port forwarding data into the table with live data"""
         # Check if already loading - use the base class implementation to show loading state
         if self.is_loading:
@@ -281,7 +283,7 @@ class PortForwardingPage(BaseResourcePage):
             self.resources = port_forwards
             
             # Use the base class method to show the results
-            self.on_resources_loaded(port_forwards, self.resource_type)
+            self.on_resources_loaded(port_forwards, self.resource_type,next_continue_token="", load_more=False)
             
         except Exception as e:
             self.on_load_error(f"Error loading port forwarding data: {str(e)}")

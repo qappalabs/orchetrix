@@ -2,144 +2,177 @@
 Extended BaseTablePage for handling Kubernetes resources with live data using Python kubernetes library.
 This module handles common resource operations like listing, deletion, and editing.
 Updated to default to 'default' namespace and improved namespace handling.
+Includes infinite scrolling capabilities and restored filter controls.
+Error fixes for COMBO_BOX_STYLE and __del__.
+Improved skeleton loading and empty state message handling.
 """
 
 import os
 import tempfile
 import yaml
 import time
+import logging
 from PyQt6.QtWidgets import (
      QMessageBox, QWidget, QVBoxLayout, QLineEdit, QComboBox,
-    QLabel, QProgressBar, QHBoxLayout, QPushButton,QApplication, QWidget,QTableWidgetItem
+    QLabel, QProgressBar, QHBoxLayout, QPushButton, QApplication, QTableWidgetItem,
+    QAbstractItemView, QStackedWidget
 )
-from PyQt6.QtGui import QColor
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
-from base_components.base_components import BaseTablePage
-from UI.Styles import AppStyles
-from utils.kubernetes_client import get_kubernetes_client
+from PyQt6.QtGui import QColor, QFont # Added QFont
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QProcess
+from base_components.base_components import BaseTablePage # Assuming base_components.py is in a package or accessible path
+from UI.Styles import AppStyles, AppColors # Assuming UI.Styles.py is accessible
+from utils.kubernetes_client import get_kubernetes_client # Assuming utils.kubernetes_client.py is accessible
 
 # Kubernetes imports
 from kubernetes import client
 from kubernetes.client.rest import ApiException
-import logging
+
 
 class KubernetesResourceLoader(QThread):
-    """Thread for loading Kubernetes resources without blocking the UI."""
-    resources_loaded = pyqtSignal(list, str)
+    """
+    Thread for loading Kubernetes resources without blocking the UI.
+    Supports pagination with limit and continue_token.
+    """
+    # Signal: resources, resource_type, next_continue_token
+    resources_loaded = pyqtSignal(list, str, str)
     error_occurred = pyqtSignal(str)
-    
-    def __init__(self, resource_type, namespace=None):
-        super().__init__()
+
+    def __init__(self, resource_type, namespace=None, limit=None, continue_token=None, parent=None):
+        super().__init__(parent)
         self.resource_type = resource_type
         self.namespace = namespace
+        self.limit = limit
+        self.continue_token = continue_token
         self.kube_client = get_kubernetes_client()
-        
+        self._is_running = True
+
+    def stop(self):
+        self._is_running = False
+
     def run(self):
         """Execute the Kubernetes API call and emit results."""
+        if not self._is_running:
+            return
         try:
-            # Map resource types to appropriate API methods
             resources = []
-            
+            next_continue_token = None # Initialize next_continue_token
+
+            # Map resource types to appropriate API methods
+            # Each _load_* method should now return (items, next_continue_token)
             if self.resource_type == "pods":
-                resources = self._load_pods()
+                resources, next_continue_token = self._load_pods()
             elif self.resource_type == "services":
-                resources = self._load_services()
+                resources, next_continue_token = self._load_services()
             elif self.resource_type == "deployments":
-                resources = self._load_deployments()
+                resources, next_continue_token = self._load_deployments()
             elif self.resource_type == "nodes":
-                resources = self._load_nodes()
+                resources, next_continue_token = self._load_nodes()
             elif self.resource_type == "namespaces":
-                resources = self._load_namespaces()
+                resources, next_continue_token = self._load_namespaces()
             elif self.resource_type == "configmaps":
-                resources = self._load_configmaps()
+                resources, next_continue_token = self._load_configmaps()
             elif self.resource_type == "secrets":
-                resources = self._load_secrets()
+                resources, next_continue_token = self._load_secrets()
             elif self.resource_type == "events":
-                resources = self._load_events()
+                resources, next_continue_token = self._load_events()
             elif self.resource_type == "persistentvolumes":
-                resources = self._load_persistent_volumes()
+                resources, next_continue_token = self._load_persistent_volumes()
             elif self.resource_type == "persistentvolumeclaims":
-                resources = self._load_persistent_volume_claims()
+                resources, next_continue_token = self._load_persistent_volume_claims()
             elif self.resource_type == "ingresses":
-                resources = self._load_ingresses()
+                resources, next_continue_token = self._load_ingresses()
             elif self.resource_type == "daemonsets":
-                resources = self._load_daemonsets()
+                resources, next_continue_token = self._load_daemonsets()
             elif self.resource_type == "statefulsets":
-                resources = self._load_statefulsets()
+                resources, next_continue_token = self._load_statefulsets()
             elif self.resource_type == "replicasets":
-                resources = self._load_replicasets()
+                resources, next_continue_token = self._load_replicasets()
             elif self.resource_type == "jobs":
-                resources = self._load_jobs()
+                resources, next_continue_token = self._load_jobs()
             elif self.resource_type == "cronjobs":
-                resources = self._load_cronjobs()
-            # Add all the missing resource types
+                resources, next_continue_token = self._load_cronjobs()
             elif self.resource_type == "replicationcontrollers":
-                resources = self._load_replication_controllers()
+                resources, next_continue_token = self._load_replication_controllers()
             elif self.resource_type == "resourcequotas":
-                resources = self._load_resource_quotas()
+                resources, next_continue_token = self._load_resource_quotas()
             elif self.resource_type == "limitranges":
-                resources = self._load_limit_ranges()
+                resources, next_continue_token = self._load_limit_ranges()
             elif self.resource_type == "horizontalpodautoscalers":
-                resources = self._load_horizontal_pod_autoscalers()
+                resources, next_continue_token = self._load_horizontal_pod_autoscalers()
             elif self.resource_type == "poddisruptionbudgets":
-                resources = self._load_pod_disruption_budgets()
+                resources, next_continue_token = self._load_pod_disruption_budgets()
             elif self.resource_type == "priorityclasses":
-                resources = self._load_priority_classes()
+                resources, next_continue_token = self._load_priority_classes()
             elif self.resource_type == "runtimeclasses":
-                resources = self._load_runtime_classes()
+                resources, next_continue_token = self._load_runtime_classes()
             elif self.resource_type == "leases":
-                resources = self._load_leases()
+                resources, next_continue_token = self._load_leases()
             elif self.resource_type == "mutatingwebhookconfigurations":
-                resources = self._load_mutating_webhook_configurations()
+                resources, next_continue_token = self._load_mutating_webhook_configurations()
             elif self.resource_type == "validatingwebhookconfigurations":
-                resources = self._load_validating_webhook_configurations()
+                resources, next_continue_token = self._load_validating_webhook_configurations()
             elif self.resource_type == "endpoints":
-                resources = self._load_endpoints()
+                resources, next_continue_token = self._load_endpoints()
             elif self.resource_type == "ingressclasses":
-                resources = self._load_ingress_classes()
+                resources, next_continue_token = self._load_ingress_classes()
             elif self.resource_type == "networkpolicies":
-                resources = self._load_network_policies()
+                resources, next_continue_token = self._load_network_policies()
             elif self.resource_type == "storageclasses":
-                resources = self._load_storage_classes()
+                resources, next_continue_token = self._load_storage_classes()
             elif self.resource_type == "serviceaccounts":
-                resources = self._load_service_accounts()
+                resources, next_continue_token = self._load_service_accounts()
             elif self.resource_type == "clusterroles":
-                resources = self._load_cluster_roles()
+                resources, next_continue_token = self._load_cluster_roles()
             elif self.resource_type == "roles":
-                resources = self._load_roles()
+                resources, next_continue_token = self._load_roles()
             elif self.resource_type == "clusterrolebindings":
-                resources = self._load_cluster_role_bindings()
+                resources, next_continue_token = self._load_cluster_role_bindings()
             elif self.resource_type == "rolebindings":
-                resources = self._load_role_bindings()
+                resources, next_continue_token = self._load_role_bindings()
             elif self.resource_type == "customresourcedefinitions":
-                resources = self._load_custom_resource_definitions()
+                resources, next_continue_token = self._load_custom_resource_definitions()
             else:
-                # Generic handling for other resource types
-                resources = self._load_generic_resource()
-            
-            # Emit the result
-            self.resources_loaded.emit(resources, self.resource_type)
-            
+                resources, next_continue_token = self._load_generic_resource()
+
+            if not self._is_running:
+                return
+            self.resources_loaded.emit(resources, self.resource_type, next_continue_token or "")
+
         except ApiException as e:
+            if not self._is_running: return
             if e.status == 403:
                 error_msg = f"Access denied loading {self.resource_type}. Check RBAC permissions."
             elif e.status == 404:
                 error_msg = f"Resource type {self.resource_type} not found in cluster."
             else:
-                error_msg = f"API error loading {self.resource_type}: {e}"
+                error_msg = f"API error loading {self.resource_type} ({e.status}): {e.reason}"
             self.error_occurred.emit(error_msg)
         except Exception as e:
-            self.error_occurred.emit(f"Error: {str(e)}")
-    
+            if not self._is_running: return
+            logging.error(f"Unexpected error in KubernetesResourceLoader for {self.resource_type}: {e}", exc_info=True)
+            self.error_occurred.emit(f"Error loading {self.resource_type}: {str(e)}")
+
+    def _get_continue_token(self, response_object):
+        """Helper to extract continue token from response metadata."""
+        if hasattr(response_object, 'metadata') and hasattr(response_object.metadata, '_continue') and response_object.metadata._continue:
+            return response_object.metadata._continue
+        return None
+
+    # --- Individual resource loading methods ---
+    # Each method needs to be updated to handle limit, _continue and return (items, next_continue_token)
+
     def _load_pods(self):
-        """Load pods using kubernetes client"""
         resources = []
-        
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        # Remove None values from kwargs to avoid issues with the API client
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
+
         if self.namespace and self.namespace != "all":
-            pods_list = self.kube_client.v1.list_namespaced_pod(namespace=self.namespace)
+            pods_list = self.kube_client.v1.list_namespaced_pod(namespace=self.namespace, **api_kwargs)
         else:
-            pods_list = self.kube_client.v1.list_pod_for_all_namespaces()
-        
+            pods_list = self.kube_client.v1.list_pod_for_all_namespaces(**api_kwargs)
+
+        next_token = self._get_continue_token(pods_list)
         for pod in pods_list.items:
             resource = {
                 "name": pod.metadata.name,
@@ -147,31 +180,27 @@ class KubernetesResourceLoader(QThread):
                 "age": self._format_age(pod.metadata.creation_timestamp),
                 "raw_data": client.ApiClient().sanitize_for_serialization(pod)
             }
-            
-            # Add pod-specific fields
             if pod.spec and pod.spec.containers:
                 resource["containers"] = len(pod.spec.containers)
-            
             if pod.status and pod.status.container_statuses:
-                restart_count = sum(container.restart_count or 0 for container in pod.status.container_statuses)
+                restart_count = sum(cs.restart_count or 0 for cs in pod.status.container_statuses)
                 resource["restarts"] = restart_count
-            
             if pod.spec and pod.spec.node_name:
                 resource["node"] = pod.spec.node_name
-            
             resources.append(resource)
-        
-        return resources
-    
+        return resources, next_token
+
     def _load_services(self):
-        """Load services using kubernetes client"""
         resources = []
-        
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
+
         if self.namespace and self.namespace != "all":
-            services_list = self.kube_client.v1.list_namespaced_service(namespace=self.namespace)
+            services_list = self.kube_client.v1.list_namespaced_service(namespace=self.namespace, **api_kwargs)
         else:
-            services_list = self.kube_client.v1.list_service_for_all_namespaces()
+            services_list = self.kube_client.v1.list_service_for_all_namespaces(**api_kwargs)
         
+        next_token = self._get_continue_token(services_list)
         for service in services_list.items:
             resource = {
                 "name": service.metadata.name,
@@ -179,31 +208,28 @@ class KubernetesResourceLoader(QThread):
                 "age": self._format_age(service.metadata.creation_timestamp),
                 "raw_data": client.ApiClient().sanitize_for_serialization(service)
             }
-            
-            # Add service-specific fields
             if service.spec:
                 resource["type"] = service.spec.type or "ClusterIP"
                 resource["cluster_ip"] = service.spec.cluster_ip or "<none>"
-                
                 if service.spec.ports:
-                    ports = [f"{port.port}:{port.target_port}/{port.protocol}" for port in service.spec.ports]
-                    resource["ports"] = ", ".join(ports)
+                    ports_desc = [f"{p.port}:{p.target_port}/{p.protocol}" for p in service.spec.ports if p.port and p.target_port and p.protocol]
+                    resource["ports"] = ", ".join(ports_desc) if ports_desc else "<none>"
                 else:
                     resource["ports"] = "<none>"
-            
             resources.append(resource)
-        
-        return resources
-    
+        return resources, next_token
+
     def _load_deployments(self):
-        """Load deployments using kubernetes client"""
         resources = []
-        
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
+
         if self.namespace and self.namespace != "all":
-            deployments_list = self.kube_client.apps_v1.list_namespaced_deployment(namespace=self.namespace)
+            deployments_list = self.kube_client.apps_v1.list_namespaced_deployment(namespace=self.namespace, **api_kwargs)
         else:
-            deployments_list = self.kube_client.apps_v1.list_deployment_for_all_namespaces()
-        
+            deployments_list = self.kube_client.apps_v1.list_deployment_for_all_namespaces(**api_kwargs)
+
+        next_token = self._get_continue_token(deployments_list)
         for deployment in deployments_list.items:
             resource = {
                 "name": deployment.metadata.name,
@@ -211,36 +237,27 @@ class KubernetesResourceLoader(QThread):
                 "age": self._format_age(deployment.metadata.creation_timestamp),
                 "raw_data": client.ApiClient().sanitize_for_serialization(deployment)
             }
-            
-            # Add deployment-specific fields
             if deployment.spec:
                 resource["replicas"] = deployment.spec.replicas or 0
-            
             if deployment.status:
                 resource["ready_replicas"] = deployment.status.ready_replicas or 0
                 resource["available_replicas"] = deployment.status.available_replicas or 0
-            
             resources.append(resource)
-        
-        return resources
-    
-    def _load_nodes(self):
-        """Load nodes using kubernetes client"""
+        return resources, next_token
+
+    def _load_nodes(self): 
         resources = []
-        
-        nodes_list = self.kube_client.v1.list_node()
-        
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
+        nodes_list = self.kube_client.v1.list_node(**api_kwargs)
+        next_token = self._get_continue_token(nodes_list)
         for node in nodes_list.items:
             resource = {
-                "name": node.metadata.name,
-                "namespace": "",  # Nodes are cluster-scoped
+                "name": node.metadata.name, "namespace": "",
                 "age": self._format_age(node.metadata.creation_timestamp),
                 "raw_data": client.ApiClient().sanitize_for_serialization(node)
             }
-            
-            # Add node-specific fields
             if node.status:
-                # Get node status
                 status = "Unknown"
                 if node.status.conditions:
                     for condition in node.status.conditions:
@@ -248,1672 +265,1318 @@ class KubernetesResourceLoader(QThread):
                             status = "Ready" if condition.status == "True" else "NotReady"
                             break
                 resource["status"] = status
-                
-                # Get node roles
-                roles = []
-                if node.metadata.labels:
-                    for label in node.metadata.labels:
-                        if label.startswith("node-role.kubernetes.io/"):
-                            role = label.split("/")[1]
-                            roles.append(role)
+                roles = [label.split("/")[1] for label in node.metadata.labels if label.startswith("node-role.kubernetes.io/")]
                 resource["roles"] = ", ".join(roles) if roles else "<none>"
-                
-                # Get version
                 if node.status.node_info:
                     resource["version"] = node.status.node_info.kubelet_version
-            
             resources.append(resource)
-        
-        return resources
-    
+        return resources, next_token
+
     def _load_namespaces(self):
-        """Load namespaces using kubernetes client"""
         resources = []
-        
-        namespaces_list = self.kube_client.v1.list_namespace()
-        
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
+        namespaces_list = self.kube_client.v1.list_namespace(**api_kwargs)
+        next_token = self._get_continue_token(namespaces_list)
         for namespace in namespaces_list.items:
             resource = {
-                "name": namespace.metadata.name,
-                "namespace": "",  # Namespaces are cluster-scoped
+                "name": namespace.metadata.name, "namespace": "",
                 "age": self._format_age(namespace.metadata.creation_timestamp),
                 "raw_data": client.ApiClient().sanitize_for_serialization(namespace)
             }
-            
-            # Add namespace-specific fields
             if namespace.status:
                 resource["status"] = namespace.status.phase or "Active"
-            
             resources.append(resource)
-        
-        return resources
-    
+        return resources, next_token
+
     def _load_configmaps(self):
-        """Load configmaps using kubernetes client"""
         resources = []
-        
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
         if self.namespace and self.namespace != "all":
-            configmaps_list = self.kube_client.v1.list_namespaced_config_map(namespace=self.namespace)
+            configmaps_list = self.kube_client.v1.list_namespaced_config_map(namespace=self.namespace, **api_kwargs)
         else:
-            configmaps_list = self.kube_client.v1.list_config_map_for_all_namespaces()
-        
+            configmaps_list = self.kube_client.v1.list_config_map_for_all_namespaces(**api_kwargs)
+        next_token = self._get_continue_token(configmaps_list)
         for cm in configmaps_list.items:
             resource = {
-                "name": cm.metadata.name,
-                "namespace": cm.metadata.namespace or "default",
+                "name": cm.metadata.name, "namespace": cm.metadata.namespace or "default",
                 "age": self._format_age(cm.metadata.creation_timestamp),
                 "raw_data": client.ApiClient().sanitize_for_serialization(cm)
             }
-            
-            # Add configmap-specific fields
             if cm.data:
-                data_keys = list(cm.data.keys())
-                resource["keys"] = ", ".join(data_keys) if data_keys else "<none>"
+                resource["keys"] = ", ".join(list(cm.data.keys())) if cm.data else "<none>"
             else:
                 resource["keys"] = "<none>"
-            
             resources.append(resource)
-        
-        return resources
-    
+        return resources, next_token
+
     def _load_secrets(self):
-        """Load secrets using kubernetes client"""
         resources = []
-        
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
         if self.namespace and self.namespace != "all":
-            secrets_list = self.kube_client.v1.list_namespaced_secret(namespace=self.namespace)
+            secrets_list = self.kube_client.v1.list_namespaced_secret(namespace=self.namespace, **api_kwargs)
         else:
-            secrets_list = self.kube_client.v1.list_secret_for_all_namespaces()
-        
+            secrets_list = self.kube_client.v1.list_secret_for_all_namespaces(**api_kwargs)
+        next_token = self._get_continue_token(secrets_list)
         for secret in secrets_list.items:
             resource = {
-                "name": secret.metadata.name,
-                "namespace": secret.metadata.namespace or "default",
+                "name": secret.metadata.name, "namespace": secret.metadata.namespace or "default",
                 "age": self._format_age(secret.metadata.creation_timestamp),
-                "raw_data": client.ApiClient().sanitize_for_serialization(secret)
+                "raw_data": client.ApiClient().sanitize_for_serialization(secret),
+                "type": secret.type or "Opaque",
+                "keys": ", ".join(list(secret.data.keys())) if secret.data else "<none>"
             }
-            
-            # Add secret-specific fields
-            resource["type"] = secret.type or "Opaque"
-            
-            if secret.data:
-                data_keys = list(secret.data.keys())
-                resource["keys"] = ", ".join(data_keys) if data_keys else "<none>"
-            else:
-                resource["keys"] = "<none>"
-            
             resources.append(resource)
-        
-        return resources
-    
+        return resources, next_token
+
     def _load_events(self):
-        """Load events using kubernetes client"""
         resources = []
-        
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token, 'watch': False}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
         if self.namespace and self.namespace != "all":
-            events_list = self.kube_client.v1.list_namespaced_event(namespace=self.namespace)
+            events_list = self.kube_client.v1.list_namespaced_event(namespace=self.namespace, **api_kwargs)
         else:
-            events_list = self.kube_client.v1.list_event_for_all_namespaces()
-        
+            events_list = self.kube_client.v1.list_event_for_all_namespaces(**api_kwargs)
+        next_token = self._get_continue_token(events_list)
         for event in events_list.items:
             resource = {
-                "name": event.metadata.name or f"event-{event.involved_object.name}",
+                "name": event.metadata.name or f"event-{event.involved_object.name if event.involved_object else 'unknown'}",
                 "namespace": event.metadata.namespace or "default",
-                "age": self._format_age(event.metadata.creation_timestamp),
-                "raw_data": client.ApiClient().sanitize_for_serialization(event)
+                "age": self._format_age(event.last_timestamp or event.metadata.creation_timestamp),
+                "raw_data": client.ApiClient().sanitize_for_serialization(event),
+                "type": event.type or "Normal", "reason": event.reason or "Unknown",
+                "message": event.message or "No message",
+                "object": f"{event.involved_object.kind}/{event.involved_object.name}" if event.involved_object else "Unknown"
             }
-            
-            # Add event-specific fields
-            resource["type"] = event.type or "Normal"
-            resource["reason"] = event.reason or "Unknown"
-            resource["message"] = event.message or "No message"
-            
-            if event.involved_object:
-                resource["object"] = f"{event.involved_object.kind}/{event.involved_object.name}"
-            
             resources.append(resource)
-        
-        return resources
+        return resources, next_token
     
     def _load_persistent_volumes(self):
-        """Load persistent volumes using kubernetes client"""
         resources = []
-        
-        pvs_list = self.kube_client.v1.list_persistent_volume()
-        
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
+        pvs_list = self.kube_client.v1.list_persistent_volume(**api_kwargs)
+        next_token = self._get_continue_token(pvs_list)
         for pv in pvs_list.items:
             resource = {
-                "name": pv.metadata.name,
-                "namespace": "",  # PVs are cluster-scoped
+                "name": pv.metadata.name, "namespace": "",
                 "age": self._format_age(pv.metadata.creation_timestamp),
-                "raw_data": client.ApiClient().sanitize_for_serialization(pv)
+                "raw_data": client.ApiClient().sanitize_for_serialization(pv),
+                "capacity": pv.spec.capacity.get("storage", "Unknown") if pv.spec.capacity else "Unknown",
+                "access_modes": ", ".join(pv.spec.access_modes) if pv.spec.access_modes else "",
+                "reclaim_policy": pv.spec.persistent_volume_reclaim_policy or "Retain",
+                "status": pv.status.phase or "Unknown"
             }
-            
-            # Add PV-specific fields
-            if pv.spec:
-                resource["capacity"] = pv.spec.capacity.get("storage", "Unknown") if pv.spec.capacity else "Unknown"
-                resource["access_modes"] = ", ".join(pv.spec.access_modes) if pv.spec.access_modes else ""
-                resource["reclaim_policy"] = pv.spec.persistent_volume_reclaim_policy or "Retain"
-            
-            if pv.status:
-                resource["status"] = pv.status.phase or "Unknown"
-            
             resources.append(resource)
-        
-        return resources
-    
+        return resources, next_token
+
     def _load_persistent_volume_claims(self):
-        """Load persistent volume claims using kubernetes client"""
         resources = []
-        
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
         if self.namespace and self.namespace != "all":
-            pvcs_list = self.kube_client.v1.list_namespaced_persistent_volume_claim(namespace=self.namespace)
+            pvcs_list = self.kube_client.v1.list_namespaced_persistent_volume_claim(namespace=self.namespace, **api_kwargs)
         else:
-            pvcs_list = self.kube_client.v1.list_persistent_volume_claim_for_all_namespaces()
-        
+            pvcs_list = self.kube_client.v1.list_persistent_volume_claim_for_all_namespaces(**api_kwargs)
+        next_token = self._get_continue_token(pvcs_list)
         for pvc in pvcs_list.items:
             resource = {
-                "name": pvc.metadata.name,
-                "namespace": pvc.metadata.namespace or "default",
+                "name": pvc.metadata.name, "namespace": pvc.metadata.namespace or "default",
                 "age": self._format_age(pvc.metadata.creation_timestamp),
-                "raw_data": client.ApiClient().sanitize_for_serialization(pvc)
+                "raw_data": client.ApiClient().sanitize_for_serialization(pvc),
+                "status": pvc.status.phase or "Unknown",
+                "volume": pvc.spec.volume_name if pvc.spec else "",
+                "capacity": pvc.spec.resources.requests.get("storage", "Unknown") if pvc.spec and pvc.spec.resources and pvc.spec.resources.requests else "Unknown"
             }
-            
-            # Add PVC-specific fields
-            if pvc.status:
-                resource["status"] = pvc.status.phase or "Unknown"
-                resource["volume"] = pvc.spec.volume_name if pvc.spec else ""
-            
-            if pvc.spec and pvc.spec.resources and pvc.spec.resources.requests:
-                resource["capacity"] = pvc.spec.resources.requests.get("storage", "Unknown")
-            
             resources.append(resource)
-        
-        return resources
-    
+        return resources, next_token
+
     def _load_ingresses(self):
-        """Load ingresses using kubernetes client"""
         resources = []
-        
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
         if self.namespace and self.namespace != "all":
-            ingresses_list = self.kube_client.networking_v1.list_namespaced_ingress(namespace=self.namespace)
+            ingresses_list = self.kube_client.networking_v1.list_namespaced_ingress(namespace=self.namespace, **api_kwargs)
         else:
-            ingresses_list = self.kube_client.networking_v1.list_ingress_for_all_namespaces()
-        
+            ingresses_list = self.kube_client.networking_v1.list_ingress_for_all_namespaces(**api_kwargs)
+        next_token = self._get_continue_token(ingresses_list)
         for ingress in ingresses_list.items:
             resource = {
-                "name": ingress.metadata.name,
-                "namespace": ingress.metadata.namespace or "default",
+                "name": ingress.metadata.name, "namespace": ingress.metadata.namespace or "default",
                 "age": self._format_age(ingress.metadata.creation_timestamp),
-                "raw_data": client.ApiClient().sanitize_for_serialization(ingress)
+                "raw_data": client.ApiClient().sanitize_for_serialization(ingress),
+                "hosts": ", ".join([rule.host for rule in ingress.spec.rules if rule.host]) if ingress.spec and ingress.spec.rules else "*"
             }
-            
-            # Add ingress-specific fields
-            if ingress.spec and ingress.spec.rules:
-                hosts = [rule.host for rule in ingress.spec.rules if rule.host]
-                resource["hosts"] = ", ".join(hosts) if hosts else "*"
-            else:
-                resource["hosts"] = "*"
-            
             resources.append(resource)
-        
-        return resources
-    
+        return resources, next_token
+
     def _load_daemonsets(self):
-        """Load daemonsets using kubernetes client"""
         resources = []
-        
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
         if self.namespace and self.namespace != "all":
-            ds_list = self.kube_client.apps_v1.list_namespaced_daemon_set(namespace=self.namespace)
+            ds_list = self.kube_client.apps_v1.list_namespaced_daemon_set(namespace=self.namespace, **api_kwargs)
         else:
-            ds_list = self.kube_client.apps_v1.list_daemon_set_for_all_namespaces()
-        
+            ds_list = self.kube_client.apps_v1.list_daemon_set_for_all_namespaces(**api_kwargs)
+        next_token = self._get_continue_token(ds_list)
         for ds in ds_list.items:
             resource = {
-                "name": ds.metadata.name,
-                "namespace": ds.metadata.namespace or "default",
+                "name": ds.metadata.name, "namespace": ds.metadata.namespace or "default",
                 "age": self._format_age(ds.metadata.creation_timestamp),
-                "raw_data": client.ApiClient().sanitize_for_serialization(ds)
+                "raw_data": client.ApiClient().sanitize_for_serialization(ds),
+                "desired": ds.status.desired_number_scheduled or 0 if ds.status else 0,
+                "current": ds.status.current_number_scheduled or 0 if ds.status else 0,
+                "ready": ds.status.number_ready or 0 if ds.status else 0
             }
-            
-            # Add daemonset-specific fields
-            if ds.status:
-                resource["desired"] = ds.status.desired_number_scheduled or 0
-                resource["current"] = ds.status.current_number_scheduled or 0
-                resource["ready"] = ds.status.number_ready or 0
-            
             resources.append(resource)
-        
-        return resources
-    
+        return resources, next_token
+
     def _load_statefulsets(self):
-        """Load statefulsets using kubernetes client"""
         resources = []
-        
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
         if self.namespace and self.namespace != "all":
-            sts_list = self.kube_client.apps_v1.list_namespaced_stateful_set(namespace=self.namespace)
+            sts_list = self.kube_client.apps_v1.list_namespaced_stateful_set(namespace=self.namespace, **api_kwargs)
         else:
-            sts_list = self.kube_client.apps_v1.list_stateful_set_for_all_namespaces()
-        
+            sts_list = self.kube_client.apps_v1.list_stateful_set_for_all_namespaces(**api_kwargs)
+        next_token = self._get_continue_token(sts_list)
         for sts in sts_list.items:
             resource = {
-                "name": sts.metadata.name,
-                "namespace": sts.metadata.namespace or "default",
+                "name": sts.metadata.name, "namespace": sts.metadata.namespace or "default",
                 "age": self._format_age(sts.metadata.creation_timestamp),
-                "raw_data": client.ApiClient().sanitize_for_serialization(sts)
+                "raw_data": client.ApiClient().sanitize_for_serialization(sts),
+                "replicas": sts.spec.replicas or 0 if sts.spec else 0,
+                "ready": sts.status.ready_replicas or 0 if sts.status else 0
             }
-            
-            # Add statefulset-specific fields
-            if sts.spec:
-                resource["replicas"] = sts.spec.replicas or 0
-            
-            if sts.status:
-                resource["ready"] = sts.status.ready_replicas or 0
-            
             resources.append(resource)
-        
-        return resources
-    
+        return resources, next_token
+
     def _load_replicasets(self):
-        """Load replicasets using kubernetes client"""
         resources = []
-        
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
         if self.namespace and self.namespace != "all":
-            rs_list = self.kube_client.apps_v1.list_namespaced_replica_set(namespace=self.namespace)
+            rs_list = self.kube_client.apps_v1.list_namespaced_replica_set(namespace=self.namespace, **api_kwargs)
         else:
-            rs_list = self.kube_client.apps_v1.list_replica_set_for_all_namespaces()
-        
+            rs_list = self.kube_client.apps_v1.list_replica_set_for_all_namespaces(**api_kwargs)
+        next_token = self._get_continue_token(rs_list)
         for rs in rs_list.items:
             resource = {
-                "name": rs.metadata.name,
-                "namespace": rs.metadata.namespace or "default",
+                "name": rs.metadata.name, "namespace": rs.metadata.namespace or "default",
                 "age": self._format_age(rs.metadata.creation_timestamp),
-                "raw_data": client.ApiClient().sanitize_for_serialization(rs)
+                "raw_data": client.ApiClient().sanitize_for_serialization(rs),
+                "desired": rs.spec.replicas or 0 if rs.spec else 0,
+                "current": rs.status.replicas or 0 if rs.status else 0,
+                "ready": rs.status.ready_replicas or 0 if rs.status else 0
             }
-            
-            # Add replicaset-specific fields
-            if rs.spec:
-                resource["desired"] = rs.spec.replicas or 0
-            
-            if rs.status:
-                resource["current"] = rs.status.replicas or 0
-                resource["ready"] = rs.status.ready_replicas or 0
-            
             resources.append(resource)
-        
-        return resources
-    
+        return resources, next_token
+
     def _load_jobs(self):
-        """Load jobs using kubernetes client"""
         resources = []
-        
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
         if self.namespace and self.namespace != "all":
-            jobs_list = self.kube_client.batch_v1.list_namespaced_job(namespace=self.namespace)
+            jobs_list = self.kube_client.batch_v1.list_namespaced_job(namespace=self.namespace, **api_kwargs)
         else:
-            jobs_list = self.kube_client.batch_v1.list_job_for_all_namespaces()
-        
+            jobs_list = self.kube_client.batch_v1.list_job_for_all_namespaces(**api_kwargs)
+        next_token = self._get_continue_token(jobs_list)
         for job in jobs_list.items:
             resource = {
-                "name": job.metadata.name,
-                "namespace": job.metadata.namespace or "default",
+                "name": job.metadata.name, "namespace": job.metadata.namespace or "default",
                 "age": self._format_age(job.metadata.creation_timestamp),
-                "raw_data": client.ApiClient().sanitize_for_serialization(job)
+                "raw_data": client.ApiClient().sanitize_for_serialization(job),
+                "completions": f"{job.status.succeeded or 0}/{job.spec.completions or 1}" if job.status and job.spec else "0/1",
+                "duration": self._calculate_duration(job.status.start_time, job.status.completion_time) if job.status and job.status.start_time else ""
             }
-            
-            # Add job-specific fields
-            if job.status:
-                resource["completions"] = f"{job.status.succeeded or 0}/{job.spec.completions or 1}"
-                resource["duration"] = self._calculate_duration(
-                    job.status.start_time, job.status.completion_time
-                ) if job.status.start_time else ""
-            
             resources.append(resource)
-        
-        return resources
-    
+        return resources, next_token
+
     def _load_cronjobs(self):
-        """Load cronjobs using kubernetes client"""
         resources = []
-        
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
         if self.namespace and self.namespace != "all":
-            cj_list = self.kube_client.batch_v1.list_namespaced_cron_job(namespace=self.namespace)
+            cj_list = self.kube_client.batch_v1.list_namespaced_cron_job(namespace=self.namespace, **api_kwargs)
         else:
-            cj_list = self.kube_client.batch_v1.list_cron_job_for_all_namespaces()
-        
+            cj_list = self.kube_client.batch_v1.list_cron_job_for_all_namespaces(**api_kwargs)
+        next_token = self._get_continue_token(cj_list)
         for cj in cj_list.items:
             resource = {
-                "name": cj.metadata.name,
-                "namespace": cj.metadata.namespace or "default",
+                "name": cj.metadata.name, "namespace": cj.metadata.namespace or "default",
                 "age": self._format_age(cj.metadata.creation_timestamp),
-                "raw_data": client.ApiClient().sanitize_for_serialization(cj)
+                "raw_data": client.ApiClient().sanitize_for_serialization(cj),
+                "schedule": cj.spec.schedule or "" if cj.spec else "",
+                "suspend": "True" if cj.spec and cj.spec.suspend else "False",
+                "active": len(cj.status.active) if cj.status and cj.status.active else 0,
+                "last_schedule": self._format_age(cj.status.last_schedule_time) if cj.status and cj.status.last_schedule_time else "<none>"
             }
-            
-            # Add cronjob-specific fields
-            if cj.spec:
-                resource["schedule"] = cj.spec.schedule or ""
-                resource["suspend"] = "True" if cj.spec.suspend else "False"
-            
-            if cj.status:
-                resource["active"] = len(cj.status.active) if cj.status.active else 0
-                resource["last_schedule"] = self._format_age(cj.status.last_schedule_time) if cj.status.last_schedule_time else "<none>"
-            
             resources.append(resource)
-        
-        return resources
+        return resources, next_token
 
     def _load_replication_controllers(self):
-        """Load replication controllers using kubernetes client"""
         resources = []
-        
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
         if self.namespace and self.namespace != "all":
-            rc_list = self.kube_client.v1.list_namespaced_replication_controller(namespace=self.namespace)
+            rc_list = self.kube_client.v1.list_namespaced_replication_controller(namespace=self.namespace, **api_kwargs)
         else:
-            rc_list = self.kube_client.v1.list_replication_controller_for_all_namespaces()
-        
+            rc_list = self.kube_client.v1.list_replication_controller_for_all_namespaces(**api_kwargs)
+        next_token = self._get_continue_token(rc_list)
         for rc in rc_list.items:
             resource = {
-                "name": rc.metadata.name,
-                "namespace": rc.metadata.namespace or "default",
+                "name": rc.metadata.name, "namespace": rc.metadata.namespace or "default",
                 "age": self._format_age(rc.metadata.creation_timestamp),
-                "raw_data": client.ApiClient().sanitize_for_serialization(rc)
+                "raw_data": client.ApiClient().sanitize_for_serialization(rc),
+                "desired_replicas": rc.spec.replicas or 0 if rc.spec else 0,
+                "replicas": rc.status.replicas or 0 if rc.status else 0,
+                "ready_replicas": rc.status.ready_replicas or 0 if rc.status else 0
             }
-            
-            # Add replication controller-specific fields
-            if rc.spec:
-                resource["desired_replicas"] = rc.spec.replicas or 0
-            
-            if rc.status:
-                resource["replicas"] = rc.status.replicas or 0
-                resource["ready_replicas"] = rc.status.ready_replicas or 0
-            
             resources.append(resource)
-        
-        return resources
+        return resources, next_token
 
     def _load_resource_quotas(self):
-        """Load resource quotas using kubernetes client"""
         resources = []
-        
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
         if self.namespace and self.namespace != "all":
-            rq_list = self.kube_client.v1.list_namespaced_resource_quota(namespace=self.namespace)
+            rq_list = self.kube_client.v1.list_namespaced_resource_quota(namespace=self.namespace, **api_kwargs)
         else:
-            rq_list = self.kube_client.v1.list_resource_quota_for_all_namespaces()
-        
+            # ResourceQuotas are namespaced. If "all", this needs iteration or specific handling.
+            # Assuming namespaced context for simplicity or error if 'all' without specific logic.
+            rq_list = self.kube_client.v1.list_namespaced_resource_quota(namespace=self.namespace, **api_kwargs) if self.namespace else client.models.V1ResourceQuotaList(items=[])
+        next_token = self._get_continue_token(rq_list)
         for rq in rq_list.items:
             resource = {
-                "name": rq.metadata.name,
-                "namespace": rq.metadata.namespace or "default",
+                "name": rq.metadata.name, "namespace": rq.metadata.namespace or "default",
                 "age": self._format_age(rq.metadata.creation_timestamp),
                 "raw_data": client.ApiClient().sanitize_for_serialization(rq)
             }
-            
             resources.append(resource)
-        
-        return resources
+        return resources, next_token
 
     def _load_limit_ranges(self):
-        """Load limit ranges using kubernetes client"""
         resources = []
-        
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
         if self.namespace and self.namespace != "all":
-            lr_list = self.kube_client.v1.list_namespaced_limit_range(namespace=self.namespace)
+            lr_list = self.kube_client.v1.list_namespaced_limit_range(namespace=self.namespace, **api_kwargs)
         else:
-            lr_list = self.kube_client.v1.list_limit_range_for_all_namespaces()
-        
+             lr_list = self.kube_client.v1.list_namespaced_limit_range(namespace=self.namespace, **api_kwargs) if self.namespace else client.models.V1LimitRangeList(items=[])
+        next_token = self._get_continue_token(lr_list)
         for lr in lr_list.items:
             resource = {
-                "name": lr.metadata.name,
-                "namespace": lr.metadata.namespace or "default",
+                "name": lr.metadata.name, "namespace": lr.metadata.namespace or "default",
                 "age": self._format_age(lr.metadata.creation_timestamp),
                 "raw_data": client.ApiClient().sanitize_for_serialization(lr)
             }
-            
             resources.append(resource)
-        
-        return resources
+        return resources, next_token
 
     def _load_horizontal_pod_autoscalers(self):
-        """Load horizontal pod autoscalers using kubernetes client"""
         resources = []
-        
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
         if self.namespace and self.namespace != "all":
-            hpa_list = self.kube_client.autoscaling_v1.list_namespaced_horizontal_pod_autoscaler(namespace=self.namespace)
+            hpa_list = self.kube_client.autoscaling_v1.list_namespaced_horizontal_pod_autoscaler(namespace=self.namespace, **api_kwargs)
         else:
-            hpa_list = self.kube_client.autoscaling_v1.list_horizontal_pod_autoscaler_for_all_namespaces()
-        
+            hpa_list = self.kube_client.autoscaling_v1.list_horizontal_pod_autoscaler_for_all_namespaces(**api_kwargs)
+        next_token = self._get_continue_token(hpa_list)
         for hpa in hpa_list.items:
             resource = {
-                "name": hpa.metadata.name,
-                "namespace": hpa.metadata.namespace or "default",
+                "name": hpa.metadata.name, "namespace": hpa.metadata.namespace or "default",
                 "age": self._format_age(hpa.metadata.creation_timestamp),
-                "raw_data": client.ApiClient().sanitize_for_serialization(hpa)
+                "raw_data": client.ApiClient().sanitize_for_serialization(hpa),
+                "min_replicas": hpa.spec.min_replicas or 0 if hpa.spec else 0,
+                "max_replicas": hpa.spec.max_replicas or 0 if hpa.spec else 0,
+                "target_cpu": hpa.spec.target_cpu_utilization_percentage or 0 if hpa.spec else 0,
+                "current_replicas": hpa.status.current_replicas or 0 if hpa.status else 0,
+                "current_cpu": hpa.status.current_cpu_utilization_percentage or 0 if hpa.status else 0
             }
-            
-            # Add HPA-specific fields
-            if hpa.spec:
-                resource["min_replicas"] = hpa.spec.min_replicas or 0
-                resource["max_replicas"] = hpa.spec.max_replicas or 0
-                resource["target_cpu"] = hpa.spec.target_cpu_utilization_percentage or 0
-            
-            if hpa.status:
-                resource["current_replicas"] = hpa.status.current_replicas or 0
-                resource["current_cpu"] = hpa.status.current_cpu_utilization_percentage or 0
-            
             resources.append(resource)
-        
-        return resources
+        return resources, next_token
 
     def _load_pod_disruption_budgets(self):
-        """Load pod disruption budgets using kubernetes client"""
         resources = []
-        
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
         try:
-            # Try to use policy/v1 first (Kubernetes 1.21+)
-            policy_api = client.PolicyV1Api()
+            policy_api = client.PolicyV1Api(self.kube_client.v1.api_client)
             if self.namespace and self.namespace != "all":
-                pdb_list = policy_api.list_namespaced_pod_disruption_budget(namespace=self.namespace)
+                pdb_list = policy_api.list_namespaced_pod_disruption_budget(namespace=self.namespace, **api_kwargs)
             else:
-                pdb_list = policy_api.list_pod_disruption_budget_for_all_namespaces()
-        except AttributeError:
-            # Fall back to policy/v1beta1 for older clusters
-            policy_api = client.PolicyV1beta1Api()
+                pdb_list = policy_api.list_pod_disruption_budget_for_all_namespaces(**api_kwargs)
+        except AttributeError: 
+            policy_api = client.PolicyV1beta1Api(self.kube_client.v1.api_client)
             if self.namespace and self.namespace != "all":
-                pdb_list = policy_api.list_namespaced_pod_disruption_budget(namespace=self.namespace)
+                pdb_list = policy_api.list_namespaced_pod_disruption_budget(namespace=self.namespace, **api_kwargs)
             else:
-                pdb_list = policy_api.list_pod_disruption_budget_for_all_namespaces()
-        
+                pdb_list = policy_api.list_pod_disruption_budget_for_all_namespaces(**api_kwargs)
+        next_token = self._get_continue_token(pdb_list)
         for pdb in pdb_list.items:
             resource = {
-                "name": pdb.metadata.name,
-                "namespace": pdb.metadata.namespace or "default",
+                "name": pdb.metadata.name, "namespace": pdb.metadata.namespace or "default",
                 "age": self._format_age(pdb.metadata.creation_timestamp),
                 "raw_data": client.ApiClient().sanitize_for_serialization(pdb)
             }
-            
             resources.append(resource)
-        
-        return resources
+        return resources, next_token
 
     def _load_priority_classes(self):
-        """Load priority classes using kubernetes client"""
         resources = []
-        
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
+        next_token = None
         try:
-            scheduling_api = client.SchedulingV1Api()
-            pc_list = scheduling_api.list_priority_class()
-            
+            scheduling_api = client.SchedulingV1Api(self.kube_client.v1.api_client)
+            pc_list = scheduling_api.list_priority_class(**api_kwargs)
+            next_token = self._get_continue_token(pc_list)
             for pc in pc_list.items:
                 resource = {
-                    "name": pc.metadata.name,
-                    "namespace": "",  # Priority classes are cluster-scoped
+                    "name": pc.metadata.name, "namespace": "",
                     "age": self._format_age(pc.metadata.creation_timestamp),
-                    "raw_data": client.ApiClient().sanitize_for_serialization(pc)
+                    "raw_data": client.ApiClient().sanitize_for_serialization(pc),
+                    "value": pc.value or 0, "global_default": pc.global_default or False
                 }
-                
-                # Add priority class-specific fields
-                resource["value"] = pc.value or 0
-                resource["global_default"] = pc.global_default or False
-                
                 resources.append(resource)
-        except AttributeError:
-            # If SchedulingV1Api is not available, return empty list
-            logging.warning("SchedulingV1Api not available for priority classes")
-        
-        return resources
+        except AttributeError: logging.warning("SchedulingV1Api not available for priority classes")
+        return resources, next_token
 
     def _load_runtime_classes(self):
-        """Load runtime classes using kubernetes client"""
         resources = []
-        
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
+        next_token = None
         try:
-            node_api = client.NodeV1Api()
-            rc_list = node_api.list_runtime_class()
-            
+            node_api = client.NodeV1Api(self.kube_client.v1.api_client)
+            rc_list = node_api.list_runtime_class(**api_kwargs)
+            next_token = self._get_continue_token(rc_list)
             for rc in rc_list.items:
                 resource = {
-                    "name": rc.metadata.name,
-                    "namespace": "",  # Runtime classes are cluster-scoped
+                    "name": rc.metadata.name, "namespace": "",
                     "age": self._format_age(rc.metadata.creation_timestamp),
-                    "raw_data": client.ApiClient().sanitize_for_serialization(rc)
+                    "raw_data": client.ApiClient().sanitize_for_serialization(rc),
+                    "handler": rc.handler or ""
                 }
-                
-                # Add runtime class-specific fields
-                resource["handler"] = rc.handler or ""
-                
                 resources.append(resource)
-        except AttributeError:
-            # If NodeV1Api is not available, return empty list
-            logging.warning("NodeV1Api not available for runtime classes")
-        
-        return resources
+        except AttributeError: logging.warning("NodeV1Api not available for runtime classes")
+        return resources, next_token
 
     def _load_leases(self):
-        """Load leases using kubernetes client"""
         resources = []
-        
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
+        next_token = None
         try:
-            coordination_api = client.CoordinationV1Api()
+            coordination_api = client.CoordinationV1Api(self.kube_client.v1.api_client)
             if self.namespace and self.namespace != "all":
-                lease_list = coordination_api.list_namespaced_lease(namespace=self.namespace)
+                lease_list = coordination_api.list_namespaced_lease(namespace=self.namespace, **api_kwargs)
             else:
-                lease_list = coordination_api.list_lease_for_all_namespaces()
-            
+                lease_list = coordination_api.list_lease_for_all_namespaces(**api_kwargs)
+            next_token = self._get_continue_token(lease_list)
             for lease in lease_list.items:
                 resource = {
-                    "name": lease.metadata.name,
-                    "namespace": lease.metadata.namespace or "default",
+                    "name": lease.metadata.name, "namespace": lease.metadata.namespace or "default",
                     "age": self._format_age(lease.metadata.creation_timestamp),
-                    "raw_data": client.ApiClient().sanitize_for_serialization(lease)
+                    "raw_data": client.ApiClient().sanitize_for_serialization(lease),
+                    "holder": lease.spec.holder_identity or "" if lease.spec else ""
                 }
-                
-                # Add lease-specific fields
-                if lease.spec:
-                    resource["holder"] = lease.spec.holder_identity or ""
-                
                 resources.append(resource)
-        except AttributeError:
-            # If CoordinationV1Api is not available, return empty list
-            logging.warning("CoordinationV1Api not available for leases")
-        
-        return resources
+        except AttributeError: logging.warning("CoordinationV1Api not available for leases")
+        return resources, next_token
 
     def _load_mutating_webhook_configurations(self):
-        """Load mutating webhook configurations using kubernetes client"""
         resources = []
-        
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
+        next_token = None
         try:
-            admission_api = client.AdmissionregistrationV1Api()
-            mwc_list = admission_api.list_mutating_webhook_configuration()
-            
+            admission_api = client.AdmissionregistrationV1Api(self.kube_client.v1.api_client)
+            mwc_list = admission_api.list_mutating_webhook_configuration(**api_kwargs)
+            next_token = self._get_continue_token(mwc_list)
             for mwc in mwc_list.items:
                 resource = {
-                    "name": mwc.metadata.name,
-                    "namespace": "",  # Webhook configurations are cluster-scoped
+                    "name": mwc.metadata.name, "namespace": "",
                     "age": self._format_age(mwc.metadata.creation_timestamp),
                     "raw_data": client.ApiClient().sanitize_for_serialization(mwc)
                 }
-                
                 resources.append(resource)
-        except AttributeError:
-            # If AdmissionregistrationV1Api is not available, return empty list
-            logging.warning("AdmissionregistrationV1Api not available for mutating webhook configurations")
-        
-        return resources
+        except AttributeError: logging.warning("AdmissionregistrationV1Api not available for mutating webhook configurations")
+        return resources, next_token
 
     def _load_validating_webhook_configurations(self):
-        """Load validating webhook configurations using kubernetes client"""
         resources = []
-        
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
+        next_token = None
         try:
-            admission_api = client.AdmissionregistrationV1Api()
-            vwc_list = admission_api.list_validating_webhook_configuration()
-            
+            admission_api = client.AdmissionregistrationV1Api(self.kube_client.v1.api_client)
+            vwc_list = admission_api.list_validating_webhook_configuration(**api_kwargs)
+            next_token = self._get_continue_token(vwc_list)
             for vwc in vwc_list.items:
                 resource = {
-                    "name": vwc.metadata.name,
-                    "namespace": "",  # Webhook configurations are cluster-scoped
+                    "name": vwc.metadata.name, "namespace": "",
                     "age": self._format_age(vwc.metadata.creation_timestamp),
                     "raw_data": client.ApiClient().sanitize_for_serialization(vwc)
                 }
-                
                 resources.append(resource)
-        except AttributeError:
-            # If AdmissionregistrationV1Api is not available, return empty list
-            logging.warning("AdmissionregistrationV1Api not available for validating webhook configurations")
-        
-        return resources
+        except AttributeError: logging.warning("AdmissionregistrationV1Api not available for validating webhook configurations")
+        return resources, next_token
 
     def _load_endpoints(self):
-        """Load endpoints using kubernetes client"""
         resources = []
-        
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
         if self.namespace and self.namespace != "all":
-            ep_list = self.kube_client.v1.list_namespaced_endpoints(namespace=self.namespace)
+            ep_list = self.kube_client.v1.list_namespaced_endpoints(namespace=self.namespace, **api_kwargs)
         else:
-            ep_list = self.kube_client.v1.list_endpoints_for_all_namespaces()
-        
+            ep_list = self.kube_client.v1.list_endpoints_for_all_namespaces(**api_kwargs)
+        next_token = self._get_continue_token(ep_list)
         for ep in ep_list.items:
-            resource = {
-                "name": ep.metadata.name,
-                "namespace": ep.metadata.namespace or "default",
-                "age": self._format_age(ep.metadata.creation_timestamp),
-                "raw_data": client.ApiClient().sanitize_for_serialization(ep)
-            }
-            
-            # Add endpoints-specific fields
-            endpoints = []
+            endpoints_str_list = []
             if ep.subsets:
                 for subset in ep.subsets:
                     addresses = subset.addresses or []
                     ports = subset.ports or []
                     for addr in addresses:
-                        for port in ports:
-                            endpoints.append(f"{addr.ip}:{port.port}")
-            
-            resource["endpoints"] = ", ".join(endpoints) if endpoints else "<none>"
-            
+                        for port_obj in ports:
+                            endpoints_str_list.append(f"{addr.ip}:{port_obj.port}")
+            resource = {
+                "name": ep.metadata.name, "namespace": ep.metadata.namespace or "default",
+                "age": self._format_age(ep.metadata.creation_timestamp),
+                "raw_data": client.ApiClient().sanitize_for_serialization(ep),
+                "endpoints": ", ".join(endpoints_str_list) if endpoints_str_list else "<none>"
+            }
             resources.append(resource)
-        
-        return resources
+        return resources, next_token
 
     def _load_ingress_classes(self):
-        """Load ingress classes using kubernetes client"""
         resources = []
-        
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
+        next_token = None
         try:
-            ic_list = self.kube_client.networking_v1.list_ingress_class()
-            
+            ic_list = self.kube_client.networking_v1.list_ingress_class(**api_kwargs)
+            next_token = self._get_continue_token(ic_list)
             for ic in ic_list.items:
                 resource = {
-                    "name": ic.metadata.name,
-                    "namespace": "",  # Ingress classes are cluster-scoped
+                    "name": ic.metadata.name, "namespace": "",
                     "age": self._format_age(ic.metadata.creation_timestamp),
-                    "raw_data": client.ApiClient().sanitize_for_serialization(ic)
+                    "raw_data": client.ApiClient().sanitize_for_serialization(ic),
+                    "controller": ic.spec.controller or "" if ic.spec else ""
                 }
-                
-                # Add ingress class-specific fields
-                if ic.spec:
-                    resource["controller"] = ic.spec.controller or ""
-                
                 resources.append(resource)
-        except AttributeError:
-            # If networking_v1 doesn't have ingress classes, return empty list
-            logging.warning("Ingress classes not available in this Kubernetes version")
-        
-        return resources
+        except AttributeError: logging.warning("Ingress classes not available in this Kubernetes version")
+        return resources, next_token
 
     def _load_network_policies(self):
-        """Load network policies using kubernetes client"""
         resources = []
-        
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
         if self.namespace and self.namespace != "all":
-            np_list = self.kube_client.networking_v1.list_namespaced_network_policy(namespace=self.namespace)
+            np_list = self.kube_client.networking_v1.list_namespaced_network_policy(namespace=self.namespace, **api_kwargs)
         else:
-            np_list = self.kube_client.networking_v1.list_network_policy_for_all_namespaces()
-        
+            np_list = self.kube_client.networking_v1.list_network_policy_for_all_namespaces(**api_kwargs)
+        next_token = self._get_continue_token(np_list)
         for np in np_list.items:
             resource = {
-                "name": np.metadata.name,
-                "namespace": np.metadata.namespace or "default",
+                "name": np.metadata.name, "namespace": np.metadata.namespace or "default",
                 "age": self._format_age(np.metadata.creation_timestamp),
                 "raw_data": client.ApiClient().sanitize_for_serialization(np)
             }
-            
             resources.append(resource)
-        
-        return resources
+        return resources, next_token
 
     def _load_storage_classes(self):
-        """Load storage classes using kubernetes client"""
         resources = []
-        
-        sc_list = self.kube_client.storage_v1.list_storage_class()
-        
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
+        sc_list = self.kube_client.storage_v1.list_storage_class(**api_kwargs)
+        next_token = self._get_continue_token(sc_list)
         for sc in sc_list.items:
             resource = {
-                "name": sc.metadata.name,
-                "namespace": "",  # Storage classes are cluster-scoped
+                "name": sc.metadata.name, "namespace": "",
                 "age": self._format_age(sc.metadata.creation_timestamp),
-                "raw_data": client.ApiClient().sanitize_for_serialization(sc)
+                "raw_data": client.ApiClient().sanitize_for_serialization(sc),
+                "provisioner": sc.provisioner or "", "reclaim_policy": sc.reclaim_policy or "Delete",
+                "volume_binding_mode": sc.volume_binding_mode or "Immediate"
             }
-            
-            # Add storage class-specific fields
-            resource["provisioner"] = sc.provisioner or ""
-            resource["reclaim_policy"] = sc.reclaim_policy or "Delete"
-            resource["volume_binding_mode"] = sc.volume_binding_mode or "Immediate"
-            
             resources.append(resource)
-        
-        return resources
+        return resources, next_token
 
     def _load_service_accounts(self):
-        """Load service accounts using kubernetes client"""
         resources = []
-        
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
         if self.namespace and self.namespace != "all":
-            sa_list = self.kube_client.v1.list_namespaced_service_account(namespace=self.namespace)
+            sa_list = self.kube_client.v1.list_namespaced_service_account(namespace=self.namespace, **api_kwargs)
         else:
-            sa_list = self.kube_client.v1.list_service_account_for_all_namespaces()
-        
+            sa_list = self.kube_client.v1.list_service_account_for_all_namespaces(**api_kwargs)
+        next_token = self._get_continue_token(sa_list)
         for sa in sa_list.items:
             resource = {
-                "name": sa.metadata.name,
-                "namespace": sa.metadata.namespace or "default",
+                "name": sa.metadata.name, "namespace": sa.metadata.namespace or "default",
                 "age": self._format_age(sa.metadata.creation_timestamp),
-                "raw_data": client.ApiClient().sanitize_for_serialization(sa)
+                "raw_data": client.ApiClient().sanitize_for_serialization(sa),
+                "secrets": len(sa.secrets) if sa.secrets else 0
             }
-            
-            # Add service account-specific fields
-            resource["secrets"] = len(sa.secrets) if sa.secrets else 0
-            
             resources.append(resource)
-        
-        return resources
+        return resources, next_token
 
     def _load_cluster_roles(self):
-        """Load cluster roles using kubernetes client"""
         resources = []
-        
-        cr_list = self.kube_client.rbac_v1.list_cluster_role()
-        
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
+        cr_list = self.kube_client.rbac_v1.list_cluster_role(**api_kwargs)
+        next_token = self._get_continue_token(cr_list)
         for cr in cr_list.items:
             resource = {
-                "name": cr.metadata.name,
-                "namespace": "",  # Cluster roles are cluster-scoped
+                "name": cr.metadata.name, "namespace": "",
                 "age": self._format_age(cr.metadata.creation_timestamp),
                 "raw_data": client.ApiClient().sanitize_for_serialization(cr)
             }
-            
             resources.append(resource)
-        
-        return resources
+        return resources, next_token
 
     def _load_roles(self):
-        """Load roles using kubernetes client"""
         resources = []
-        
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
         if self.namespace and self.namespace != "all":
-            role_list = self.kube_client.rbac_v1.list_namespaced_role(namespace=self.namespace)
+            role_list = self.kube_client.rbac_v1.list_namespaced_role(namespace=self.namespace, **api_kwargs)
         else:
-            role_list = self.kube_client.rbac_v1.list_role_for_all_namespaces()
-        
+            role_list = self.kube_client.rbac_v1.list_role_for_all_namespaces(**api_kwargs)
+        next_token = self._get_continue_token(role_list)
         for role in role_list.items:
             resource = {
-                "name": role.metadata.name,
-                "namespace": role.metadata.namespace or "default",
+                "name": role.metadata.name, "namespace": role.metadata.namespace or "default",
                 "age": self._format_age(role.metadata.creation_timestamp),
                 "raw_data": client.ApiClient().sanitize_for_serialization(role)
             }
-            
             resources.append(resource)
-        
-        return resources
+        return resources, next_token
 
     def _load_cluster_role_bindings(self):
-        """Load cluster role bindings using kubernetes client"""
         resources = []
-        
-        crb_list = self.kube_client.rbac_v1.list_cluster_role_binding()
-        
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
+        crb_list = self.kube_client.rbac_v1.list_cluster_role_binding(**api_kwargs)
+        next_token = self._get_continue_token(crb_list)
         for crb in crb_list.items:
             resource = {
-                "name": crb.metadata.name,
-                "namespace": "",  # Cluster role bindings are cluster-scoped
+                "name": crb.metadata.name, "namespace": "",
                 "age": self._format_age(crb.metadata.creation_timestamp),
-                "raw_data": client.ApiClient().sanitize_for_serialization(crb)
+                "raw_data": client.ApiClient().sanitize_for_serialization(crb),
+                "role": crb.role_ref.name or "" if crb.role_ref else "",
+                "subjects": len(crb.subjects) if crb.subjects else 0
             }
-            
-            # Add cluster role binding-specific fields
-            if crb.role_ref:
-                resource["role"] = crb.role_ref.name or ""
-            
-            resource["subjects"] = len(crb.subjects) if crb.subjects else 0
-            
             resources.append(resource)
-        
-        return resources
+        return resources, next_token
 
     def _load_role_bindings(self):
-        """Load role bindings using kubernetes client"""
         resources = []
-        
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
         if self.namespace and self.namespace != "all":
-            rb_list = self.kube_client.rbac_v1.list_namespaced_role_binding(namespace=self.namespace)
+            rb_list = self.kube_client.rbac_v1.list_namespaced_role_binding(namespace=self.namespace, **api_kwargs)
         else:
-            rb_list = self.kube_client.rbac_v1.list_role_binding_for_all_namespaces()
-        
+            rb_list = self.kube_client.rbac_v1.list_role_binding_for_all_namespaces(**api_kwargs)
+        next_token = self._get_continue_token(rb_list)
         for rb in rb_list.items:
             resource = {
-                "name": rb.metadata.name,
-                "namespace": rb.metadata.namespace or "default",
+                "name": rb.metadata.name, "namespace": rb.metadata.namespace or "default",
                 "age": self._format_age(rb.metadata.creation_timestamp),
-                "raw_data": client.ApiClient().sanitize_for_serialization(rb)
+                "raw_data": client.ApiClient().sanitize_for_serialization(rb),
+                "role": rb.role_ref.name or "" if rb.role_ref else "",
+                "subjects": len(rb.subjects) if rb.subjects else 0
             }
-            
-            # Add role binding-specific fields
-            if rb.role_ref:
-                resource["role"] = rb.role_ref.name or ""
-            
-            resource["subjects"] = len(rb.subjects) if rb.subjects else 0
-            
             resources.append(resource)
-        
-        return resources
+        return resources, next_token
 
     def _load_custom_resource_definitions(self):
-        """Load custom resource definitions using kubernetes client"""
         resources = []
-        
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
+        next_token = None
         try:
-            apiextensions_api = client.ApiextensionsV1Api()
-            crd_list = apiextensions_api.list_custom_resource_definition()
-            
+            apiextensions_api = client.ApiextensionsV1Api(self.kube_client.v1.api_client)
+            crd_list = apiextensions_api.list_custom_resource_definition(**api_kwargs)
+            next_token = self._get_continue_token(crd_list)
             for crd in crd_list.items:
                 resource = {
-                    "name": crd.metadata.name,
-                    "namespace": "",  # CRDs are cluster-scoped
+                    "name": crd.metadata.name, "namespace": "",
                     "age": self._format_age(crd.metadata.creation_timestamp),
-                    "raw_data": client.ApiClient().sanitize_for_serialization(crd)
+                    "raw_data": client.ApiClient().sanitize_for_serialization(crd),
+                    "group": crd.spec.group or "" if crd.spec else "",
+                    "scope": crd.spec.scope or "" if crd.spec else "",
+                    "version": crd.spec.versions[0].name or "" if crd.spec and crd.spec.versions else ""
                 }
-                
-                # Add CRD-specific fields
-                if crd.spec:
-                    resource["group"] = crd.spec.group or ""
-                    resource["scope"] = crd.spec.scope or ""
-                    if crd.spec.versions:
-                        resource["version"] = crd.spec.versions[0].name or ""
-                
                 resources.append(resource)
-        except AttributeError:
-            # If ApiextensionsV1Api is not available, return empty list
-            logging.warning("ApiextensionsV1Api not available for custom resource definitions")
-        
-        return resources
-    
+        except AttributeError: logging.warning("ApiextensionsV1Api not available for custom resource definitions")
+        return resources, next_token
+
     def _load_generic_resource(self):
-        """Generic resource loading for resources not specifically handled"""
-        # This would be used for custom resources or resources not yet implemented
-        # For now, return empty list
         logging.warning(f"Generic resource loading not implemented for {self.resource_type}")
-        return []
-    
+        return [], None 
+
     def _format_age(self, timestamp):
-        """Format timestamp to age string (e.g., "2d", "5h")"""
-        if not timestamp:
-            return "Unknown"
-        
+        if not timestamp: return "Unknown"
         try:
             import datetime
             if isinstance(timestamp, str):
-                created_time = datetime.datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-            else:
-                # Assume it's already a datetime object
-                created_time = timestamp.replace(tzinfo=datetime.timezone.utc)
-            
+                try:
+                    created_time = datetime.datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                    if created_time.tzinfo is None: 
+                         created_time = created_time.replace(tzinfo=datetime.timezone.utc)
+                except ValueError:
+                    try: 
+                        created_time = datetime.datetime.strptime(timestamp, "%Y-%m-%dT%H:%M:%S.%f%z")
+                    except ValueError:
+                        try: 
+                            created_time = datetime.datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S").replace(tzinfo=datetime.timezone.utc)
+                        except ValueError:
+                             logging.warning(f"Could not parse timestamp string: {timestamp}")
+                             return "Unknown"
+            elif isinstance(timestamp, datetime.datetime):
+                if timestamp.tzinfo is None: 
+                    created_time = timestamp.replace(tzinfo=datetime.timezone.utc)
+                else:
+                    created_time = timestamp 
+            else: 
+                return "Unknown"
             now = datetime.datetime.now(datetime.timezone.utc)
             diff = now - created_time
-            
             days = diff.days
-            hours = diff.seconds // 3600
-            minutes = (diff.seconds % 3600) // 60
-            
-            if days > 0:
-                return f"{days}d"
-            elif hours > 0:
-                return f"{hours}h"
-            else:
-                return f"{minutes}m"
-        except Exception:
+            hours, remainder = divmod(diff.seconds, 3600)
+            minutes, _ = divmod(remainder, 60)
+            if days > 0: return f"{days}d"
+            if hours > 0: return f"{hours}h"
+            return f"{minutes}m"
+        except Exception as e:
+            logging.error(f"Error formatting age for timestamp {timestamp}: {e}")
             return "Unknown"
-    
-    def _calculate_duration(self, start_time, end_time):
-        """Calculate duration between two timestamps"""
-        if not start_time or not end_time:
-            return ""
-        
+
+    def _calculate_duration(self, start_time_str, end_time_str):
+        if not start_time_str or not end_time_str: return ""
         try:
             import datetime
-            if isinstance(start_time, str):
-                start = datetime.datetime.fromisoformat(start_time.replace('Z', '+00:00'))
-            else:
-                start = start_time.replace(tzinfo=datetime.timezone.utc)
-            
-            if isinstance(end_time, str):
-                end = datetime.datetime.fromisoformat(end_time.replace('Z', '+00:00'))
-            else:
-                end = end_time.replace(tzinfo=datetime.timezone.utc)
-            
-            diff = end - start
-            
+            start_time = datetime.datetime.fromisoformat(start_time_str.replace('Z', '+00:00'))
+            end_time = datetime.datetime.fromisoformat(end_time_str.replace('Z', '+00:00'))
+            if start_time.tzinfo is None: start_time = start_time.replace(tzinfo=datetime.timezone.utc)
+            if end_time.tzinfo is None: end_time = end_time.replace(tzinfo=datetime.timezone.utc)
+            diff = end_time - start_time
             days = diff.days
-            hours = diff.seconds // 3600
-            minutes = (diff.seconds % 3600) // 60
-            seconds = diff.seconds % 60
-            
-            if days > 0:
-                return f"{days}d{hours}h"
-            elif hours > 0:
-                return f"{hours}h{minutes}m"
-            elif minutes > 0:
-                return f"{minutes}m{seconds}s"
-            else:
-                return f"{seconds}s"
-        except Exception:
+            hours, remainder = divmod(diff.seconds, 3600)
+            minutes, seconds = divmod(remainder, 60)
+            if days > 0: return f"{days}d{hours}h"
+            if hours > 0: return f"{hours}h{minutes}m"
+            if minutes > 0: return f"{minutes}m{seconds}s"
+            return f"{seconds}s"
+        except Exception as e:
+            logging.error(f"Error calculating duration: {e}")
             return ""
 
+
 class ResourceDeleterThread(QThread):
-    """Thread for deleting Kubernetes resources."""
-    delete_completed = pyqtSignal(bool, str, str, str)
-    
-    def __init__(self, resource_type, resource_name, namespace):
-        super().__init__()
+    delete_completed = pyqtSignal(bool, str, str, str) 
+    def __init__(self, resource_type, resource_name, namespace, parent=None):
+        super().__init__(parent)
         self.resource_type = resource_type
         self.resource_name = resource_name
         self.namespace = namespace
         self.kube_client = get_kubernetes_client()
-        
+        self._is_running = True
+
+    def stop(self): self._is_running = False
+
     def run(self):
-        """Delete the specified resource using kubernetes client."""
+        if not self._is_running: return
         try:
-            # Delete the resource using the appropriate API
-            if self.resource_type == "pod":
+            delete_options = client.V1DeleteOptions() 
+            if self.resource_type == "pods":
                 if self.namespace:
-                    self.kube_client.v1.delete_namespaced_pod(
-                        name=self.resource_name,
-                        namespace=self.namespace
-                    )
-                else:
-                    self.kube_client.v1.delete_pod(name=self.resource_name)
-            elif self.resource_type == "service":
-                self.kube_client.v1.delete_namespaced_service(
-                    name=self.resource_name,
-                    namespace=self.namespace
-                )
-            elif self.resource_type == "deployment":
-                self.kube_client.apps_v1.delete_namespaced_deployment(
-                    name=self.resource_name,
-                    namespace=self.namespace
-                )
-            elif self.resource_type == "node":
-                self.kube_client.v1.delete_node(name=self.resource_name)
-            elif self.resource_type == "namespace":
-                self.kube_client.v1.delete_namespace(name=self.resource_name)
-            elif self.resource_type == "configmap":
-                self.kube_client.v1.delete_namespaced_config_map(
-                    name=self.resource_name,
-                    namespace=self.namespace
-                )
-            elif self.resource_type == "secret":
-                self.kube_client.v1.delete_namespaced_secret(
-                    name=self.resource_name,
-                    namespace=self.namespace
-                )
-            # Add more resource types as needed
+                    self.kube_client.v1.delete_namespaced_pod(name=self.resource_name, namespace=self.namespace, body=delete_options)
+            elif self.resource_type == "services":
+                 self.kube_client.v1.delete_namespaced_service(name=self.resource_name, namespace=self.namespace, body=delete_options)
+            elif self.resource_type == "deployments":
+                 self.kube_client.apps_v1.delete_namespaced_deployment(name=self.resource_name, namespace=self.namespace, body=delete_options)
             else:
-                self.delete_completed.emit(
-                    False, 
-                    f"Deletion not implemented for resource type: {self.resource_type}",
-                    self.resource_name,
-                    self.namespace
-                )
+                if not self._is_running: return
+                self.delete_completed.emit(False, f"Deletion not implemented for {self.resource_type}", self.resource_name, self.namespace)
                 return
-            
-            # Report success
-            self.delete_completed.emit(
-                True, 
-                f"{self.resource_type}/{self.resource_name} deleted successfully", 
-                self.resource_name,
-                self.namespace
-            )
-            
+            if not self._is_running: return
+            self.delete_completed.emit(True, f"{self.resource_type}/{self.resource_name} deleted", self.resource_name, self.namespace)
         except ApiException as e:
-            if e.status == 404:
-                self.delete_completed.emit(
-                    False,
-                    f"Resource not found: {self.resource_type}/{self.resource_name}",
-                    self.resource_name,
-                    self.namespace
-                )
-            elif e.status == 409:
-                self.delete_completed.emit(
-                    False,
-                    f"Conflict deleting resource (may be in use): {e}",
-                    self.resource_name,
-                    self.namespace
-                )
-            else:
-                self.delete_completed.emit(
-                    False, 
-                    f"API error deleting {self.resource_type}/{self.resource_name}: {e}",
-                    self.resource_name,
-                    self.namespace
-                )
+            if not self._is_running: return
+            self.delete_completed.emit(False, f"API error deleting: {e.reason}", self.resource_name, self.namespace)
         except Exception as e:
-            self.delete_completed.emit(
-                False, 
-                f"Error: {str(e)}", 
-                self.resource_name,
-                self.namespace
-            )
+            if not self._is_running: return
+            self.delete_completed.emit(False, f"Error deleting: {str(e)}", self.resource_name, self.namespace)
+
 
 class BatchResourceDeleterThread(QThread):
-    """Thread for deleting multiple Kubernetes resources."""
-    batch_delete_progress = pyqtSignal(int, int)
+    batch_delete_progress = pyqtSignal(int, int) 
     batch_delete_completed = pyqtSignal(list, list)
-    
-    def __init__(self, resource_type, resources):
-        super().__init__()
+    def __init__(self, resource_type, resources_to_delete, parent=None):
+        super().__init__(parent)
         self.resource_type = resource_type
-        self.resources = resources  # List of (name, namespace) tuples
+        self.resources_to_delete = resources_to_delete
         self.kube_client = get_kubernetes_client()
-        
+        self._is_running = True
+    def stop(self): self._is_running = False
     def run(self):
-        """Delete all specified resources."""
-        success_list = []
-        error_list = []
-        
-        for i, (name, namespace) in enumerate(self.resources):
+        successes, errors = [], []
+        total = len(self.resources_to_delete)
+        for i, (name, ns) in enumerate(self.resources_to_delete):
+            if not self._is_running: break
             try:
-                # Use the single resource deletion logic
-                deleter = ResourceDeleterThread(self.resource_type, name, namespace)
-                deleter.run()  # Run synchronously in this thread
-                
-                # Check if deletion was successful
-                # (This is a simplification - in a real implementation, 
-                # you'd want to capture the result from the deleter)
-                success_list.append((name, namespace))
-                
-            except Exception as e:
-                error_list.append((name, namespace, str(e)))
-                
-            # Report progress
-            self.batch_delete_progress.emit(i + 1, len(self.resources))
-            
-        # Report final results
-        self.batch_delete_completed.emit(success_list, error_list)
+                delete_options = client.V1DeleteOptions()
+                if self.resource_type == "pods":
+                    self.kube_client.v1.delete_namespaced_pod(name=name, namespace=ns, body=delete_options)
+                else: raise NotImplementedError(f"Batch delete not implemented for {self.resource_type}")
+                successes.append((name, ns))
+            except Exception as e: errors.append((name, ns, str(e)))
+            if self._is_running: self.batch_delete_progress.emit(i + 1, total)
+        if self._is_running: self.batch_delete_completed.emit(successes, errors)
 
-# Cluster-scoped resources that don't have namespaces
 CLUSTER_SCOPED_RESOURCES = {
-    'nodes', 'persistentvolumes', 'clusterroles', 'clusterrolebindings', 
+    'nodes', 'persistentvolumes', 'clusterroles', 'clusterrolebindings',
     'storageclasses', 'ingressclasses', 'priorityclasses', 'runtimeclasses',
     'mutatingwebhookconfigurations', 'validatingwebhookconfigurations',
     'customresourcedefinitions', 'namespaces'
 }
 
 class BaseResourcePage(BaseTablePage):
-    """
-    A base class for all Kubernetes resource pages that handles:
-    1. Loading and displaying dynamic data from Kubernetes API
-    2. Editing resources
-    3. Deleting resources (individual and batch)
-    4. Handling error states
-    5. Namespace filtering with default namespace as default
-    
-    This should be subclassed for specific resource types.
-    """
-    
+    load_more_complete = pyqtSignal()
+    all_items_loaded_signal = pyqtSignal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.resource_type = None  # To be set by subclasses
-        self.resources = []
-        self.namespace_filter = "default"  # Changed from "all" to "default"
+        self.resource_type = None
+        self.resources = [] 
+        self.namespace_filter = "default"
+        self.search_bar = None 
+        self.namespace_combo = None 
         self.loading_thread = None
         self.delete_thread = None
-        self.edit_thread = None
         self.batch_delete_thread = None
-        self.is_loading = False
-        self.selected_items = set()  # Track selected items by (name, namespace)
-        self.reload_on_show = True  # Always reload data when page is shown
-
+        self.is_loading_initial = False 
+        self.is_loading_more = False    
+        self.all_data_loaded = False    
+        self.current_continue_token = None
+        self.items_per_page = 15 # User specified
+        self.selected_items = set()
+        self.reload_on_show = True
         self.is_showing_skeleton = False
-        self._data_cache = {}  # Add cache dictionary
-        self._cache_timestamps = {}  # Track cache age
-        
-        # Get kubernetes client
+        self._data_cache = {}
+        self._cache_timestamps = {}
+        self._shutting_down = False 
         self.kube_client = get_kubernetes_client()
+        self._load_more_indicator_widget = None
+        self._all_loaded_label = None
         
+        self._message_widget_container = None 
+        self._table_stack = None 
+
+
     def setup_ui(self, title, headers, sortable_columns=None):
-        """Set up the UI with an added refresh button and namespace selector."""
-        layout = super().setup_ui(title, headers, sortable_columns)
-        
-        # Create a refresh button in the header
-        self._add_refresh_button()
-        
-        return layout
+        page_main_layout = QVBoxLayout(self)
+        page_main_layout.setContentsMargins(16, 16, 16, 16)
+        page_main_layout.setSpacing(16)
 
-    def _show_skeleton_loader(self, rows=5):
-        """Show a skeleton loader with empty rows while preserving table headers"""
-        self.is_showing_skeleton = True
-        
-        # Clear existing data but keep headers
-        self.table.setRowCount(0)
-        
-        # Add empty skeleton rows
-        for i in range(rows):
-            self.table.insertRow(i)
-            for j in range(self.table.columnCount()):
-                # First column (checkbox)
-                if j == 0:
-                    empty_widget = QWidget()
-                    empty_widget.setStyleSheet("background-color: #2d2d2d;")
-                    self.table.setCellWidget(i, j, empty_widget)
-                # Last column (actions)
-                elif j == self.table.columnCount() - 1:
-                    empty_widget = QWidget()
-                    empty_widget.setStyleSheet("background-color: #2d2d2d;")
-                    self.table.setCellWidget(i, j, empty_widget)
-                else:
-                    # Regular data cells
-                    item = QTableWidgetItem("")
-                    item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
-                    item.setBackground(QColor("#2d2d2d"))
-                    self.table.setItem(i, j, item)
-            
-            # Set row height
-            self.table.setRowHeight(i, 40)
-        
-        # Disable sorting during loading
-        self.table.setSortingEnabled(False)
-        
-        # Update UI immediately
-        QApplication.processEvents()
-        
-        # Start skeleton animation
-        if not hasattr(self, 'skeleton_timer'):
-            self.skeleton_timer = QTimer(self)
-            self.skeleton_timer.timeout.connect(self._animate_skeleton)
-            self.skeleton_animation_step = 0
-        
-        self.skeleton_timer.start(300)  # Update every 300ms
-   
-    def _animate_skeleton(self):
-        """Animate the skeleton cells with gradient effect"""
-        if not self.is_showing_skeleton:
-            self.skeleton_timer.stop()
-            return
-            
-        # Alternate between darker and lighter grays
-        colors = ["#2d2d2d", "#333333", "#3a3a3a", "#333333"]
-        color = QColor(colors[self.skeleton_animation_step % len(colors)])
-        
-        # Update all skeleton cells
-        for i in range(self.table.rowCount()):
-            for j in range(1, self.table.columnCount() - 1):
-                item = self.table.item(i, j)
-                if item:
-                    item.setBackground(color)
-        
-        self.skeleton_animation_step += 1
-        QApplication.processEvents()
+        header_controls_layout = QHBoxLayout() 
+        self._create_title_and_count(header_controls_layout, title) 
+        page_main_layout.addLayout(header_controls_layout)
+        self._add_controls_to_header(header_controls_layout) 
 
-    def get_cached_data(self, key):
-        """Get cached data with expiration check"""
-        if key in self._data_cache and key in self._cache_timestamps:
-            # Cache expires after 5 minutes
-            cache_age = time.time() - self._cache_timestamps[key]
-            if cache_age < 300:  # 5 minutes in seconds
-                return self._data_cache[key]
-        return None
-    
-    def cache_data(self, key, data):
-        """Cache data with timestamp"""
-        self._data_cache[key] = data
-        self._cache_timestamps[key] = time.time()
+        self._table_stack = QStackedWidget()
+        page_main_layout.addWidget(self._table_stack)
+
+        self.table = self._create_table(headers, sortable_columns) 
+        self._table_stack.addWidget(self.table)
+
+        # Create a dedicated container for messages (empty/error)
+        self._message_widget_container = QWidget()
+        message_container_layout = QVBoxLayout(self._message_widget_container)
+        message_container_layout.setAlignment(Qt.AlignmentFlag.AlignCenter) # Center content
+        message_container_layout.setContentsMargins(20,20,20,20) # Add some padding
+        self._table_stack.addWidget(self._message_widget_container) 
+        
+        self._table_stack.setCurrentWidget(self.table) 
+
+        select_all_checkbox = self._create_select_all_checkbox()
+        self._set_header_widget(0, select_all_checkbox) 
+
+        if hasattr(self, 'table') and self.table:
+            self.table.verticalScrollBar().valueChanged.connect(self._handle_scroll)
+            self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+            self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        
+        self.installEventFilter(self) 
+        return page_main_layout
+
+
+    def _create_title_and_count(self, layout, title_text):
+        title_label = QLabel(title_text)
+        title_label_style = getattr(AppStyles, "TITLE_STYLE", "font-size: 20px; font-weight: bold; color: #ffffff;")
+        title_label.setStyleSheet(title_label_style)
+        
+        self.items_count = QLabel("0 items") 
+        items_count_style = getattr(AppStyles, "COUNT_STYLE", "color: #9ca3af; font-size: 12px; margin-left: 8px;")
+        self.items_count.setStyleSheet(items_count_style)
+        self.items_count.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        
+        layout.addWidget(title_label)
+        layout.addWidget(self.items_count)
+
+    def _add_controls_to_header(self, header_layout):
+        self._add_filter_controls(header_layout) 
+        header_layout.addStretch(1) 
+
+        refresh_btn = QPushButton("Refresh")
+        refresh_style = getattr(AppStyles, "SECONDARY_BUTTON_STYLE", 
+            """QPushButton { background-color: #2d2d2d; color: #ffffff; border: 1px solid #3d3d3d;
+                           border-radius: 4px; padding: 5px 10px; }
+               QPushButton:hover { background-color: #3d3d3d; }
+               QPushButton:pressed { background-color: #1e1e1e; }"""
+        )
+        refresh_btn.setStyleSheet(refresh_style)
+        refresh_btn.clicked.connect(self.force_load_data)
+        header_layout.addWidget(refresh_btn)
 
     def _add_filter_controls(self, header_layout):
-        """Add namespace filter dropdown and search bar to the header layout"""
-        # Check if this resource has a namespace column
-        has_namespace_column = False
-        if hasattr(self, 'table') and self.table.columnCount() > 0:
-            for col in range(self.table.columnCount()):
-                header_item = self.table.horizontalHeaderItem(col)
-                if header_item and header_item.text() == "Namespace":
-                    has_namespace_column = True
-                    break
-        
-        # For cluster-scoped resources, don't show namespace dropdown
-        if self.resource_type in CLUSTER_SCOPED_RESOURCES:
-            has_namespace_column = False
-        
-        # Create a layout for the filters
-        filters_layout = QHBoxLayout()
+        filters_widget = QWidget() 
+        filters_layout = QHBoxLayout(filters_widget)
+        filters_layout.setContentsMargins(0,0,0,0) 
         filters_layout.setSpacing(10)
-        
-        # Create search bar matching the header style
+
         self.search_bar = QLineEdit()
         self.search_bar.setPlaceholderText("Search resources...")
-        self.search_bar.setFixedHeight(AppStyles.SEARCH_BAR_HEIGHT)
-        self.search_bar.setMinimumWidth(AppStyles.SEARCH_BAR_MIN_WIDTH)
-        self.search_bar.setStyleSheet(AppStyles.SEARCH_BAR_STYLE)
+        search_bar_height = getattr(AppStyles, "SEARCH_BAR_HEIGHT", 30) 
+        search_bar_min_width = getattr(AppStyles, "SEARCH_BAR_MIN_WIDTH", 200)
+        search_bar_style = getattr(AppStyles, "SEARCH_BAR_STYLE", "QLineEdit { padding: 5px; border: 1px solid #555; border-radius: 4px; background-color: #333; color: white; }")
+        self.search_bar.setFixedHeight(search_bar_height)
+        self.search_bar.setMinimumWidth(search_bar_min_width)
+        self.search_bar.setStyleSheet(search_bar_style)
         self.search_bar.textChanged.connect(self._handle_search)
         filters_layout.addWidget(self.search_bar)
-        
-        # Create namespace filter dropdown if needed
-        if has_namespace_column:
+
+        if self.resource_type not in CLUSTER_SCOPED_RESOURCES:
             namespace_label = QLabel("Namespace:")
             namespace_label.setStyleSheet("color: #ffffff; font-size: 13px; margin-right: 5px;")
             filters_layout.addWidget(namespace_label)
             
             self.namespace_combo = QComboBox()
-            self.namespace_combo.setFixedHeight(AppStyles.SEARCH_BAR_HEIGHT)  # Match search bar height
+            self.namespace_combo.setFixedHeight(search_bar_height) 
             self.namespace_combo.setMinimumWidth(150)
-            self.namespace_combo.setStyleSheet("""
-                QComboBox {
-                    background-color: #2d2d2d;
-                    color: #ffffff;
-                    border: 1px solid #3d3d3d;
-                    border-radius: 4px;
-                    padding: 5px 10px;
-                    font-size: 13px;
-                }
-                QComboBox:hover {
-                    border: 1px solid #555555;
-                }
-                QComboBox::drop-down {
-                    border: none;
-                    width: 20px;
-                }
-                QComboBox::down-arrow {
-                    image: none;
-                    color: #aaaaaa;
-                }
-                QComboBox QAbstractItemView {
-                    background-color: #2d2d2d;
-                    color: #ffffff;
-                    selection-background-color: #0078d7;
-                    border: 1px solid #3d3d3d;
-                    padding: 5px;
-                }
-            """)
-            
-            # Initially add just the default namespace
-            self.namespace_combo.addItem("default")
+            combo_box_style = getattr(AppStyles, "COMBO_BOX_STYLE", 
+                """ QComboBox { background-color: #2d2d2d; color: #ffffff; border: 1px solid #3d3d3d;
+                                border-radius: 4px; padding: 5px 10px; font-size: 13px; }
+                    QComboBox:hover { border: 1px solid #555555; }
+                    QComboBox::drop-down { border: none; width: 20px; }
+                    QComboBox::down-arrow { image: none; }
+                    QComboBox QAbstractItemView { background-color: #2d2d2d; color: #ffffff; 
+                                                selection-background-color: #0078d7;
+                                                border: 1px solid #3d3d3d; padding: 5px; }"""
+            )
+            self.namespace_combo.setStyleSheet(combo_box_style) 
+            self.namespace_combo.addItem("default") 
             self.namespace_combo.setCurrentText("default")
             self.namespace_combo.currentTextChanged.connect(self._handle_namespace_change)
             filters_layout.addWidget(self.namespace_combo)
-            
-            # Load namespaces asynchronously
-            QTimer.singleShot(100, self._load_namespaces)
-        
-        # Add the filters layout to the header layout
-        header_layout.addLayout(filters_layout)
-        header_layout.addStretch()
+            QTimer.singleShot(100, self._load_namespaces) 
 
-    def _handle_search(self, text):
-        """Filter resources based on search text"""
-        self._apply_filters()
+        header_layout.addWidget(filters_widget) 
 
-    def _handle_namespace_change(self, namespace):
-        """Filter resources based on selected namespace and reload data"""
-        if not namespace:
+    def _show_message_in_table_area(self, message_text, description_text=None, is_error=False):
+        """Displays a message (e.g., 'No items found' or an error) in the table area."""
+        if not self._table_stack or not self._message_widget_container: 
+            logging.warning("_table_stack or _message_widget_container not initialized.")
             return
-            
-        # Update the namespace filter
-        if namespace == "All Namespaces":
-            self.namespace_filter = "all"
-        else:
-            self.namespace_filter = namespace
-        
-        # Reload data with new namespace filter
-        self.force_load_data()
 
-    def _apply_filters(self):
-        """Apply both namespace and search filters"""
-        if not hasattr(self, 'table') or self.table.rowCount() == 0:
-            return
-            
-        # Get the search text
-        search_text = self.search_bar.text().lower() if hasattr(self, 'search_bar') else ""
+        # Clear previous content from the message container's layout
+        layout = self._message_widget_container.layout()
+        if layout:
+            while layout.count():
+                child = layout.takeAt(0)
+                if child.widget():
+                    child.widget().deleteLater()
+        else: # Should not happen if setup_ui is correct
+            new_layout = QVBoxLayout(self._message_widget_container)
+            new_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            new_layout.setContentsMargins(20,20,20,20)
+
+
+        # Create the main message label
+        main_message_label = QLabel(message_text)
+        main_message_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        main_message_label.setWordWrap(True)
+        font = QFont()
+        font.setPointSize(16) # Slightly larger for main message
+        font.setBold(True)
+        main_message_label.setFont(font)
+
+        if is_error:
+            error_color = getattr(AppColors, "TEXT_ERROR", "#E53935") # A fallback red
+            main_message_label.setStyleSheet(f"color: {error_color};")
+        else: # For "No items found" or other info messages
+            info_color = getattr(AppColors, "TEXT_MUTED", "#9E9E9E") # Fallback grey
+            main_message_label.setStyleSheet(f"color: {info_color};")
         
-        # Hide rows that don't match the filters
-        for row in range(self.table.rowCount()):
-            show_row = True
-            
-            # Apply search filter if text is entered
-            if show_row and search_text:
-                row_matches = False
-                for col in range(1, self.table.columnCount() - 1):  # Skip checkbox and actions columns
-                    # Check regular table items
-                    item = self.table.item(row, col)
-                    if item and search_text in item.text().lower():
-                        row_matches = True
-                        break
-                    
-                    # Check for cell widgets (like status labels)
-                    cell_widget = self.table.cellWidget(row, col)
-                    if cell_widget:
-                        widget_text = ""
-                        # Handle StatusLabel widgets which contain a QLabel
-                        for label in cell_widget.findChildren(QLabel):
-                            widget_text += label.text() + " "
-                        
-                        if search_text in widget_text.lower():
-                            row_matches = True
-                            break
-                
-                if not row_matches:
-                    show_row = False
-            
-            # Show or hide the row based on filters
-            self.table.setRowHidden(row, not show_row)
+        self._message_widget_container.layout().addWidget(main_message_label)
+
+        if description_text:
+            desc_label = QLabel(description_text)
+            desc_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            desc_label.setWordWrap(True)
+            desc_font = QFont()
+            desc_font.setPointSize(12)
+            desc_label.setFont(desc_font)
+            desc_label.setStyleSheet(f"color: {getattr(AppColors, 'TEXT_SECONDARY', '#B0BEC5')}; margin-top: 10px;")
+            self._message_widget_container.layout().addWidget(desc_label)
+        
+        self._table_stack.setCurrentWidget(self._message_widget_container)
+
+
+    def _show_table_area(self):
+        """Ensures the table is visible in the stacked widget."""
+        if self._table_stack:
+            self._table_stack.setCurrentWidget(self.table)
+
+
+    def _show_skeleton_loader(self, rows=10): 
+        if not hasattr(self, 'table') or self._shutting_down: return
+        self.is_showing_skeleton = True
+        self._show_table_area() 
+        self.table.setRowCount(0) 
+        
+        for i in range(rows):
+            self.table.insertRow(i)
+            for j in range(self.table.columnCount()):
+                if j == 0: 
+                    empty_widget = QWidget(); empty_widget.setStyleSheet("background-color: #2d2d2d; border-radius: 3px;") 
+                    self.table.setCellWidget(i, j, empty_widget)
+                elif j == self.table.columnCount() - 1: 
+                    empty_widget = QWidget(); empty_widget.setStyleSheet("background-color: #2d2d2d; border-radius: 3px;")
+                    self.table.setCellWidget(i, j, empty_widget)
+                else:
+                    item = QTableWidgetItem(""); item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEnabled) 
+                    item.setBackground(QColor("#2d2d2d")); self.table.setItem(i, j, item)
+            self.table.setRowHeight(i, 40) 
+        
+        self.table.setSortingEnabled(False)
+        QApplication.processEvents()
+        
+        if not hasattr(self, 'skeleton_timer'):
+            self.skeleton_timer = QTimer(self)
+            self.skeleton_timer.timeout.connect(self._animate_skeleton)
+            self.skeleton_animation_step = 0
+        if not self.skeleton_timer.isActive(): self.skeleton_timer.start(250) 
+
+    def _animate_skeleton(self):
+        if not self.is_showing_skeleton or not hasattr(self, 'table'):
+            if hasattr(self, 'skeleton_timer'): self.skeleton_timer.stop()
+            return
+        colors = ["#2d2d2d", "#313131", "#353535", "#313131"] 
+        current_color_hex = colors[self.skeleton_animation_step % len(colors)]
+        for i in range(self.table.rowCount()):
+            for j in [0, self.table.columnCount() -1]:
+                 widget = self.table.cellWidget(i,j)
+                 if widget: widget.setStyleSheet(f"background-color: {current_color_hex}; border-radius: 3px;")
+            for j in range(1, self.table.columnCount() - 1):
+                item = self.table.item(i, j)
+                if item: item.setBackground(QColor(current_color_hex))
+        self.skeleton_animation_step += 1
 
     def _load_namespaces(self):
-        """Load namespaces from Kubernetes cluster"""
-        if not hasattr(self, 'namespace_combo'):
-            return
-        
+        if not self.namespace_combo: return
         try:
-            # Get namespaces using kubernetes client
-            namespaces_list = self.kube_client.v1.list_namespace()
-            namespaces = [ns.metadata.name for ns in namespaces_list.items]
-            
-            # Update the combo box
+            namespaces_list_obj = self.kube_client.v1.list_namespace()
+            namespaces = [ns.metadata.name for ns in namespaces_list_obj.items]
             current_selection = self.namespace_combo.currentText()
+            self.namespace_combo.blockSignals(True)
             self.namespace_combo.clear()
-            self.namespace_combo.addItem("All Namespaces")
+            self.namespace_combo.addItem("All Namespaces") 
             self.namespace_combo.addItems(sorted(namespaces))
-            
-            # Set default namespace as selected if it's the first load
-            if current_selection == "default" and "default" in namespaces:
-                self.namespace_combo.setCurrentText("default")
-            else:
-                # Restore the previous selection if it still exists
-                index = self.namespace_combo.findText(current_selection)
-                if index >= 0:
-                    self.namespace_combo.setCurrentIndex(index)
-                else:
-                    # Default to "default" namespace if available
-                    if "default" in namespaces:
-                        self.namespace_combo.setCurrentText("default")
-                    else:
-                        self.namespace_combo.setCurrentText("All Namespaces")
-                        
+            if current_selection in namespaces: self.namespace_combo.setCurrentText(current_selection)
+            elif "default" in namespaces: self.namespace_combo.setCurrentText("default")
+            elif namespaces: self.namespace_combo.setCurrentIndex(1) 
+            else: self.namespace_combo.setCurrentText("All Namespaces")
+            self.namespace_combo.blockSignals(False)
         except Exception as e:
-            logging.warning(f"Error loading namespaces: {e}")
-            # If we can't load namespaces, just add default namespace
+            logging.error(f"Error loading namespaces: {e}")
+            self.namespace_combo.blockSignals(True)
             self.namespace_combo.clear()
-            self.namespace_combo.addItem("All Namespaces")
-            self.namespace_combo.addItem("default")
+            self.namespace_combo.addItem("All Namespaces"); self.namespace_combo.addItem("default") 
             self.namespace_combo.setCurrentText("default")
-    
-    def _add_refresh_button(self):
-        """Add a refresh button and filter controls to the page header."""
-        # Find the header layout
-        header_layout = None
-        for i in range(self.layout().count()):
-            item = self.layout().itemAt(i)
-            if isinstance(item, QHBoxLayout):
-                header_layout = item
-                break
-                
-        if not header_layout:
-            # Create a new header layout if none exists
-            header_layout = QHBoxLayout()
-            self.layout().insertLayout(0, header_layout)
-        
-        # Add filter controls first (to the left of the refresh button)
-        self._add_filter_controls(header_layout)
-        
-        # Create refresh button
-        refresh_btn = QPushButton("Refresh")
-        refresh_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2d2d2d;
-                color: #ffffff;
-                border: 1px solid #3d3d3d;
-                border-radius: 4px;
-                padding: 5px 10px;
-            }
-            QPushButton:hover {
-                background-color: #3d3d3d;
-            }
-            QPushButton:pressed {
-                background-color: #1e1e1e;
-            }
-            QPushButton:disabled {
-                background-color: #555555;
-                color: #888888;
-            }
-        """)
-        refresh_btn.clicked.connect(self.load_data)
-        
-        # Add button to header (no more stretch before it)
-        header_layout.addWidget(refresh_btn)
+            self.namespace_combo.blockSignals(False)
+
+    def _handle_search(self, text):
+        if hasattr(self, '_search_delay_timer'): self._search_delay_timer.stop()
+        else:
+            self._search_delay_timer = QTimer(self)
+            self._search_delay_timer.setSingleShot(True)
+            self._search_delay_timer.timeout.connect(self.force_load_data)
+        self._search_delay_timer.start(500) 
+
+    def _handle_namespace_change(self, namespace):
+        if not namespace: return
+        new_filter = "all" if namespace == "All Namespaces" else namespace
+        if self.namespace_filter != new_filter:
+            self.namespace_filter = new_filter
+            self.force_load_data() 
+
+    def _handle_scroll(self, value):
+        if self.is_loading_initial or self.is_loading_more or self.all_data_loaded: return
+        scrollbar = self.table.verticalScrollBar()
+        if value >= scrollbar.maximum() - (2 * self.table.rowHeight(0) if self.table.rowCount() > 0 else 0) : 
+            self.load_data(load_more=True)
 
     def force_load_data(self):
-        """Force reload data regardless of loading state."""
-        # Reset loading state and call load_data
-        self.is_loading = False
+        self.is_loading_initial = False 
+        self.is_loading_more = False
+        self.all_data_loaded = False
+        self.current_continue_token = None
         
-        # Show skeleton loader first if attribute exists
-        if hasattr(self, '_show_skeleton_loader'):
+        if hasattr(self, '_show_skeleton_loader') and not self.resources: 
             self._show_skeleton_loader()
-            
-        # Delay loading to allow UI to update
-        QTimer.singleShot(100, self.load_data)
-    
+        elif self.table: 
+             self.table.setRowCount(0)
+        QTimer.singleShot(50, lambda: self.load_data(load_more=False))
+
     def showEvent(self, event):
-        """Load data when the page is shown."""
         super().showEvent(event)
-        
-        # Load data if needed
-        if self.reload_on_show and not self.is_loading:
-            self.load_data()
-    
-    def __del__(self):
-        """Ensure proper cleanup of threads before destruction"""
-        self.cleanup_threads()
+        if self.reload_on_show and not self.is_loading_initial and not self.resources: 
+            self.force_load_data() 
 
     def cleanup_threads(self):
-        """Clean up any running threads safely"""
-        threads_to_cleanup = [
-            'loading_thread', 
-            'delete_thread', 
-            'edit_thread', 
-            'batch_delete_thread'
+        threads_to_stop = [
+            self.loading_thread, self.delete_thread, self.batch_delete_thread
         ]
-        
-        for thread_name in threads_to_cleanup:
-            thread = getattr(self, thread_name, None)
+        for thread in threads_to_stop:
             if thread and thread.isRunning():
-                thread.wait(300)  # Wait up to 300ms for thread to finish
+                if hasattr(thread, 'stop'): thread.stop()
+                thread.quit()
+                if not thread.wait(500): 
+                    logging.warning(f"Thread {thread} did not terminate gracefully, forcing.")
+                    thread.terminate()
+        self.loading_thread = None; self.delete_thread = None; self.batch_delete_thread = None
 
-    def hideEvent(self, event):
-        """Clean up threads when the page is hidden"""
-        super().hideEvent(event)
-        # This ensures threads are stopped when switching away from this page
-        self.cleanup_threads()
+    def load_data(self, load_more=False):
+        """
+        Loads data for the resource page.
+        IMPORTANT: If a subclass overrides this method, it MUST accept `load_more=False`
+        in its signature and ideally call `super().load_data(load_more=load_more)`
+        if it wants to leverage the base class's loading logic. Failure to do so
+        will result in a TypeError when `force_load_data` or scroll-to-load calls this method.
+        """
+        if self._shutting_down: return
+        
+        if load_more:
+            if self.is_loading_more or self.all_data_loaded: return 
+            self.is_loading_more = True
+            self._show_load_more_indicator_ui(True) 
+        else: 
+            if self.is_loading_initial: return 
+            self.is_loading_initial = True
+            self.resources = [] 
+            self.selected_items.clear()
+            self.current_continue_token = None 
+            self.all_data_loaded = False
+            if self.table: self.table.setRowCount(0) 
+            if hasattr(self, '_show_skeleton_loader') and self.table.rowCount() == 0 : # Show skeleton only if table is empty
+                self._show_skeleton_loader()
+            else: # Ensure table is shown if not showing skeleton
+                self._show_table_area() 
 
-    def load_data(self):
-        """Load resource data with caching and skeleton loading"""
-        if self.is_loading:
-            return
-        
-        # Clean up any existing loading thread first    
-        if hasattr(self, 'loading_thread') and self.loading_thread and self.loading_thread.isRunning():
-            self.loading_thread.wait(300)  # Wait for it to finish with timeout
-        
-        # Reset search filter if it exists
-        if hasattr(self, 'search_bar'):
-            self.search_bar.blockSignals(True)  # Prevent triggering filter while loading
-            self.search_bar.clear()
-            self.search_bar.blockSignals(False)
-        
-        # Check for cached data
-        cache_key = f"{self.resource_type}_{self.namespace_filter}"
-        cached_data = self.get_cached_data(cache_key)
-        
-        if cached_data:
-            # Use cached data if available
-            self.on_resources_loaded(cached_data, self.resource_type)
-            return
-        
-        self.is_loading = True
-        self.resources = []
-        self.selected_items.clear()
-        
-        # Show skeleton loader if attribute exists and not already shown
-        if hasattr(self, 'is_showing_skeleton') and not self.is_showing_skeleton:
-            self._show_skeleton_loader()
-            
-        # Start loading thread
-        self.loading_thread = KubernetesResourceLoader(self.resource_type, self.namespace_filter)
+
+        if self.loading_thread and self.loading_thread.isRunning():
+            self.loading_thread.stop(); self.loading_thread.quit(); self.loading_thread.wait() 
+
+        self.loading_thread = KubernetesResourceLoader(
+            self.resource_type, self.namespace_filter,
+            limit=self.items_per_page,
+            continue_token=self.current_continue_token if load_more else None
+        )
         self.loading_thread.resources_loaded.connect(
-            lambda resources, resource_type: self.on_resources_loaded(resources, resource_type, cache_key))
-        self.loading_thread.error_occurred.connect(self.on_load_error)
+            lambda res, r_type, next_token: self.on_resources_loaded(res, r_type, next_token, load_more)
+        )
+        self.loading_thread.error_occurred.connect(
+            lambda err_msg: self.on_load_error(err_msg, load_more)
+        )
         self.loading_thread.start()
-    
-    def on_resources_loaded(self, resources, resource_type, cache_key=None):
-        """Handle loaded resources with empty message overlaying the table area."""
-        self.is_loading = False
-        self.is_showing_skeleton = False
-        
-        # Stop skeleton animation if running
-        if hasattr(self, 'skeleton_timer') and self.skeleton_timer.isActive():
-            self.skeleton_timer.stop()
 
-        # Store resources
-        self.resources = resources
+    def on_resources_loaded(self, new_resources, resource_type, next_continue_token, load_more=False):
+        if self._shutting_down: return
+        
+        current_scroll_pos = 0
+        if self.table and self.table.verticalScrollBar(): current_scroll_pos = self.table.verticalScrollBar().value() 
+        
+        search_text = self.search_bar.text().lower() if self.search_bar and self.search_bar.text() else ""
+        
+        filtered_new_resources = []
+        if search_text:
+            for r_item in new_resources:
+                match = search_text in r_item.get("name", "").lower()
+                if not match and r_item.get("namespace"): match = search_text in r_item.get("namespace", "").lower()
+                if match: filtered_new_resources.append(r_item)
+        else: filtered_new_resources = new_resources
 
-        # Cache the data if we have a cache key
-        if cache_key and resources:
-            self.cache_data(cache_key, resources)
+        if self.is_showing_skeleton: 
+            self.is_showing_skeleton = False
+            if hasattr(self, 'skeleton_timer') and self.skeleton_timer.isActive(): self.skeleton_timer.stop()
+
+        if load_more:
+            self.is_loading_more = False
+            self._show_load_more_indicator_ui(False)
+            if not new_resources and not next_continue_token: 
+                self.all_data_loaded = True; self.all_items_loaded_signal.emit(); self._show_all_loaded_message_ui(True) 
+                return
+            if filtered_new_resources: 
+                start_row = len(self.resources) 
+                self.resources.extend(filtered_new_resources)
+                self.table.setUpdatesEnabled(False)
+                current_row_count = self.table.rowCount()
+                self.table.setRowCount(current_row_count + len(filtered_new_resources))
+                for i, resource_item in enumerate(filtered_new_resources): 
+                    self.populate_resource_row(current_row_count + i, resource_item)
+                self.table.setUpdatesEnabled(True)
+            self.load_more_complete.emit()
+        else: 
+            self.is_loading_initial = False
+            self.resources = filtered_new_resources 
+            self.table.setRowCount(0) 
+            self.populate_table(self.resources) 
+
+        self.current_continue_token = next_continue_token
+        if not self.current_continue_token: 
+            self.all_data_loaded = True; self.all_items_loaded_signal.emit()
+            if load_more or not self.resources: self._show_all_loaded_message_ui(True)
+
+        self.items_count.setText(f"{len(self.resources)} items")
         
-        # Update the item count
-        self.items_count.setText(f"{len(resources)} items")
-        
-        # Check if resources list is empty
-        if not resources:
-            # Clear all rows but keep table visible
-            self.table.setRowCount(0)
-            
-            # Create overlay label if it doesn't exist
-            if not hasattr(self, 'empty_overlay'):
-                # Create an overlay widget that sits on top of the table body area
-                self.empty_overlay = QLabel("Item list is empty")
-                self.empty_overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                self.empty_overlay.setStyleSheet("""
-                    color: #888888;
-                    font-size: 16px;
-                    font-weight: bold;
-                    background-color: transparent;
-                """)
-                
-                # Add the widget as sibling to the table
-                self.layout().addWidget(self.empty_overlay)
-                
-                # Initially hidden
-                self.empty_overlay.hide()
-            
-            # Position the overlay to cover the table body area (but below headers)
-            header_height = self.table.horizontalHeader().height()
-            self.empty_overlay.setGeometry(
-                self.table.x(),
-                self.table.y() + header_height,
-                self.table.width(),
-                self.table.height() - header_height
-            )
-            
-            # Show the overlay
-            self.empty_overlay.raise_()  # Bring to front
-            self.empty_overlay.show()
-            
-            # Disable sorting when empty
-            self.table.setSortingEnabled(False)
+        if not self.resources: 
+            self._show_message_in_table_area(f"No {self.resource_type} found.", 
+                                             "Item list is empty.")
+            if self.table: self.table.setSortingEnabled(False)
         else:
-            # Normal case - populate the table with data
-            self.table.setRowCount(0)  # Clear first
-            self.populate_table(resources)
-            self.table.setSortingEnabled(True)
-            
-            # Hide the overlay if it exists
-            if hasattr(self, 'empty_overlay'):
-                self.empty_overlay.hide()
+            self._show_table_area() 
+            if self.table: self.table.setSortingEnabled(True)
+        
+        QApplication.processEvents() 
+        if self.table and self.table.verticalScrollBar() and load_more: 
+            self.table.verticalScrollBar().setValue(current_scroll_pos)
 
-        # Apply any existing filters
-        self._apply_filters()
-        
-    def resizeEvent(self, event):
-        """Handle resizing of the widget to properly position the empty overlay."""
-        super().resizeEvent(event)
-        
-        # Update empty overlay position if it exists
-        if hasattr(self, 'empty_overlay') and self.empty_overlay.isVisible():
-            header_height = self.table.horizontalHeader().height()
-            self.empty_overlay.setGeometry(
-                self.table.x(),
-                self.table.y() + header_height,
-                self.table.width(),
-                self.table.height() - header_height
-            )
-            
-    def eventFilter(self, watched, event):
-        """Filter events to update overlay position when table geometry changes."""
-        if (watched == self.table and event.type() in 
-                (event.Type.Resize, event.Type.Move, event.Type.Show)):
-            if hasattr(self, 'empty_overlay') and self.empty_overlay.isVisible():
-                header_height = self.table.horizontalHeader().height()
-                self.empty_overlay.setGeometry(
-                    self.table.x(),
-                    self.table.y() + header_height,
-                    self.table.width(),
-                    self.table.height() - header_height
-                )
-        
-        return super().eventFilter(watched, event)
 
-    def on_load_error(self, error_message):
-        """Handle loading errors."""
-        self.is_loading = False
+    def on_load_error(self, error_message, load_more=False):
+        if self._shutting_down: return
+
+        if self.is_showing_skeleton: 
+            self.is_showing_skeleton = False
+            if hasattr(self, 'skeleton_timer') and self.skeleton_timer.isActive(): self.skeleton_timer.stop()
+
+        if load_more:
+            self.is_loading_more = False
+            self._show_load_more_indicator_ui(False)
+            logging.error(f"Error loading more items for {self.resource_type}: {error_message}")
+            if hasattr(self, 'show_transient_error_message'): self.show_transient_error_message(f"Failed to load more: {error_message}")
+        else: 
+            self.is_loading_initial = False
+            self.resources = [] 
+            if self.table: self.table.setRowCount(0)
+            
+            desc_with_retry = error_message + "\n\nClick Retry to try again."
+            self._show_message_in_table_area(f"Error loading {self.resource_type}", 
+                                             description_text=desc_with_retry, 
+                                             is_error=True)
+            
+            if self._message_widget_container.layout().count() > 0:
+                actual_message_widget = self._message_widget_container.layout().itemAt(0).widget()
+                if actual_message_widget and actual_message_widget.layout():
+                    # Check if a retry button already exists to avoid duplicates
+                    retry_exists = False
+                    for i in range(actual_message_widget.layout().count()):
+                        item = actual_message_widget.layout().itemAt(i).widget()
+                        if isinstance(item, QPushButton) and item.text() == "Retry":
+                            retry_exists = True
+                            break
+                    if not retry_exists:
+                        retry_button = QPushButton("Retry")
+                        retry_button_style = getattr(AppStyles, "PRIMARY_BUTTON_STYLE", "QPushButton { padding: 5px 10px; }")
+                        retry_button.setStyleSheet(retry_button_style)
+                        retry_button.clicked.connect(self.force_load_data) 
+                        actual_message_widget.layout().addWidget(retry_button, alignment=Qt.AlignmentFlag.AlignCenter)
+
+            logging.error(f"Initial load error for {self.resource_type}: {error_message}")
+
+
+    def _show_load_more_indicator_ui(self, show):
+        if self._shutting_down or not self.table or not self.table.viewport(): return
+        if show:
+            if not self._load_more_indicator_widget:
+                self._load_more_indicator_widget = QWidget(self.table.viewport())
+                layout = QHBoxLayout(self._load_more_indicator_widget)
+                spinner = QLabel("Loading more...") 
+                spinner.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                layout.addWidget(spinner)
+                self._load_more_indicator_widget.setStyleSheet("background-color: #2a2a2a; color: white; padding: 5px; border-top: 1px solid #3d3d3d;")
+            viewport_height = self.table.viewport().height()
+            indicator_height = self._load_more_indicator_widget.sizeHint().height()
+            self._load_more_indicator_widget.setGeometry(0, viewport_height - indicator_height, self.table.viewport().width(), indicator_height)
+            self._load_more_indicator_widget.show(); self._load_more_indicator_widget.raise_()
+        elif self._load_more_indicator_widget: self._load_more_indicator_widget.hide()
+
+    def _show_all_loaded_message_ui(self, show):
+        if self._shutting_down or not self.table or not self.table.viewport(): return
+        if show:
+            if not self._all_loaded_label:
+                self._all_loaded_label = QLabel("All items loaded.", self.table.viewport())
+                self._all_loaded_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                self._all_loaded_label.setStyleSheet("background-color: #2a2a2a; color: #888888; padding: 5px; border-top: 1px solid #3d3d3d;")
+            viewport_height = self.table.viewport().height()
+            label_height = self._all_loaded_label.sizeHint().height()
+            self._all_loaded_label.setGeometry(0, viewport_height - label_height, self.table.viewport().width(), label_height)
+            self._all_loaded_label.show(); self._all_loaded_label.raise_()
+            QTimer.singleShot(3000, lambda: self._show_all_loaded_message_ui(False) if self._all_loaded_label and self._all_loaded_label.isVisible() else None)
+        elif self._all_loaded_label: self._all_loaded_label.hide()
+
+    def populate_table(self, resources_to_populate):
+        if not self.table: return
+        self.table.setUpdatesEnabled(False) 
+        self.table.setRowCount(len(resources_to_populate)) 
+        for row, resource_item in enumerate(resources_to_populate): 
+            self.populate_resource_row(row, resource_item)
+        self.table.setUpdatesEnabled(True)
+
+
+    def populate_resource_row(self, row, resource): 
+        raise NotImplementedError("Subclasses must implement populate_resource_row")
+
+    # def _create_action_button(self, row, resource_name, resource_namespace):
+    #     """Create an action button with edit and delete options only."""
+    #     return super()._create_action_button(row, [
+    #         {"text": "Edit", "icon": "icons/edit.png", "dangerous": False},
+    #         {"text": "Delete", "icon": "icons/delete.png", "dangerous": True}
+    #     ])
+
+    # def _handle_action(self, action, row):
+    #     """Handle action button clicks."""
+    #     if row >= len(self.resources):
+    #         return
+            
+    #     resource = self.resources[row]
+    #     resource_name = resource.get("name", "")
+    #     resource_namespace = resource.get("namespace", "")
         
-        # Clear loading indicator
-        self.table.setRowCount(0)
-        
-        # Show error message
-        error_row = self.table.rowCount()
-        self.table.setRowCount(error_row + 1)
-        self.table.setSpan(error_row, 0, 1, self.table.columnCount())
-        
-        error_widget = QWidget()
-        error_layout = QVBoxLayout(error_widget)
-        error_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        error_layout.setContentsMargins(20, 30, 20, 30)
-        
-        error_text = QLabel(f"Error: {error_message}")
-        error_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        error_text.setStyleSheet("color: #ff6b6b; font-size: 14px;")
-        error_text.setWordWrap(True)
-        
-        retry_button = QPushButton("Retry")
-        retry_button.setStyleSheet("""
-            QPushButton {
-                background-color: #2d2d2d;
-                color: #ffffff;
-                border: 1px solid #3d3d3d;
-                border-radius: 4px;
-                padding: 5px 10px;
-                max-width: 100px;
-            }
-            QPushButton:hover {
-                background-color: #3d3d3d;
-            }
-            QPushButton:pressed {
-                background-color: #1e1e1e;
-            }
-        """)
-        retry_button.clicked.connect(self.load_data)
-        
-        error_layout.addWidget(error_text)
-        error_layout.addSpacing(10)
-        error_layout.addWidget(retry_button, 0, Qt.AlignmentFlag.AlignCenter)
-        
-        self.table.setCellWidget(error_row, 0, error_widget)
-        
-    def populate_table(self, resources):
-        """Populate the table with resources."""
-        # Set row count
-        self.table.setRowCount(len(resources))
-        
-        # Fill the table
-        for row, resource in enumerate(resources):
-            self.populate_resource_row(row, resource)
-        
-    def populate_resource_row(self, row, resource):
-        """
-        Populate a single row with resource data.
-        This should be overridden by subclasses to handle resource-specific columns.
-        """
-        pass  # Implemented by subclasses
-        
-    def _create_action_button(self, row, resource_name, resource_namespace):
-        """Create an action button with edit and delete options only."""
-        return super()._create_action_button(row, [
-            {"text": "Edit", "icon": "icons/edit.png", "dangerous": False},
-            {"text": "Delete", "icon": "icons/delete.png", "dangerous": True}
-        ])
-        
+    #     if action == "View Logs":
+    #         pass
+    #     elif action == "Delete":
+    #         self.delete_resource(resource_name, resource_namespace)
+            
     def _handle_action(self, action, row):
-        """Handle action button clicks."""
+        """Handle action button clicks with pod-specific logic."""
         if row >= len(self.resources):
             return
             
@@ -1921,11 +1584,198 @@ class BaseResourcePage(BaseTablePage):
         resource_name = resource.get("name", "")
         resource_namespace = resource.get("namespace", "")
         
-        if action == "Logs":
-            print(f"logs for {resource_name}, and {resource_namespace}" )
+        if action == "View Logs":
+            # Double-check this is a pod resource
+            if self.resource_type == "pods":
+                self._handle_view_logs(resource_name, resource_namespace, resource)
+            else:
+                self._show_logs_error("Logs are only available for pod resources.")
+        if action == "SSH":
+            # SSH action - only available for pods
+            if self.resource_type == "pods":
+                self._handle_ssh_into_pod(resource_name, resource_namespace, resource)
+            else:
+                self._show_ssh_error("SSH is only available for pod resources.")
+
+        elif action == "Edit":
+            self._handle_edit_resource(resource_name, resource_namespace, resource)
         elif action == "Delete":
             self.delete_resource(resource_name, resource_namespace)
+
+    def _handle_edit_resource(self, resource_name, resource_namespace, resource):
+        """Handle edit resource action - placeholder for future implementation"""
+        # TODO: Implement resource editing functionality
+        from PyQt6.QtWidgets import QMessageBox
+        QMessageBox.information(self, "Edit Resource", 
+                            f"Edit functionality for {resource_name} will be implemented soon.")
+
+    def _handle_ssh_into_pod(self, resource_name, resource_namespace, resource):
+        """Handle SSH into pod action with validation"""
+        try:
+            # Validate this is actually a pod and it's running
+            is_valid, message = self._validate_pod_for_ssh(resource_name, resource_namespace)
+            if not is_valid:
+                self._show_ssh_error(f"Cannot SSH into pod: {message}")
+                return
             
+            # Get the terminal panel
+            terminal_panel = self._get_terminal_panel()
+            if not terminal_panel:
+                self._show_ssh_error("Terminal panel not available. Please ensure you're in cluster view.")
+                return
+            
+            # Show the terminal if it's hidden
+            if not terminal_panel.is_visible:
+                terminal_panel.show_terminal()
+            
+            # Create or switch to SSH tab
+            self._create_ssh_tab(terminal_panel, resource_name, resource_namespace, resource)
+            
+        except Exception as e:
+            logging.error(f"Error handling SSH for {resource_name}: {e}")
+            self._show_ssh_error(f"Error opening SSH session: {str(e)}")
+
+    def _validate_pod_for_ssh(self, resource_name, resource_namespace):
+        """Validate that the pod is suitable for SSH access"""
+        try:
+            kube_client = get_kubernetes_client()
+            if not kube_client or not kube_client.v1:
+                return False, "Kubernetes client not available"
+            
+            # Get the pod to validate it exists and is running
+            try:
+                pod = kube_client.v1.read_namespaced_pod(name=resource_name, namespace=resource_namespace)
+                
+                # Check if pod is running
+                if pod.status.phase != "Running":
+                    return False, f"Pod is not running (status: {pod.status.phase})"
+                
+                # Check if pod has at least one container
+                if not pod.spec.containers:
+                    return False, "Pod has no containers"
+                
+                return True, "Pod validated successfully"
+                
+            except ApiException as e:
+                if e.status == 404:
+                    return False, f"Pod '{resource_name}' not found in namespace '{resource_namespace}'"
+                elif e.status == 403:
+                    return False, "Access denied. Check RBAC permissions for pod access."
+                else:
+                    return False, f"API error: {e.reason}"
+                    
+        except Exception as e:
+            return False, f"Validation error: {str(e)}"
+
+    def _create_ssh_tab(self, terminal_panel, pod_name, namespace, resource):
+        """Create an SSH tab for pod access"""
+        try:
+            # Check if an SSH tab for this pod already exists
+            ssh_tab_name = f"SSH: {pod_name}"
+            existing_tab_index = None
+            
+            for i, tab_data in enumerate(terminal_panel.terminal_tabs):
+                if tab_data.get('is_ssh_tab') and tab_data.get('pod_name') == pod_name:
+                    existing_tab_index = i
+                    break
+            
+            if existing_tab_index is not None:
+                # Switch to existing SSH tab
+                terminal_panel.switch_to_terminal_tab(existing_tab_index)
+                # Optionally reconnect or refresh the session
+                ssh_session = terminal_panel.terminal_tabs[existing_tab_index].get('ssh_session')
+                if ssh_session and hasattr(ssh_session, 'reconnect'):
+                    ssh_session.reconnect()
+            else:
+                # Create new SSH tab
+                new_tab_index = terminal_panel.create_ssh_tab(pod_name, namespace)
+                if new_tab_index is not None:
+                    terminal_panel.switch_to_terminal_tab(new_tab_index)
+            
+        except Exception as e:
+            logging.error(f"Error creating SSH tab for {pod_name}: {e}")
+            self._show_ssh_error(f"Error creating SSH tab: {str(e)}")
+
+    def _show_ssh_error(self, error_message):
+        """Show error message for SSH functionality"""
+        try:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "SSH Error", error_message)
+        except Exception as e:
+            logging.error(f"Error showing SSH error message: {e}")
+
+
+    def _validate_pod_resource(self, resource_name, resource_namespace):
+        """Validate that the resource is actually a pod using Kubernetes API"""
+        try:
+            kube_client = get_kubernetes_client()
+            if not kube_client or not kube_client.v1:
+                return False, "Kubernetes client not available"
+            
+            # Try to get the pod to validate it exists
+            try:
+                pod = kube_client.v1.read_namespaced_pod(name=resource_name, namespace=resource_namespace)
+                return True, "Pod validated successfully"
+            except ApiException as e:
+                if e.status == 404:
+                    return False, f"Pod '{resource_name}' not found in namespace '{resource_namespace}'"
+                elif e.status == 403:
+                    return False, "Access denied. Check RBAC permissions for pod access."
+                else:
+                    return False, f"API error: {e.reason}"
+                    
+        except Exception as e:
+            return False, f"Validation error: {str(e)}"
+
+    def _handle_view_logs(self, resource_name, resource_namespace, resource):
+        """Handle View Logs action for pods with validation"""
+        try:
+            # Validate this is actually a pod
+            is_valid, message = self._validate_pod_resource(resource_name, resource_namespace)
+            if not is_valid:
+                self._show_logs_error(f"Cannot view logs: {message}")
+                return
+            
+            # Get the terminal panel
+            terminal_panel = self._get_terminal_panel()
+            if not terminal_panel:
+                self._show_logs_error("Terminal panel not available. Please ensure you're in cluster view.")
+                return
+            
+            # Show the terminal if it's hidden
+            if not terminal_panel.is_visible:
+                terminal_panel.show_terminal()
+            
+            # Create or switch to logs tab
+            self._create_enhanced_logs_tab(terminal_panel, resource_name, resource_namespace, resource)
+            
+        except Exception as e:
+            logging.error(f"Error handling view logs for {resource_name}: {e}")
+            self._show_logs_error(f"Error opening logs: {str(e)}")
+
+    def _get_terminal_panel(self):
+        """Get the terminal panel from the cluster view"""
+        try:
+            # Navigate up the widget hierarchy to find the cluster view
+            parent = self.parent()
+            while parent:
+                if hasattr(parent, 'terminal_panel'):
+                    return parent.terminal_panel
+                parent = parent.parent()
+            
+            # Alternative: check if we can access through the main window
+            from PyQt6.QtWidgets import QApplication
+            app = QApplication.instance()
+            if app:
+                for widget in app.allWidgets():
+                    if hasattr(widget, 'terminal_panel') and widget.terminal_panel:
+                        return widget.terminal_panel
+            
+            return None
+        except Exception as e:
+            logging.error(f"Error getting terminal panel: {e}")
+            return None
+
     def _handle_checkbox_change(self, state, item_name):
         """Handle checkbox state changes with namespace awareness."""
         # Find the namespace for this item
@@ -1949,7 +1799,286 @@ class BaseResourcePage(BaseTablePage):
                 self.select_all_checkbox.blockSignals(True)
                 self.select_all_checkbox.setChecked(False)
                 self.select_all_checkbox.blockSignals(False)
-                
+
+    # Updated base_resource_page.py - Integration with Enhanced Logs Viewer
+
+    def _create_enhanced_logs_tab(self, terminal_panel, pod_name, namespace, resource):
+        """Create an enhanced logs tab with search, filter and live streaming"""
+        try:
+            # Check if a logs tab for this pod already exists
+            logs_tab_name = f"Logs: {pod_name}"
+            existing_tab_index = None
+            
+            for i, tab_data in enumerate(terminal_panel.terminal_tabs):
+                if tab_data.get('is_logs_tab') and tab_data.get('pod_name') == pod_name:
+                    existing_tab_index = i
+                    break
+            
+            if existing_tab_index is not None:
+                # Switch to existing logs tab and refresh
+                terminal_panel.switch_to_terminal_tab(existing_tab_index)
+                logs_viewer = terminal_panel.terminal_tabs[existing_tab_index].get('logs_viewer')
+                if logs_viewer:
+                    logs_viewer.refresh_logs()
+            else:
+                # Create new enhanced logs tab
+                new_tab_index = self._create_new_enhanced_logs_tab(terminal_panel, logs_tab_name, pod_name, namespace)
+                if new_tab_index is not None:
+                    terminal_panel.switch_to_terminal_tab(new_tab_index)
+            
+        except Exception as e:
+            logging.error(f"Error creating enhanced logs tab for {pod_name}: {e}")
+            self._show_logs_error(f"Error creating logs tab: {str(e)}")
+
+    def _show_logs_error(self, error_message):
+        """Show error message for logs functionality"""
+        try:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "View Logs Error", error_message)
+        except Exception as e:
+            logging.error(f"Error showing logs error message: {e}")
+
+    def _create_new_enhanced_logs_tab(self, terminal_panel, tab_name, pod_name, namespace):
+        """Create a new enhanced logs tab with search and streaming capabilities"""
+        try:
+            from PyQt6.QtWidgets import QLabel, QPushButton, QHBoxLayout, QWidget
+            from PyQt6.QtCore import Qt
+            from PyQt6.QtGui import QFont
+            
+            tab_index = len(terminal_panel.terminal_tabs)
+            
+            # Create tab widget
+            tab_widget = QWidget()
+            tab_widget.setFixedHeight(28)
+            tab_widget.setCursor(Qt.CursorShape.PointingHandCursor)
+            
+            tab_layout = QHBoxLayout(tab_widget)
+            tab_layout.setContentsMargins(8, 0, 8, 0)
+            tab_layout.setSpacing(6)
+            
+            # Create label with enhanced logs icon and name
+            label = QLabel(f"📋 {pod_name}")
+            label.setStyleSheet("""
+                color: #4CAF50;
+                background: transparent;
+                font-size: 12px;
+                font-weight: bold;
+                text-decoration: none;
+                border: none;
+                outline: none;
+            """)
+            
+            # Create close button
+            close_btn = QPushButton("✕")
+            close_btn.setFixedSize(16, 16)
+            close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            close_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: transparent;
+                    color: #9ca3af;
+                    border: none;
+                    font-size: 10px;
+                    font-weight: bold;
+                    padding: 0px;
+                    margin: 0px;
+                }
+                QPushButton:hover {
+                    background-color: #FF4D4D;
+                    color: white;
+                    border-radius: 8px;
+                }
+            """)
+            
+            tab_layout.addWidget(label)
+            tab_layout.addWidget(close_btn)
+            
+            # Create tab button
+            tab_btn = QPushButton()
+            tab_btn.setCheckable(True)
+            tab_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: transparent;
+                    border: none;
+                    border-right: 1px solid #3d3d3d;
+                    border-left: 1px solid #3d3d3d;
+                    border-bottom: 1px solid #3d3d3d;
+                    border-top: 1px solid #3d3d3d;
+                    padding: 0px 35px;
+                    margin: 0px;
+                }
+                QPushButton:hover {
+                    background-color: rgba(76, 175, 80, 0.1);
+                }
+                QPushButton:checked {
+                    background-color: #1E1E1E;
+                    border-bottom: 2px solid #4CAF50;
+                }
+            """)
+            tab_btn.setLayout(tab_layout)
+            
+            # Create tab container
+            tab_container = QWidget()
+            container_layout = QHBoxLayout(tab_container)
+            container_layout.setContentsMargins(0, 0, 0, 0)
+            container_layout.setSpacing(0)
+            container_layout.addWidget(tab_btn)
+            
+            # Connect signals
+            close_btn.clicked.connect(lambda: self._close_enhanced_logs_tab(terminal_panel, tab_index))
+            tab_btn.clicked.connect(lambda: terminal_panel.switch_to_terminal_tab(tab_index))
+            
+            # Add tab to header
+            terminal_panel.unified_header.add_tab(tab_container)
+            
+            # Create enhanced logs viewer widget
+            from UI.TerminalPanel import EnhancedLogsViewer  # Import the enhanced viewer
+            logs_viewer = EnhancedLogsViewer(pod_name, namespace)
+            
+            # Add the logs viewer to terminal stack
+            terminal_panel.stack_layout.addWidget(logs_viewer)
+            logs_viewer.setVisible(False)
+            
+            # Store tab data with enhanced information
+            terminal_data = {
+                'tab_button': tab_btn,
+                'tab_container': tab_container,
+                'content_widget': logs_viewer,  # Use logs_viewer as content
+                'logs_viewer': logs_viewer,     # Direct reference to logs viewer
+                'terminal_widget': None,        # No terminal widget for logs tabs
+                'process': None,                # No process for logs tabs
+                'started': True,                # Always "started" for logs
+                'active': False,
+                'is_logs_tab': True,           # Mark as enhanced logs tab
+                'pod_name': pod_name,
+                'namespace': namespace
+            }
+            terminal_panel.terminal_tabs.append(terminal_data)
+            
+            return tab_index
+            
+        except Exception as e:
+            logging.error(f"Error creating new enhanced logs tab: {e}")
+            return None
+
+    def _close_enhanced_logs_tab(self, terminal_panel, tab_index):
+        """Close an enhanced logs tab and cleanup resources"""
+        try:
+            if tab_index >= len(terminal_panel.terminal_tabs):
+                return
+            
+            terminal_data = terminal_panel.terminal_tabs[tab_index]
+            logs_viewer = terminal_data.get('logs_viewer')
+            
+            # Stop log streaming before closing
+            if logs_viewer and hasattr(logs_viewer, 'stop_log_stream'):
+                logs_viewer.stop_log_stream()
+            
+            # Close the tab using terminal panel's method
+            terminal_panel.close_terminal_tab(tab_index)
+            
+        except Exception as e:
+            logging.error(f"Error closing enhanced logs tab: {e}")
+
+    # Update the terminal panel switch method to handle enhanced logs tabs
+    def switch_to_enhanced_logs_tab(self, tab_index):
+        """Switch to enhanced logs tab - add this to TerminalPanel class"""
+        if tab_index >= len(self.terminal_tabs):
+            return
+        
+        # Hide all content widgets
+        for i, tab_data in enumerate(self.terminal_tabs):
+            content_widget = tab_data.get('content_widget')
+            if content_widget:
+                content_widget.setVisible(i == tab_index)
+            
+            # Update tab button states
+            tab_button = tab_data.get('tab_button')
+            if tab_button:
+                tab_button.setChecked(i == tab_index)
+            
+            tab_data['active'] = i == tab_index
+        
+        # Set focus and update active index
+        self.active_terminal_index = tab_index
+        terminal_data = self.terminal_tabs[tab_index]
+        
+        # Handle different tab types
+        if terminal_data.get('is_logs_tab'):
+            # For logs tabs, focus the logs viewer
+            logs_viewer = terminal_data.get('logs_viewer')
+            if logs_viewer:
+                logs_viewer.setFocus()
+        else:
+            # For regular terminal tabs, focus the terminal widget
+            terminal_widget = terminal_data.get('terminal_widget')
+            if terminal_widget:
+                terminal_widget.setFocus()
+                terminal_widget.ensure_cursor_at_input()
+            
+            # Start process if not started
+            if not terminal_data.get('started', False):
+                self.start_terminal_process(tab_index)
+
+    # Enhanced close method for terminal panel
+    def close_enhanced_terminal_tab(self, tab_index):
+        """Enhanced close method that handles both regular and logs tabs"""
+        if tab_index >= len(self.terminal_tabs):
+            return
+        
+        if len(self.terminal_tabs) <= 1:
+            self.hide_terminal()
+            return
+
+        terminal_data = self.terminal_tabs[tab_index]
+        
+        # Handle enhanced logs tab cleanup
+        if terminal_data.get('is_logs_tab'):
+            logs_viewer = terminal_data.get('logs_viewer')
+            if logs_viewer and hasattr(logs_viewer, 'stop_log_stream'):
+                logs_viewer.stop_log_stream()
+        else:
+            # Handle regular terminal tab cleanup
+            process = terminal_data.get('process')
+            if process and process.state() == QProcess.ProcessState.Running:
+                try:
+                    process.terminate()
+                    if not process.waitForFinished(500):
+                        process.kill()
+                except Exception as e:
+                    print(f"Error terminating process: {e}")
+
+        # Remove tab from UI
+        tab_container = terminal_data.get('tab_container')
+        if tab_container:
+            self.unified_header.remove_tab(tab_container)
+        
+        content_widget = terminal_data.get('content_widget')
+        if content_widget:
+            self.stack_layout.removeWidget(content_widget)
+            content_widget.deleteLater()
+
+        # Remove from tabs list
+        self.terminal_tabs.pop(tab_index)
+        self.active_terminal_index = min(max(0, self.active_terminal_index), len(self.terminal_tabs) - 1)
+
+        # Update remaining tabs' close button connections
+        for i, tab_data in enumerate(self.terminal_tabs):
+            tab_container = tab_data.get('tab_container')
+            if tab_container:
+                for child in tab_container.findChildren(QPushButton):
+                    if child.text() == "✕":
+                        try:
+                            child.clicked.disconnect()
+                        except TypeError:
+                            pass
+                        child.clicked.connect(lambda checked=False, idx=i: self.close_terminal_tab(idx))
+
+        # Switch to active tab if tabs remain
+        if self.terminal_tabs:
+            self.switch_to_terminal_tab(self.active_terminal_index)
+        
+        self.renumber_tabs()
+
     def _handle_select_all(self, state):
         """Handle select-all checkbox state changes."""
         super()._handle_select_all(state)
@@ -1961,120 +2090,64 @@ class BaseResourcePage(BaseTablePage):
             # Add all items to selected set
             for resource in self.resources:
                 self.selected_items.add((resource["name"], resource.get("namespace", "")))
-                
-    def delete_selected_resources(self):
-        """Delete all selected resources."""
-        # Clean up any existing delete thread first
-        if hasattr(self, 'delete_thread') and self.delete_thread and self.delete_thread.isRunning():
-            self.delete_thread.wait(300)  # Wait for it to finish with timeout
+                 
 
+    def delete_selected_resources(self):
+        if hasattr(self, 'delete_thread') and self.delete_thread and self.delete_thread.isRunning():
+            self.delete_thread.wait(300)
         if not self.selected_items:
-            QMessageBox.information(
-                self, 
-                "No Selection", 
-                "No resources selected for deletion."
-            )
+            QMessageBox.information(self, "No Selection", "No resources selected for deletion.")
             return
-            
-        # Confirm deletion
         count = len(self.selected_items)
-        result = QMessageBox.warning(
-            self,
-            "Confirm Deletion",
+        result = QMessageBox.warning(self, "Confirm Deletion",
             f"Are you sure you want to delete {count} selected {self.resource_type}?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
-        )
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+        if result != QMessageBox.StandardButton.Yes: return
         
-        if result != QMessageBox.StandardButton.Yes:
-            return
-            
-        # Start batch deletion
-        resources_list = list(self.selected_items)
+        resources_list = list(self.selected_items) 
         
-        # Create and show progress dialog
-        from PyQt6.QtWidgets import QProgressDialog
+        from PyQt6.QtWidgets import QProgressDialog 
         progress = QProgressDialog(f"Deleting {count} {self.resource_type}...", "Cancel", 0, count, self)
-        progress.setWindowTitle("Deleting Resources")
-        progress.setWindowModality(Qt.WindowModality.WindowModal)
-        progress.setMinimumDuration(0)
-        progress.setAutoClose(False)
-        progress.setValue(0)
+        progress.setWindowTitle("Deleting Resources"); progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0); progress.setAutoClose(False); progress.setValue(0)
         
-        # Start batch delete thread
         self.batch_delete_thread = BatchResourceDeleterThread(self.resource_type, resources_list)
         self.batch_delete_thread.batch_delete_progress.connect(progress.setValue)
         self.batch_delete_thread.batch_delete_completed.connect(
-            lambda success, errors: self.on_batch_delete_completed(success, errors, progress)
-        )
+            lambda success, errors: self.on_batch_delete_completed(success, errors, progress))
         self.batch_delete_thread.start()
         
     def on_batch_delete_completed(self, success_list, error_list, progress_dialog):
-        """Handle batch deletion completion."""
-        # Close progress dialog
         progress_dialog.close()
-        
-        # Show results
         success_count = len(success_list)
         error_count = len(error_list)
-        
         result_message = f"Deleted {success_count} of {success_count + error_count} {self.resource_type}."
-        
         if error_count > 0:
             result_message += f"\n\nFailed to delete {error_count} resources:"
-            for name, namespace, error in error_list[:5]:  # Show first 5 errors
+            for name, namespace, error in error_list[:5]:
                 ns_text = f" in namespace {namespace}" if namespace else ""
                 result_message += f"\n- {name}{ns_text}: {error}"
-                
-            if error_count > 5:
-                result_message += f"\n... and {error_count - 5} more."
-                
+            if error_count > 5: result_message += f"\n... and {error_count - 5} more."
         QMessageBox.information(self, "Deletion Results", result_message)
-        
-        # Reload data
-        self.load_data()
+        self.force_load_data() 
         
     def delete_resource(self, resource_name, resource_namespace):
-        """Delete a single resource."""
-        # Clean up any existing delete thread first
         if hasattr(self, 'delete_thread') and self.delete_thread and self.delete_thread.isRunning():
-            self.delete_thread.wait(300)  # Wait for it to finish with timeout
-
-        # Confirm deletion
+            self.delete_thread.wait(300)
         ns_text = f" in namespace {resource_namespace}" if resource_namespace else ""
-        result = QMessageBox.warning(
-            self,
-            "Confirm Deletion",
+        result = QMessageBox.warning(self, "Confirm Deletion",
             f"Are you sure you want to delete {self.resource_type}/{resource_name}{ns_text}?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
-        )
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+        if result != QMessageBox.StandardButton.Yes: return
         
-        if result != QMessageBox.StandardButton.Yes:
-            return
-            
-        # Start deletion thread
         self.delete_thread = ResourceDeleterThread(self.resource_type, resource_name, resource_namespace)
         self.delete_thread.delete_completed.connect(self.on_delete_completed)
         self.delete_thread.start()
         
     def on_delete_completed(self, success, message, resource_name, resource_namespace):
-        """Handle deletion completion."""
         if success:
-            # Show success message
             QMessageBox.information(self, "Deletion Successful", message)
-            
-            # Remove from selected items if present
             self.selected_items.discard((resource_name, resource_namespace))
-            
-            # Remove from resources list
-            self.resources = [r for r in self.resources if not (
-                r["name"] == resource_name and r.get("namespace", "") == resource_namespace
-            )]
-            
-            # Reload data
-            self.load_data()
+            self.force_load_data() 
         else:
-            # Show error message
             QMessageBox.critical(self, "Deletion Failed", message)
-            
