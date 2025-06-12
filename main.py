@@ -49,8 +49,6 @@ try:
     from UI.ClusterView import ClusterView, LoadingOverlay
     from UI.Styles import AppColors, AppStyles
     from utils.cluster_connector import get_cluster_connector
-    from UI.ProfileScreen import ProfileScreen
-    from UI.NotificationScreen import NotificationScreen
     from UI.DetailPageComponent import DetailPageComponent
     from UI.detail_sections.detailpage_yamlsection import DetailPageYAMLSection
 
@@ -256,8 +254,10 @@ class MainWindow(QMainWindow):
 
             def post_switch_operations():
                 self.cluster_view.set_active_cluster(loaded_cluster_name)
-                if hasattr(self.cluster_view, 'terminal_panel') and self.cluster_view.terminal_panel.is_visible:
-                    self.cluster_view.adjust_terminal_position()
+                if (hasattr(self.cluster_view, 'terminal_panel') and
+                        self.cluster_view.terminal_panel.is_visible and
+                        hasattr(self.cluster_view.terminal_panel, 'reposition')):
+                    self.cluster_view.terminal_panel.reposition()
                 if hasattr(self.cluster_view, 'handle_page_change'):
                     self.cluster_view.handle_page_change(self.cluster_view.stacked_widget.currentWidget())
 
@@ -316,8 +316,10 @@ class MainWindow(QMainWindow):
 
             def post_switch_ops_cached():
                 self.cluster_view.set_active_cluster(cluster_name)
-                if hasattr(self.cluster_view, 'terminal_panel') and self.cluster_view.terminal_panel.is_visible:
-                    self.cluster_view.adjust_terminal_position()
+                if (hasattr(self.cluster_view, 'terminal_panel') and
+                        self.cluster_view.terminal_panel.is_visible and
+                        hasattr(self.cluster_view.terminal_panel, 'reposition')):
+                    self.cluster_view.terminal_panel.reposition()
                 if hasattr(self.cluster_view, 'handle_page_change'):
                     self.cluster_view.handle_page_change(self.cluster_view.stacked_widget.currentWidget())
             QTimer.singleShot(50, post_switch_ops_cached)
@@ -386,45 +388,6 @@ class MainWindow(QMainWindow):
 
         # Setup connections and auxiliary panels
         self.setup_connections()
-        self.setup_profile_screen()
-        self.setup_notification_screen()
-
-    def setup_profile_screen(self):
-        """Set up the profile panel"""
-        self.profile_screen = ProfileScreen(self)
-        if hasattr(self.title_bar, 'profile_btn'):
-            self.title_bar.profile_btn.clicked.connect(self.toggle_profile_screen)
-
-    def toggle_profile_screen(self):
-        """Toggle the profile screen visibility"""
-        if not hasattr(self, 'profile_screen'):
-            return
-
-        if self.profile_screen.is_visible:
-            self.profile_screen.hide_profile()
-        else:
-            # Set user information before showing
-            self.profile_screen.set_user_info(
-                name="John Doe",
-                username="johndoe",
-                email="john.doe@example.com",
-                organization="Acme Corp",
-                team="DevOps",
-                role="Administrator"
-            )
-            self.profile_screen.show_profile()
-            self.profile_screen.raise_()
-
-    def setup_notification_screen(self):
-        """Set up the notification panel"""
-        self.notification_screen = NotificationScreen(self, self.title_bar.notifications_btn)
-        if hasattr(self.title_bar, 'notifications_btn'):
-            self.title_bar.notifications_btn.clicked.connect(self.toggle_notification_screen)
-
-    def toggle_notification_screen(self):
-        """Toggle the notification screen visibility"""
-        if hasattr(self, 'notification_screen'):
-            self.notification_screen.toggle_notifications()
 
     def setup_connections(self):
         """Set up signal connections between components"""
@@ -479,27 +442,11 @@ class MainWindow(QMainWindow):
                 pos = self.mapToGlobal(QPoint(geom.width() - msg_width -10 , geom.height() - msg_height -10))
                 msg.move(pos)
 
-
             # Automatically close after 3 seconds
             QTimer.singleShot(3000, msg.close)
 
             # Show the notification
             msg.show()
-
-            # Update notification count on title bar if available
-            if hasattr(self.title_bar, 'update_notification_count'):
-                try:
-                    # This logic should be in NotificationScreen or a shared manager
-                    # For now, just simulate an increase.
-                    # A more robust solution: self.notification_screen.add_notification_item(...)
-                    # and then self.title_bar.update_notification_count(self.notification_screen.get_unread_count())
-                    current_count = 0 # Placeholder, get actual count
-                    if hasattr(self.notification_screen, 'get_unread_count'):
-                        current_count = self.notification_screen.get_unread_count() +1 # Simulate adding one
-                    self.title_bar.update_notification_count(current_count if current_count >0 else 1)
-
-                except Exception as e:
-                    logging.warning(f"Failed to update notification count: {e}")
 
         except Exception as e:
             logging.error(f"Error showing notification: {e}")
@@ -538,11 +485,6 @@ class MainWindow(QMainWindow):
             # Update any time displays in cluster view (e.g., event timestamps)
             if hasattr(self.cluster_view, 'update_timezone_dependent_displays'):
                 self.cluster_view.update_timezone_dependent_displays(timezone)
-
-            # Update notification screen timestamps
-            if hasattr(self.notification_screen, 'refresh_timestamps'):
-                self.notification_screen.refresh_timestamps()
-
 
             logging.info(f"Applied timezone change to: {timezone}")
 
@@ -832,6 +774,7 @@ class MainWindow(QMainWindow):
 
     def update_panel_positions(self):
         """Update positions of panels - called from resize and move events"""
+
         # Update profile screen position if visible
         if hasattr(self, 'profile_screen') and self.profile_screen.is_visible:
             self.profile_screen.setFixedHeight(self.height())
@@ -947,24 +890,6 @@ class MainWindow(QMainWindow):
                 if hasattr(self.cluster_view.terminal_panel, 'cleanup'):
                     self.cluster_view.terminal_panel.cleanup()
 
-
-            # Hide profile screen if visible
-            if hasattr(self, 'profile_screen') and self.profile_screen.is_visible:
-                try:
-                    logging.debug("Hiding profile screen.")
-                    self.profile_screen.hide_profile()
-                except Exception as e_prof:
-                    logging.error(f"Error hiding profile screen: {e_prof}")
-
-            # Hide notification screen if visible
-            if hasattr(self, 'notification_screen') and self.notification_screen.is_visible:
-                try:
-                    logging.debug("Hiding notification screen.")
-                    self.notification_screen.hide_notifications() # Assuming method name
-                except Exception as e_notif:
-                    logging.error(f"Error hiding notification screen: {e_notif}")
-
-
             # Clean up main pages if they have specific cleanup methods
             pages_to_cleanup = [self.home_page, self.cluster_view, self.preferences_page]
             for page in pages_to_cleanup:
@@ -997,7 +922,7 @@ class MainWindow(QMainWindow):
 
         potential_timer_parents = [self, self.main_widget, self.title_bar, self.stacked_widget,
                                    self.home_page, self.cluster_view, self.preferences_page,
-                                   self.loading_overlay, self.profile_screen, self.notification_screen]
+                                   self.loading_overlay]
         if hasattr(self, 'cluster_view') and hasattr(self.cluster_view, 'terminal_panel'):
             potential_timer_parents.append(self.cluster_view.terminal_panel)
 

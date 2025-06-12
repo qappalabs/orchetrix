@@ -119,10 +119,10 @@ class PreferencesWidget(QWidget):
         self.copy_paste_enabled = False  # Track copy-paste state
         self.show_line_numbers = True  # Default to showing line numbers
         self.last_emitted_size = self.current_font_size  # Keep track of last emitted size to avoid duplicates
-        
+
         # Initialize timezone
         self.current_timezone = self.get_system_timezone()
-        
+
         print("PreferencesWidget: Initialized with terminal_panel=None")
         self.setup_ui()
 
@@ -442,7 +442,7 @@ class PreferencesWidget(QWidget):
         ])
         self.timezone_combo.setStyleSheet(AppStyles.DROPDOWN_STYLE)
         self.timezone_combo.setCursor(Qt.CursorShape.PointingHandCursor)
-        
+
         # Try to set the current timezone in the combo box
         try:
             index = self.timezone_combo.findText(self.current_timezone)
@@ -450,10 +450,10 @@ class PreferencesWidget(QWidget):
                 self.timezone_combo.setCurrentIndex(index)
         except Exception as e:
             print(f"Error setting current timezone: {e}")
-            
+
         self.timezone_combo.currentIndexChanged.connect(self.change_timezone)
         content_layout.addWidget(self.timezone_combo)
-        
+
         # Add current time display
         self.timezone_info = QLabel()
         self.timezone_info.setStyleSheet(AppStyles.DESCRIPTION_STYLE)
@@ -464,15 +464,15 @@ class PreferencesWidget(QWidget):
         timezone_apply_container = QWidget()
         timezone_apply_layout = QHBoxLayout(timezone_apply_container)
         timezone_apply_layout.setContentsMargins(0, 10, 0, 10)
-        
+
         timezone_apply_btn = QPushButton("Apply Timezone")
         timezone_apply_btn.setStyleSheet(AppStyles.BUTTON_PRIMARY_STYLE)
         timezone_apply_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         timezone_apply_btn.clicked.connect(self.apply_timezone)
-        
+
         timezone_apply_layout.addStretch()
         timezone_apply_layout.addWidget(timezone_apply_btn)
-        
+
         content_layout.addWidget(timezone_apply_container)
 
         content_layout.addStretch()
@@ -574,33 +574,33 @@ class PreferencesWidget(QWidget):
                 timezone = self.pending_timezone
                 self.current_timezone = timezone
                 print(f"Applying timezone change to: {timezone}")
-                
+
                 # Emit signal to notify application of timezone change
                 self.timezone_changed.emit(timezone)
-                
+
                 # Show confirmation message
-                QMessageBox.information(self, "Timezone Changed", 
-                                      f"Timezone has been changed to {timezone}.\nApplication display times will use this timezone.")
-                
+                QMessageBox.information(self, "Timezone Changed",
+                                        f"Timezone has been changed to {timezone}.\nApplication display times will use this timezone.")
+
                 # Update environment variable if needed
                 if platform.system() == "Linux" or platform.system() == "Darwin":
                     os.environ["TZ"] = timezone
                     time.tzset()  # Apply the timezone change
-                
+
                 # In a real app, you might also want to:
                 # 1. Save this preference to settings
                 # 2. Update any time displays throughout the app
                 # 3. Handle Windows timezone changes differently
-                
+
                 # Clear pending timezone
                 del self.pending_timezone
             except Exception as e:
                 print(f"Error applying timezone: {e}")
-                QMessageBox.warning(self, "Timezone Error", 
-                                   f"Failed to change timezone: {str(e)}")
+                QMessageBox.warning(self, "Timezone Error",
+                                    f"Failed to change timezone: {str(e)}")
         else:
-            QMessageBox.information(self, "No Change", 
-                                  "No timezone change was pending.")
+            QMessageBox.information(self, "No Change",
+                                    "No timezone change was pending.")
 
     def show_proxy_section(self):
         content_widget = QWidget()
@@ -1192,7 +1192,7 @@ class PreferencesWidget(QWidget):
             print(f"PreferencesWidget: Editor font family changed to {font_family}")
             # Emit signal to update all YAML editors
             self.font_changed.emit(font_family)
-            
+
             # Sync terminal font family combo if it exists
             if hasattr(self, 'font_family_combo') and not self.font_family_combo.isNull():
                 try:
@@ -1202,7 +1202,7 @@ class PreferencesWidget(QWidget):
                 except RuntimeError:
                     # Handle the case where the widget has been deleted
                     print("Warning: font_family_combo has been deleted")
-                    
+
             # Additional logging to confirm signal emission
             print(f"PreferencesWidget: Emitted font_changed signal with font family: {font_family}")
 
@@ -1221,7 +1221,7 @@ class PreferencesWidget(QWidget):
                     print(f"PreferencesWidget: Emitting font_size_changed with size: {font_size}")
                     self.font_size_changed.emit(font_size)
                     self.apply_font_size_manually(font_size)
-                    
+
                     # Sync editor font size input if it exists
                     if hasattr(self, 'editor_font_size_input'):
                         self.editor_font_size_input.blockSignals(True)
@@ -1248,7 +1248,7 @@ class PreferencesWidget(QWidget):
                     self.last_emitted_size = font_size
                     print(f"PreferencesWidget: Emitting font_size_changed with size: {font_size}")
                     self.font_size_changed.emit(font_size)
-                    
+
                     # Sync terminal font size input if it exists
                     if hasattr(self, 'font_size_input'):
                         self.font_size_input.blockSignals(True)
