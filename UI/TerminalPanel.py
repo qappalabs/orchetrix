@@ -1,18 +1,168 @@
 import os
 import sys
 import platform
+import re
 import shutil
+from datetime import datetime
+from kubernetes import watch
+from kubernetes.client.rest import ApiException
+import logging
 from PyQt6.QtWidgets import (
-    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QToolButton, QSizePolicy,
-    QFileDialog, QMenu, QLabel, QPushButton, QComboBox
+    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QToolButton, QSizePolicy,QLineEdit,
+    QFileDialog, QMenu, QLabel, QPushButton, QComboBox, QCheckBox
 )
-from PyQt6.QtGui import QAction, QColor, QTextCursor, QFont, QIcon, QTextCharFormat, QTextDocument
-from PyQt6.QtCore import Qt, QProcess, QTimer, pyqtSignal, QSize, QEvent, QPropertyAnimation, QEasingCurve, QPoint
+from PyQt6.QtGui import QAction, QColor, QTextCursor, QFont, QIcon, QTextCharFormat,QTextDocument, QKeySequence
+from PyQt6.QtCore import Qt, QSize, QPropertyAnimation, QEasingCurve, QPoint, QThread, QTimer, pyqtSignal, QProcess
 from datetime import datetime
 from enum import Enum
 
-from Styles import AppColors, AppStyles
-from Icons import Icons
+from Styles import AppColors
+
+
+class StyleConstants:
+    """Centralized stylesheet constants"""
+    TERMINAL_TEXTEDIT = f"""
+        QTextEdit {{
+            background-color: #1E1E1E;
+            color: #E0E0E0;
+            border: none;
+            selection-background-color: #264F78;
+            selection-color: #E0E0E0;
+            padding: 8px;
+        }}
+        QScrollBar:vertical {{
+            border: none;
+            background: #2D2D2D;
+            width: 10px;
+            margin: 0px;
+        }}
+        QScrollBar::handle:vertical {{
+            background: #555555;
+            min-height: 20px;
+            border-radius: 5px;
+        }}
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+            height: 0px;
+        }}
+    """
+    TERMINAL_WRAPPER = f"""
+        QWidget#terminal_wrapper {{
+            background-color: {AppColors.BG_DARKER};
+            border: 1px solid {AppColors.BORDER_COLOR};
+            border-bottom: none;
+        }}
+    """
+    HEADER_CONTENT = f"""
+        background-color: {AppColors.BG_DARKER};
+        border-bottom: 1px solid {AppColors.BORDER_COLOR};
+    """
+    TAB_LABEL = f"""
+        color: {AppColors.TEXT_SECONDARY};
+        background: transparent;
+        font-size: 12px;
+        text-decoration: none;
+        border: none;
+        outline: none;
+    """
+    TAB_CLOSE_BUTTON = f"""
+        QPushButton {{
+            background-color: transparent;
+            color: {AppColors.TEXT_SECONDARY};
+            border: none;
+            font-size: 10px;
+            font-weight: bold;
+            padding: 0px;
+            margin: 0px;
+        }}
+        QPushButton:hover {{
+            background-color: #FF4D4D;
+            color: white;
+            border-radius: 8px;
+        }}
+    """
+    TAB_BUTTON = f"""
+        QPushButton {{
+            background-color: transparent;
+            border: none;
+            border-right: 1px solid {AppColors.BORDER_COLOR};
+            border-left: 1px solid {AppColors.BORDER_COLOR};
+            border-bottom: 1px solid {AppColors.BORDER_COLOR};
+            border-top: 1px solid {AppColors.BORDER_COLOR};
+            padding: 0px 35px;
+            margin: 0px;
+        }}
+        QPushButton:hover {{
+            background-color: {AppColors.HOVER_BG};
+        }}
+        QPushButton:checked {{
+            background-color: #1E1E1E;
+            border-bottom: 2px solid {AppColors.ACCENT_BLUE};
+        }}
+    """
+    HEADER_BUTTON = f"""
+        QToolButton {{
+            background-color: transparent;
+            color: {AppColors.TEXT_SECONDARY};
+            border: none;
+            font-size: 12px;
+            padding: 4px;
+        }}
+        QToolButton:hover {{
+            background-color: {AppColors.HOVER_BG};
+            color: #ffffff;
+            border-radius: 4px;
+        }}
+    """
+    RESIZE_HANDLE = """
+        background-color: rgba(80, 80, 80, 0.3);
+        border: none;
+    """
+    SHELL_DROPDOWN = f"""
+        QComboBox {{
+            background-color: {AppColors.BG_DARKER};
+            color: {AppColors.TEXT_SECONDARY};
+            border: 1px solid {AppColors.BORDER_COLOR};
+            padding: 2px 4px;
+            font-size: 12px;
+        }}
+        QComboBox:hover {{
+            background-color: {AppColors.HOVER_BG};
+        }}
+        QComboBox::drop-down {{
+            border: none;
+            width: 20px;
+        }}
+        QComboBox::down-arrow {{
+            image: url(icons/dropdown_arrow.svg);
+            width: 10px;
+            height: 10px;
+        }}
+        QComboBox QAbstractItemView {{
+            background-color: {AppColors.BG_DARKER};
+            color: {AppColors.TEXT_SECONDARY};
+            selection-background-color: {AppColors.HOVER_BG};
+            border: 1px solid {AppColors.BORDER_COLOR};
+        }}
+    """
+    SEARCH_INPUT = f"""
+        QLineEdit {{
+            background-color: {AppColors.BG_DARKER};
+            color: {AppColors.TEXT_SECONDARY};
+            border: 1px solid {AppColors.BORDER_COLOR};
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 12px;
+            min-width: 200px;
+        }}
+        QLineEdit:focus {{
+            border-color: {AppColors.ACCENT_BLUE};
+            background-color: #242424;
+        }}
+        QLineEdit::placeholder {{
+            color: #666666;
+        }}
+    """
+
 
 class CommandConstants(Enum):
     CLEAR = "clear"
@@ -38,6 +188,8 @@ class UnifiedTerminalWidget(QTextEdit):
         self.font_size = 9
         self.font_family = "Monospace"
         self.copy_paste_enabled = False
+        self.search_highlights = []  # Store search highlight positions
+        self.terminal_bg_color = QColor("#1E1E1E")  # Store terminal background color
         self.setup_ui()
         self.update_prompt_with_working_directory()
         self.append_prompt()
@@ -146,11 +298,18 @@ class UnifiedTerminalWidget(QTextEdit):
         if not self.is_valid:
             return
         try:
+            # Allow selection, so don't force cursor if there is a selection
+            if self.textCursor().hasSelection():
+                return
             cursor = self.textCursor()
-            cursor.setPosition(self.edit_start_pos if self.edit_mode and cursor.position() < self.edit_start_pos else
-                               self.edit_end_pos if self.edit_mode and cursor.position() > self.edit_end_pos else
-                               self.input_position)
-            self.setTextCursor(cursor)
+            if self.edit_mode:
+                 if cursor.position() < self.edit_start_pos or cursor.position() > self.edit_end_pos:
+                    cursor.setPosition(self.edit_end_pos)
+                    self.setTextCursor(cursor)
+            else:
+                if cursor.position() < self.input_position:
+                    cursor.setPosition(self.document().characterCount() - 1)
+                    self.setTextCursor(cursor)
         except RuntimeError:
             self.is_valid = False
 
