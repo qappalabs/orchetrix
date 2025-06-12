@@ -775,14 +775,16 @@ class MainWindow(QMainWindow):
     def update_panel_positions(self):
         """Update positions of panels - called from resize and move events"""
 
-        # Update terminal position if visible (terminal is part of ClusterView)
-        if (hasattr(self, 'cluster_view') and
-                hasattr(self.cluster_view, 'terminal_panel') and
-                self.cluster_view.terminal_panel.is_visible):
-            if (hasattr(self.cluster_view, 'terminal_panel') and
-                    self.cluster_view.terminal_panel.is_visible and
-                    hasattr(self.cluster_view.terminal_panel, 'reposition')):
-                self.cluster_view.terminal_panel.reposition()
+        # Update profile screen position if visible
+        if hasattr(self, 'profile_screen') and self.profile_screen.is_visible:
+            self.profile_screen.setFixedHeight(self.height())
+            self.profile_screen.move(self.width() - self.profile_screen.width(), 0)
+
+        # Update notification screen position
+        if hasattr(self, 'notification_screen') and self.notification_screen.is_visible:
+            # Notification screen might have its own logic via update_position or similar
+            if hasattr(self.notification_screen, 'update_position'):
+                self.notification_screen.update_position()
 
     def moveEvent(self, event):
         """Handle move event"""
