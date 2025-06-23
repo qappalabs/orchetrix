@@ -1,15 +1,16 @@
+# file: Pages/Helm/ChartsPage.py
 """
-Enhanced implementation of the Charts page with comprehensive data from ArtifactHub API.
-Includes icon detection, better error handling, and more metadata from the API.
+Enhanced implementation of the Charts page displaying charts from various repositories.
+Includes icon detection, better error handling, and repository-based filtering.
 """
 
 from PyQt6.QtWidgets import (
     QHeaderView, QWidget, QLabel, QHBoxLayout,
     QToolButton, QMenu, QVBoxLayout, QTableWidgetItem, 
-    QProgressBar, QAbstractSlider, QPushButton,QMessageBox,QDialog
+    QProgressBar, QLineEdit, QPushButton, QMessageBox, QDialog, QComboBox, QProgressDialog
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt6.QtGui import QColor, QPixmap
+from PyQt6.QtGui import QColor, QPixmap, QIcon
 
 import requests
 import json
@@ -17,1018 +18,343 @@ import os
 import re
 import hashlib
 from urllib.parse import urljoin
+import yaml
+import logging
 
 from base_components.base_components import SortableTableWidgetItem
 from base_components.base_resource_page import BaseResourcePage
 from UI.Styles import AppColors, AppStyles
-from utils.helm_utils import ChartInstallDialog, install_helm_chart
-
+from utils.helm_utils import ChartInstallDialog, HelmInstallThread, get_helm_repos, update_helm_repos, ScrollableMessageBox, ManageReposDialog
 
 class ChartDataThread(QThread):
-    """Thread for loading Helm charts from ArtifactHub API without blocking the UI."""
-    data_loaded = pyqtSignal(list, bool)  # Data, is_more_available
+    """Thread for loading Helm charts from ArtifactHub API and local repo cache."""
+    data_loaded = pyqtSignal(list, bool)
     error_occurred = pyqtSignal(str)
-    
-    def __init__(self, limit=25, offset=0, use_search=True, search_term=""):
+
+    def __init__(self, repository=None, limit=50, offset=0, search_term=""):
         super().__init__()
+        self.repository = repository
         self.limit = limit
         self.offset = offset
-        self.use_search = use_search
         self.search_term = search_term
-        
-        # Create the directories for storing icons
         self.setup_directories()
-        
-        # Repository icons cache (repo_name -> icon_path)
-        self.repository_icons = {}
-        
+
     def setup_directories(self):
-        """Set up directories for storing icons and cache"""
-        # Create directory for icons
-        self.icons_dir = os.path.join(os.path.expanduser('~'), '.artifacthub', 'icons')
+        self.icons_dir = os.path.join(os.path.expanduser('~'), '.orchestrix', 'icons')
         os.makedirs(self.icons_dir, exist_ok=True)
-        
-        # Create directory for default icons
-        self.default_icons_dir = os.path.join(os.path.expanduser('~'), '.artifacthub', 'default_icons')
-        os.makedirs(self.default_icons_dir, exist_ok=True)
-        
-        # Download default Helm icon if not present
-        self.default_helm_icon_path = os.path.join(self.default_icons_dir, 'default_helm_icon.png')
-        if not os.path.exists(self.default_helm_icon_path):
-            try:
-                # Create a session for cookies and headers
-                session = requests.Session()
-                headers = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                    'Accept': 'application/json'
-                }
-                
-                # Try to get the Helm icon from Artifact Hub
-                default_icon_url = "https://artifacthub.io/static/media/helm-chart.svg"
-                icon_response = session.get(default_icon_url, headers=headers, timeout=10)
-                if icon_response.status_code == 200:
-                    with open(self.default_helm_icon_path, 'wb') as f:
-                        f.write(icon_response.content)
-
-            except Exception as e:
-                pass
+        self.default_chart_icon_path = os.path.join(self.icons_dir, 'default_chart_icon.png')
 
     def run(self):
-        """Execute the API request and emit results."""
         try:
-            # Create a session for cookies and headers
-            session = requests.Session()
-            
-            # Use a more browser-like user agent
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Accept': 'application/json',
-                'Content-Type': 'application/json'
-            }
-            
-            # Try different API methods: POST first (seems more reliable)
-            charts_data = []
-            is_more_available = True
-            
-            # First try POST method
-            try:
-                post_endpoint = 'https://artifacthub.io/api/v1/packages/search'
-                
-                # Build search parameters
-                search_query = "apache -solr -hadoop"  # Default query
-                if self.use_search and self.search_term:
-                    search_query = self.search_term
-                
-                post_data = {
-                    "filters": {
-                        "kind": [0]  # 0 is for Helm charts
-                    },
-                    "offset": self.offset,
-                    "limit": self.limit,
-                    "sort": "last_updated", 
-                    "ts_query_web": search_query
-                }
-                
-
-                response = session.post(post_endpoint, json=post_data, headers=headers, timeout=30)
-                
-                if response.status_code == 200:
-                    page_data = response.json()
-                    
-                    # Process the data
-                    charts_data = self.process_api_data(page_data, session, headers)
-                    
-                    # We'll assume more data is available if we got a full page
-                    is_more_available = len(charts_data) >= self.limit
-                    
-
-                else:
-                    pass
-            except Exception as e:
-                pass
-            
-            # If POST failed and we have no data, try GET method
-            if not charts_data:
-                try:
-                    # Try different API endpoints
-                    possible_api_endpoints = [
-                        'https://artifacthub.io/api/v1/packages/search',
-                        'https://artifacthub.io/api/packages/search',
-                        'https://artifacthub.io/packages/api/v1/search'
-                    ]
-                    
-                    for endpoint in possible_api_endpoints:
-                        # Parameters for the search
-                        search_query = "apache -solr -hadoop"  # Default query
-                        if self.use_search and self.search_term:
-                            search_query = self.search_term
-                            
-                        params = {
-                            'kind': '0',  # Helm charts
-                            'ts_query_web': search_query,
-                            'sort': 'last_updated',
-                            'page': (self.offset // self.limit) + 1,
-                            'limit': self.limit
-                        }
-                        
-                       
-                        response = session.get(endpoint, params=params, headers=headers, timeout=30)
-                        
-                        if response.status_code == 200:
-                            page_data = response.json()
-                            
-                            # Process the data
-                            charts_data = self.process_api_data(page_data, session, headers)
-                            
-                            # We'll assume more data is available if we got a full page
-                            is_more_available = len(charts_data) >= self.limit
-
-                            break  # Exit the loop if we got data
-                except Exception as e:
-                    pass
-            
-            # Force more data available flag to true if we got any data at all
-            if charts_data:
-                is_more_available = True
-            
-            # Do a second pass to add default icons for charts missing them
-            charts_missing_icons = [chart for chart in charts_data if not chart.get('icon_path')]
-            if charts_missing_icons:
-                pass
-                
-                for chart in charts_missing_icons:
-                    # First try repository icon
-                    repo_name = chart.get('repository', 'Unknown')
-                    if repo_name in self.repository_icons and self.repository_icons[repo_name] != 'N/A':
-                        chart['icon_path'] = self.repository_icons[repo_name]
-                    else:
-                        # Use default Helm icon as last resort
-                        if os.path.exists(self.default_helm_icon_path):
-                            chart['icon_path'] = self.default_helm_icon_path
-            
-            # Emit the result with more data available flag
-            
-            self.data_loaded.emit(charts_data, is_more_available)
-            
+            charts = self.search_artifact_hub()
+            is_more_available = len(charts) == self.limit
+            self.data_loaded.emit(charts, is_more_available)
+        except requests.exceptions.ConnectionError:
+             self.error_occurred.emit("Network connection error. Could not connect to Artifact Hub.")
         except Exception as e:
-            self.error_occurred.emit(f"Error fetching charts: {str(e)}")
-    
+            logging.error(f"Failed to fetch charts from ArtifactHub: {e}")
+            try:
+                charts = self.load_from_local_cache()
+                self.data_loaded.emit(charts, False)
+            except Exception as cache_e:
+                self.error_occurred.emit(f"API Error: {e}\nCache Error: {cache_e}")
+
+    def search_artifact_hub(self):
+        session = requests.Session()
+        headers = {'User-Agent': 'Orchestrix/1.0', 'Accept': 'application/json'}
+        search_query = self.search_term if self.search_term else ""
+        
+        endpoint = 'https://artifacthub.io/api/v1/packages/search'
+        params = {
+            'kind': '0', 
+            'ts_query_web': search_query,
+            'sort': 'relevance',
+            'offset': self.offset,
+            'limit': self.limit
+        }
+        if self.repository and self.repository.lower() != 'all':
+            params['repo'] = [self.repository]
+
+        response = session.get(endpoint, params=params, headers=headers, timeout=30)
+        response.raise_for_status()
+        page_data = response.json()
+        return self.process_api_data(page_data, session, headers)
+
+    def load_from_local_cache(self):
+        if self.repository and self.repository.lower() != 'all':
+            return self.load_charts_from_repo(self.repository)
+        return self.load_charts_from_all_repos_cache()
+
+    def load_charts_from_repo(self, repo_name):
+        charts = []
+        cache_dir = os.path.join(os.path.expanduser('~'), '.cache', 'helm', 'repository')
+        index_file = f"{repo_name}-index.yaml"
+        index_path = os.path.join(cache_dir, index_file)
+        if os.path.exists(index_path):
+            with open(index_path, 'r', encoding='utf-8') as f:
+                index_data = yaml.safe_load(f)
+                for name, chart_versions in index_data.get('entries', {}).items():
+                    if self.search_term and self.search_term.lower() not in name.lower():
+                        continue
+                    if chart_versions:
+                        latest = chart_versions[0]
+                        charts.append({
+                            'name': latest.get('name'), 'description': latest.get('description'),
+                            'version': latest.get('version'), 'app_version': latest.get('appVersion'),
+                            'repository': repo_name, 'icon_path': self.default_chart_icon_path
+                        })
+        return charts
+
+    def load_charts_from_all_repos_cache(self):
+        all_charts = []
+        repos = get_helm_repos()
+        for repo in repos:
+            all_charts.extend(self.load_charts_from_repo(repo['name']))
+        if self.search_term:
+            term = self.search_term.lower()
+            return [c for c in all_charts if term in c['name'].lower() or term in c['description'].lower()]
+        return all_charts
+
     def process_api_data(self, api_data, session, headers):
-        """Process API data to extract helm charts with icons"""
-        helm_charts = []
-        
-        if not api_data:
-            return helm_charts
-        
-        # Handle different possible data structures
-        packages = []
-        
-        if isinstance(api_data, dict):
-            if 'packages' in api_data:
-                packages = api_data['packages']
-            elif 'data' in api_data and isinstance(api_data['data'], list):
-                packages = api_data['data']
-            elif 'items' in api_data and isinstance(api_data['items'], list):
-                packages = api_data['items']
-        elif isinstance(api_data, list):
-            packages = api_data
-        
-        # Process packages
-        for package in packages:
-            try:
-                # Extract data (adjust based on actual API response structure)
-                name = package.get('name', 'Unknown')
-                if isinstance(name, dict) and 'name' in name:
-                    name = name['name']
-                
-                description = package.get('description', 'No description available')
-                version = package.get('version', 'N/A')
-                app_version = package.get('app_version', None)
-                if app_version is None and 'appVersion' in package:
-                    app_version = package.get('appVersion', 'N/A')
-                
-                # Extract repository info
-                repository = 'Unknown'
-                repository_url = ''
-                if 'repository' in package and isinstance(package.get('repository'), dict):
-                    repo = package.get('repository', {})
-                    repository = repo.get('name', 'Unknown')
-                    repository_url = repo.get('url', '')
-                
-                # Get stars and last updated
-                stars = str(package.get('stars', 0))
-                last_updated = package.get('last_updated', None)
-                if not last_updated:
-                    last_updated = package.get('created_at', '')
-                
-                # Store package_id for potential later use to get detailed info
-                package_id = package.get('package_id', 'N/A')
-                if package_id == 'N/A' and 'packageId' in package:
-                    package_id = package.get('packageId', 'N/A')
-                
-                # Download icon if available
-                icon_url, icon_path = self.download_icon(package, session, headers)
-                
-                # Add to our list
-                helm_charts.append({
-                    'name': name,
-                    'description': description,
-                    'version': version,
-                    'app_version': app_version,
-                    'repository': repository,
-                    'repository_url': repository_url,
-                    'stars': stars,
-                    'last_updated': last_updated,
-                    'package_id': package_id,
-                    'icon_url': icon_url,
-                    'icon_path': icon_path
-                })
-            except Exception as e:
-                pass
-        
-        return helm_charts
-    
+        charts = []
+        for package in api_data.get('packages', []):
+            repo_info = package.get('repository', {})
+            charts.append({
+                'name': package.get('name'), 
+                'description': package.get('description'),
+                'version': package.get('version'), 
+                'app_version': package.get('app_version'),
+                'repository': repo_info.get('name'),
+                'repository_url': repo_info.get('url'),
+                'icon_path': self.download_icon(package, session, headers)
+            })
+        return charts
+
     def download_icon(self, package, session, headers):
-        """Download and save the package icon if available"""
-        icon_url = None
-        icon_path = None
-        
+        icon_url = package.get('logo_url') or (f"https://artifacthub.io/image/{package['logo_image_id']}" if package.get('logo_image_id') else None)
+        if not icon_url: return self.default_chart_icon_path
         try:
-            # Get package name for debugging
-            package_name = package.get('name', 'unknown')
-            
-            # Check for logo_image_id first (most reliable)
-            if 'logo_image_id' in package and package['logo_image_id']:
-                logo_id = package.get('logo_image_id')
-                if logo_id:
-                    icon_url = f"https://artifacthub.io/image/{logo_id}"
-            
-            # If no logo_image_id, check other possible icon fields
-            if not icon_url:
-                # Check for direct logoURL or logo field
-                for field in ['logoURL', 'logo_url', 'logoImageId', 'logo', 'icon']:
-                    if field in package and package[field]:
-                        if field == 'logoImageId':
-                            logo_id = package.get(field)
-                            if logo_id:
-                                icon_url = f"https://artifacthub.io/image/{logo_id}"
-                        else:
-                            icon_url = package.get(field)
-                        break
-                    
-                # Check for nested structures if still no icon
-                if not icon_url:
-                    # Check repository
-                    if 'repository' in package and isinstance(package['repository'], dict):
-                        repo = package['repository']
-                        
-                        # Save repository logo for future use as fallback
-                        repo_name = repo.get('name')
-                        if repo_name:
-                            # Look for repository logo
-                            repo_logo_id = repo.get('logo_image_id') or repo.get('logoImageId')
-                            
-                            if repo_logo_id and repo_name not in self.repository_icons:
-                                repo_icon_url = f"https://artifacthub.io/image/{repo_logo_id}"
-                                # Download the repository icon
-                                try:
-                                    repo_icon_filename = f"repo_{repo_name}_{hashlib.md5(repo_icon_url.encode()).hexdigest()[:8]}.png"
-                                    repo_icon_path = os.path.join(self.icons_dir, repo_icon_filename)
-                                    
-                                    if not os.path.exists(repo_icon_path):
-                                        repo_icon_response = session.get(repo_icon_url, headers=headers, timeout=10)
-                                        if repo_icon_response.status_code == 200:
-                                            with open(repo_icon_path, 'wb') as f:
-                                                f.write(repo_icon_response.content)
-                                            self.repository_icons[repo_name] = repo_icon_path
-                                    else:
-                                        self.repository_icons[repo_name] = repo_icon_path
-                                except Exception as e:
-                                    
-                                    self.repository_icons[repo_name] = 'N/A'
-                        
-                        # Try to use repo logo fields for the package icon if not found elsewhere
-                        if not icon_url:
-                            for field in ['logoURL', 'logo_url', 'logo_image_id', 'logo']:
-                                if field in repo and repo[field]:
-                                    if field == 'logo_image_id':
-                                        logo_id = repo.get(field)
-                                        if logo_id:
-                                            icon_url = f"https://artifacthub.io/image/{logo_id}"
-                                    else:
-                                        icon_url = repo.get(field)
-                                    break
-            
-            # If icon URL starts with /, it's a relative URL
-            if icon_url and icon_url.startswith('/'):
-                icon_url = urljoin('https://artifacthub.io', icon_url)
-            
-            # If we found an icon URL, download it
-            if icon_url:
-                # Create a filename based on package name and URL hash
-                url_hash = hashlib.md5(icon_url.encode()).hexdigest()[:8]
-                
-                # Determine file extension from URL or default to .png
-                file_ext = os.path.splitext(icon_url)[1].lower()
-                if not file_ext or len(file_ext) > 5:  # If no extension or suspicious extension
-                    file_ext = '.png'
-                
-                # Clean package name for filename
-                safe_name = re.sub(r'[^\w\-\.]', '_', package_name)
-                icon_filename = f"{safe_name}_{url_hash}{file_ext}"
-                icon_path = os.path.join(self.icons_dir, icon_filename)
-                
-                # Download the icon if it doesn't exist
-                if not os.path.exists(icon_path):
-                    try:
-                        icon_response = session.get(icon_url, headers=headers, timeout=10)
-                        
-                        if icon_response.status_code == 200:
-                            with open(icon_path, 'wb') as f:
-                                f.write(icon_response.content)
-                        else:
-                            
-                            icon_path = None
-                    except Exception as e:
-                        icon_path = None
-            else:
-                icon_path = None
-        
-        except Exception as e:
-            icon_path = None
-        
-        return icon_url, icon_path
-
-
-class ChartSearchThread(QThread):
-    """Thread for searching Helm charts from ArtifactHub API."""
-    search_completed = pyqtSignal(list, str)
-    error_occurred = pyqtSignal(str)
-    
-    def __init__(self, search_term=""):
-        super().__init__()
-        self.search_term = search_term
-        
-    def run(self):
-        """Execute the search request and emit results."""
-        # Create and start a ChartDataThread with search parameters
-        data_thread = ChartDataThread(limit=25, offset=0, use_search=True, search_term=self.search_term)
-        data_thread.data_loaded.connect(lambda data, is_more: self.search_completed.emit(data, self.search_term))
-        data_thread.error_occurred.connect(self.error_occurred)
-        data_thread.start()
-        data_thread.wait()  # Wait for thread to complete
-
+            url_hash = hashlib.md5(icon_url.encode()).hexdigest()
+            file_ext = (os.path.splitext(icon_url)[1] or '.png').split('?')[0]
+            icon_path = os.path.join(self.icons_dir, f"{url_hash}{file_ext}")
+            if not os.path.exists(icon_path):
+                res = session.get(icon_url, headers=headers, timeout=10)
+                if res.status_code == 200:
+                    with open(icon_path, 'wb') as f: f.write(res.content)
+                else: return self.default_chart_icon_path
+            return icon_path
+        except Exception:
+            return self.default_chart_icon_path
 
 class ChartsPage(BaseResourcePage):
-    """
-    Displays Helm charts with enhanced data from ArtifactHub API.
-    """
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.resource_type = "charts"  # Set resource type for detail page
-        self.resources = []  # Store loaded chart data
-        self.offset = 0  # Current offset for pagination
-        self.is_more_available = True  # Flag to indicate if more data can be loaded
-        self.is_loading_more = False  # Flag to prevent multiple load-more operations
-        self.is_searching = False  # Flag to indicate search mode
-        
-        # Add a safety mechanism to recover from stuck loading states
-        self._loading_timer = QTimer()
-        self._loading_timer.timeout.connect(self._reset_loading_state)
-        self._loading_timer.setSingleShot(True)
-        
-        # Initialize the UI
-        self.setup_page_ui()
-        
-    def _reset_loading_state(self):
-        """Reset loading state if it gets stuck"""
-        if hasattr(self, 'is_loading') and self.is_loading:
-            self.is_loading = False
-            
-        if hasattr(self, 'is_loading_more') and self.is_loading_more:
-            self.is_loading_more = False
-            
-        # Always ensure is_more_available is True to allow trying to load more
-        if hasattr(self, 'resources') and len(self.resources) > 0:
-            self.is_more_available = True
-            
-        # Re-enable the table if it was disabled
-        if hasattr(self, 'table'):
-            self.table.setEnabled(True)
-            
-        # If we had a loading indicator row, remove it
-        if hasattr(self, 'table') and self.table.rowCount() > 0:
-            last_row = self.table.rowCount() - 1
-            cell_widget = self.table.cellWidget(last_row, 0)
-            if cell_widget and hasattr(cell_widget, 'findChild'):
-                progress_bar = cell_widget.findChild(QProgressBar)
-                if progress_bar:
-                    # This is likely a loading indicator row, remove it
-                    self.table.setRowCount(last_row)
-        
-    def setup_page_ui(self):
-        """Set up the main UI elements for the Charts page"""
-        # Define headers and sortable columns
-        headers = ["", "Name", "Description", "Version", "App Version", "Repository", ""]
-        sortable_columns = {1, 3, 4, 5}
-        
-        # Create base UI
-        layout = super().setup_ui("Charts", headers, sortable_columns)
-        
-        # Apply table style
-        self.table.setStyleSheet(AppStyles.TABLE_STYLE)
-        self.table.horizontalHeader().setStyleSheet(AppStyles.CUSTOM_HEADER_STYLE)
-        
-        # Configure column widths
-        self.configure_columns()
-        
-        # Connect vertical scrollbar to detect when user reaches bottom
-        scrollbar = self.table.verticalScrollBar()
-        scrollbar.valueChanged.connect(self.check_scroll_position)
-        
-        # Remove checkbox column if present in the base class
-        if hasattr(self, 'select_all_checkbox') and self.select_all_checkbox:
-            self.select_all_checkbox.hide()
-        
-        return layout
-    
-    def _apply_filters(self):
-        """Apply search filter to the table"""
-        if not hasattr(self, 'table') or self.table.rowCount() == 0:
-            return
-                
-        # Get the search text
-        search_text = ""
-        if hasattr(self, 'search_bar'):
-            search_text = self.search_bar.text().lower()
-        
-        if not search_text:
-            # If no search text, show all rows
-            for row in range(self.table.rowCount()):
-                self.table.setRowHidden(row, False)
-            return
-            
-        # Hide rows that don't match the filters
-        for row in range(self.table.rowCount()):
-            row_matches = False
-            
-            # Search through all displayed columns, skipping icon and actions columns
-            for col in range(1, self.table.columnCount() - 1):
-                # Check regular table items
-                item = self.table.item(row, col)
-                if item and search_text in item.text().lower():
-                    row_matches = True
-                    break
-                
-                # Check for cell widgets (like status labels)
-                cell_widget = self.table.cellWidget(row, col)
-                if cell_widget:
-                    widget_text = ""
-                    # Handle widgets which contain QLabels
-                    for label in cell_widget.findChildren(QLabel):
-                        widget_text += label.text() + " "
-                    
-                    if search_text in widget_text.lower():
-                        row_matches = True
-                        break
-            
-            # Show or hide the row based on matches
-            self.table.setRowHidden(row, not row_matches)
-
-    def check_scroll_position(self, value):
-        """Check if user has scrolled to the bottom and load more data if needed"""
-        # Don't load more data if we're in search mode or if we're already loading
-        if self.is_searching or self.is_loading or self.is_loading_more:
-            return
-            
-        scrollbar = self.table.verticalScrollBar()
-        
-        # Get scrollbar values
-        max_value = scrollbar.maximum()
-        current_value = value
-        
-        # Calculate how far we've scrolled as a percentage (0.0 to 1.0)
-        # Avoid division by zero if max_value is 0
-        if max_value <= 0:
-            return
-            
-        scroll_percentage = current_value / max_value
-        
-        # ALWAYS try to load more data when we're over 65% scrolled
-        if scroll_percentage >= 0.65:
-            # Force is_more_available to True to ensure we try loading more
-            self.is_more_available = True
-            
-            # Call load_more_data if we're not already loading
-            if not self.is_loading_more and not self.is_loading:
-                self.load_more_data()
-    
-    def configure_columns(self):
-        """Configure column widths and behaviors"""
-        # Configure columns with fixed widths
-        fixed_widths = {
-            0: 50,   # Icon
-            1: 180,  # Name
-            3: 100,  # Version
-            4: 120,  # App Version
-            5: 150,  # Repository
-            6: 40    # Actions
-        }
-        
-        # Set column widths
-        for col, width in fixed_widths.items():
-            self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
-            self.table.setColumnWidth(col, width)
-        
-        # Make Description column stretch
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-    
-    def load_data(self, load_more=False):
-        """Load initial chart data from ArtifactHub API"""
-        if hasattr(self, 'is_loading') and self.is_loading:
-            return
-            
-        self.is_loading = True
-        self.resources = []
+        self.resource_type = "charts"
+        self.current_repo = "bitnami" 
+        self.is_loading = False
         self.offset = 0
         self.is_more_available = True
+        self.install_thread = None
+        self.setup_page_ui()
+        self.load_helm_repos()
+
+    def _add_controls_to_header(self, header_layout):
+        self.search_bar = QLineEdit()
+        self.search_bar.setPlaceholderText("Search charts...")
+        self.search_bar.setMinimumWidth(350)
+        self.search_bar.setFixedHeight(30)
+        search_style = getattr(AppStyles, "SEARCH_BAR_STYLE", "QLineEdit {}")
+        self.search_bar.setStyleSheet(search_style)
+        self.search_bar.textChanged.connect(self._handle_search)
+        header_layout.addWidget(self.search_bar)
+
+        header_layout.addStretch(1)
         
-        # Start the safety timer to recover from potential stuck states
-        self._loading_timer.start(15000)  # 15 seconds timeout
+        repo_label = QLabel("Repository:")
+        repo_label.setStyleSheet("color: #ffffff;")
+        header_layout.addWidget(repo_label)
         
-        # Clear the table first
-        self.table.setRowCount(0)
-        self.table.setSortingEnabled(False)
+        self.repo_combo = QComboBox()
+        self.repo_combo.setMinimumWidth(200)
+        self.repo_combo.setFixedHeight(30)
+        combo_style = getattr(AppStyles, "COMBO_BOX_STYLE", "QComboBox {}")
+        self.repo_combo.setStyleSheet(combo_style)
+        self.repo_combo.currentTextChanged.connect(self._handle_repo_change)
+        header_layout.addWidget(self.repo_combo)
+
+        manage_repos_btn = QPushButton("Manage Repos")
+        btn_style = getattr(AppStyles, "SECONDARY_BUTTON_STYLE", "QPushButton {}")
+        manage_repos_btn.setStyleSheet(btn_style)
+        manage_repos_btn.clicked.connect(self.manage_repositories)
+        header_layout.addWidget(manage_repos_btn)
+
+    def load_helm_repos(self):
+        """Loads helm repositories and sets the default selection."""
+        self.repo_combo.blockSignals(True)
+        self.repo_combo.clear()
+        self.repo_combo.addItem("All")
         
-        # Show loading indicator
-        loading_row = self.table.rowCount()
-        self.table.setRowCount(loading_row + 1)
-        self.table.setSpan(loading_row, 0, 1, self.table.columnCount())
+        # On first load, self.current_repo is 'bitnami'
+        default_repo_to_select = self.current_repo 
         
-        loading_widget = QWidget()
-        loading_layout = QVBoxLayout(loading_widget)
-        loading_layout.setContentsMargins(20, 20, 20, 20)
+        try:
+            # This now uses the pure Python client via the updated helm_utils
+            repos = get_helm_repos()
+            if repos:
+                repo_names = sorted([repo['name'] for repo in repos])
+                self.repo_combo.addItems(repo_names)
+        except Exception as e:
+            QMessageBox.warning(self, "Helm Error", f"Could not list Helm repositories: {e}")
+
+        # Attempt to set the default repository
+        repo_index = self.repo_combo.findText(default_repo_to_select, Qt.MatchFlag.MatchFixedString)
+        if repo_index >= 0:
+            self.repo_combo.setCurrentIndex(repo_index)
+        else:
+            # If default 'bitnami' isn't found, default to 'All'
+            self.repo_combo.setCurrentIndex(0)
+            
+        self.repo_combo.blockSignals(False)
         
-        loading_bar = QProgressBar()
-        loading_bar.setRange(0, 0)  # Indeterminate
-        loading_bar.setTextVisible(False)
-        loading_bar.setStyleSheet("""
-            QProgressBar {
-                border: 1px solid #3d3d3d;
-                border-radius: 3px;
-                background-color: #1e1e1e;
-                height: 20px;
-            }
-            QProgressBar::chunk {
-                background-color: #0078d7;
-            }
-        """)
+        # Manually trigger the handler with the newly set text to ensure initial data load
+        current_text = self.repo_combo.currentText()
+        if self.current_repo != current_text.lower():
+             self._handle_repo_change(current_text)
+        else:
+             self.force_load_data()
+
+    def manage_repositories(self):
+        dialog = ManageReposDialog(self)
+        if dialog.exec():
+            self.load_helm_repos()
+            self.force_load_data()
+
+    def _handle_repo_change(self, repo_name):
+        if repo_name:
+            self.current_repo = repo_name.lower()
+            self.force_load_data()
         
-        loading_text = QLabel(f"Loading charts from ArtifactHub API...")
-        loading_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        loading_text.setStyleSheet("color: #ffffff; font-size: 14px;")
+    def _handle_search(self, text):
+        if hasattr(self, '_search_timer'): self._search_timer.stop()
+        self._search_timer = QTimer()
+        self._search_timer.setSingleShot(True)
+        self._search_timer.timeout.connect(self.force_load_data)
+        self._search_timer.start(500)
+
+    def load_data(self, load_more=False):
+        if self.is_loading: return
+        self.is_loading = True
+        if not load_more:
+            self.offset = 0
+            self.resources = []
+            self._show_skeleton_loader()
         
-        loading_layout.addWidget(loading_text)
-        loading_layout.addWidget(loading_bar)
-        
-        self.table.setCellWidget(loading_row, 0, loading_widget)
-        
-        # Create and start the data loading thread
-        self.chart_thread = ChartDataThread(limit=25, offset=self.offset)
-        self.chart_thread.data_loaded.connect(self.on_data_loaded)
+        search_term = self.search_bar.text() if hasattr(self, 'search_bar') else ""
+        repo = self.current_repo
+        self.chart_thread = ChartDataThread(repository=repo, offset=self.offset, search_term=search_term, limit=25)
+        self.chart_thread.data_loaded.connect(lambda d, m: self.on_data_loaded(d, m, load_more))
         self.chart_thread.error_occurred.connect(self.on_load_error)
         self.chart_thread.start()
 
-    def _handle_scroll(self, value):
-        """
-        Override BaseResourcePage._handle_scroll to use ChartsPage's
-        own scroll handling mechanism (check_scroll_position).
-        """
-        # This method is intentionally left to let check_scroll_position handle it,
-        # or we can directly call it if needed, but check_scroll_position
-        # is already connected to scrollbar.valueChanged.
-        # The key is to prevent BaseResourcePage's _handle_scroll from running its logic.
-        pass # Or explicitly call self.check_scroll_position(value) if it's not redundant
+    def on_data_loaded(self, data, is_more_available, is_load_more):
+        if self.is_showing_skeleton:
+            self.table.setRowCount(0) # Clear skeleton
+            self.is_showing_skeleton = False
 
+        if not is_load_more:
+            self.table.setRowCount(0)
+            self.resources = []
+        
+        start_row = len(self.resources)
+        self.resources.extend(data)
+        
+        self.table.setUpdatesEnabled(False)
+        self.table.setRowCount(len(self.resources))
+        for i, chart_data in enumerate(data):
+            self.populate_resource_row(start_row + i, chart_data)
+        self.table.setUpdatesEnabled(True)
 
-    def load_more_data(self):
-        """Load more chart data when user scrolls to bottom"""
-        if not self.is_more_available or self.is_loading_more:
-            return
-            
-        self.is_loading_more = True
-        
-        # Start the safety timer to recover from potential stuck states
-        self._loading_timer.start(15000)  # 15 seconds timeout
-        
-        # Calculate the new offset for next batch of data
+        self.is_more_available = is_more_available
         self.offset = len(self.resources)
-        
-        # Add a loading indicator row at the bottom
-        loading_row = self.table.rowCount()
-        self.table.setRowCount(loading_row + 1)
-        self.table.setSpan(loading_row, 0, 1, self.table.columnCount())
-        
-        loading_widget = QWidget()
-        loading_layout = QHBoxLayout(loading_widget)
-        loading_layout.setContentsMargins(10, 5, 10, 5)
-        
-        loading_bar = QProgressBar()
-        loading_bar.setRange(0, 0)  # Indeterminate
-        loading_bar.setTextVisible(False)
-        loading_bar.setMaximumHeight(10)
-        loading_bar.setStyleSheet("""
-            QProgressBar {
-                border: 1px solid #3d3d3d;
-                border-radius: 2px;
-                background-color: #1e1e1e;
-                height: 10px;
-            }
-            QProgressBar::chunk {
-                background-color: #0078d7;
-            }
-        """)
-        
-        loading_text = QLabel("Loading more charts...")
-        loading_text.setStyleSheet("color: #aaaaaa; font-size: 12px;")
-        
-        loading_layout.addWidget(loading_text)
-        loading_layout.addWidget(loading_bar)
-        
-        self.table.setCellWidget(loading_row, 0, loading_widget)
-        
-        # Create and start the data loading thread for additional data
-        self.more_thread = ChartDataThread(limit=25, offset=self.offset)
-        self.more_thread.data_loaded.connect(self.on_more_data_loaded)
-        self.more_thread.error_occurred.connect(self.on_load_more_error)
-        self.more_thread.start()
-    
-    def on_data_loaded(self, data, is_more_available):
-        """Handle loaded chart data for initial load"""
-        # Stop the safety timer
-        self._loading_timer.stop()
-        
         self.is_loading = False
-        self.resources = data
-        
-        # Force is_more_available to True for better UX until we reach the true end
-        self.is_more_available = True if data else False
-        
-        
-        # Update the item count
-        self.items_count.setText(f"{len(data)} items (scroll for more)")
-        
-        # Clear the table and populate with data
-        self.table.setRowCount(0)
-        self.populate_table(data)
-        
-        # Re-enable sorting
-        self.table.setSortingEnabled(True)
-        
-        # Apply any existing filters
-        self._apply_filters()
-    
-    def on_more_data_loaded(self, data, is_more_available):
-        """Handle loaded chart data for load-more operation"""
-        # Stop the safety timer
-        self._loading_timer.stop()
-        
-        # Remove the loading indicator row
-        self.table.setRowCount(self.table.rowCount() - 1)
-        
-        # Update tracking variables
-        self.is_loading_more = False
-        
-        
-        if data:
-            # Keep trying to load more as long as we get some data
-            self.is_more_available = True
-            
-            # Add new data to existing resources
-            self.resources.extend(data)
-            
-            # Disable sorting temporarily while adding rows
-            was_sorting_enabled = self.table.isSortingEnabled()
-            self.table.setSortingEnabled(False)
-            
-            # Add new rows
-            start_row = self.table.rowCount()
-            self.table.setRowCount(start_row + len(data))
-            
-            # Populate new rows
-            for i, chart in enumerate(data):
-                self.populate_chart_row(start_row + i, chart)
-            
-            # Restore sorting state
-            self.table.setSortingEnabled(was_sorting_enabled)
-            
-            # Make sure we update the offset for next pagination request
-            self.offset = len(self.resources)
-            
-            # Update the item count with pagination indication
-            self.items_count.setText(f"{len(self.resources)} items (scroll for more)")
+             
+        self.items_count.setText(f"{len(self.resources)} items")
+        if not self.resources:
+            self._show_message_in_table_area("No charts found.", "Try a different search or repository.")
         else:
-            # No data returned means we've likely reached the end
-            self.is_more_available = False
-            
-            # Update the item count without pagination indication
-            self.items_count.setText(f"{len(self.resources)} items (end of results)")
+            self._show_table_area()
         
-        # Apply any existing filters
-        self._apply_filters()
-    
-    def on_search_completed(self, search_results, search_term):
-        """Handle search results"""
-        # Clear the search indicator
-        self.table.setRowCount(0)
+        if not hasattr(self, '_scroll_handler_connected'):
+            self.table.verticalScrollBar().valueChanged.connect(self._on_scroll)
+            self._scroll_handler_connected = True
+
+    def _on_scroll(self, value):
+        if self.is_loading or not self.is_more_available:
+            return
         
-        # Store results
-        self.resources = search_results
-        self.is_searching = False
-        
-        # Display results
-        self.table.setSortingEnabled(False)
-        self.populate_table(search_results)
-        self.table.setSortingEnabled(True)
-        
-        # Update item count to show search context
-        self.items_count.setText(f"{len(search_results)} results for '{search_term}'")
-        
-    def on_search_error(self, error_message):
-        """Handle search error"""
-        # Clear the loading indicator
-        self.table.setRowCount(0)
-        self.is_searching = False
-        
-        # Show error message
-        error_row = 0
-        self.table.setRowCount(1)
-        self.table.setSpan(error_row, 0, 1, self.table.columnCount())
-        
-        error_widget = QWidget()
-        error_layout = QVBoxLayout(error_widget)
-        error_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        error_layout.setContentsMargins(20, 30, 20, 30)
-        
-        error_text = QLabel(f"Search error: {error_message}")
-        error_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        error_text.setStyleSheet("color: #ff6b6b; font-size: 14px;")
-        error_text.setWordWrap(True)
-        
-        error_layout.addWidget(error_text)
-        
-        self.table.setCellWidget(error_row, 0, error_widget)
-        
-        # Log 
-    
-    def on_load_error(self, error_message):
-        """Handle error loading data"""
-        # Stop the safety timer
-        self._loading_timer.stop()
-        
-        self.is_loading = False
-        
-        # Clear the table
-        self.table.setRowCount(0)
-        
-        # Show error message
-        error_row = self.table.rowCount()
-        self.table.setRowCount(error_row + 1)
-        self.table.setSpan(error_row, 0, 1, self.table.columnCount())
-        
-        error_widget = QWidget()
-        error_layout = QVBoxLayout(error_widget)
-        error_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        error_layout.setContentsMargins(20, 30, 20, 30)
-        
-        error_text = QLabel(f"Error: {error_message}")
-        error_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        error_text.setStyleSheet("color: #ff6b6b; font-size: 14px;")
-        error_text.setWordWrap(True)
-        
-        error_layout.addWidget(error_text)
-        
-        self.table.setCellWidget(error_row, 0, error_widget)
-        
-        # Log the error
-    
-    def on_load_more_error(self, error_message):
-        """Handle error when loading more data"""
-        # Stop the safety timer
-        self._loading_timer.stop()
-        
-        # Remove the loading indicator row
-        self.table.setRowCount(self.table.rowCount() - 1)
-        
-        self.is_loading_more = False
-        
-        # Show a temporary error message at the bottom of the table
-        row = self.table.rowCount()
-        self.table.setRowCount(row + 1)
-        self.table.setSpan(row, 0, 1, self.table.columnCount())
-        
-        error_widget = QWidget()
-        error_layout = QHBoxLayout(error_widget)
-        error_layout.setContentsMargins(10, 5, 10, 5)
-        
-        error_text = QLabel(f"Error loading more charts: {error_message}")
-        error_text.setStyleSheet("color: #ff6b6b; font-size: 12px;")
-        error_text.setWordWrap(True)
-        
-        error_layout.addWidget(error_text)
-        
-        self.table.setCellWidget(row, 0, error_widget)
-        
-        # Log the error
-        
-        # Remove the error message after 5 seconds
-        QTimer.singleShot(5000, lambda: self.table.setRowCount(self.table.rowCount() - 1))
-    
-    def populate_table(self, data):
-        """Populate the table with chart data"""
-        # Set row count
-        self.table.setRowCount(len(data))
-        
-        # Fill the table
-        for row, chart in enumerate(data):
-            self.populate_chart_row(row, chart)
-    
-    def populate_chart_row(self, row, chart):
-        """
-        Populate a single row with chart data, including icons
-        
-        Args:
-            row: The row index
-            chart: Chart data dictionary
-        """
-        # Set row height
+        scrollbar = self.table.verticalScrollBar()
+        if value >= scrollbar.maximum() * 0.9: 
+            self.load_data(load_more=True)
+
+    def setup_page_ui(self):
+        headers = ["", "Name", "Description", "Version", "App Version", "Repository", ""]
+        sortable_columns = {1, 3, 4, 5}
+        super().setup_ui("Helm Charts", headers, sortable_columns)
+        self.configure_columns()
+        if hasattr(self, 'select_all_checkbox'): self.select_all_checkbox.hide()
+
+    def configure_columns(self):
+        fixed_widths = {0: 50, 1: 220, 3: 120, 4: 120, 5: 150, 6: 40}
+        for col, width in fixed_widths.items():
+            self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            self.table.setColumnWidth(col, width)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+
+    def populate_resource_row(self, row, chart):
         self.table.setRowHeight(row, 42)
-        
-        # Extract chart data with proper defaults
-        chart_name = chart.get("name", "Unknown")
-        description = chart.get("description", "No description available")
-        version = chart.get("version", "N/A")
-        app_version = chart.get("app_version", "N/A")
-        repository = chart.get("repository", "Unknown")
-        
-        # If description is too long, truncate it
-        if len(description) > 100:
-            description = description[:100] + "..."
-        
-        # Create icon widget for column 0
-        icon_widget = QWidget()
-        icon_layout = QHBoxLayout(icon_widget)
-        icon_layout.setContentsMargins(0, 0, 0, 0)
-        icon_layout.setSpacing(0)
-        icon_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        # Add icon if available
-        icon_label = QLabel()
-        icon_label.setFixedSize(28, 28)
-        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon_label.setStyleSheet("""
-            QLabel {
-                border-radius: 3px;
-                background-color: rgba(255, 255, 255, 0.05);
-                border: none;
-                padding: 0px;
-                margin: 0px;
-            }
-        """)
-        
         icon_path = chart.get("icon_path")
+        icon_widget = QLabel()
+        icon_widget.setFixedSize(28, 28)
+        icon_widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
         if icon_path and os.path.exists(icon_path):
-            try:
-                pixmap = QPixmap(icon_path)
-                if not pixmap.isNull():
-                    pixmap = pixmap.scaled(24, 24, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-                    icon_label.setPixmap(pixmap)
-                else:
-                    # If pixmap is null, show a placeholder text
-                    icon_label.setText("📦")
-                    icon_label.setStyleSheet("""
-                        QLabel {
-                            color: #aaaaaa;
-                            font-size: 14px;
-                            border-radius: 3px;
-                            background-color: rgba(255, 255, 255, 0.05);
-                            border: none;
-                            padding: 0px;
-                            margin: 0px;
-                        }
-                    """)
-            except Exception as e:
-                icon_label.setText("📦")
-                icon_label.setStyleSheet("""
-                    QLabel {
-                        color: #aaaaaa;
-                        font-size: 14px;
-                        border-radius: 3px;
-                        background-color: rgba(255, 255, 255, 0.05);
-                        border: none;
-                        padding: 0px;
-                        margin: 0px;
-                    }
-                """)
-        else:
-            # No icon available, show placeholder
-            icon_label.setText("📦")
-            icon_label.setStyleSheet("""
-                QLabel {
-                    color: #aaaaaa;
-                    font-size: 14px;
-                    border-radius: 3px;
-                    background-color: rgba(255, 255, 255, 0.05);
-                    border: none;
-                    padding: 0px;
-                    margin: 0px;
-                }
-            """)
-        
-        icon_layout.addWidget(icon_label)
+            pixmap = QPixmap(icon_path).scaled(28, 28, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            icon_widget.setPixmap(pixmap)
         self.table.setCellWidget(row, 0, icon_widget)
+
+        for i, key in enumerate(['name', 'description', 'version', 'app_version', 'repository'], 1):
+            self.table.setItem(row, i, SortableTableWidgetItem(chart.get(key, '')))
         
-        # Create data items for the text columns
-        columns = [chart_name, description, version, app_version, repository]
-        
-        for col, value in enumerate(columns, 1):  # Start at column 1 (after icon)
-            # Create item
-            item = SortableTableWidgetItem(value)
-            
-            # Set text alignment
-            if col == 1:  # Name column
-                item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-                item.setForeground(QColor("#e2e8f0"))
-            else:
-                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                item.setForeground(QColor("#e2e8f0"))
-            
-            # Make cells non-editable
-            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            
-            # Add the item to the table
-            self.table.setItem(row, col, item)
-        
-        # Create and add action button
-        action_button = self._create_action_button(row, chart_name)
-        action_container = QWidget()
-        action_layout = QHBoxLayout(action_container)
-        action_layout.setContentsMargins(0, 0, 0, 0)
-        action_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        action_layout.addWidget(action_button)
-        action_container.setStyleSheet("background-color: transparent;")
-        self.table.setCellWidget(row, len(columns) + 1, action_container)
-   
-    def _create_action_button(self, row, chart_name):
-        """Create an action button with view details and install options"""
+        action_button = self._create_action_button(row)
+        self.table.setCellWidget(row, 6, action_button)
+
+    def _create_action_button(self, row):
         button = QToolButton()
-        button.setText("⋮")
-        button.setFixedWidth(20)
-        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        button.setIcon(QIcon(os.path.join("icons", "Moreaction_Button.svg")))
+        
         button.setStyleSheet("""
             QToolButton {
                 color: #888888;
-                font-size: 14px;
+                font-size: 18px;
                 background: transparent;
-                padding: 0px;
+                padding: 2px;
                 margin: 0;
                 border: none;
                 font-weight: bold;
             }
             QToolButton:hover {
                 background-color: rgba(255, 255, 255, 0.1);
-                border-radius: 2px;
+                border-radius: 3px;
                 color: #ffffff;
             }
             QToolButton::menu-indicator {
                 image: none;
             }
         """)
-        button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        button.setCursor(Qt.CursorShape.PointingHandCursor)
         
-        # Create menu
+        button.setFixedSize(30, 30)
+        
         menu = QMenu(button)
+        
         menu.setStyleSheet("""
             QMenu {
                 background-color: #2d2d2d;
@@ -1038,201 +364,63 @@ class ChartsPage(BaseResourcePage):
             }
             QMenu::item {
                 color: #ffffff;
-                padding: 6px 20px 6px 24px;
-                border-radius: 3px;
-                font-size: 12px;
+                padding: 8px 24px 8px 36px;
+                border-radius: 4px;
+                font-size: 13px;
             }
             QMenu::item:selected {
                 background-color: rgba(33, 150, 243, 0.2);
                 color: #ffffff;
             }
+            QMenu::item[dangerous="true"] {
+                color: #ff4444;
+            }
+            QMenu::item[dangerous="true"]:selected {
+                background-color: rgba(255, 68, 68, 0.1);
+            }
         """)
         
-        # Add view action
-        view_action = menu.addAction("View Details")
-        view_action.triggered.connect(lambda: self._handle_view_details(row))
-        
-        # Add install action
         install_action = menu.addAction("Install")
         install_action.triggered.connect(lambda: self._handle_action("Install", row))
-    
         
-        button.setMenu(menu)
+        def show_menu():
+            button_pos = button.mapToGlobal(button.rect().bottomLeft())
+            menu.exec(button_pos)
+        
+        button.clicked.connect(show_menu)
+        button.setToolTip("Chart actions")
         return button
-    
-    # Update the _handle_action method
-    def _handle_action(self, action, row):
-        """Handle action button clicks in the charts page"""
-        if row >= len(self.resources):
-            return
-            
-        chart = self.resources[row]
-        chart_name = chart.get("name", "Unknown")
-        
-        if action == "View Details":
-            self._handle_view_details(row)
-        elif action == "Install":
-            self._install_chart(chart)
 
-    # Add the installation method
-    def _install_chart(self, chart):
-        """Display installation dialog and install the chart"""
-        chart_name = chart.get("name", "Unknown")
-        repository = chart.get("repository", "")
-        
-        # Create and show the installation dialog
-        dialog = ChartInstallDialog(chart_name, repository, self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            # Get installation options
-            options = dialog.get_values()
-            
-            # Install the chart
-            success, message = install_helm_chart(chart_name, repository, options, self)
-            
-            # Show result message
-            if success:
-                QMessageBox.information(self, "Installation Successful", message)
-                
-                # Try to find the parent ClusterView to refresh releases page
-                parent = self.parent()
-                while parent and not hasattr(parent, 'stacked_widget'):
-                    parent = parent.parent()
-                    
-                if parent and hasattr(parent, 'pages') and "Releases" in parent.pages:
-                    releases_page = parent.pages["Releases"]
-                    if hasattr(releases_page, 'load_data'):
-                        # Schedule refresh to give the cluster time to register the release
-                        from PyQt6.QtCore import QTimer
-                        QTimer.singleShot(1000, releases_page.load_data)
-            else:
-                QMessageBox.critical(self, "Installation Failed", message)
-    
-    def _handle_view_details(self, row):
-        """Handle view details action with robust file path handling for Windows compatibility"""
-        if row >= len(self.resources):
+    def _handle_action(self, action, row):
+        if action == "Install" and row < len(self.resources):
+            chart = self.resources[row]
+            dialog = ChartInstallDialog(chart, self)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                options = dialog.get_values()
+                if options: self.start_install_chart(chart, options)
+
+    def start_install_chart(self, chart, options):
+        if self.install_thread and self.install_thread.isRunning():
+            QMessageBox.warning(self, "Installation in Progress", "Another chart installation is already running.")
             return
-            
-        chart = self.resources[row]
-        chart_name = chart.get("name", "Unknown")
+
+        progress = QProgressDialog("Preparing installation...", "Cancel", 0, 100, self)
+        progress.setWindowTitle("Installing Chart")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.show()
         
-        # Find the ClusterView instance
-        parent = self.parent()
-        while parent and not hasattr(parent, 'detail_manager'):
-            parent = parent.parent()
+        self.install_thread = HelmInstallThread(chart, options)
+        self.install_thread.progress_update.connect(progress.setLabelText)
+        self.install_thread.progress_percentage.connect(progress.setValue)
+        self.install_thread.installation_complete.connect(lambda s, m: self.on_install_complete(progress, s, m))
+        progress.canceled.connect(self.install_thread.cancel)
+        self.install_thread.start()
         
-        if parent and hasattr(parent, 'detail_manager'):
-            # Prepare enhanced data for the detail page with more careful file handling
-            resource_data = {
-                "kind": "HelmChart",
-                "apiVersion": "helm.sh/v1",
-                "metadata": {
-                    "name": chart_name,
-                    "creationTimestamp": chart.get("last_updated", ""),
-                    "labels": {
-                        "repository": chart.get("repository", "Unknown"),
-                        "version": chart.get("version", ""),
-                        "appVersion": chart.get("app_version", ""),
-                        "stars": chart.get("stars", "0")
-                    },
-                    "annotations": {
-                        "description": chart.get("description", ""),
-                        "repository_url": chart.get("repository_url", ""),
-                        "package_id": chart.get("package_id", ""),
-                        "source": "ArtifactHub"
-                    }
-                },
-                "spec": {
-                    "version": chart.get("version", ""),
-                    "appVersion": chart.get("app_version", ""),
-                    "repository": chart.get("repository", "Unknown"),
-                },
-                "status": {
-                    "phase": "Available"
-                }
-            }
-            
-            # Add icon data only if file exists to prevent file not found errors
-            try:
-                icon_path = chart.get("icon_path")
-                if icon_path and isinstance(icon_path, str) and os.path.exists(icon_path):
-                    resource_data["metadata"]["annotations"]["icon_path"] = icon_path
-            except Exception as e:
-                pass
-            
-            # Create a global reference to the current chart data for detail page
-            import json
-            global current_chart_data
-            current_chart_data = json.dumps(resource_data)
-            
-            # Call the detail page
-            parent.detail_manager.show_detail("chart", chart_name)
-    
-    def handle_search(self):
-        """Handle search button click or enter key press in search bar"""
-        if hasattr(self, 'is_searching') and self.is_searching:
-            return
-            
-        # Get search text
-        search_text = self.search_bar.text().strip()
-        
-        if not search_text:
-            # If search bar is empty, reload all data
-            self.is_searching = False
-            self.load_data()
-            return
-        
-        # Set searching flag
-        self.is_searching = True
-        
-        # Clear the table and show loading indicator
-        self.table.setRowCount(0)
-        self.table.setSortingEnabled(False)
-        
-        # Add loading indicator
-        loading_row = self.table.rowCount()
-        self.table.setRowCount(loading_row + 1)
-        self.table.setSpan(loading_row, 0, 1, self.table.columnCount())
-        
-        loading_widget = QWidget()
-        loading_layout = QVBoxLayout(loading_widget)
-        loading_layout.setContentsMargins(20, 20, 20, 20)
-        
-        loading_bar = QProgressBar()
-        loading_bar.setRange(0, 0)  # Indeterminate
-        loading_bar.setTextVisible(False)
-        loading_bar.setStyleSheet("""
-            QProgressBar {
-                border: 1px solid #3d3d3d;
-                border-radius: 3px;
-                background-color: #1e1e1e;
-                height: 20px;
-            }
-            QProgressBar::chunk {
-                background-color: #0078d7;
-            }
-        """)
-        
-        loading_text = QLabel(f"Searching for '{search_text}'...")
-        loading_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        loading_text.setStyleSheet("color: #ffffff; font-size: 14px;")
-        
-        loading_layout.addWidget(loading_text)
-        loading_layout.addWidget(loading_bar)
-        
-        self.table.setCellWidget(loading_row, 0, loading_widget)
-        
-        # Start search thread
-        self.search_thread = ChartSearchThread(search_text)
-        self.search_thread.search_completed.connect(self.on_search_completed)
-        self.search_thread.error_occurred.connect(self.on_search_error)
-        self.search_thread.start()
-    
-    def handle_row_click(self, row, column):
-        """Handle row selection when a table cell is clicked"""
-        if column != self.table.columnCount() - 1:  # Skip action column
-            # Select the row
-            self.table.selectRow(row)
-            
-            # If this is a direct click (not on action), show details
-            if row < len(self.resources):
-                self._handle_view_details(row)
+    def on_install_complete(self, progress_dialog, success, message):
+        progress_dialog.close()
+        if success:
+            msg_box = ScrollableMessageBox("Installation Success", message, self)
+            msg_box.exec()
+        else:
+            QMessageBox.critical(self, "Installation Failed", message)
+        self.install_thread = None

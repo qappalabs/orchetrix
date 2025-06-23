@@ -82,7 +82,7 @@ class BarChart(QWidget):
                     self.times = self._generate_time_labels(len(self.data))
                 
                 self.has_data = True
-                logging.debug(f"Chart updated with {len(self.data)} data points")
+                # logging.debug(f"Chart updated with {len(self.data)} data points")
                 self.update()
             else:
                 logging.warning(f"Invalid data provided to chart: {data}")
@@ -901,7 +901,7 @@ class ClusterPage(QWidget):
             # ... clear other metric UIs ...
             return
 
-        logging.info(f"ClusterPage: Metrics data updated.")
+        # logging.info(f"ClusterPage: Metrics data updated.")
         try:
             if "cpu" in metrics and hasattr(self, 'cpu_status') and hasattr(self, 'cpu_chart'):
                 cpu = metrics["cpu"]
@@ -934,7 +934,7 @@ class ClusterPage(QWidget):
 
     def update_issues(self, issues):
         self.issues_data = issues if issues is not None else []
-        logging.info(f"ClusterPage: Issues data updated with {len(self.issues_data)} issues.")
+        # logging.info(f"ClusterPage: Issues data updated with {len(self.issues_data)} issues.")
         try:
             if hasattr(self, 'stacked_layout') and hasattr(self, 'issues_table'):
                 if self.issues_data:

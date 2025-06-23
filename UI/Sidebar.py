@@ -672,18 +672,18 @@ class Sidebar(QWidget):
         except TypeError:
             pass  # No connections to disconnect
 
-        chat_btn = NavIconButton(
-            "chat", "Chat", False, False,
+        ai_assis_btn = NavIconButton(
+            "ai_assis", "AI Assistent", False, False,
             self.parent_window, self.sidebar_expanded, coming_soon=True  # Add this parameter
         )
 
         self.nav_buttons.append(compare_btn)
         self.nav_buttons.append(terminal_btn)
-        self.nav_buttons.append(chat_btn)
+        self.nav_buttons.append(ai_assis_btn)
 
         self.sidebar_layout.addWidget(compare_btn)
         self.sidebar_layout.addWidget(terminal_btn)
-        self.sidebar_layout.addWidget(chat_btn)
+        self.sidebar_layout.addWidget(ai_assis_btn)
 
     def update_sidebar_state(self):
         # Create animation for smooth transition

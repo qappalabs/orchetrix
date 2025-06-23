@@ -10,7 +10,7 @@ from UI.Sidebar import Sidebar
 from UI.Styles import AppColors
 from UI.TerminalPanel import TerminalPanel
 from utils.cluster_connector import get_cluster_connector
-from UI.DetailPageComponent import DetailPageComponent
+from UI.DetailPageComponent import DetailPageComponent as DetailPage
 
 # Import all page classes (required for PyInstaller compatibility)
 from Pages.ClusterPage import ClusterPage

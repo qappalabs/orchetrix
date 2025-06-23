@@ -30,20 +30,7 @@ class StyleConstants:
             selection-color: #E0E0E0;
             padding: 8px;
         }}
-        QScrollBar:vertical {{
-            border: none;
-            background: #2D2D2D;
-            width: 10px;
-            margin: 0px;
-        }}
-        QScrollBar::handle:vertical {{
-            background: #555555;
-            min-height: 20px;
-            border-radius: 5px;
-        }}
-        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
-            height: 0px;
-        }}
+        {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
     """
     TERMINAL_WRAPPER = f"""
         QWidget#terminal_wrapper {{
@@ -133,15 +120,28 @@ class StyleConstants:
             width: 20px;
         }}
         QComboBox::down-arrow {{
-            image: url(icons/dropdown_arrow.svg);
-            width: 10px;
-            height: 10px;
+            image: url(icons/down_btn.svg);
+            width: 12px;
+            height: 12px;
         }}
         QComboBox QAbstractItemView {{
             background-color: {AppColors.BG_DARKER};
             color: {AppColors.TEXT_SECONDARY};
             selection-background-color: {AppColors.HOVER_BG};
             border: 1px solid {AppColors.BORDER_COLOR};
+        }}
+        QComboBox QAbstractItemView::item {{
+            cursor: pointer;
+            padding: 6px 8px;
+        }}
+        QComboBox QAbstractItemView::item:hover {{
+            cursor: pointer;
+        }}
+        QCheckBox {{
+            color: white;
+            font-size: 12px;
+            padding: 2px;
+            cursor: pointer;
         }}
     """
     SEARCH_INPUT = f"""
@@ -198,7 +198,7 @@ class UnifiedTerminalWidget(QTextEdit):
     def setup_ui(self):
         self.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
         self.setFont(QFont(self.font_family, self.font_size))
-        self.setStyleSheet(AppStyles.TERMINAL_TEXTEDIT)
+        self.setStyleSheet(StyleConstants.TERMINAL_TEXTEDIT)
         self.setAcceptRichText(False)
 
     def __del__(self):
@@ -1467,8 +1467,9 @@ class UnifiedTerminalHeader(QWidget):
 
         # Shell dropdown (for regular terminals)
         self.shell_dropdown = QComboBox()
-        self.shell_dropdown.setFixedSize(120, 24)
+        self.shell_dropdown.setFixedSize(160, 24)
         self.shell_dropdown.setStyleSheet(StyleConstants.SHELL_DROPDOWN)
+        self.shell_dropdown.setCursor(Qt.CursorShape.PointingHandCursor)
         for name, _ in self.available_shells:
             self.shell_dropdown.addItem(name)
         self.shell_dropdown.currentIndexChanged.connect(self._update_selected_shell)
@@ -1941,6 +1942,7 @@ class LogsHeaderWidget(QWidget):
         container_label.setFixedSize(20, 20)
         self.container_combo = QComboBox()
         self.container_combo.setFixedHeight(24)
+        self.container_combo.setCursor(Qt.CursorShape.PointingHandCursor)
         self.container_combo.currentTextChanged.connect(self.container_changed.emit)
         controls_row.addWidget(container_label)
         controls_row.addWidget(self.container_combo)
@@ -1950,6 +1952,7 @@ class LogsHeaderWidget(QWidget):
         lines_label.setFixedSize(20, 20)
         self.lines_combo = QComboBox()
         self.lines_combo.setFixedHeight(24)
+        self.lines_combo.setCursor(Qt.CursorShape.PointingHandCursor)
         self.lines_combo.addItems(["50", "100", "200", "500", "1000", "All"])
         self.lines_combo.setCurrentText("200")
         self.lines_combo.currentTextChanged.connect(self._on_lines_changed)
@@ -1959,6 +1962,7 @@ class LogsHeaderWidget(QWidget):
         # Follow logs checkbox
         self.follow_checkbox = QCheckBox("Follow")
         self.follow_checkbox.setChecked(True)
+        self.follow_checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
         self.follow_checkbox.toggled.connect(self.follow_toggled.emit)
         controls_row.addWidget(self.follow_checkbox)
 
@@ -2203,24 +2207,15 @@ class EnhancedLogsViewer(QWidget):
         font = QFont("Consolas", 9)
         self.logs_display.setFont(font)
 
-        self.logs_display.setStyleSheet("""
-            QTextEdit {
+        self.logs_display.setStyleSheet(f"""
+            QTextEdit {{
                 background-color: #1e1e1e;
                 color: #e0e0e0;
                 border: none;
                 selection-background-color: #264F78;
                 padding: 8px;
-            }
-            QScrollBar:vertical {
-                border: none;
-                background: #2d2d2d;
-                width: 10px;
-            }
-            QScrollBar::handle:vertical {
-                background: #555555;
-                min-height: 20px;
-                border-radius: 5px;
-            }
+            }}
+            {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
         """)
 
         content_layout.addWidget(self.logs_display)

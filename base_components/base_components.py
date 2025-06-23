@@ -13,7 +13,7 @@ from PyQt6.QtGui import QColor, QIcon, QCursor, QFont, QLinearGradient, QPainter
 from functools import partial
 import weakref
 
-from Styles import AppStyles, AppColors, AppConstants
+from UI.Styles import AppStyles, AppColors, AppConstants
 
 
 class SortableTableWidgetItem(QTableWidgetItem):
@@ -165,7 +165,7 @@ class BaseTablePage(QWidget):
         table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
 
         # Configure appearance
-        table.setShowGrid(True)
+        table.setShowGrid(False)
         table.setAlternatingRowColors(False)
         table.verticalHeader().setVisible(False)
 
@@ -284,11 +284,17 @@ class BaseTablePage(QWidget):
         menu.aboutToShow.connect(lambda: self._highlight_active_row(row, True))
         menu.aboutToHide.connect(lambda: self._highlight_active_row(row, False))
 
+        actions  = []
+        # Only show "View Logs" for pods
+        if self.resource_type == "pods":
+            actions.append({"text": "View Logs", "icon": "icons/logs.png", "dangerous": False})
+            actions.append({"text": "SSH", "icon": "icons/terminal.png", "dangerous": False})
+
         # Add default actions
-        actions = [
+        actions.extend([
             {"text": "Edit", "icon": "icons/edit.png", "dangerous": False},
             {"text": "Delete", "icon": "icons/delete.png", "dangerous": True}
-        ]
+        ])
 
         # Add actions to menu
         for action_info in actions:
