@@ -1907,6 +1907,437 @@ class KubernetesClient(QObject):
         except Exception as e:
             logging.error(f"Error handling stream status: {e}")
 
+    def update_resource(self, resource_type, resource_name, namespace, yaml_data):
+        """
+        Update a Kubernetes resource using patch (kubectl apply equivalent)
+        Returns (success: bool, message: str)
+        """
+        try:
+            resource_type_lower = resource_type.strip().lower()
+
+            # Core V1 API resources
+            if resource_type_lower in ["pod", "pods"]:
+                if namespace:
+                    result = self.v1.patch_namespaced_pod(
+                        name=resource_name,
+                        namespace=namespace,
+                        body=yaml_data
+                    )
+                else:
+                    return False, "Pods require a namespace"
+
+            elif resource_type_lower in ["service", "services", "svc"]:
+                result = self.v1.patch_namespaced_service(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            elif resource_type_lower in ["configmap", "configmaps", "cm"]:
+                result = self.v1.patch_namespaced_config_map(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            elif resource_type_lower in ["secret", "secrets"]:
+                result = self.v1.patch_namespaced_secret(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            elif resource_type_lower in ["node", "nodes"]:
+                result = self.v1.patch_node(name=resource_name, body=yaml_data)
+
+            elif resource_type_lower in ["namespace", "namespaces", "ns"]:
+                result = self.v1.patch_namespace(name=resource_name, body=yaml_data)
+
+            elif resource_type_lower in ["endpoint", "endpoints", "ep"]:
+                result = self.v1.patch_namespaced_endpoints(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            elif resource_type_lower in ["persistentvolume", "persistentvolumes", "pv"]:
+                result = self.v1.patch_persistent_volume(name=resource_name, body=yaml_data)
+
+            elif resource_type_lower in ["persistentvolumeclaim", "persistentvolumeclaims", "pvc"]:
+                result = self.v1.patch_namespaced_persistent_volume_claim(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            elif resource_type_lower in ["serviceaccount", "serviceaccounts", "sa"]:
+                result = self.v1.patch_namespaced_service_account(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            # Apps V1 API resources
+            elif resource_type_lower in ["deployment", "deployments", "deploy"]:
+                result = self.apps_v1.patch_namespaced_deployment(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            elif resource_type_lower in ["replicaset", "replicasets", "rs"]:
+                result = self.apps_v1.patch_namespaced_replica_set(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            elif resource_type_lower in ["daemonset", "daemonsets", "ds"]:
+                result = self.apps_v1.patch_namespaced_daemon_set(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            elif resource_type_lower in ["statefulset", "statefulsets", "sts"]:
+                result = self.apps_v1.patch_namespaced_stateful_set(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            # Batch V1 API resources
+            elif resource_type_lower in ["job", "jobs"]:
+                result = self.batch_v1.patch_namespaced_job(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            elif resource_type_lower in ["cronjob", "cronjobs", "cj"]:
+                try:
+                    # Try batch/v1 first (Kubernetes 1.21+)
+                    batch_v1_api = client.BatchV1Api()
+                    result = batch_v1_api.patch_namespaced_cron_job(
+                        name=resource_name,
+                        namespace=namespace,
+                        body=yaml_data
+                    )
+                except:
+                    # Fallback to batch/v1beta1 (older versions)
+                    batch_v1beta1_api = client.BatchV1beta1Api()
+                    result = batch_v1beta1_api.patch_namespaced_cron_job(
+                        name=resource_name,
+                        namespace=namespace,
+                        body=yaml_data
+                    )
+
+            # Networking V1 API resources
+            elif resource_type_lower in ["ingress", "ingresses", "ing"]:
+                result = self.networking_v1.patch_namespaced_ingress(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            elif resource_type_lower in ["networkpolicy", "networkpolicies", "netpol"]:
+                result = self.networking_v1.patch_namespaced_network_policy(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            elif resource_type_lower in ["ingressclass", "ingressclasses", "ic"]:
+                result = self.networking_v1.patch_ingress_class(name=resource_name, body=yaml_data)
+
+            # Storage V1 API resources
+            elif resource_type_lower in ["storageclass", "storageclasses", "sc"]:
+                result = self.storage_v1.patch_storage_class(name=resource_name, body=yaml_data)
+
+            # RBAC V1 API resources
+            elif resource_type_lower in ["role", "roles"]:
+                result = self.rbac_v1.patch_namespaced_role(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            elif resource_type_lower in ["rolebinding", "rolebindings", "rb"]:
+                result = self.rbac_v1.patch_namespaced_role_binding(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            elif resource_type_lower in ["clusterrole", "clusterroles", "cr"]:
+                result = self.rbac_v1.patch_cluster_role(name=resource_name, body=yaml_data)
+
+            elif resource_type_lower in ["clusterrolebinding", "clusterrolebindings", "crb"]:
+                result = self.rbac_v1.patch_cluster_role_binding(name=resource_name, body=yaml_data)
+
+            # Autoscaling V1 API resources
+            elif resource_type_lower in ["horizontalpodautoscaler", "horizontalpodautoscalers", "hpa"]:
+                result = self.autoscaling_v1.patch_namespaced_horizontal_pod_autoscaler(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            # CustomResourceDefinitions
+            elif resource_type_lower in ["customresourcedefinition", "customresourcedefinitions", "crd"]:
+                result = self.api_extensions_v1.patch_custom_resource_definition(
+                    name=resource_name,
+                    body=yaml_data
+                )
+
+            # ReplicationController
+            elif resource_type_lower in ["replicationcontroller", "replicationcontrollers", "rc"]:
+                result = self.v1.patch_namespaced_replication_controller(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            # ValidatingWebhookConfiguration and MutatingWebhookConfiguration
+            elif resource_type_lower in ["validatingwebhookconfiguration", "validatingwebhookconfigurations", "vwc"]:
+                result = self.admissionregistration_v1.patch_validating_webhook_configuration(
+                    name=resource_name,
+                    body=yaml_data
+                )
+
+            elif resource_type_lower in ["mutatingwebhookconfiguration", "mutatingwebhookconfigurations", "mwc"]:
+                result = self.admissionregistration_v1.patch_mutating_webhook_configuration(
+                    name=resource_name,
+                    body=yaml_data
+                )
+
+            # PriorityClasses
+            elif resource_type_lower in ["priorityclass", "priorityclasses", "pc"]:
+                scheduling_v1_api = client.SchedulingV1Api()
+                result = scheduling_v1_api.patch_priority_class(name=resource_name, body=yaml_data)
+
+            # Leases
+            elif resource_type_lower in ["lease", "leases"]:
+                coordination_v1_api = client.CoordinationV1Api()
+                result = coordination_v1_api.patch_namespaced_lease(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            # PodDisruptionBudgets
+            elif resource_type_lower in ["poddisruptionbudget", "poddisruptionbudgets", "pdb"]:
+                policy_v1_api = client.PolicyV1Api()
+                result = policy_v1_api.patch_namespaced_pod_disruption_budget(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            # RuntimeClasses
+            elif resource_type_lower in ["runtimeclass", "runtimeclasses", "rtc"]:
+                node_v1_api = client.NodeV1Api()
+                result = node_v1_api.patch_runtime_class(name=resource_name, body=yaml_data)
+
+            # Additional Core V1 resources
+            elif resource_type_lower in ["limitrange", "limitranges", "limits"]:
+                result = self.v1.patch_namespaced_limit_range(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            elif resource_type_lower in ["resourcequota", "resourcequotas", "quota"]:
+                result = self.v1.patch_namespaced_resource_quota(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            # Helm resources - should not reach here as they're disabled in UI
+            elif resource_type_lower in ["helmrelease", "helmreleases", "hr", "chart", "charts"]:
+                return False, "Helm resources cannot be edited via YAML editor"
+
+            # Custom Resources - Generic handling
+            else:
+                # Try to handle as custom resource
+                try:
+                    # Find matching CRD
+                    crds = self.api_extensions_v1.list_custom_resource_definition()
+                    matching_crd = None
+
+                    for crd in crds.items:
+                        crd_spec = crd.spec
+                        if (crd_spec.names.plural.lower() == resource_type_lower or
+                                crd_spec.names.singular.lower() == resource_type_lower or
+                                crd_spec.names.kind.lower() == resource_type_lower):
+                            matching_crd = crd
+                            break
+
+                    if matching_crd:
+                        crd_spec = matching_crd.spec
+                        group = crd_spec.group
+                        version = crd_spec.versions[-1].name if crd_spec.versions else "v1"
+                        plural = crd_spec.names.plural
+
+                        if crd_spec.scope == "Namespaced":
+                            result = self.custom_objects_api.patch_namespaced_custom_object(
+                                group=group,
+                                version=version,
+                                namespace=namespace,
+                                plural=plural,
+                                name=resource_name,
+                                body=yaml_data
+                            )
+                        else:
+                            result = self.custom_objects_api.patch_cluster_custom_object(
+                                group=group,
+                                version=version,
+                                plural=plural,
+                                name=resource_name,
+                                body=yaml_data
+                            )
+                    else:
+                        return False, f"Unknown resource type: {resource_type}"
+
+                except Exception as e:
+                    return False, f"Error updating custom resource: {str(e)}"
+
+            # If we reach here, the update was successful
+            return True, f"Successfully updated {resource_type}/{resource_name}"
+
+        except ApiException as e:
+            if e.status == 404:
+                return False, f"Resource not found: {resource_type}/{resource_name}"
+            elif e.status == 403:
+                return False, f"Permission denied: Cannot update {resource_type}/{resource_name}"
+            elif e.status == 422:
+                return False, f"Invalid resource data: {e.body}"
+            else:
+                return False, f"API error: {e.reason} (Status: {e.status})"
+        except Exception as e:
+            return False, f"Unexpected error updating resource: {str(e)}"
+
+    def validate_kubernetes_schema(self, yaml_data):
+        """
+        Basic Kubernetes schema validation
+        Returns (is_valid: bool, error_message: str)
+        """
+        try:
+            # Check required top-level fields
+            required_fields = ['apiVersion', 'kind', 'metadata']
+            for field in required_fields:
+                if field not in yaml_data:
+                    return False, f"Missing required field: {field}"
+
+            # Validate apiVersion format
+            api_version = yaml_data.get('apiVersion', '')
+            if not api_version or '/' not in api_version and api_version not in ['v1']:
+                if '/' not in api_version:
+                    # Core API resources like v1
+                    valid_core_versions = ['v1']
+                    if api_version not in valid_core_versions:
+                        return False, f"Invalid apiVersion: {api_version}"
+                else:
+                    # Group/version format
+                    if not api_version.count('/') == 1:
+                        return False, f"Invalid apiVersion format: {api_version}"
+
+            # Validate kind
+            kind = yaml_data.get('kind', '')
+            if not kind:
+                return False, "Missing or empty 'kind' field"
+
+            # Validate metadata
+            metadata = yaml_data.get('metadata', {})
+            if not isinstance(metadata, dict):
+                return False, "'metadata' must be an object"
+
+            if 'name' not in metadata:
+                return False, "Missing 'metadata.name' field"
+
+            # Validate common spec fields based on kind
+            kind_lower = kind.lower()
+            spec = yaml_data.get('spec', {})
+
+            if kind_lower in ['pod', 'deployment', 'daemonset', 'statefulset', 'replicaset', 'job']:
+                if 'containers' not in spec and kind_lower == 'pod':
+                    return False, "Pod spec must contain 'containers' field"
+                elif 'template' in spec and kind_lower in ['deployment', 'daemonset', 'statefulset', 'replicaset']:
+                    template_spec = spec.get('template', {}).get('spec', {})
+                    if 'containers' not in template_spec:
+                        return False, f"{kind} template spec must contain 'containers' field"
+
+            # Validate container structure if present
+            containers = []
+            if kind_lower == 'pod':
+                containers = spec.get('containers', [])
+            elif 'template' in spec:
+                containers = spec.get('template', {}).get('spec', {}).get('containers', [])
+
+            for i, container in enumerate(containers):
+                if not isinstance(container, dict):
+                    return False, f"Container {i} must be an object"
+                if 'name' not in container:
+                    return False, f"Container {i} missing 'name' field"
+                if 'image' not in container:
+                    return False, f"Container {i} missing 'image' field"
+
+            return True, "Schema validation passed"
+
+        except Exception as e:
+            return False, f"Schema validation error: {str(e)}"
+
+    def update_resource_async(self, resource_type, resource_name, namespace, yaml_data):
+        """Update resource asynchronously"""
+        if self._shutting_down:
+            return
+
+        class UpdateWorker(BaseWorker):
+            def __init__(self, client_instance, resource_type, resource_name, namespace, yaml_data):
+                super().__init__()
+                self.client_instance = client_instance
+                self.resource_type = resource_type
+                self.resource_name = resource_name
+                self.namespace = namespace
+                self.yaml_data = yaml_data
+    
+            @pyqtSlot()
+            def run(self):
+                try:
+                    success, message = self.client_instance.update_resource(
+                        self.resource_type,
+                        self.resource_name,
+                        self.namespace,
+                        self.yaml_data
+                    )
+                    self.safe_emit_finished({'success': success, 'message': message})
+                except Exception as e:
+                    self.safe_emit_error(str(e))
+
+        worker = UpdateWorker(self, resource_type, resource_name, namespace, yaml_data)
+
+        worker.signals.finished.connect(
+            lambda result: self.resource_updated.emit(result) if not self._shutting_down else None
+        )
+        worker.signals.error.connect(
+            lambda error: self.error_occurred.emit(error) if not self._shutting_down else None
+        )
+
+        self._active_workers.add(worker)
+
+        def cleanup_worker(result=None):
+            if worker in self._active_workers:
+                self._active_workers.remove(worker)
+
+        worker.signals.finished.connect(cleanup_worker)
+        worker.signals.error.connect(lambda _: cleanup_worker())
+
+        self.threadpool.start(worker)
+
+    # Add new signal to the class signals section
+    resource_updated = pyqtSignal(dict)  # Add this to the existing signals
+
 # Singleton instance
 _instance = None
 

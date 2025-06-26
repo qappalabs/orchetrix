@@ -349,6 +349,171 @@ class ClusterView(QWidget):
         self.detail_manager = DetailManager(self.parent_window)
         self.detail_manager.resource_updated.connect(self._handle_resource_updated)
 
+        # Connect the new refresh signal
+        self.detail_manager.refresh_main_page.connect(self._handle_refresh_main_page)
+
+    def _handle_refresh_main_page(self, resource_type: str, resource_name: str, namespace: str):
+        """Handle request to refresh main page after YAML deployment"""
+        try:
+            logging.info(f"ClusterView: Refreshing main page for {resource_type}/{resource_name}")
+
+            # Map resource type to page name
+            page_name = self._map_resource_type_to_page_name(resource_type)
+
+            if page_name and page_name in self.pages:
+                page = self.pages[page_name]
+
+                # Force reload the page data
+                if hasattr(page, 'force_load_data'):
+                    QTimer.singleShot(500, page.force_load_data)  # Small delay to let Kubernetes propagate changes
+                elif hasattr(page, 'load_data'):
+                    QTimer.singleShot(500, page.load_data)
+
+                logging.info(f"Refreshed page: {page_name}")
+
+            # Always refresh Events page as well since events may be generated
+            if "Events" in self.pages:
+                events_page = self.pages["Events"]
+                if hasattr(events_page, 'force_load_data'):
+                    QTimer.singleShot(1000, events_page.force_load_data)  # Slightly longer delay for events
+                elif hasattr(events_page, 'load_data'):
+                    QTimer.singleShot(1000, events_page.load_data)
+
+        except Exception as e:
+            logging.error(f"Error refreshing main page: {e}")
+
+    def _map_resource_type_to_page_name(self, resource_type: str) -> str:
+        """Map resource type to corresponding page name"""
+        # Convert resource type to page name
+        resource_type_lower = resource_type.lower()
+
+        # Direct mappings
+        type_to_page = {
+            # Core resources
+            'pod': 'Pods',
+            'pods': 'Pods',
+            'service': 'Services',
+            'services': 'Services',
+            'svc': 'Services',
+            'configmap': 'Config Maps',
+            'configmaps': 'Config Maps',
+            'cm': 'Config Maps',
+            'secret': 'Secrets',
+            'secrets': 'Secrets',
+            'node': 'Nodes',
+            'nodes': 'Nodes',
+            'namespace': 'Namespaces',
+            'namespaces': 'Namespaces',
+            'ns': 'Namespaces',
+            'endpoint': 'Endpoints',
+            'endpoints': 'Endpoints',
+            'ep': 'Endpoints',
+            'persistentvolume': 'Persistent Volumes',
+            'persistentvolumes': 'Persistent Volumes',
+            'pv': 'Persistent Volumes',
+            'persistentvolumeclaim': 'Persistent Volume Claims',
+            'persistentvolumeclaims': 'Persistent Volume Claims',
+            'pvc': 'Persistent Volume Claims',
+            'serviceaccount': 'Service Accounts',
+            'serviceaccounts': 'Service Accounts',
+            'sa': 'Service Accounts',
+            'event': 'Events',
+            'events': 'Events',
+
+            # Apps resources
+            'deployment': 'Deployments',
+            'deployments': 'Deployments',
+            'deploy': 'Deployments',
+            'replicaset': 'Replica Sets',
+            'replicasets': 'Replica Sets',
+            'rs': 'Replica Sets',
+            'daemonset': 'Daemon Sets',
+            'daemonsets': 'Daemon Sets',
+            'ds': 'Daemon Sets',
+            'statefulset': 'Stateful Sets',
+            'statefulsets': 'Stateful Sets',
+            'sts': 'Stateful Sets',
+            'replicationcontroller': 'Replication Controllers',
+            'replicationcontrollers': 'Replication Controllers',
+            'rc': 'Replication Controllers',
+
+            # Batch resources
+            'job': 'Jobs',
+            'jobs': 'Jobs',
+            'cronjob': 'Cron Jobs',
+            'cronjobs': 'Cron Jobs',
+            'cj': 'Cron Jobs',
+
+            # Networking resources
+            'ingress': 'Ingresses',
+            'ingresses': 'Ingresses',
+            'ing': 'Ingresses',
+            'ingressclass': 'Ingress Classes',
+            'ingressclasses': 'Ingress Classes',
+            'ic': 'Ingress Classes',
+            'networkpolicy': 'Network Policies',
+            'networkpolicies': 'Network Policies',
+            'netpol': 'Network Policies',
+
+            # Storage resources
+            'storageclass': 'Storage Classes',
+            'storageclasses': 'Storage Classes',
+            'sc': 'Storage Classes',
+
+            # RBAC resources
+            'role': 'Roles',
+            'roles': 'Roles',
+            'rolebinding': 'Role Bindings',
+            'rolebindings': 'Role Bindings',
+            'rb': 'Role Bindings',
+            'clusterrole': 'Cluster Roles',
+            'clusterroles': 'Cluster Roles',
+            'cr': 'Cluster Roles',
+            'clusterrolebinding': 'Cluster Role Bindings',
+            'clusterrolebindings': 'Cluster Role Bindings',
+            'crb': 'Cluster Role Bindings',
+
+            # Autoscaling resources
+            'horizontalpodautoscaler': 'Horizontal Pod Autoscalers',
+            'horizontalpodautoscalers': 'Horizontal Pod Autoscalers',
+            'hpa': 'Horizontal Pod Autoscalers',
+
+            # Other resources
+            'customresourcedefinition': 'Definitions',
+            'customresourcedefinitions': 'Definitions',
+            'crd': 'Definitions',
+            'poddisruptionbudget': 'Pod Disruption Budgets',
+            'poddisruptionbudgets': 'Pod Disruption Budgets',
+            'pdb': 'Pod Disruption Budgets',
+            'priorityclass': 'Priority Classes',
+            'priorityclasses': 'Priority Classes',
+            'pc': 'Priority Classes',
+            'runtimeclass': 'Runtime Classes',
+            'runtimeclasses': 'Runtime Classes',
+            'rtc': 'Runtime Classes',
+            'lease': 'Leases',
+            'leases': 'Leases',
+            'limitrange': 'Limit Ranges',
+            'limitranges': 'Limit Ranges',
+            'resourcequota': 'Resource Quotas',
+            'resourcequotas': 'Resource Quotas',
+            'validatingwebhookconfiguration': 'Validating Webhook Configs',
+            'validatingwebhookconfigurations': 'Validating Webhook Configs',
+            'vwc': 'Validating Webhook Configs',
+            'mutatingwebhookconfiguration': 'Mutating Webhook Configs',
+            'mutatingwebhookconfigurations': 'Mutating Webhook Configs',
+            'mwc': 'Mutating Webhook Configs',
+
+            # Helm resources (should not be edited, but included for completeness)
+            'helmrelease': 'Releases',
+            'helmreleases': 'Releases',
+            'hr': 'Releases',
+            'chart': 'Charts',
+            'charts': 'Charts'
+        }
+
+        return type_to_page.get(resource_type_lower, None)
+
     def _initialize_terminal(self) -> None:
         """Initialize the terminal panel"""
         self.terminal_panel = TerminalPanel(self.parent_window)

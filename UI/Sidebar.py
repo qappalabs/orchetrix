@@ -673,7 +673,7 @@ class Sidebar(QWidget):
             pass  # No connections to disconnect
 
         ai_assis_btn = NavIconButton(
-            "ai_assis", "AI Assistent", False, False,
+            "ai_assis", "AI Assistant", False, False,
             self.parent_window, self.sidebar_expanded, coming_soon=True  # Add this parameter
         )
 
