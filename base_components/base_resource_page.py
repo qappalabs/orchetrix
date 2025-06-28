@@ -13,7 +13,7 @@ import yaml
 import time
 import logging
 from PyQt6.QtWidgets import (
-     QMessageBox, QWidget, QVBoxLayout, QLineEdit, QComboBox,
+    QMessageBox, QWidget, QVBoxLayout, QLineEdit, QComboBox,
     QLabel, QProgressBar, QHBoxLayout, QPushButton, QApplication, QTableWidgetItem,
     QAbstractItemView, QStackedWidget
 )
@@ -199,7 +199,7 @@ class KubernetesResourceLoader(QThread):
             services_list = self.kube_client.v1.list_namespaced_service(namespace=self.namespace, **api_kwargs)
         else:
             services_list = self.kube_client.v1.list_service_for_all_namespaces(**api_kwargs)
-        
+
         next_token = self._get_continue_token(services_list)
         for service in services_list.items:
             resource = {
@@ -245,7 +245,7 @@ class KubernetesResourceLoader(QThread):
             resources.append(resource)
         return resources, next_token
 
-    def _load_nodes(self): 
+    def _load_nodes(self):
         resources = []
         api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
         api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
@@ -352,7 +352,7 @@ class KubernetesResourceLoader(QThread):
             }
             resources.append(resource)
         return resources, next_token
-    
+
     def _load_persistent_volumes(self):
         resources = []
         api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
@@ -564,7 +564,7 @@ class KubernetesResourceLoader(QThread):
         if self.namespace and self.namespace != "all":
             lr_list = self.kube_client.v1.list_namespaced_limit_range(namespace=self.namespace, **api_kwargs)
         else:
-             lr_list = self.kube_client.v1.list_namespaced_limit_range(namespace=self.namespace, **api_kwargs) if self.namespace else client.models.V1LimitRangeList(items=[])
+            lr_list = self.kube_client.v1.list_namespaced_limit_range(namespace=self.namespace, **api_kwargs) if self.namespace else client.models.V1LimitRangeList(items=[])
         next_token = self._get_continue_token(lr_list)
         for lr in lr_list.items:
             resource = {
@@ -608,7 +608,7 @@ class KubernetesResourceLoader(QThread):
                 pdb_list = policy_api.list_namespaced_pod_disruption_budget(namespace=self.namespace, **api_kwargs)
             else:
                 pdb_list = policy_api.list_pod_disruption_budget_for_all_namespaces(**api_kwargs)
-        except AttributeError: 
+        except AttributeError:
             policy_api = client.PolicyV1beta1Api(self.kube_client.v1.api_client)
             if self.namespace and self.namespace != "all":
                 pdb_list = policy_api.list_namespaced_pod_disruption_budget(namespace=self.namespace, **api_kwargs)
@@ -919,7 +919,7 @@ class KubernetesResourceLoader(QThread):
 
     def _load_generic_resource(self):
         logging.warning(f"Generic resource loading not implemented for {self.resource_type}")
-        return [], None 
+        return [], None
 
     def _format_age(self, timestamp):
         if not timestamp: return "Unknown"
@@ -928,23 +928,23 @@ class KubernetesResourceLoader(QThread):
             if isinstance(timestamp, str):
                 try:
                     created_time = datetime.datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-                    if created_time.tzinfo is None: 
-                         created_time = created_time.replace(tzinfo=datetime.timezone.utc)
+                    if created_time.tzinfo is None:
+                        created_time = created_time.replace(tzinfo=datetime.timezone.utc)
                 except ValueError:
-                    try: 
+                    try:
                         created_time = datetime.datetime.strptime(timestamp, "%Y-%m-%dT%H:%M:%S.%f%z")
                     except ValueError:
-                        try: 
+                        try:
                             created_time = datetime.datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S").replace(tzinfo=datetime.timezone.utc)
                         except ValueError:
-                             logging.warning(f"Could not parse timestamp string: {timestamp}")
-                             return "Unknown"
+                            logging.warning(f"Could not parse timestamp string: {timestamp}")
+                            return "Unknown"
             elif isinstance(timestamp, datetime.datetime):
-                if timestamp.tzinfo is None: 
+                if timestamp.tzinfo is None:
                     created_time = timestamp.replace(tzinfo=datetime.timezone.utc)
                 else:
-                    created_time = timestamp 
-            else: 
+                    created_time = timestamp
+            else:
                 return "Unknown"
             now = datetime.datetime.now(datetime.timezone.utc)
             diff = now - created_time
@@ -980,7 +980,7 @@ class KubernetesResourceLoader(QThread):
 
 
 class ResourceDeleterThread(QThread):
-    delete_completed = pyqtSignal(bool, str, str, str) 
+    delete_completed = pyqtSignal(bool, str, str, str)
     def __init__(self, resource_type, resource_name, namespace, parent=None):
         super().__init__(parent)
         self.resource_type = resource_type
@@ -994,14 +994,16 @@ class ResourceDeleterThread(QThread):
     def run(self):
         if not self._is_running: return
         try:
-            delete_options = client.V1DeleteOptions() 
+            delete_options = client.V1DeleteOptions()
+
             if self.resource_type == "pods":
                 if self.namespace:
                     self.kube_client.v1.delete_namespaced_pod(name=self.resource_name, namespace=self.namespace, body=delete_options)
             elif self.resource_type == "services":
-                 self.kube_client.v1.delete_namespaced_service(name=self.resource_name, namespace=self.namespace, body=delete_options)
+                self.kube_client.v1.delete_namespaced_service(name=self.resource_name, namespace=self.namespace, body=delete_options)
             elif self.resource_type == "deployments":
-                 self.kube_client.apps_v1.delete_namespaced_deployment(name=self.resource_name, namespace=self.namespace, body=delete_options)
+                self.kube_client.apps_v1.delete_namespaced_deployment(name=self.resource_name, namespace=self.namespace, body=delete_options)
+
             else:
                 if not self._is_running: return
                 self.delete_completed.emit(False, f"Deletion not implemented for {self.resource_type}", self.resource_name, self.namespace)
@@ -1017,7 +1019,7 @@ class ResourceDeleterThread(QThread):
 
 
 class BatchResourceDeleterThread(QThread):
-    batch_delete_progress = pyqtSignal(int, int) 
+    batch_delete_progress = pyqtSignal(int, int)
     batch_delete_completed = pyqtSignal(list, list)
     def __init__(self, resource_type, resources_to_delete, parent=None):
         super().__init__(parent)
@@ -1055,16 +1057,16 @@ class BaseResourcePage(BaseTablePage):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.resource_type = None
-        self.resources = [] 
+        self.resources = []
         self.namespace_filter = "default"
-        self.search_bar = None 
-        self.namespace_combo = None 
+        self.search_bar = None
+        self.namespace_combo = None
         self.loading_thread = None
         self.delete_thread = None
         self.batch_delete_thread = None
-        self.is_loading_initial = False 
-        self.is_loading_more = False    
-        self.all_data_loaded = False    
+        self.is_loading_initial = False
+        self.is_loading_more = False
+        self.all_data_loaded = False
         self.current_continue_token = None
         self.items_per_page = 15 # User specified
         self.selected_items = set()
@@ -1072,13 +1074,13 @@ class BaseResourcePage(BaseTablePage):
         self.is_showing_skeleton = False
         self._data_cache = {}
         self._cache_timestamps = {}
-        self._shutting_down = False 
+        self._shutting_down = False
         self.kube_client = get_kubernetes_client()
         self._load_more_indicator_widget = None
         self._all_loaded_label = None
-        
-        self._message_widget_container = None 
-        self._table_stack = None 
+
+        self._message_widget_container = None
+        self._table_stack = None
 
 
     def setup_ui(self, title, headers, sortable_columns=None):
@@ -1086,15 +1088,15 @@ class BaseResourcePage(BaseTablePage):
         page_main_layout.setContentsMargins(16, 16, 16, 16)
         page_main_layout.setSpacing(16)
 
-        header_controls_layout = QHBoxLayout() 
-        self._create_title_and_count(header_controls_layout, title) 
+        header_controls_layout = QHBoxLayout()
+        self._create_title_and_count(header_controls_layout, title)
         page_main_layout.addLayout(header_controls_layout)
-        self._add_controls_to_header(header_controls_layout) 
+        self._add_controls_to_header(header_controls_layout)
 
         self._table_stack = QStackedWidget()
         page_main_layout.addWidget(self._table_stack)
 
-        self.table = self._create_table(headers, sortable_columns) 
+        self.table = self._create_table(headers, sortable_columns)
         self._table_stack.addWidget(self.table)
 
         # Create a dedicated container for messages (empty/error)
@@ -1102,19 +1104,19 @@ class BaseResourcePage(BaseTablePage):
         message_container_layout = QVBoxLayout(self._message_widget_container)
         message_container_layout.setAlignment(Qt.AlignmentFlag.AlignCenter) # Center content
         message_container_layout.setContentsMargins(20,20,20,20) # Add some padding
-        self._table_stack.addWidget(self._message_widget_container) 
-        
-        self._table_stack.setCurrentWidget(self.table) 
+        self._table_stack.addWidget(self._message_widget_container)
+
+        self._table_stack.setCurrentWidget(self.table)
 
         select_all_checkbox = self._create_select_all_checkbox()
-        self._set_header_widget(0, select_all_checkbox) 
+        self._set_header_widget(0, select_all_checkbox)
 
         if hasattr(self, 'table') and self.table:
             self.table.verticalScrollBar().valueChanged.connect(self._handle_scroll)
             self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
             self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        
-        self.installEventFilter(self) 
+
+        self.installEventFilter(self)
         return page_main_layout
 
 
@@ -1122,39 +1124,39 @@ class BaseResourcePage(BaseTablePage):
         title_label = QLabel(title_text)
         title_label_style = getattr(AppStyles, "TITLE_STYLE", "font-size: 20px; font-weight: bold; color: #ffffff;")
         title_label.setStyleSheet(title_label_style)
-        
-        self.items_count = QLabel("0 items") 
+
+        self.items_count = QLabel("0 items")
         items_count_style = getattr(AppStyles, "COUNT_STYLE", "color: #9ca3af; font-size: 12px; margin-left: 8px;")
         self.items_count.setStyleSheet(items_count_style)
         self.items_count.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-        
+
         layout.addWidget(title_label)
         layout.addWidget(self.items_count)
 
     def _add_controls_to_header(self, header_layout):
-        self._add_filter_controls(header_layout) 
-        header_layout.addStretch(1) 
+        self._add_filter_controls(header_layout)
+        header_layout.addStretch(1)
 
         refresh_btn = QPushButton("Refresh")
-        refresh_style = getattr(AppStyles, "SECONDARY_BUTTON_STYLE", 
-            """QPushButton { background-color: #2d2d2d; color: #ffffff; border: 1px solid #3d3d3d;
-                           border-radius: 4px; padding: 5px 10px; }
-               QPushButton:hover { background-color: #3d3d3d; }
-               QPushButton:pressed { background-color: #1e1e1e; }"""
-        )
+        refresh_style = getattr(AppStyles, "SECONDARY_BUTTON_STYLE",
+                                """QPushButton { background-color: #2d2d2d; color: #ffffff; border: 1px solid #3d3d3d;
+                                               border-radius: 4px; padding: 5px 10px; }
+                                   QPushButton:hover { background-color: #3d3d3d; }
+                                   QPushButton:pressed { background-color: #1e1e1e; }"""
+                                )
         refresh_btn.setStyleSheet(refresh_style)
         refresh_btn.clicked.connect(self.force_load_data)
         header_layout.addWidget(refresh_btn)
 
     def _add_filter_controls(self, header_layout):
-        filters_widget = QWidget() 
+        filters_widget = QWidget()
         filters_layout = QHBoxLayout(filters_widget)
-        filters_layout.setContentsMargins(0,0,0,0) 
+        filters_layout.setContentsMargins(0,0,0,0)
         filters_layout.setSpacing(10)
 
         self.search_bar = QLineEdit()
         self.search_bar.setPlaceholderText("Search resources...")
-        search_bar_height = getattr(AppStyles, "SEARCH_BAR_HEIGHT", 30) 
+        search_bar_height = getattr(AppStyles, "SEARCH_BAR_HEIGHT", 30)
         search_bar_min_width = getattr(AppStyles, "SEARCH_BAR_MIN_WIDTH", 200)
         search_bar_style = getattr(AppStyles, "SEARCH_BAR_STYLE", "QLineEdit { padding: 5px; border: 1px solid #555; border-radius: 4px; background-color: #333; color: white; }")
         self.search_bar.setFixedHeight(search_bar_height)
@@ -1167,32 +1169,32 @@ class BaseResourcePage(BaseTablePage):
             namespace_label = QLabel("Namespace:")
             namespace_label.setStyleSheet("color: #ffffff; font-size: 13px; margin-right: 5px;")
             filters_layout.addWidget(namespace_label)
-            
+
             self.namespace_combo = QComboBox()
-            self.namespace_combo.setFixedHeight(search_bar_height) 
+            self.namespace_combo.setFixedHeight(search_bar_height)
             self.namespace_combo.setMinimumWidth(150)
-            combo_box_style = getattr(AppStyles, "COMBO_BOX_STYLE", 
-                """ QComboBox { background-color: #2d2d2d; color: #ffffff; border: 1px solid #3d3d3d;
-                                border-radius: 4px; padding: 5px 10px; font-size: 13px; }
-                    QComboBox:hover { border: 1px solid #555555; }
-                    QComboBox::drop-down { border: none; width: 20px; }
-                    QComboBox::down-arrow { image: none; }
-                    QComboBox QAbstractItemView { background-color: #2d2d2d; color: #ffffff; 
-                                                selection-background-color: #0078d7;
-                                                border: 1px solid #3d3d3d; padding: 5px; }"""
-            )
-            self.namespace_combo.setStyleSheet(combo_box_style) 
-            self.namespace_combo.addItem("default") 
+            combo_box_style = getattr(AppStyles, "COMBO_BOX_STYLE",
+                                      """ QComboBox { background-color: #2d2d2d; color: #ffffff; border: 1px solid #3d3d3d;
+                                                      border-radius: 4px; padding: 5px 10px; font-size: 13px; }
+                                          QComboBox:hover { border: 1px solid #555555; }
+                                          QComboBox::drop-down { border: none; width: 20px; }
+                                          QComboBox::down-arrow { image: none; }
+                                          QComboBox QAbstractItemView { background-color: #2d2d2d; color: #ffffff; 
+                                                                      selection-background-color: #0078d7;
+                                                                      border: 1px solid #3d3d3d; padding: 5px; }"""
+                                      )
+            self.namespace_combo.setStyleSheet(combo_box_style)
+            self.namespace_combo.addItem("default")
             self.namespace_combo.setCurrentText("default")
             self.namespace_combo.currentTextChanged.connect(self._handle_namespace_change)
             filters_layout.addWidget(self.namespace_combo)
-            QTimer.singleShot(100, self._load_namespaces) 
+            QTimer.singleShot(100, self._load_namespaces)
 
-        header_layout.addWidget(filters_widget) 
+        header_layout.addWidget(filters_widget)
 
     def _show_message_in_table_area(self, message_text, description_text=None, is_error=False):
         """Displays a message (e.g., 'No items found' or an error) in the table area."""
-        if not self._table_stack or not self._message_widget_container: 
+        if not self._table_stack or not self._message_widget_container:
             logging.warning("_table_stack or _message_widget_container not initialized.")
             return
 
@@ -1224,7 +1226,7 @@ class BaseResourcePage(BaseTablePage):
         else: # For "No items found" or other info messages
             info_color = getattr(AppColors, "TEXT_MUTED", "#9E9E9E") # Fallback grey
             main_message_label.setStyleSheet(f"color: {info_color};")
-        
+
         self._message_widget_container.layout().addWidget(main_message_label)
 
         if description_text:
@@ -1236,7 +1238,7 @@ class BaseResourcePage(BaseTablePage):
             desc_label.setFont(desc_font)
             desc_label.setStyleSheet(f"color: {getattr(AppColors, 'TEXT_SECONDARY', '#B0BEC5')}; margin-top: 10px;")
             self._message_widget_container.layout().addWidget(desc_label)
-        
+
         self._table_stack.setCurrentWidget(self._message_widget_container)
 
 
@@ -1246,45 +1248,45 @@ class BaseResourcePage(BaseTablePage):
             self._table_stack.setCurrentWidget(self.table)
 
 
-    def _show_skeleton_loader(self, rows=10): 
+    def _show_skeleton_loader(self, rows=10):
         if not hasattr(self, 'table') or self._shutting_down: return
         self.is_showing_skeleton = True
-        self._show_table_area() 
-        self.table.setRowCount(0) 
-        
+        self._show_table_area()
+        self.table.setRowCount(0)
+
         for i in range(rows):
             self.table.insertRow(i)
             for j in range(self.table.columnCount()):
-                if j == 0: 
-                    empty_widget = QWidget(); empty_widget.setStyleSheet("background-color: #2d2d2d; border-radius: 3px;") 
+                if j == 0:
+                    empty_widget = QWidget(); empty_widget.setStyleSheet("background-color: #2d2d2d; border-radius: 3px;")
                     self.table.setCellWidget(i, j, empty_widget)
-                elif j == self.table.columnCount() - 1: 
+                elif j == self.table.columnCount() - 1:
                     empty_widget = QWidget(); empty_widget.setStyleSheet("background-color: #2d2d2d; border-radius: 3px;")
                     self.table.setCellWidget(i, j, empty_widget)
                 else:
-                    item = QTableWidgetItem(""); item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEnabled) 
+                    item = QTableWidgetItem(""); item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
                     item.setBackground(QColor("#2d2d2d")); self.table.setItem(i, j, item)
-            self.table.setRowHeight(i, 40) 
-        
+            self.table.setRowHeight(i, 40)
+
         self.table.setSortingEnabled(False)
         QApplication.processEvents()
-        
+
         if not hasattr(self, 'skeleton_timer'):
             self.skeleton_timer = QTimer(self)
             self.skeleton_timer.timeout.connect(self._animate_skeleton)
             self.skeleton_animation_step = 0
-        if not self.skeleton_timer.isActive(): self.skeleton_timer.start(250) 
+        if not self.skeleton_timer.isActive(): self.skeleton_timer.start(250)
 
     def _animate_skeleton(self):
         if not self.is_showing_skeleton or not hasattr(self, 'table'):
             if hasattr(self, 'skeleton_timer'): self.skeleton_timer.stop()
             return
-        colors = ["#2d2d2d", "#313131", "#353535", "#313131"] 
+        colors = ["#2d2d2d", "#313131", "#353535", "#313131"]
         current_color_hex = colors[self.skeleton_animation_step % len(colors)]
         for i in range(self.table.rowCount()):
             for j in [0, self.table.columnCount() -1]:
-                 widget = self.table.cellWidget(i,j)
-                 if widget: widget.setStyleSheet(f"background-color: {current_color_hex}; border-radius: 3px;")
+                widget = self.table.cellWidget(i,j)
+                if widget: widget.setStyleSheet(f"background-color: {current_color_hex}; border-radius: 3px;")
             for j in range(1, self.table.columnCount() - 1):
                 item = self.table.item(i, j)
                 if item: item.setBackground(QColor(current_color_hex))
@@ -1298,18 +1300,18 @@ class BaseResourcePage(BaseTablePage):
             current_selection = self.namespace_combo.currentText()
             self.namespace_combo.blockSignals(True)
             self.namespace_combo.clear()
-            self.namespace_combo.addItem("All Namespaces") 
+            self.namespace_combo.addItem("All Namespaces")
             self.namespace_combo.addItems(sorted(namespaces))
             if current_selection in namespaces: self.namespace_combo.setCurrentText(current_selection)
             elif "default" in namespaces: self.namespace_combo.setCurrentText("default")
-            elif namespaces: self.namespace_combo.setCurrentIndex(1) 
+            elif namespaces: self.namespace_combo.setCurrentIndex(1)
             else: self.namespace_combo.setCurrentText("All Namespaces")
             self.namespace_combo.blockSignals(False)
         except Exception as e:
             logging.error(f"Error loading namespaces: {e}")
             self.namespace_combo.blockSignals(True)
             self.namespace_combo.clear()
-            self.namespace_combo.addItem("All Namespaces"); self.namespace_combo.addItem("default") 
+            self.namespace_combo.addItem("All Namespaces"); self.namespace_combo.addItem("default")
             self.namespace_combo.setCurrentText("default")
             self.namespace_combo.blockSignals(False)
 
@@ -1319,37 +1321,37 @@ class BaseResourcePage(BaseTablePage):
             self._search_delay_timer = QTimer(self)
             self._search_delay_timer.setSingleShot(True)
             self._search_delay_timer.timeout.connect(self.force_load_data)
-        self._search_delay_timer.start(500) 
+        self._search_delay_timer.start(500)
 
     def _handle_namespace_change(self, namespace):
         if not namespace: return
         new_filter = "all" if namespace == "All Namespaces" else namespace
         if self.namespace_filter != new_filter:
             self.namespace_filter = new_filter
-            self.force_load_data() 
+            self.force_load_data()
 
     def _handle_scroll(self, value):
         if self.is_loading_initial or self.is_loading_more or self.all_data_loaded: return
         scrollbar = self.table.verticalScrollBar()
-        if value >= scrollbar.maximum() - (2 * self.table.rowHeight(0) if self.table.rowCount() > 0 else 0) : 
+        if value >= scrollbar.maximum() - (2 * self.table.rowHeight(0) if self.table.rowCount() > 0 else 0) :
             self.load_data(load_more=True)
 
     def force_load_data(self):
-        self.is_loading_initial = False 
+        self.is_loading_initial = False
         self.is_loading_more = False
         self.all_data_loaded = False
         self.current_continue_token = None
-        
-        if hasattr(self, '_show_skeleton_loader') and not self.resources: 
+
+        if hasattr(self, '_show_skeleton_loader') and not self.resources:
             self._show_skeleton_loader()
-        elif self.table: 
-             self.table.setRowCount(0)
+        elif self.table:
+            self.table.setRowCount(0)
         QTimer.singleShot(50, lambda: self.load_data(load_more=False))
 
     def showEvent(self, event):
         super().showEvent(event)
-        if self.reload_on_show and not self.is_loading_initial and not self.resources: 
-            self.force_load_data() 
+        if self.reload_on_show and not self.is_loading_initial and not self.resources:
+            self.force_load_data()
 
     def cleanup_threads(self):
         threads_to_stop = [
@@ -1359,7 +1361,7 @@ class BaseResourcePage(BaseTablePage):
             if thread and thread.isRunning():
                 if hasattr(thread, 'stop'): thread.stop()
                 thread.quit()
-                if not thread.wait(500): 
+                if not thread.wait(500):
                     logging.warning(f"Thread {thread} did not terminate gracefully, forcing.")
                     thread.terminate()
         self.loading_thread = None; self.delete_thread = None; self.batch_delete_thread = None
@@ -1373,27 +1375,27 @@ class BaseResourcePage(BaseTablePage):
         will result in a TypeError when `force_load_data` or scroll-to-load calls this method.
         """
         if self._shutting_down: return
-        
+
         if load_more:
-            if self.is_loading_more or self.all_data_loaded: return 
+            if self.is_loading_more or self.all_data_loaded: return
             self.is_loading_more = True
-            self._show_load_more_indicator_ui(True) 
-        else: 
-            if self.is_loading_initial: return 
+            self._show_load_more_indicator_ui(True)
+        else:
+            if self.is_loading_initial: return
             self.is_loading_initial = True
-            self.resources = [] 
+            self.resources = []
             self.selected_items.clear()
-            self.current_continue_token = None 
+            self.current_continue_token = None
             self.all_data_loaded = False
-            if self.table: self.table.setRowCount(0) 
+            if self.table: self.table.setRowCount(0)
             if hasattr(self, '_show_skeleton_loader') and self.table.rowCount() == 0 : # Show skeleton only if table is empty
                 self._show_skeleton_loader()
             else: # Ensure table is shown if not showing skeleton
-                self._show_table_area() 
+                self._show_table_area()
 
 
         if self.loading_thread and self.loading_thread.isRunning():
-            self.loading_thread.stop(); self.loading_thread.quit(); self.loading_thread.wait() 
+            self.loading_thread.stop(); self.loading_thread.quit(); self.loading_thread.wait()
 
         self.loading_thread = KubernetesResourceLoader(
             self.resource_type, self.namespace_filter,
@@ -1410,12 +1412,12 @@ class BaseResourcePage(BaseTablePage):
 
     def on_resources_loaded(self, new_resources, resource_type, next_continue_token, load_more=False):
         if self._shutting_down: return
-        
+
         current_scroll_pos = 0
-        if self.table and self.table.verticalScrollBar(): current_scroll_pos = self.table.verticalScrollBar().value() 
-        
+        if self.table and self.table.verticalScrollBar(): current_scroll_pos = self.table.verticalScrollBar().value()
+
         search_text = self.search_bar.text().lower() if self.search_bar and self.search_bar.text() else ""
-        
+
         filtered_new_resources = []
         if search_text:
             for r_item in new_resources:
@@ -1424,56 +1426,56 @@ class BaseResourcePage(BaseTablePage):
                 if match: filtered_new_resources.append(r_item)
         else: filtered_new_resources = new_resources
 
-        if self.is_showing_skeleton: 
+        if self.is_showing_skeleton:
             self.is_showing_skeleton = False
             if hasattr(self, 'skeleton_timer') and self.skeleton_timer.isActive(): self.skeleton_timer.stop()
 
         if load_more:
             self.is_loading_more = False
             self._show_load_more_indicator_ui(False)
-            if not new_resources and not next_continue_token: 
-                self.all_data_loaded = True; self.all_items_loaded_signal.emit(); self._show_all_loaded_message_ui(True) 
+            if not new_resources and not next_continue_token:
+                self.all_data_loaded = True; self.all_items_loaded_signal.emit(); self._show_all_loaded_message_ui(True)
                 return
-            if filtered_new_resources: 
-                start_row = len(self.resources) 
+            if filtered_new_resources:
+                start_row = len(self.resources)
                 self.resources.extend(filtered_new_resources)
                 self.table.setUpdatesEnabled(False)
                 current_row_count = self.table.rowCount()
                 self.table.setRowCount(current_row_count + len(filtered_new_resources))
-                for i, resource_item in enumerate(filtered_new_resources): 
+                for i, resource_item in enumerate(filtered_new_resources):
                     self.populate_resource_row(current_row_count + i, resource_item)
                 self.table.setUpdatesEnabled(True)
             self.load_more_complete.emit()
-        else: 
+        else:
             self.is_loading_initial = False
-            self.resources = filtered_new_resources 
-            self.table.setRowCount(0) 
-            self.populate_table(self.resources) 
+            self.resources = filtered_new_resources
+            self.table.setRowCount(0)
+            self.populate_table(self.resources)
 
         self.current_continue_token = next_continue_token
-        if not self.current_continue_token: 
+        if not self.current_continue_token:
             self.all_data_loaded = True; self.all_items_loaded_signal.emit()
             if load_more or not self.resources: self._show_all_loaded_message_ui(True)
 
         self.items_count.setText(f"{len(self.resources)} items")
-        
-        if not self.resources: 
-            self._show_message_in_table_area(f"No {self.resource_type} found.", 
+
+        if not self.resources:
+            self._show_message_in_table_area(f"No {self.resource_type} found.",
                                              "Item list is empty.")
             if self.table: self.table.setSortingEnabled(False)
         else:
-            self._show_table_area() 
+            self._show_table_area()
             if self.table: self.table.setSortingEnabled(True)
-        
-        QApplication.processEvents() 
-        if self.table and self.table.verticalScrollBar() and load_more: 
+
+        QApplication.processEvents()
+        if self.table and self.table.verticalScrollBar() and load_more:
             self.table.verticalScrollBar().setValue(current_scroll_pos)
 
 
     def on_load_error(self, error_message, load_more=False):
         if self._shutting_down: return
 
-        if self.is_showing_skeleton: 
+        if self.is_showing_skeleton:
             self.is_showing_skeleton = False
             if hasattr(self, 'skeleton_timer') and self.skeleton_timer.isActive(): self.skeleton_timer.stop()
 
@@ -1482,16 +1484,16 @@ class BaseResourcePage(BaseTablePage):
             self._show_load_more_indicator_ui(False)
             logging.error(f"Error loading more items for {self.resource_type}: {error_message}")
             if hasattr(self, 'show_transient_error_message'): self.show_transient_error_message(f"Failed to load more: {error_message}")
-        else: 
+        else:
             self.is_loading_initial = False
-            self.resources = [] 
+            self.resources = []
             if self.table: self.table.setRowCount(0)
-            
+
             desc_with_retry = error_message + "\n\nClick Retry to try again."
-            self._show_message_in_table_area(f"Error loading {self.resource_type}", 
-                                             description_text=desc_with_retry, 
+            self._show_message_in_table_area(f"Error loading {self.resource_type}",
+                                             description_text=desc_with_retry,
                                              is_error=True)
-            
+
             if self._message_widget_container.layout().count() > 0:
                 actual_message_widget = self._message_widget_container.layout().itemAt(0).widget()
                 if actual_message_widget and actual_message_widget.layout():
@@ -1506,7 +1508,7 @@ class BaseResourcePage(BaseTablePage):
                         retry_button = QPushButton("Retry")
                         retry_button_style = getattr(AppStyles, "PRIMARY_BUTTON_STYLE", "QPushButton { padding: 5px 10px; }")
                         retry_button.setStyleSheet(retry_button_style)
-                        retry_button.clicked.connect(self.force_load_data) 
+                        retry_button.clicked.connect(self.force_load_data)
                         actual_message_widget.layout().addWidget(retry_button, alignment=Qt.AlignmentFlag.AlignCenter)
 
             logging.error(f"Initial load error for {self.resource_type}: {error_message}")
@@ -1518,7 +1520,7 @@ class BaseResourcePage(BaseTablePage):
             if not self._load_more_indicator_widget:
                 self._load_more_indicator_widget = QWidget(self.table.viewport())
                 layout = QHBoxLayout(self._load_more_indicator_widget)
-                spinner = QLabel("Loading more...") 
+                spinner = QLabel("Loading more...")
                 spinner.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 layout.addWidget(spinner)
                 self._load_more_indicator_widget.setStyleSheet("background-color: #2a2a2a; color: white; padding: 5px; border-top: 1px solid #3d3d3d;")
@@ -1544,14 +1546,14 @@ class BaseResourcePage(BaseTablePage):
 
     def populate_table(self, resources_to_populate):
         if not self.table: return
-        self.table.setUpdatesEnabled(False) 
-        self.table.setRowCount(len(resources_to_populate)) 
-        for row, resource_item in enumerate(resources_to_populate): 
+        self.table.setUpdatesEnabled(False)
+        self.table.setRowCount(len(resources_to_populate))
+        for row, resource_item in enumerate(resources_to_populate):
             self.populate_resource_row(row, resource_item)
         self.table.setUpdatesEnabled(True)
 
 
-    def populate_resource_row(self, row, resource): 
+    def populate_resource_row(self, row, resource):
         raise NotImplementedError("Subclasses must implement populate_resource_row")
 
     # def _create_action_button(self, row, resource_name, resource_namespace):
@@ -1565,25 +1567,25 @@ class BaseResourcePage(BaseTablePage):
     #     """Handle action button clicks."""
     #     if row >= len(self.resources):
     #         return
-            
+
     #     resource = self.resources[row]
     #     resource_name = resource.get("name", "")
     #     resource_namespace = resource.get("namespace", "")
-        
+
     #     if action == "View Logs":
     #         pass
     #     elif action == "Delete":
     #         self.delete_resource(resource_name, resource_namespace)
-            
+
     def _handle_action(self, action, row):
         """Handle action button clicks with pod-specific logic."""
         if row >= len(self.resources):
             return
-            
+
         resource = self.resources[row]
         resource_name = resource.get("name", "")
         resource_namespace = resource.get("namespace", "")
-        
+
         if action == "View Logs":
             # Double-check this is a pod resource
             if self.resource_type == "pods":
@@ -1606,8 +1608,8 @@ class BaseResourcePage(BaseTablePage):
         """Handle edit resource action - placeholder for future implementation"""
         # TODO: Implement resource editing functionality
         from PyQt6.QtWidgets import QMessageBox
-        QMessageBox.information(self, "Edit Resource", 
-                            f"Edit functionality for {resource_name} will be implemented soon.")
+        QMessageBox.information(self, "Edit Resource",
+                                f"Edit functionality for {resource_name} will be implemented soon.")
 
     def _handle_ssh_into_pod(self, resource_name, resource_namespace, resource):
         """Handle SSH into pod action with validation"""
@@ -1617,20 +1619,20 @@ class BaseResourcePage(BaseTablePage):
             if not is_valid:
                 self._show_ssh_error(f"Cannot SSH into pod: {message}")
                 return
-            
+
             # Get the terminal panel
             terminal_panel = self._get_terminal_panel()
             if not terminal_panel:
                 self._show_ssh_error("Terminal panel not available. Please ensure you're in cluster view.")
                 return
-            
+
             # Show the terminal if it's hidden
             if not terminal_panel.is_visible:
                 terminal_panel.show_terminal()
-            
+
             # Create or switch to SSH tab
             self._create_ssh_tab(terminal_panel, resource_name, resource_namespace, resource)
-            
+
         except Exception as e:
             logging.error(f"Error handling SSH for {resource_name}: {e}")
             self._show_ssh_error(f"Error opening SSH session: {str(e)}")
@@ -1641,21 +1643,21 @@ class BaseResourcePage(BaseTablePage):
             kube_client = get_kubernetes_client()
             if not kube_client or not kube_client.v1:
                 return False, "Kubernetes client not available"
-            
+              
             # Get the pod to validate it exists and is running
             try:
                 pod = kube_client.v1.read_namespaced_pod(name=resource_name, namespace=resource_namespace)
-                
+
                 # Check if pod is running
                 if pod.status.phase != "Running":
                     return False, f"Pod is not running (status: {pod.status.phase})"
-                
+
                 # Check if pod has at least one container
                 if not pod.spec.containers:
                     return False, "Pod has no containers"
-                
+
                 return True, "Pod validated successfully"
-                
+
             except ApiException as e:
                 if e.status == 404:
                     return False, f"Pod '{resource_name}' not found in namespace '{resource_namespace}'"
@@ -1663,7 +1665,7 @@ class BaseResourcePage(BaseTablePage):
                     return False, "Access denied. Check RBAC permissions for pod access."
                 else:
                     return False, f"API error: {e.reason}"
-                    
+                  
         except Exception as e:
             return False, f"Validation error: {str(e)}"
 
@@ -1673,12 +1675,12 @@ class BaseResourcePage(BaseTablePage):
             # Check if an SSH tab for this pod already exists
             ssh_tab_name = f"SSH: {pod_name}"
             existing_tab_index = None
-            
+
             for i, tab_data in enumerate(terminal_panel.terminal_tabs):
                 if tab_data.get('is_ssh_tab') and tab_data.get('pod_name') == pod_name:
                     existing_tab_index = i
                     break
-            
+
             if existing_tab_index is not None:
                 # Switch to existing SSH tab
                 terminal_panel.switch_to_terminal_tab(existing_tab_index)
@@ -1691,7 +1693,7 @@ class BaseResourcePage(BaseTablePage):
                 new_tab_index = terminal_panel.create_ssh_tab(pod_name, namespace)
                 if new_tab_index is not None:
                     terminal_panel.switch_to_terminal_tab(new_tab_index)
-            
+
         except Exception as e:
             logging.error(f"Error creating SSH tab for {pod_name}: {e}")
             self._show_ssh_error(f"Error creating SSH tab: {str(e)}")
@@ -1711,7 +1713,7 @@ class BaseResourcePage(BaseTablePage):
             kube_client = get_kubernetes_client()
             if not kube_client or not kube_client.v1:
                 return False, "Kubernetes client not available"
-            
+
             # Try to get the pod to validate it exists
             try:
                 pod = kube_client.v1.read_namespaced_pod(name=resource_name, namespace=resource_namespace)
@@ -1723,7 +1725,7 @@ class BaseResourcePage(BaseTablePage):
                     return False, "Access denied. Check RBAC permissions for pod access."
                 else:
                     return False, f"API error: {e.reason}"
-                    
+
         except Exception as e:
             return False, f"Validation error: {str(e)}"
 
@@ -1735,20 +1737,25 @@ class BaseResourcePage(BaseTablePage):
             if not is_valid:
                 self._show_logs_error(f"Cannot view logs: {message}")
                 return
-            
-            # Get the terminal panel
+
+            # Get the terminal panel with better error handling
+
             terminal_panel = self._get_terminal_panel()
             if not terminal_panel:
                 self._show_logs_error("Terminal panel not available. Please ensure you're in cluster view.")
                 return
-            
+              
             # Show the terminal if it's hidden
-            if not terminal_panel.is_visible:
+            if hasattr(terminal_panel, 'is_visible') and not terminal_panel.is_visible:
                 terminal_panel.show_terminal()
-            
-            # Create or switch to logs tab
-            self._create_enhanced_logs_tab(terminal_panel, resource_name, resource_namespace, resource)
-            
+
+            # Create or switch to logs tab with error handling
+            try:
+                self._create_enhanced_logs_tab(terminal_panel, resource_name, resource_namespace, resource)
+            except Exception as e:
+                logging.error(f"Error creating logs tab: {e}")
+                self._show_logs_error(f"Failed to create logs tab: {str(e)}")
+
         except Exception as e:
             logging.error(f"Error handling view logs for {resource_name}: {e}")
             self._show_logs_error(f"Error opening logs: {str(e)}")
@@ -1762,7 +1769,7 @@ class BaseResourcePage(BaseTablePage):
                 if hasattr(parent, 'terminal_panel'):
                     return parent.terminal_panel
                 parent = parent.parent()
-            
+
             # Alternative: check if we can access through the main window
             from PyQt6.QtWidgets import QApplication
             app = QApplication.instance()
@@ -1770,7 +1777,7 @@ class BaseResourcePage(BaseTablePage):
                 for widget in app.allWidgets():
                     if hasattr(widget, 'terminal_panel') and widget.terminal_panel:
                         return widget.terminal_panel
-            
+
             return None
         except Exception as e:
             logging.error(f"Error getting terminal panel: {e}")
@@ -1784,15 +1791,15 @@ class BaseResourcePage(BaseTablePage):
             if resource["name"] == item_name:
                 namespace = resource.get("namespace", "")
                 break
-                
+
         # Store the (name, namespace) tuple for deletion
         item_key = (item_name, namespace)
-        
+
         if state == Qt.CheckState.Checked.value:
             self.selected_items.add(item_key)
         else:
             self.selected_items.discard(item_key)
-            
+
             # If any checkbox is unchecked, uncheck the select-all checkbox
             if self.select_all_checkbox is not None and self.select_all_checkbox.isChecked():
                 # Block signals to prevent infinite recursion
@@ -1808,12 +1815,12 @@ class BaseResourcePage(BaseTablePage):
             # Check if a logs tab for this pod already exists
             logs_tab_name = f"Logs: {pod_name}"
             existing_tab_index = None
-            
+
             for i, tab_data in enumerate(terminal_panel.terminal_tabs):
                 if tab_data.get('is_logs_tab') and tab_data.get('pod_name') == pod_name:
                     existing_tab_index = i
                     break
-            
+
             if existing_tab_index is not None:
                 # Switch to existing logs tab and refresh
                 terminal_panel.switch_to_terminal_tab(existing_tab_index)
@@ -1825,7 +1832,7 @@ class BaseResourcePage(BaseTablePage):
                 new_tab_index = self._create_new_enhanced_logs_tab(terminal_panel, logs_tab_name, pod_name, namespace)
                 if new_tab_index is not None:
                     terminal_panel.switch_to_terminal_tab(new_tab_index)
-            
+
         except Exception as e:
             logging.error(f"Error creating enhanced logs tab for {pod_name}: {e}")
             self._show_logs_error(f"Error creating logs tab: {str(e)}")
@@ -1844,18 +1851,17 @@ class BaseResourcePage(BaseTablePage):
             from PyQt6.QtWidgets import QLabel, QPushButton, QHBoxLayout, QWidget
             from PyQt6.QtCore import Qt
             from PyQt6.QtGui import QFont
-            
+
             tab_index = len(terminal_panel.terminal_tabs)
-            
+
             # Create tab widget
             tab_widget = QWidget()
             tab_widget.setFixedHeight(28)
             tab_widget.setCursor(Qt.CursorShape.PointingHandCursor)
-            
             tab_layout = QHBoxLayout(tab_widget)
             tab_layout.setContentsMargins(8, 0, 8, 0)
             tab_layout.setSpacing(6)
-            
+
             # Create label with enhanced logs icon and name
             label = QLabel(f"📋 {pod_name}")
             label.setStyleSheet("""
@@ -1888,10 +1894,10 @@ class BaseResourcePage(BaseTablePage):
                     border-radius: 8px;
                 }
             """)
-            
+
             tab_layout.addWidget(label)
             tab_layout.addWidget(close_btn)
-            
+
             # Create tab button
             tab_btn = QPushButton()
             tab_btn.setCheckable(True)
@@ -1915,29 +1921,29 @@ class BaseResourcePage(BaseTablePage):
                 }
             """)
             tab_btn.setLayout(tab_layout)
-            
+
             # Create tab container
             tab_container = QWidget()
             container_layout = QHBoxLayout(tab_container)
             container_layout.setContentsMargins(0, 0, 0, 0)
             container_layout.setSpacing(0)
             container_layout.addWidget(tab_btn)
-            
+
             # Connect signals
             close_btn.clicked.connect(lambda: self._close_enhanced_logs_tab(terminal_panel, tab_index))
             tab_btn.clicked.connect(lambda: terminal_panel.switch_to_terminal_tab(tab_index))
-            
+
             # Add tab to header
             terminal_panel.unified_header.add_tab(tab_container)
-            
+
             # Create enhanced logs viewer widget
             from UI.TerminalPanel import EnhancedLogsViewer  # Import the enhanced viewer
             logs_viewer = EnhancedLogsViewer(pod_name, namespace)
-            
+
             # Add the logs viewer to terminal stack
             terminal_panel.stack_layout.addWidget(logs_viewer)
             logs_viewer.setVisible(False)
-            
+
             # Store tab data with enhanced information
             terminal_data = {
                 'tab_button': tab_btn,
@@ -1953,9 +1959,9 @@ class BaseResourcePage(BaseTablePage):
                 'namespace': namespace
             }
             terminal_panel.terminal_tabs.append(terminal_data)
-            
+
             return tab_index
-            
+
         except Exception as e:
             logging.error(f"Error creating new enhanced logs tab: {e}")
             return None
@@ -1965,17 +1971,17 @@ class BaseResourcePage(BaseTablePage):
         try:
             if tab_index >= len(terminal_panel.terminal_tabs):
                 return
-            
+
             terminal_data = terminal_panel.terminal_tabs[tab_index]
             logs_viewer = terminal_data.get('logs_viewer')
-            
+
             # Stop log streaming before closing
             if logs_viewer and hasattr(logs_viewer, 'stop_log_stream'):
                 logs_viewer.stop_log_stream()
-            
+
             # Close the tab using terminal panel's method
             terminal_panel.close_terminal_tab(tab_index)
-            
+
         except Exception as e:
             logging.error(f"Error closing enhanced logs tab: {e}")
 
@@ -1984,24 +1990,24 @@ class BaseResourcePage(BaseTablePage):
         """Switch to enhanced logs tab - add this to TerminalPanel class"""
         if tab_index >= len(self.terminal_tabs):
             return
-        
+
         # Hide all content widgets
         for i, tab_data in enumerate(self.terminal_tabs):
             content_widget = tab_data.get('content_widget')
             if content_widget:
                 content_widget.setVisible(i == tab_index)
-            
+
             # Update tab button states
             tab_button = tab_data.get('tab_button')
             if tab_button:
                 tab_button.setChecked(i == tab_index)
-            
+
             tab_data['active'] = i == tab_index
-        
+
         # Set focus and update active index
         self.active_terminal_index = tab_index
         terminal_data = self.terminal_tabs[tab_index]
-        
+
         # Handle different tab types
         if terminal_data.get('is_logs_tab'):
             # For logs tabs, focus the logs viewer
@@ -2014,7 +2020,7 @@ class BaseResourcePage(BaseTablePage):
             if terminal_widget:
                 terminal_widget.setFocus()
                 terminal_widget.ensure_cursor_at_input()
-            
+
             # Start process if not started
             if not terminal_data.get('started', False):
                 self.start_terminal_process(tab_index)
@@ -2024,13 +2030,13 @@ class BaseResourcePage(BaseTablePage):
         """Enhanced close method that handles both regular and logs tabs"""
         if tab_index >= len(self.terminal_tabs):
             return
-        
+
         if len(self.terminal_tabs) <= 1:
             self.hide_terminal()
             return
 
         terminal_data = self.terminal_tabs[tab_index]
-        
+
         # Handle enhanced logs tab cleanup
         if terminal_data.get('is_logs_tab'):
             logs_viewer = terminal_data.get('logs_viewer')
@@ -2051,7 +2057,7 @@ class BaseResourcePage(BaseTablePage):
         tab_container = terminal_data.get('tab_container')
         if tab_container:
             self.unified_header.remove_tab(tab_container)
-        
+
         content_widget = terminal_data.get('content_widget')
         if content_widget:
             self.stack_layout.removeWidget(content_widget)
@@ -2076,21 +2082,20 @@ class BaseResourcePage(BaseTablePage):
         # Switch to active tab if tabs remain
         if self.terminal_tabs:
             self.switch_to_terminal_tab(self.active_terminal_index)
-        
+
         self.renumber_tabs()
 
     def _handle_select_all(self, state):
         """Handle select-all checkbox state changes."""
         super()._handle_select_all(state)
-        
+
         # Update selected_items set based on state
         self.selected_items.clear()
-        
+
         if state == Qt.CheckState.Checked.value:
             # Add all items to selected set
             for resource in self.resources:
                 self.selected_items.add((resource["name"], resource.get("namespace", "")))
-                 
 
     def delete_selected_resources(self):
         if hasattr(self, 'delete_thread') and self.delete_thread and self.delete_thread.isRunning():
@@ -2100,23 +2105,23 @@ class BaseResourcePage(BaseTablePage):
             return
         count = len(self.selected_items)
         result = QMessageBox.warning(self, "Confirm Deletion",
-            f"Are you sure you want to delete {count} selected {self.resource_type}?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+                                     f"Are you sure you want to delete {count} selected {self.resource_type}?",
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
         if result != QMessageBox.StandardButton.Yes: return
-        
-        resources_list = list(self.selected_items) 
-        
-        from PyQt6.QtWidgets import QProgressDialog 
+
+        resources_list = list(self.selected_items)
+
+        from PyQt6.QtWidgets import QProgressDialog
         progress = QProgressDialog(f"Deleting {count} {self.resource_type}...", "Cancel", 0, count, self)
         progress.setWindowTitle("Deleting Resources"); progress.setWindowModality(Qt.WindowModality.WindowModal)
         progress.setMinimumDuration(0); progress.setAutoClose(False); progress.setValue(0)
-        
+
         self.batch_delete_thread = BatchResourceDeleterThread(self.resource_type, resources_list)
         self.batch_delete_thread.batch_delete_progress.connect(progress.setValue)
         self.batch_delete_thread.batch_delete_completed.connect(
             lambda success, errors: self.on_batch_delete_completed(success, errors, progress))
         self.batch_delete_thread.start()
-        
+
     def on_batch_delete_completed(self, success_list, error_list, progress_dialog):
         progress_dialog.close()
         success_count = len(success_list)
@@ -2129,25 +2134,25 @@ class BaseResourcePage(BaseTablePage):
                 result_message += f"\n- {name}{ns_text}: {error}"
             if error_count > 5: result_message += f"\n... and {error_count - 5} more."
         QMessageBox.information(self, "Deletion Results", result_message)
-        self.force_load_data() 
-        
+        self.force_load_data()
+
     def delete_resource(self, resource_name, resource_namespace):
         if hasattr(self, 'delete_thread') and self.delete_thread and self.delete_thread.isRunning():
             self.delete_thread.wait(300)
         ns_text = f" in namespace {resource_namespace}" if resource_namespace else ""
         result = QMessageBox.warning(self, "Confirm Deletion",
-            f"Are you sure you want to delete {self.resource_type}/{resource_name}{ns_text}?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+                                     f"Are you sure you want to delete {self.resource_type}/{resource_name}{ns_text}?",
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
         if result != QMessageBox.StandardButton.Yes: return
-        
+
         self.delete_thread = ResourceDeleterThread(self.resource_type, resource_name, resource_namespace)
         self.delete_thread.delete_completed.connect(self.on_delete_completed)
         self.delete_thread.start()
-        
+
     def on_delete_completed(self, success, message, resource_name, resource_namespace):
         if success:
             QMessageBox.information(self, "Deletion Successful", message)
             self.selected_items.discard((resource_name, resource_namespace))
-            self.force_load_data() 
+            self.force_load_data()
         else:
             QMessageBox.critical(self, "Deletion Failed", message)

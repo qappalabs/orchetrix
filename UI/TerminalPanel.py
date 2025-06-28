@@ -16,8 +16,8 @@ from PyQt6.QtCore import Qt, QSize, QPropertyAnimation, QEasingCurve, QPoint, QT
 from datetime import datetime
 from enum import Enum
 
-from Styles import AppColors
 
+from Styles import AppColors, AppStyles
 
 class StyleConstants:
     """Centralized stylesheet constants"""
@@ -30,20 +30,9 @@ class StyleConstants:
             selection-color: #E0E0E0;
             padding: 8px;
         }}
-        QScrollBar:vertical {{
-            border: none;
-            background: #2D2D2D;
-            width: 10px;
-            margin: 0px;
-        }}
-        QScrollBar::handle:vertical {{
-            background: #555555;
-            min-height: 20px;
-            border-radius: 5px;
-        }}
-        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
-            height: 0px;
-        }}
+
+        {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
+
     """
     TERMINAL_WRAPPER = f"""
         QWidget#terminal_wrapper {{
@@ -133,15 +122,30 @@ class StyleConstants:
             width: 20px;
         }}
         QComboBox::down-arrow {{
-            image: url(icons/dropdown_arrow.svg);
-            width: 10px;
-            height: 10px;
+            image: url(icons/down_btn.svg);
+            width: 12px;
+            height: 12px;
+
         }}
         QComboBox QAbstractItemView {{
             background-color: {AppColors.BG_DARKER};
             color: {AppColors.TEXT_SECONDARY};
             selection-background-color: {AppColors.HOVER_BG};
             border: 1px solid {AppColors.BORDER_COLOR};
+        }}
+
+        QComboBox QAbstractItemView::item {{
+            cursor: pointer;
+            padding: 6px 8px;
+        }}
+        QComboBox QAbstractItemView::item:hover {{
+            cursor: pointer;
+        }}
+        QCheckBox {{
+            color: white;
+            font-size: 12px;
+            padding: 2px;
+            cursor: pointer;
         }}
     """
     SEARCH_INPUT = f"""
@@ -198,7 +202,7 @@ class UnifiedTerminalWidget(QTextEdit):
     def setup_ui(self):
         self.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
         self.setFont(QFont(self.font_family, self.font_size))
-        self.setStyleSheet(AppStyles.TERMINAL_TEXTEDIT)
+        self.setStyleSheet(StyleConstants.TERMINAL_TEXTEDIT)
         self.setAcceptRichText(False)
 
     def __del__(self):
@@ -319,7 +323,8 @@ class UnifiedTerminalWidget(QTextEdit):
                 return
             cursor = self.textCursor()
             if self.edit_mode:
-                 if cursor.position() < self.edit_start_pos or cursor.position() > self.edit_end_pos:
+                if cursor.position() < self.edit_start_pos or cursor.position() > self.edit_end_pos:
+
                     cursor.setPosition(self.edit_end_pos)
                     self.setTextCursor(cursor)
             else:
@@ -531,7 +536,8 @@ class UnifiedTerminalWidget(QTextEdit):
 
             # Get containers from the logs viewer header
             if (hasattr(logs_info['logs_viewer'], 'header') and
-                hasattr(logs_info['logs_viewer'].header, 'containers')):
+                    hasattr(logs_info['logs_viewer'].header, 'containers')):
+
                 return logs_info['logs_viewer'].header.containers
 
             # Fallback: Get containers directly from Kubernetes API
@@ -569,7 +575,7 @@ class UnifiedTerminalWidget(QTextEdit):
         # only if not selecting text.
         cursor = self.textCursor()
         if not cursor.hasSelection():
-             self.ensure_cursor_at_input()
+            self.ensure_cursor_at_input()
 
         super().mousePressEvent(event)
         print("UnifiedTerminalWidget: Mouse event passed to super")
@@ -622,7 +628,7 @@ class UnifiedTerminalWidget(QTextEdit):
                 self.copy()
             event.accept()
             return
-            
+
         # Handle Paste Shortcut (Ctrl+V or Cmd+V)
         if event.matches(QKeySequence.StandardKey.Paste):
             self.paste()
@@ -639,7 +645,8 @@ class UnifiedTerminalWidget(QTextEdit):
             Qt.Key.Key_Left, Qt.Key.Key_Right, Qt.Key.Key_PageUp, Qt.Key.Key_PageDown
         }
         if cursor_pos < self.input_position and key not in nav_keys and not event.matches(QKeySequence.StandardKey.SelectAll):
-             # If a non-navigation key is pressed in the output area, move the cursor to the end
+          
+            # If a non-navigation key is pressed in the output area, move the cursor to the end
             cursor.movePosition(QTextCursor.MoveOperation.End)
             self.setTextCursor(cursor)
 
@@ -1137,7 +1144,8 @@ class SSHTerminalWidget(UnifiedTerminalWidget):
     def keyPressEvent(self, event):
         """Handle key events for SSH terminal"""
         if not self.is_ssh_connected:
-             # Still allow copy/paste even if not connected
+
+            # Still allow copy/paste even if not connected
             if event.matches(QKeySequence.StandardKey.Copy) or event.matches(QKeySequence.StandardKey.Paste):
                 super().keyPressEvent(event)
             else:
@@ -1177,7 +1185,7 @@ class SSHTerminalWidget(UnifiedTerminalWidget):
         if key == Qt.Key.Key_Return and not event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
             command_to_send = self.pending_input
             self.append_output(f"\n")
-            
+
             # Add to history if not empty
             if command_to_send.strip():
                 self.command_history.append(command_to_send)
@@ -1185,7 +1193,7 @@ class SSHTerminalWidget(UnifiedTerminalWidget):
 
             # Execute the command
             self.execute_ssh_command(command_to_send)
-            
+
             self._clear_all_pending_input()
             event.accept()
             return
@@ -1467,8 +1475,11 @@ class UnifiedTerminalHeader(QWidget):
 
         # Shell dropdown (for regular terminals)
         self.shell_dropdown = QComboBox()
-        self.shell_dropdown.setFixedSize(120, 24)
+
+        self.shell_dropdown.setFixedSize(160, 24)
         self.shell_dropdown.setStyleSheet(StyleConstants.SHELL_DROPDOWN)
+        self.shell_dropdown.setCursor(Qt.CursorShape.PointingHandCursor)
+
         for name, _ in self.available_shells:
             self.shell_dropdown.addItem(name)
         self.shell_dropdown.currentIndexChanged.connect(self._update_selected_shell)
@@ -1521,8 +1532,8 @@ class UnifiedTerminalHeader(QWidget):
         """Get the active terminal widget"""
         try:
             if (self.parent_terminal and
-                hasattr(self.parent_terminal, 'active_terminal_index') and
-                self.parent_terminal.active_terminal_index < len(self.parent_terminal.terminal_tabs)):
+                    hasattr(self.parent_terminal, 'active_terminal_index') and
+                    self.parent_terminal.active_terminal_index < len(self.parent_terminal.terminal_tabs)):
 
                 active_tab_data = self.parent_terminal.terminal_tabs[self.parent_terminal.active_terminal_index]
                 return active_tab_data.get('terminal_widget')
@@ -1557,8 +1568,9 @@ class UnifiedTerminalHeader(QWidget):
         """Check if the active tab is a logs tab"""
         try:
             if (self.parent_terminal and
-                hasattr(self.parent_terminal, 'active_terminal_index') and
-                self.parent_terminal.active_terminal_index < len(self.parent_terminal.terminal_tabs)):
+                    hasattr(self.parent_terminal, 'active_terminal_index') and
+                    self.parent_terminal.active_terminal_index < len(self.parent_terminal.terminal_tabs)):
+
 
                 active_tab_data = self.parent_terminal.terminal_tabs[self.parent_terminal.active_terminal_index]
                 return active_tab_data.get('is_logs_tab', False)
@@ -1570,8 +1582,9 @@ class UnifiedTerminalHeader(QWidget):
         """Get the active logs tab viewer"""
         try:
             if (self.parent_terminal and
-                hasattr(self.parent_terminal, 'active_terminal_index') and
-                self.parent_terminal.active_terminal_index < len(self.parent_terminal.terminal_tabs)):
+                    hasattr(self.parent_terminal, 'active_terminal_index') and
+                    self.parent_terminal.active_terminal_index < len(self.parent_terminal.terminal_tabs)):
+
 
                 active_tab_data = self.parent_terminal.terminal_tabs[self.parent_terminal.active_terminal_index]
                 if active_tab_data.get('is_logs_tab', False):
@@ -1674,8 +1687,8 @@ class UnifiedTerminalHeader(QWidget):
         """Check if the active tab is an SSH tab"""
         try:
             if (self.parent_terminal and
-                hasattr(self.parent_terminal, 'active_terminal_index') and
-                self.parent_terminal.active_terminal_index < len(self.parent_terminal.terminal_tabs)):
+                    hasattr(self.parent_terminal, 'active_terminal_index') and
+                    self.parent_terminal.active_terminal_index < len(self.parent_terminal.terminal_tabs)):
 
                 active_tab_data = self.parent_terminal.terminal_tabs[self.parent_terminal.active_terminal_index]
                 return active_tab_data.get('is_ssh_tab', False)
@@ -1687,8 +1700,8 @@ class UnifiedTerminalHeader(QWidget):
         """Get the active SSH tab widget"""
         try:
             if (self.parent_terminal and
-                hasattr(self.parent_terminal, 'active_terminal_index') and
-                self.parent_terminal.active_terminal_index < len(self.parent_terminal.terminal_tabs)):
+                    hasattr(self.parent_terminal, 'active_terminal_index') and
+                    self.parent_terminal.active_terminal_index < len(self.parent_terminal.terminal_tabs)):
 
                 active_tab_data = self.parent_terminal.terminal_tabs[self.parent_terminal.active_terminal_index]
                 if active_tab_data.get('is_ssh_tab', False):
@@ -1941,6 +1954,7 @@ class LogsHeaderWidget(QWidget):
         container_label.setFixedSize(20, 20)
         self.container_combo = QComboBox()
         self.container_combo.setFixedHeight(24)
+        self.container_combo.setCursor(Qt.CursorShape.PointingHandCursor)
         self.container_combo.currentTextChanged.connect(self.container_changed.emit)
         controls_row.addWidget(container_label)
         controls_row.addWidget(self.container_combo)
@@ -1950,6 +1964,7 @@ class LogsHeaderWidget(QWidget):
         lines_label.setFixedSize(20, 20)
         self.lines_combo = QComboBox()
         self.lines_combo.setFixedHeight(24)
+        self.lines_combo.setCursor(Qt.CursorShape.PointingHandCursor)
         self.lines_combo.addItems(["50", "100", "200", "500", "1000", "All"])
         self.lines_combo.setCurrentText("200")
         self.lines_combo.currentTextChanged.connect(self._on_lines_changed)
@@ -1959,6 +1974,7 @@ class LogsHeaderWidget(QWidget):
         # Follow logs checkbox
         self.follow_checkbox = QCheckBox("Follow")
         self.follow_checkbox.setChecked(True)
+        self.follow_checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
         self.follow_checkbox.toggled.connect(self.follow_toggled.emit)
         controls_row.addWidget(self.follow_checkbox)
 
@@ -2202,25 +2218,16 @@ class EnhancedLogsViewer(QWidget):
         # Set font for logs
         font = QFont("Consolas", 9)
         self.logs_display.setFont(font)
+        self.logs_display.setStyleSheet(f"""
+            QTextEdit {{
 
-        self.logs_display.setStyleSheet("""
-            QTextEdit {
                 background-color: #1e1e1e;
                 color: #e0e0e0;
                 border: none;
                 selection-background-color: #264F78;
                 padding: 8px;
-            }
-            QScrollBar:vertical {
-                border: none;
-                background: #2d2d2d;
-                width: 10px;
-            }
-            QScrollBar::handle:vertical {
-                background: #555555;
-                min-height: 20px;
-                border-radius: 5px;
-            }
+            }}
+            {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
         """)
 
         content_layout.addWidget(self.logs_display)

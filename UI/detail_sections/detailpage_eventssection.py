@@ -5,7 +5,7 @@ Events section for DetailPage component
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QListWidget, QListWidgetItem, QLabel, QHBoxLayout
 )
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, QSize
 from PyQt6.QtGui import QColor
 from typing import Dict, Any, List
 from datetime import datetime, timezone
@@ -150,7 +150,11 @@ class DetailPageEventsSection(BaseDetailSection):
 
             # Add to list
             item = QListWidgetItem()
-            item.setSizeHint(event_widget.sizeHint())
+            # Calculate minimum height for the event item
+            min_height = 80  # Minimum height to ensure content is visible
+            current_size = event_widget.sizeHint()
+            adjusted_height = max(min_height, current_size.height())
+            item.setSizeHint(QSize(current_size.width(), adjusted_height))
             self.events_list.addItem(item)
             self.events_list.setItemWidget(item, event_widget)
 

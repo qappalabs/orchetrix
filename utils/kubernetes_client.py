@@ -6,6 +6,9 @@ from dataclasses import dataclass
 from typing import Optional, Dict, List, Any
 import datetime
 import logging
+import threading
+import queue
+import time
 
 
 import threading
@@ -15,6 +18,8 @@ import time
 from kubernetes import client, config, watch
 from kubernetes.client.rest import ApiException
 from kubernetes.config.config_exception import ConfigException
+from kubernetes.stream import stream
+
 
 
 class KubernetesLogStreamer(QObject):
@@ -374,16 +379,249 @@ class ResourceDetailWorker(BaseWorker):
         except Exception as e:
             self.safe_emit_error(str(e))
 
+class KubernetesLogStreamer(QObject):
+    """Kubernetes log streamer using watch API for real-time logs"""
+
+    log_line_received = pyqtSignal(str, str, str)  # pod_name, log_line, timestamp
+    stream_error = pyqtSignal(str, str)  # pod_name, error_message
+    stream_status = pyqtSignal(str, str)  # pod_name, status_message
+
+    def __init__(self, kube_client):
+        super().__init__()
+        self.kube_client = kube_client
+        self.active_streams = {}  # Track active log streams
+        self._shutdown = False
+
+    def start_log_stream(self, pod_name, namespace, container=None, tail_lines=200, follow=True):
+        """Start streaming logs for a pod"""
+        try:
+            stream_key = f"{namespace}/{pod_name}"
+            if container:
+                stream_key += f"/{container}"
+
+            # Stop existing stream if any
+            self.stop_log_stream(stream_key)
+
+            # Create and start new stream
+            stream_thread = LogStreamThread(
+                self.kube_client,
+                pod_name,
+                namespace,
+                container,
+                tail_lines,
+                follow,
+                self
+            )
+
+            self.active_streams[stream_key] = stream_thread
+            stream_thread.start()
+
+            self.stream_status.emit(pod_name, "Starting log stream...")
+
+        except Exception as e:
+            logging.error(f"Error starting log stream for {pod_name}: {e}")
+            self.stream_error.emit(pod_name, f"Failed to start stream: {str(e)}")
+
+    def stop_log_stream(self, stream_key):
+        """Stop a specific log stream"""
+        try:
+            if stream_key in self.active_streams:
+                stream_thread = self.active_streams[stream_key]
+                stream_thread.stop()
+                stream_thread.wait(2000)  # Wait up to 2 seconds
+
+                if stream_thread.isRunning():
+                    stream_thread.terminate()
+
+                del self.active_streams[stream_key]
+
+        except Exception as e:
+            logging.error(f"Error stopping log stream {stream_key}: {e}")
+
+    def stop_all_streams(self):
+        """Stop all active log streams"""
+        self._shutdown = True
+        for stream_key in list(self.active_streams.keys()):
+            self.stop_log_stream(stream_key)
+
+    def __del__(self):
+        """Cleanup when object is destroyed"""
+        self.stop_all_streams()
+
+class LogStreamThread(QThread):
+    """Thread for streaming logs from Kubernetes API"""
+
+    def __init__(self, kube_client, pod_name, namespace, container, tail_lines, follow, parent_streamer):
+        super().__init__()
+        self.kube_client = kube_client
+        self.pod_name = pod_name
+        self.namespace = namespace
+        self.container = container
+        self.tail_lines = tail_lines
+        self.follow = follow
+        self.parent_streamer = parent_streamer
+        self._stop_requested = False
+
+    def stop(self):
+        """Request thread to stop"""
+        self._stop_requested = True
+
+    def run(self):
+        """Run the log streaming"""
+        try:
+            # First, get initial logs if tail_lines is specified
+            if self.tail_lines and self.tail_lines > 0:
+                self._fetch_initial_logs()
+
+            # If follow mode is enabled, start streaming
+            if self.follow and not self._stop_requested:
+                self._stream_live_logs()
+
+        except Exception as e:
+            if not self._stop_requested:
+                self.parent_streamer.stream_error.emit(
+                    self.pod_name,
+                    f"Log streaming error: {str(e)}"
+                )
+
+    def _fetch_initial_logs(self):
+        """Fetch initial logs"""
+        try:
+            if not self.kube_client.v1:
+                return
+
+            kwargs = {
+                'name': self.pod_name,
+                'namespace': self.namespace,
+                'timestamps': True,
+                'tail_lines': self.tail_lines
+            }
+
+            if self.container:
+                kwargs['container'] = self.container
+
+            logs = self.kube_client.v1.read_namespaced_pod_log(**kwargs)
+
+            if logs and not self._stop_requested:
+                # Parse and emit each log line
+                for line in logs.strip().split('\n'):
+                    if self._stop_requested:
+                        break
+
+                    if line.strip():
+                        timestamp, log_content = self._parse_log_line(line)
+                        self.parent_streamer.log_line_received.emit(
+                            self.pod_name, log_content, timestamp
+                        )
+                        # Small delay to prevent overwhelming the UI
+                        self.msleep(1)
+
+        except ApiException as e:
+            if not self._stop_requested:
+                if e.status == 404:
+                    self.parent_streamer.stream_error.emit(
+                        self.pod_name, f"Pod not found: {self.pod_name}"
+                    )
+                else:
+                    self.parent_streamer.stream_error.emit(
+                        self.pod_name, f"API error: {e.reason}"
+                    )
+        except Exception as e:
+            if not self._stop_requested:
+                self.parent_streamer.stream_error.emit(
+                    self.pod_name, f"Error fetching initial logs: {str(e)}"
+                )
+
+    def _stream_live_logs(self):
+        """Stream live logs using Kubernetes watch API"""
+        try:
+            if not self.kube_client.v1:
+                return
+
+            self.parent_streamer.stream_status.emit(self.pod_name, "🔴 Live streaming...")
+
+            w = watch.Watch()
+
+            kwargs = {
+                'name': self.pod_name,
+                'namespace': self.namespace,
+                'follow': True,
+                'timestamps': True,
+                'since_seconds': 1  # Only get very recent logs for streaming
+            }
+
+            if self.container:
+                kwargs['container'] = self.container
+
+            # Start the watch stream
+            stream_iter = w.stream(
+                self.kube_client.v1.read_namespaced_pod_log,
+                **kwargs
+            )
+
+            for event in stream_iter:
+                if self._stop_requested:
+                    w.stop()
+                    break
+
+                # Process the log event
+                if isinstance(event, str) and event.strip():
+                    timestamp, log_content = self._parse_log_line(event)
+                    self.parent_streamer.log_line_received.emit(
+                        self.pod_name, log_content, timestamp
+                    )
+
+                # Small delay to prevent overwhelming
+                self.msleep(10)
+
+        except ApiException as e:
+            if not self._stop_requested:
+                self.parent_streamer.stream_error.emit(
+                    self.pod_name, f"Streaming API error: {e.reason}"
+                )
+        except Exception as e:
+            if not self._stop_requested:
+                self.parent_streamer.stream_error.emit(
+                    self.pod_name, f"Streaming error: {str(e)}"
+                )
+
+    def _parse_log_line(self, log_line):
+        """Parse log line to extract timestamp and content"""
+        try:
+            # Kubernetes logs format: 2024-01-01T12:00:00.000000000Z log content
+            if ' ' in log_line and log_line.startswith('20'):
+                parts = log_line.split(' ', 1)
+                if len(parts) == 2:
+                    timestamp_str = parts[0]
+                    log_content = parts[1]
+
+                    # Extract just the time part (HH:MM:SS)
+                    if 'T' in timestamp_str:
+                        time_part = timestamp_str.split('T')[1]
+                        if '.' in time_part:
+                            time_part = time_part.split('.')[0]
+                        timestamp = time_part[:8]  # HH:MM:SS
+                    else:
+                        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+
+                    return timestamp, log_content
+
+            # Fallback if parsing fails
+            return datetime.datetime.now().strftime("%H:%M:%S"), log_line
+
+        except Exception:
+            return datetime.datetime.now().strftime("%H:%M:%S"), log_line
+
 
 class KubernetesPodSSH(QObject):
     """SSH-like connection to Kubernetes pods using exec API"""
-    
+
     # Signals for SSH session
     data_received = pyqtSignal(str)  # Data from pod
     error_occurred = pyqtSignal(str)  # Error messages
     session_status = pyqtSignal(str)  # Status updates
     session_closed = pyqtSignal()    # Session ended
-    
+
     def __init__(self, pod_name, namespace, container=None, shell="/bin/bash"):
         super().__init__()
         self.pod_name = pod_name
@@ -394,31 +632,29 @@ class KubernetesPodSSH(QObject):
         self.exec_stream = None
         self.is_connected = False
         self._stop_requested = False
-        
+
     def connect_to_pod(self):
         """Establish SSH-like connection to pod"""
         try:
             if not self.kube_client or not self.kube_client.v1:
                 self.error_occurred.emit("Kubernetes client not available")
                 return False
-            
+
             self.session_status.emit(f"Connecting to {self.pod_name}...")
-            
+
             # Determine available shells and container
             available_container, available_shell = self._detect_container_and_shell()
             if not available_container:
                 self.error_occurred.emit("No suitable container found in pod")
                 return False
-            
+
             self.container = available_container
             self.shell = available_shell
-            
+
             # Create exec command
             exec_command = [self.shell]
-            
+
             # Create the exec session
-            from kubernetes.stream import stream
-            
             self.exec_stream = stream(
                 self.kube_client.v1.connect_get_namespaced_pod_exec,
                 name=self.pod_name,
@@ -431,15 +667,15 @@ class KubernetesPodSSH(QObject):
                 tty=True,
                 _preload_content=False
             )
-            
+
             self.is_connected = True
             self.session_status.emit(f"🟢 Connected to {self.pod_name} ({self.container})")
-            
+
             # Start listening for data
             self._start_reading_thread()
-            
+
             return True
-            
+
         except ApiException as e:
             error_msg = f"API error: {e.reason}"
             self.error_occurred.emit(error_msg)
@@ -448,28 +684,27 @@ class KubernetesPodSSH(QObject):
             error_msg = f"Connection error: {str(e)}"
             self.error_occurred.emit(error_msg)
             return False
-    
+
     def _detect_container_and_shell(self):
         """Detect the best container and shell to use"""
         try:
             # Get pod details
             pod = self.kube_client.v1.read_namespaced_pod(
-                name=self.pod_name, 
+                name=self.pod_name,
                 namespace=self.namespace
             )
-            
+
             # If container specified, use it; otherwise use first container
             target_container = self.container
             if not target_container and pod.spec.containers:
                 target_container = pod.spec.containers[0].name
-            
+
             # Try to detect available shell by checking common paths
             shells_to_try = ["/bin/bash", "/bin/sh", "/bin/ash", "/usr/bin/bash"]
-            
+
             for shell in shells_to_try:
                 try:
                     # Test if shell exists using a simple exec
-                    from kubernetes.stream import stream
                     test_stream = stream(
                         self.kube_client.v1.connect_get_namespaced_pod_exec,
                         name=self.pod_name,
@@ -485,14 +720,14 @@ class KubernetesPodSSH(QObject):
                     return target_container, shell
                 except:
                     continue
-            
+
             # Fallback to /bin/sh which should exist in most containers
             return target_container, "/bin/sh"
-            
+
         except Exception as e:
             logging.error(f"Error detecting container and shell: {e}")
             return None, "/bin/sh"
-    
+
     def _start_reading_thread(self):
         """Start thread to read data from exec stream"""
         self.read_thread = SSHReadThread(self.exec_stream, self)
@@ -500,24 +735,24 @@ class KubernetesPodSSH(QObject):
         self.read_thread.error_occurred.connect(self.error_occurred.emit)
         self.read_thread.session_ended.connect(self._handle_session_end)
         self.read_thread.start()
-    
+
     def send_command(self, command):
         """Send command to the pod"""
         try:
             if not self.is_connected or not self.exec_stream:
                 return False
-            
+
             # Add newline if not present
             if not command.endswith('\n'):
                 command += '\n'
-            
+
             self.exec_stream.write_stdin(command)
             return True
-            
+
         except Exception as e:
             self.error_occurred.emit(f"Error sending command: {str(e)}")
             return False
-    
+
     def send_signal(self, signal="SIGINT"):
         """Send signal to the running process (Ctrl+C, etc.)"""
         try:
@@ -531,7 +766,7 @@ class KubernetesPodSSH(QObject):
         except Exception as e:
             self.error_occurred.emit(f"Error sending signal: {str(e)}")
             return False
-    
+
     def resize_terminal(self, rows, cols):
         """Resize the terminal (if supported)"""
         try:
@@ -540,31 +775,30 @@ class KubernetesPodSSH(QObject):
             pass
         except Exception as e:
             logging.error(f"Error resizing terminal: {e}")
-    
+
     def disconnect(self):
         """Disconnect from the pod"""
         try:
             self._stop_requested = True
             self.is_connected = False
-            
+
             if hasattr(self, 'read_thread') and self.read_thread.isRunning():
                 self.read_thread.stop()
                 self.read_thread.wait(2000)
                 if self.read_thread.isRunning():
                     self.read_thread.terminate()
-            
             if self.exec_stream:
                 try:
                     self.exec_stream.close()
                 except:
                     pass
                 self.exec_stream = None
-            
+
             self.session_closed.emit()
-            
+
         except Exception as e:
             logging.error(f"Error disconnecting SSH session: {e}")
-    
+
     def _handle_session_end(self):
         """Handle when the SSH session ends"""
         self.is_connected = False
@@ -574,21 +808,21 @@ class KubernetesPodSSH(QObject):
 
 class SSHReadThread(QThread):
     """Thread for reading data from SSH exec stream"""
-    
+
     data_received = pyqtSignal(str)
     error_occurred = pyqtSignal(str)
     session_ended = pyqtSignal()
-    
+
     def __init__(self, exec_stream, ssh_session):
         super().__init__()
         self.exec_stream = exec_stream
         self.ssh_session = ssh_session
         self._stop_requested = False
-    
+
     def stop(self):
         """Stop the reading thread"""
         self._stop_requested = True
-    
+
     def run(self):
         """Read data from the exec stream"""
         try:
@@ -599,22 +833,22 @@ class SSHReadThread(QThread):
                         output = self.exec_stream.read_stdout(timeout=1)
                         if output:
                             self.data_received.emit(output)
-                        
+
                         error_output = self.exec_stream.read_stderr(timeout=1)
                         if error_output:
                             self.data_received.emit(error_output)
                     else:
                         # Stream closed
                         break
-                        
+
                 except Exception as e:
                     if not self._stop_requested:
                         self.error_occurred.emit(f"Read error: {str(e)}")
                     break
-            
+
             if not self._stop_requested:
                 self.session_ended.emit()
-                
+
         except Exception as e:
             if not self._stop_requested:
                 self.error_occurred.emit(f"SSH read thread error: {str(e)}")
@@ -637,7 +871,11 @@ class KubernetesClient(QObject):
     pod_log_stream_status = pyqtSignal(dict)      # Stream status updates
     
     error_occurred = pyqtSignal(str)
-    
+    pod_logs_loaded = pyqtSignal(dict)
+    pod_log_line_received = pyqtSignal(dict)      # Individual log line
+    pod_log_stream_error = pyqtSignal(dict)       # Stream errors
+    pod_log_stream_status = pyqtSignal(dict)      # Stream status updates
+
     def __init__(self):
         super().__init__()
         self.threadpool = QThreadPool()
@@ -679,6 +917,14 @@ class KubernetesClient(QObject):
         
         # Shutdown flag
         self._shutting_down = False
+
+        # Add log streamer initialization
+        self.log_streamer = KubernetesLogStreamer(self)
+
+        # Connect log streamer signals
+        self.log_streamer.log_line_received.connect(self.handle_log_line_received)
+        self.log_streamer.stream_error.connect(self.handle_stream_error)
+        self.log_streamer.stream_status.connect(self.handle_stream_status)
     
     def __del__(self):
         """Clean up resources when object is deleted"""
@@ -823,25 +1069,29 @@ class KubernetesClient(QObject):
 
 
     def force_shutdown(self):
-        """Force shutdown of kubernetes client"""
+        """Enhanced force shutdown that includes log streams"""
         try:
             logging.info("KubernetesClient force shutdown initiated...")
-            
+
             self._shutting_down = True
-            
+
+            # Stop log streams first
+            if hasattr(self, 'log_streamer'):
+                self.log_streamer.stop_all_streams()
+
             # Disconnect all signals
             self.disconnect_all_signals()
-            
-            # Stop everything
+
+            # Stop everything else
             self.stop_all_timers()
             self.stop_all_workers()
-            
+
             # Clear data
             self.clusters.clear()
             self.current_cluster = None
-            
+
             logging.info("KubernetesClient force shutdown completed")
-            
+
         except Exception as e:
             logging.error(f"Error in kubernetes client force_shutdown: {e}")
 
@@ -851,9 +1101,10 @@ class KubernetesClient(QObject):
             signals_to_disconnect = [
                 'clusters_loaded', 'cluster_info_loaded', 'cluster_metrics_updated',
                 'node_metrics_updated', 'cluster_issues_updated', 'resource_detail_loaded',
-                'error_occurred'
+                'pod_logs_loaded', 'pod_log_line_received', 'pod_log_stream_error',
+                'pod_log_stream_status', 'error_occurred'
             ]
-            
+
             for signal_name in signals_to_disconnect:
                 try:
                     signal = getattr(self, signal_name, None)
@@ -861,7 +1112,7 @@ class KubernetesClient(QObject):
                         signal.disconnect()
                 except (TypeError, RuntimeError, AttributeError):
                     pass
-                    
+
         except Exception as e:
             logging.error(f"Error disconnecting kubernetes client signals: {e}")
 
@@ -871,37 +1122,85 @@ class KubernetesClient(QObject):
         try:
             # Core API
             self.v1 = client.CoreV1Api()
-            
+
             # Apps API
             self.apps_v1 = client.AppsV1Api()
-            
+
+            # Admission Registration API
+            self.admissionregistration_v1 = client.AdmissionregistrationV1Api()
+
             # Extensions API (for some legacy resources)
             try:
                 self.extensions_v1beta1 = client.ExtensionsV1beta1Api()
             except:
                 pass  # Not available in newer versions
-            
+
             # Networking API
             self.networking_v1 = client.NetworkingV1Api()
-            
+
             # Storage API
             self.storage_v1 = client.StorageV1Api()
-            
+
             # RBAC API
             self.rbac_v1 = client.RbacAuthorizationV1Api()
-            
+
             # Batch API
             self.batch_v1 = client.BatchV1Api()
-            
+
+            # Batch V1Beta1 API (for older CronJobs)
+            try:
+                self.batch_v1beta1 = client.BatchV1beta1Api()
+            except:
+                pass  # Not available in newer versions
+
             # Autoscaling API
             self.autoscaling_v1 = client.AutoscalingV1Api()
-            
+
+            # Autoscaling V2 API (for newer HPA features)
+            try:
+                self.autoscaling_v2 = client.AutoscalingV2Api()
+            except:
+                pass  # Not available in older versions
+
             # Custom Objects API
             self.custom_objects_api = client.CustomObjectsApi()
-            
+
             # Version API
             self.version_api = client.VersionApi()
-            
+
+            # API Extensions API (for CRDs)
+            self.api_extensions_v1 = client.ApiextensionsV1Api()
+
+            # Events API (separate from core events in newer versions)
+            try:
+                self.events_v1 = client.EventsV1Api()
+            except:
+                pass  # Fallback to core events
+
+            # Policy API (for PodDisruptionBudgets, PodSecurityPolicies)
+            try:
+                self.policy_v1 = client.PolicyV1Api()
+            except:
+                pass
+
+            # Coordination API (for Leases)
+            try:
+                self.coordination_v1 = client.CoordinationV1Api()
+            except:
+                pass
+
+            # Node API (for RuntimeClasses)
+            try:
+                self.node_v1 = client.NodeV1Api()
+            except:
+                pass
+
+            # Scheduling API (for PriorityClasses)
+            try:
+                self.scheduling_v1 = client.SchedulingV1Api()
+            except:
+                pass
+
             return True
         except Exception as e:
             self.error_occurred.emit(f"Failed to initialize API clients: {str(e)}")
@@ -1315,41 +1614,332 @@ class KubernetesClient(QObject):
             if not self._shutting_down:
                 logging.error(f"Error starting issues worker: {e}")
 
-    
+
     def get_resource_detail(self, resource_type, resource_name, namespace="default"):
         """Get detailed information about a specific Kubernetes resource"""
         try:
             resource_data = None
-            
-            # Map resource types to appropriate API calls
-            if resource_type.lower() == "pod":
+
+            # Special handling for CRDs clicked from the definitions list
+            if resource_type.lower() in ["definitions", "customresourcedefinition", "customresourcedefinitions", "crd"]:
+                resource_type = "customresourcedefinition"
+                namespace = None  # CRDs are cluster-scoped
+
+            resource_type = resource_type.strip().lower()
+
+            # Handle common plural/singular issues
+            if resource_type == "networkpolicie":
+                resource_type = "networkpolicies"
+            elif resource_type == "customresourcedefintion":  # common typo
+                resource_type = "customresourcedefinition"
+            elif resource_type == "validatingwebhookconfiguraton":  # common typo
+                resource_type = "validatingwebhookconfiguration"
+
+            resource_type_lower = resource_type.lower()
+
+            # FORCE initialize API clients if they don't exist
+            missing_clients = []
+            if not hasattr(self, 'networking_v1') or self.networking_v1 is None:
+                missing_clients.append('networking_v1')
+            if not hasattr(self, 'api_extensions_v1') or self.api_extensions_v1 is None:
+                missing_clients.append('api_extensions_v1')
+            if not hasattr(self, 'admissionregistration_v1') or self.admissionregistration_v1 is None:
+                missing_clients.append('admissionregistration_v1')
+
+            if missing_clients:
+                logging.warning(f"Reinitializing missing API clients: {missing_clients}")
+                self._initialize_api_clients()
+
+            # Core V1 API resources
+            if resource_type_lower in ["pod", "pods"]:
                 if namespace:
                     resource_data = self.v1.read_namespaced_pod(name=resource_name, namespace=namespace)
                 else:
                     resource_data = self.v1.read_pod(name=resource_name)
-            elif resource_type.lower() == "service":
+
+            elif resource_type_lower in ["service", "services", "svc"]:
                 resource_data = self.v1.read_namespaced_service(name=resource_name, namespace=namespace)
-            elif resource_type.lower() == "deployment":
-                resource_data = self.apps_v1.read_namespaced_deployment(name=resource_name, namespace=namespace)
-            elif resource_type.lower() == "node":
+
+            elif resource_type_lower in ["configmap", "configmaps", "cm"]:
+                resource_data = self.v1.read_namespaced_config_map(name=resource_name, namespace=namespace)
+
+            elif resource_type_lower in ["secret", "secrets"]:
+                resource_data = self.v1.read_namespaced_secret(name=resource_name, namespace=namespace)
+
+            elif resource_type_lower in ["node", "nodes"]:
                 resource_data = self.v1.read_node(name=resource_name)
-            elif resource_type.lower() == "namespace":
+
+            elif resource_type_lower in ["namespace", "namespaces", "ns"]:
                 resource_data = self.v1.read_namespace(name=resource_name)
-            # Add more resource types as needed
-            
+
+            elif resource_type_lower in ["endpoint", "endpoints", "ep"]:
+                resource_data = self.v1.read_namespaced_endpoints(name=resource_name, namespace=namespace)
+
+            elif resource_type_lower in ["persistentvolume", "persistentvolumes", "pv"]:
+                resource_data = self.v1.read_persistent_volume(name=resource_name)
+
+            elif resource_type_lower in ["persistentvolumeclaim", "persistentvolumeclaims", "pvc"]:
+                resource_data = self.v1.read_namespaced_persistent_volume_claim(name=resource_name, namespace=namespace)
+
+            elif resource_type_lower in ["serviceaccount", "serviceaccounts", "sa"]:
+                resource_data = self.v1.read_namespaced_service_account(name=resource_name, namespace=namespace)
+
+            elif resource_type_lower in ["event", "events"]:
+                resource_data = self.v1.read_namespaced_event(name=resource_name, namespace=namespace)
+
+            # Apps V1 API resources
+            elif resource_type_lower in ["deployment", "deployments", "deploy"]:
+                resource_data = self.apps_v1.read_namespaced_deployment(name=resource_name, namespace=namespace)
+
+            elif resource_type_lower in ["replicaset", "replicasets", "rs"]:
+                resource_data = self.apps_v1.read_namespaced_replica_set(name=resource_name, namespace=namespace)
+
+            elif resource_type_lower in ["daemonset", "daemonsets", "ds"]:
+                resource_data = self.apps_v1.read_namespaced_daemon_set(name=resource_name, namespace=namespace)
+
+            elif resource_type_lower in ["statefulset", "statefulsets", "sts"]:
+                resource_data = self.apps_v1.read_namespaced_stateful_set(name=resource_name, namespace=namespace)
+
+            # Batch V1 API resources
+            elif resource_type_lower in ["job", "jobs"]:
+                resource_data = self.batch_v1.read_namespaced_job(name=resource_name, namespace=namespace)
+
+            elif resource_type_lower in ["cronjob", "cronjobs", "cj"]:
+                try:
+                    # Try batch/v1 first (Kubernetes 1.21+)
+                    batch_v1_api = client.BatchV1Api()
+                    resource_data = batch_v1_api.read_namespaced_cron_job(name=resource_name, namespace=namespace)
+                except:
+                    # Fallback to batch/v1beta1 (older versions)
+                    try:
+                        batch_v1beta1_api = client.BatchV1beta1Api()
+                        resource_data = batch_v1beta1_api.read_namespaced_cron_job(name=resource_name, namespace=namespace)
+                    except Exception as e:
+                        raise Exception(f"CronJob not found in batch/v1 or batch/v1beta1: {str(e)}")
+
+            # Networking V1 API resources - FIXED: Added the missing networkpolicies handling
+            elif resource_type_lower in ["ingress", "ingresses", "ing"]:
+                resource_data = self.networking_v1.read_namespaced_ingress(name=resource_name, namespace=namespace)
+
+            elif resource_type_lower in ["networkpolicy", "networkpolicies", "netpol"]:
+                resource_data = self.networking_v1.read_namespaced_network_policy(name=resource_name, namespace=namespace)
+
+            # Storage V1 API resources
+            elif resource_type_lower in ["storageclass", "storageclasses", "sc"]:
+                resource_data = self.storage_v1.read_storage_class(name=resource_name)
+
+            # RBAC V1 API resources
+            elif resource_type_lower in ["role", "roles"]:
+                resource_data = self.rbac_v1.read_namespaced_role(name=resource_name, namespace=namespace)
+
+            elif resource_type_lower in ["rolebinding", "rolebindings", "rb"]:
+                resource_data = self.rbac_v1.read_namespaced_role_binding(name=resource_name, namespace=namespace)
+
+            elif resource_type_lower in ["clusterrole", "clusterroles", "cr"]:
+                resource_data = self.rbac_v1.read_cluster_role(name=resource_name)
+
+            elif resource_type_lower in ["clusterrolebinding", "clusterrolebindings", "crb"]:
+                resource_data = self.rbac_v1.read_cluster_role_binding(name=resource_name)
+
+            # Autoscaling V1 API resources
+            elif resource_type_lower in ["horizontalpodautoscaler", "horizontalpodautoscalers", "hpa"]:
+                resource_data = self.autoscaling_v1.read_namespaced_horizontal_pod_autoscaler(name=resource_name, namespace=namespace)
+
+            # API Extensions V1 API resources - FIXED: Added the missing CustomResourceDefinition handling
+            elif resource_type_lower in ["customresourcedefinition", "customresourcedefinitions", "crd"]:
+                try:
+                    if not hasattr(self, 'api_extensions_v1') or self.api_extensions_v1 is None:
+                        self.api_extensions_v1 = client.ApiextensionsV1Api()
+                    resource_data = self.api_extensions_v1.read_custom_resource_definition(name=resource_name)
+                except ApiException as e:
+                    if e.status == 404:
+                        raise Exception(f"CustomResourceDefinition '{resource_name}' not found")
+                    else:
+                        raise Exception(f"Error fetching CustomResourceDefinition: {e.reason}")
+                except Exception as e:
+                    raise Exception(f"Failed to fetch CustomResourceDefinition: {str(e)}")
+
+            # ValidatingWebhookConfiguration and MutatingWebhookConfiguration
+            elif resource_type_lower in ["validatingwebhookconfiguration", "validatingwebhookconfigurations", "vwc"]:
+                try:
+                    if not hasattr(self, 'admissionregistration_v1') or self.admissionregistration_v1 is None:
+                        self.admissionregistration_v1 = client.AdmissionregistrationV1Api()
+                    resource_data = self.admissionregistration_v1.read_validating_webhook_configuration(name=resource_name)
+                except Exception as e:
+                    raise Exception(f"ValidatingWebhookConfiguration not found: {str(e)}")
+
+            elif resource_type_lower in ["mutatingwebhookconfiguration", "mutatingwebhookconfigurations", "mwc"]:
+                try:
+                    if not hasattr(self, 'admissionregistration_v1') or self.admissionregistration_v1 is None:
+                        self.admissionregistration_v1 = client.AdmissionregistrationV1Api()
+                    resource_data = self.admissionregistration_v1.read_mutating_webhook_configuration(name=resource_name)
+                except Exception as e:
+                    raise Exception(f"MutatingWebhookConfiguration not found: {str(e)}")
+
+            # Add ReplicationController and IngressClass support
+            elif resource_type_lower in ["replicationcontroller", "replicationcontrollers", "rc"]:
+                resource_data = self.v1.read_namespaced_replication_controller(name=resource_name, namespace=namespace)
+
+            elif resource_type_lower in ["ingressclass", "ingressclasses", "ic"]:
+                resource_data = self.networking_v1.read_ingress_class(name=resource_name)
+
+
+            # Scheduling V1 API resources (PriorityClasses)
+            elif resource_type_lower in ["priorityclass", "priorityclasses", "pc"]:
+                try:
+                    if not hasattr(self, 'scheduling_v1') or self.scheduling_v1 is None:
+                        scheduling_v1_api = client.SchedulingV1Api()
+                    else:
+                        scheduling_v1_api = self.scheduling_v1
+                    resource_data = scheduling_v1_api.read_priority_class(name=resource_name)
+                except Exception as e:
+                    raise Exception(f"PriorityClass not found: {str(e)}")
+
+            # Coordination V1 API resources (Leases)
+            elif resource_type_lower in ["lease", "leases"]:
+                try:
+                    if not hasattr(self, 'coordination_v1') or self.coordination_v1 is None:
+                        coordination_v1_api = client.CoordinationV1Api()
+                    else:
+                        coordination_v1_api = self.coordination_v1
+                    resource_data = coordination_v1_api.read_namespaced_lease(name=resource_name, namespace=namespace)
+                except Exception as e:
+                    raise Exception(f"Lease not found: {str(e)}")
+
+            # Policy V1 API resources
+            elif resource_type_lower in ["poddisruptionbudget", "poddisruptionbudgets", "pdb"]:
+                try:
+                    if not hasattr(self, 'policy_v1') or self.policy_v1 is None:
+                        policy_v1_api = client.PolicyV1Api()
+                    else:
+                        policy_v1_api = self.policy_v1
+                    resource_data = policy_v1_api.read_namespaced_pod_disruption_budget(name=resource_name, namespace=namespace)
+                except Exception as e:
+                    raise Exception(f"PodDisruptionBudget not found: {str(e)}")
+
+            # Node V1 API resources (RuntimeClasses)
+            elif resource_type_lower in ["runtimeclass", "runtimeclasses", "rtc"]:
+                try:
+                    if not hasattr(self, 'node_v1') or self.node_v1 is None:
+                        node_v1_api = client.NodeV1Api()
+                    else:
+                        node_v1_api = self.node_v1
+                    resource_data = node_v1_api.read_runtime_class(name=resource_name)
+                except Exception as e:
+                    raise Exception(f"RuntimeClass not found: {str(e)}")
+
+            # Additional Core V1 resources
+            elif resource_type_lower in ["limitrange", "limitranges", "limits"]:
+                resource_data = self.v1.read_namespaced_limit_range(name=resource_name, namespace=namespace)
+
+            elif resource_type_lower in ["resourcequota", "resourcequotas", "quota"]:
+                resource_data = self.v1.read_namespaced_resource_quota(name=resource_name, namespace=namespace)
+
+            # Helm resources (assuming Helm CRDs are installed)
+            elif resource_type_lower in ["helmrelease", "helmreleases", "hr"]:
+                try:
+                    # Try common Helm operator CRDs
+                    resource_data = self.custom_objects_api.get_namespaced_custom_object(
+                        group="helm.cattle.io",
+                        version="v1",
+                        namespace=namespace,
+                        plural="helmreleases",
+                        name=resource_name
+                    )
+                except:
+                    try:
+                        # Try Flux Helm Controller CRD
+                        resource_data = self.custom_objects_api.get_namespaced_custom_object(
+                            group="helm.toolkit.fluxcd.io",
+                            version="v2beta1",
+                            namespace=namespace,
+                            plural="helmreleases",
+                            name=resource_name
+                        )
+                    except Exception as e:
+                        raise Exception(f"HelmRelease CRD not found: {str(e)}")
+
+            elif resource_type_lower in ["chart", "charts"]:
+                try:
+                    # Try Helm Chart CRD
+                    resource_data = self.custom_objects_api.get_namespaced_custom_object(
+                        group="helm.cattle.io",
+                        version="v1",
+                        namespace=namespace,
+                        plural="charts",
+                        name=resource_name
+                    )
+                except Exception as e:
+                    raise Exception(f"Chart CRD not found: {str(e)}")
+
+            # Custom Resources - Generic handling
+            else:
+                # Try to handle as custom resource
+                # This requires the resource type to include group and version info
+                # Format expected: "group/version/kind" or just the plural name
+                try:
+                    # First, try to list all CRDs and find a match
+                    if not hasattr(self, 'api_extensions_v1') or self.api_extensions_v1 is None:
+                        api_client = client.ApiextensionsV1Api()
+                    else:
+                        api_client = self.api_extensions_v1
+                    crds = api_client.list_custom_resource_definition()
+
+                    matching_crd = None
+                    for crd in crds.items:
+                        crd_spec = crd.spec
+                        # Check if resource_type matches any of the CRD names
+                        if (crd_spec.names.plural.lower() == resource_type_lower or
+                                crd_spec.names.singular.lower() == resource_type_lower or
+                                crd_spec.names.kind.lower() == resource_type_lower):
+                            matching_crd = crd
+                            break
+
+                    if matching_crd:
+                        crd_spec = matching_crd.spec
+                        group = crd_spec.group
+                        # Get the latest version
+                        version = crd_spec.versions[-1].name if crd_spec.versions else "v1"
+                        plural = crd_spec.names.plural
+
+                        if crd_spec.scope == "Namespaced":
+                            resource_data = self.custom_objects_api.get_namespaced_custom_object(
+                                group=group,
+                                version=version,
+                                namespace=namespace,
+                                plural=plural,
+                                name=resource_name
+                            )
+                        else:
+                            resource_data = self.custom_objects_api.get_cluster_custom_object(
+                                group=group,
+                                version=version,
+                                plural=plural,
+                                name=resource_name
+                            )
+                    else:
+                        raise Exception(f"Unknown resource type: {resource_type}")
+
+                except Exception as e:
+                    self.error_occurred.emit(f"Unknown resource type: {resource_type}. Error: {str(e)}")
+                    return {}
+
             if resource_data:
                 # Convert to dict
-                resource_dict = client.ApiClient().sanitize_for_serialization(resource_data)
-                
+                if hasattr(resource_data, 'to_dict'):
+                    resource_dict = resource_data.to_dict()
+                else:
+                    resource_dict = client.ApiClient().sanitize_for_serialization(resource_data)
+
                 # Add related events
                 events = self._get_resource_events(resource_type, resource_name, namespace)
                 resource_dict["events"] = events
-                
+
                 return resource_dict
             else:
-                self.error_occurred.emit(f"Unknown resource type: {resource_type}")
+                self.error_occurred.emit(f"Failed to retrieve resource: {resource_type}/{resource_name}")
                 return {}
-                
+
         except ApiException as e:
             if e.status == 404:
                 self.error_occurred.emit(f"Resource not found: {resource_type}/{resource_name}")
@@ -1359,13 +1949,40 @@ class KubernetesClient(QObject):
         except Exception as e:
             self.error_occurred.emit(f"Error getting resource details: {str(e)}")
             return {}
-    
+
+    def map_resource_type_from_ui(self, clicked_resource_type, resource_name):
+        """Map UI resource type to API resource type"""
+        type_mapping = {
+            "definitions": "customresourcedefinition",
+            "agents": "customresourcedefinition",
+            "apikeys": "customresourcedefinition",
+            "apmservers": "customresourcedefinition",
+            "beats": "customresourcedefinition",
+            "bookkeeperclusters": "customresourcedefinition",
+            "connectorcatalogs": "customresourcedefinition",
+            "consoles": "customresourcedefinition",
+            "elasticmapsservers": "customresourcedefinition",
+            "elasticsearchautoscalers": "customresourcedefinition",
+            "elasticsearches": "customresourcedefinition",
+            "enterprisesearches": "customresourcedefinition",
+            "kafkaconnects": "customresourcedefinition",
+            "kibanas": "customresourcedefinition",
+        }
+        return type_mapping.get(clicked_resource_type.lower(), clicked_resource_type)
+
     def get_resource_detail_async(self, resource_type, resource_name, namespace="default"):
         """Get resource details asynchronously"""
         if self._shutting_down:
             return
-            
-        worker = ResourceDetailWorker(self, resource_type, resource_name, namespace)
+
+        # Map resource type if needed
+        mapped_type = self.map_resource_type_from_ui(resource_type, resource_name)
+
+        # CRDs are cluster-scoped, don't use namespace
+        if mapped_type.lower() in ["customresourcedefinition", "customresourcedefinitions", "crd"]:
+            namespace = None
+
+        worker = ResourceDetailWorker(self, mapped_type, resource_name, namespace)
         
         worker.signals.finished.connect(
             lambda result: self.resource_detail_loaded.emit(result) if result and not self._shutting_down else None
@@ -1574,6 +2191,497 @@ class KubernetesClient(QObject):
             base_value = value
         
         return history
+
+    def start_pod_log_stream(self, pod_name, namespace="default", container=None, tail_lines=200, follow=True):
+        """Start streaming logs for a pod"""
+        try:
+            if self._shutting_down:
+                return
+
+            self.log_streamer.start_log_stream(pod_name, namespace, container, tail_lines, follow)
+
+        except Exception as e:
+            logging.error(f"Error starting pod log stream: {e}")
+            self.error_occurred.emit(f"Failed to start log stream: {str(e)}")
+
+    def stop_pod_log_stream(self, pod_name, namespace="default", container=None):
+        """Stop streaming logs for a pod"""
+        try:
+            stream_key = f"{namespace}/{pod_name}"
+            if container:
+                stream_key += f"/{container}"
+
+            self.log_streamer.stop_log_stream(stream_key)
+
+        except Exception as e:
+            logging.error(f"Error stopping pod log stream: {e}")
+
+    def handle_log_line_received(self, pod_name, log_line, timestamp):
+        """Handle received log line from stream"""
+        try:
+            if not self._shutting_down:
+                # Emit signal with log data
+                self.pod_log_line_received.emit({
+                    'pod_name': pod_name,
+                    'log_line': log_line,
+                    'timestamp': timestamp
+                })
+        except Exception as e:
+            logging.error(f"Error handling log line: {e}")
+
+    def handle_stream_error(self, pod_name, error_message):
+        """Handle streaming errors"""
+        try:
+            if not self._shutting_down:
+                logging.error(f"Log stream error for {pod_name}: {error_message}")
+                self.pod_log_stream_error.emit({
+                    'pod_name': pod_name,
+                    'error': error_message
+                })
+        except Exception as e:
+            logging.error(f"Error handling stream error: {e}")
+
+    def handle_stream_status(self, pod_name, status_message):
+        """Handle streaming status updates"""
+        try:
+            if not self._shutting_down:
+                self.pod_log_stream_status.emit({
+                    'pod_name': pod_name,
+                    'status': status_message
+                })
+        except Exception as e:
+            logging.error(f"Error handling stream status: {e}")
+
+    def update_resource(self, resource_type, resource_name, namespace, yaml_data):
+        """
+        Update a Kubernetes resource using patch (kubectl apply equivalent)
+        Returns (success: bool, message: str)
+        """
+        try:
+            resource_type_lower = resource_type.strip().lower()
+
+            # Core V1 API resources
+            if resource_type_lower in ["pod", "pods"]:
+                if namespace:
+                    result = self.v1.patch_namespaced_pod(
+                        name=resource_name,
+                        namespace=namespace,
+                        body=yaml_data
+                    )
+                else:
+                    return False, "Pods require a namespace"
+
+            elif resource_type_lower in ["service", "services", "svc"]:
+                result = self.v1.patch_namespaced_service(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            elif resource_type_lower in ["configmap", "configmaps", "cm"]:
+                result = self.v1.patch_namespaced_config_map(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            elif resource_type_lower in ["secret", "secrets"]:
+                result = self.v1.patch_namespaced_secret(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            elif resource_type_lower in ["node", "nodes"]:
+                result = self.v1.patch_node(name=resource_name, body=yaml_data)
+
+            elif resource_type_lower in ["namespace", "namespaces", "ns"]:
+                result = self.v1.patch_namespace(name=resource_name, body=yaml_data)
+
+            elif resource_type_lower in ["endpoint", "endpoints", "ep"]:
+                result = self.v1.patch_namespaced_endpoints(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            elif resource_type_lower in ["persistentvolume", "persistentvolumes", "pv"]:
+                result = self.v1.patch_persistent_volume(name=resource_name, body=yaml_data)
+
+            elif resource_type_lower in ["persistentvolumeclaim", "persistentvolumeclaims", "pvc"]:
+                result = self.v1.patch_namespaced_persistent_volume_claim(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            elif resource_type_lower in ["serviceaccount", "serviceaccounts", "sa"]:
+                result = self.v1.patch_namespaced_service_account(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            # Apps V1 API resources
+            elif resource_type_lower in ["deployment", "deployments", "deploy"]:
+                result = self.apps_v1.patch_namespaced_deployment(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            elif resource_type_lower in ["replicaset", "replicasets", "rs"]:
+                result = self.apps_v1.patch_namespaced_replica_set(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            elif resource_type_lower in ["daemonset", "daemonsets", "ds"]:
+                result = self.apps_v1.patch_namespaced_daemon_set(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            elif resource_type_lower in ["statefulset", "statefulsets", "sts"]:
+                result = self.apps_v1.patch_namespaced_stateful_set(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            # Batch V1 API resources
+            elif resource_type_lower in ["job", "jobs"]:
+                result = self.batch_v1.patch_namespaced_job(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            elif resource_type_lower in ["cronjob", "cronjobs", "cj"]:
+                try:
+                    # Try batch/v1 first (Kubernetes 1.21+)
+                    batch_v1_api = client.BatchV1Api()
+                    result = batch_v1_api.patch_namespaced_cron_job(
+                        name=resource_name,
+                        namespace=namespace,
+                        body=yaml_data
+                    )
+                except:
+                    # Fallback to batch/v1beta1 (older versions)
+                    batch_v1beta1_api = client.BatchV1beta1Api()
+                    result = batch_v1beta1_api.patch_namespaced_cron_job(
+                        name=resource_name,
+                        namespace=namespace,
+                        body=yaml_data
+                    )
+
+            # Networking V1 API resources
+            elif resource_type_lower in ["ingress", "ingresses", "ing"]:
+                result = self.networking_v1.patch_namespaced_ingress(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            elif resource_type_lower in ["networkpolicy", "networkpolicies", "netpol"]:
+                result = self.networking_v1.patch_namespaced_network_policy(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            elif resource_type_lower in ["ingressclass", "ingressclasses", "ic"]:
+                result = self.networking_v1.patch_ingress_class(name=resource_name, body=yaml_data)
+
+            # Storage V1 API resources
+            elif resource_type_lower in ["storageclass", "storageclasses", "sc"]:
+                result = self.storage_v1.patch_storage_class(name=resource_name, body=yaml_data)
+
+            # RBAC V1 API resources
+            elif resource_type_lower in ["role", "roles"]:
+                result = self.rbac_v1.patch_namespaced_role(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            elif resource_type_lower in ["rolebinding", "rolebindings", "rb"]:
+                result = self.rbac_v1.patch_namespaced_role_binding(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            elif resource_type_lower in ["clusterrole", "clusterroles", "cr"]:
+                result = self.rbac_v1.patch_cluster_role(name=resource_name, body=yaml_data)
+
+            elif resource_type_lower in ["clusterrolebinding", "clusterrolebindings", "crb"]:
+                result = self.rbac_v1.patch_cluster_role_binding(name=resource_name, body=yaml_data)
+
+            # Autoscaling V1 API resources
+            elif resource_type_lower in ["horizontalpodautoscaler", "horizontalpodautoscalers", "hpa"]:
+                result = self.autoscaling_v1.patch_namespaced_horizontal_pod_autoscaler(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            # CustomResourceDefinitions
+            elif resource_type_lower in ["customresourcedefinition", "customresourcedefinitions", "crd"]:
+                result = self.api_extensions_v1.patch_custom_resource_definition(
+                    name=resource_name,
+                    body=yaml_data
+                )
+
+            # ReplicationController
+            elif resource_type_lower in ["replicationcontroller", "replicationcontrollers", "rc"]:
+                result = self.v1.patch_namespaced_replication_controller(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            # ValidatingWebhookConfiguration and MutatingWebhookConfiguration
+            elif resource_type_lower in ["validatingwebhookconfiguration", "validatingwebhookconfigurations", "vwc"]:
+                result = self.admissionregistration_v1.patch_validating_webhook_configuration(
+                    name=resource_name,
+                    body=yaml_data
+                )
+
+            elif resource_type_lower in ["mutatingwebhookconfiguration", "mutatingwebhookconfigurations", "mwc"]:
+                result = self.admissionregistration_v1.patch_mutating_webhook_configuration(
+                    name=resource_name,
+                    body=yaml_data
+                )
+
+            # PriorityClasses
+            elif resource_type_lower in ["priorityclass", "priorityclasses", "pc"]:
+                scheduling_v1_api = client.SchedulingV1Api()
+                result = scheduling_v1_api.patch_priority_class(name=resource_name, body=yaml_data)
+
+            # Leases
+            elif resource_type_lower in ["lease", "leases"]:
+                coordination_v1_api = client.CoordinationV1Api()
+                result = coordination_v1_api.patch_namespaced_lease(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            # PodDisruptionBudgets
+            elif resource_type_lower in ["poddisruptionbudget", "poddisruptionbudgets", "pdb"]:
+                policy_v1_api = client.PolicyV1Api()
+                result = policy_v1_api.patch_namespaced_pod_disruption_budget(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            # RuntimeClasses
+            elif resource_type_lower in ["runtimeclass", "runtimeclasses", "rtc"]:
+                node_v1_api = client.NodeV1Api()
+                result = node_v1_api.patch_runtime_class(name=resource_name, body=yaml_data)
+
+            # Additional Core V1 resources
+            elif resource_type_lower in ["limitrange", "limitranges", "limits"]:
+                result = self.v1.patch_namespaced_limit_range(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            elif resource_type_lower in ["resourcequota", "resourcequotas", "quota"]:
+                result = self.v1.patch_namespaced_resource_quota(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+
+            # Helm resources - should not reach here as they're disabled in UI
+            elif resource_type_lower in ["helmrelease", "helmreleases", "hr", "chart", "charts"]:
+                return False, "Helm resources cannot be edited via YAML editor"
+
+            # Custom Resources - Generic handling
+            else:
+                # Try to handle as custom resource
+                try:
+                    # Find matching CRD
+                    crds = self.api_extensions_v1.list_custom_resource_definition()
+                    matching_crd = None
+
+                    for crd in crds.items:
+                        crd_spec = crd.spec
+                        if (crd_spec.names.plural.lower() == resource_type_lower or
+                                crd_spec.names.singular.lower() == resource_type_lower or
+                                crd_spec.names.kind.lower() == resource_type_lower):
+                            matching_crd = crd
+                            break
+
+                    if matching_crd:
+                        crd_spec = matching_crd.spec
+                        group = crd_spec.group
+                        version = crd_spec.versions[-1].name if crd_spec.versions else "v1"
+                        plural = crd_spec.names.plural
+
+                        if crd_spec.scope == "Namespaced":
+                            result = self.custom_objects_api.patch_namespaced_custom_object(
+                                group=group,
+                                version=version,
+                                namespace=namespace,
+                                plural=plural,
+                                name=resource_name,
+                                body=yaml_data
+                            )
+                        else:
+                            result = self.custom_objects_api.patch_cluster_custom_object(
+                                group=group,
+                                version=version,
+                                plural=plural,
+                                name=resource_name,
+                                body=yaml_data
+                            )
+                    else:
+                        return False, f"Unknown resource type: {resource_type}"
+
+                except Exception as e:
+                    return False, f"Error updating custom resource: {str(e)}"
+
+            # If we reach here, the update was successful
+            return True, f"Successfully updated {resource_type}/{resource_name}"
+
+        except ApiException as e:
+            if e.status == 404:
+                return False, f"Resource not found: {resource_type}/{resource_name}"
+            elif e.status == 403:
+                return False, f"Permission denied: Cannot update {resource_type}/{resource_name}"
+            elif e.status == 422:
+                return False, f"Invalid resource data: {e.body}"
+            else:
+                return False, f"API error: {e.reason} (Status: {e.status})"
+        except Exception as e:
+            return False, f"Unexpected error updating resource: {str(e)}"
+
+    def validate_kubernetes_schema(self, yaml_data):
+        """
+        Basic Kubernetes schema validation
+        Returns (is_valid: bool, error_message: str)
+        """
+        try:
+            # Check required top-level fields
+            required_fields = ['apiVersion', 'kind', 'metadata']
+            for field in required_fields:
+                if field not in yaml_data:
+                    return False, f"Missing required field: {field}"
+
+            # Validate apiVersion format
+            api_version = yaml_data.get('apiVersion', '')
+            if not api_version or '/' not in api_version and api_version not in ['v1']:
+                if '/' not in api_version:
+                    # Core API resources like v1
+                    valid_core_versions = ['v1']
+                    if api_version not in valid_core_versions:
+                        return False, f"Invalid apiVersion: {api_version}"
+                else:
+                    # Group/version format
+                    if not api_version.count('/') == 1:
+                        return False, f"Invalid apiVersion format: {api_version}"
+
+            # Validate kind
+            kind = yaml_data.get('kind', '')
+            if not kind:
+                return False, "Missing or empty 'kind' field"
+
+            # Validate metadata
+            metadata = yaml_data.get('metadata', {})
+            if not isinstance(metadata, dict):
+                return False, "'metadata' must be an object"
+
+            if 'name' not in metadata:
+                return False, "Missing 'metadata.name' field"
+
+            # Validate common spec fields based on kind
+            kind_lower = kind.lower()
+            spec = yaml_data.get('spec', {})
+
+            if kind_lower in ['pod', 'deployment', 'daemonset', 'statefulset', 'replicaset', 'job']:
+                if 'containers' not in spec and kind_lower == 'pod':
+                    return False, "Pod spec must contain 'containers' field"
+                elif 'template' in spec and kind_lower in ['deployment', 'daemonset', 'statefulset', 'replicaset']:
+                    template_spec = spec.get('template', {}).get('spec', {})
+                    if 'containers' not in template_spec:
+                        return False, f"{kind} template spec must contain 'containers' field"
+
+            # Validate container structure if present
+            containers = []
+            if kind_lower == 'pod':
+                containers = spec.get('containers', [])
+            elif 'template' in spec:
+                containers = spec.get('template', {}).get('spec', {}).get('containers', [])
+
+            for i, container in enumerate(containers):
+                if not isinstance(container, dict):
+                    return False, f"Container {i} must be an object"
+                if 'name' not in container:
+                    return False, f"Container {i} missing 'name' field"
+                if 'image' not in container:
+                    return False, f"Container {i} missing 'image' field"
+
+            return True, "Schema validation passed"
+
+        except Exception as e:
+            return False, f"Schema validation error: {str(e)}"
+
+    def update_resource_async(self, resource_type, resource_name, namespace, yaml_data):
+        """Update resource asynchronously"""
+        if self._shutting_down:
+            return
+
+        class UpdateWorker(BaseWorker):
+            def __init__(self, client_instance, resource_type, resource_name, namespace, yaml_data):
+                super().__init__()
+                self.client_instance = client_instance
+                self.resource_type = resource_type
+                self.resource_name = resource_name
+                self.namespace = namespace
+                self.yaml_data = yaml_data
+    
+            @pyqtSlot()
+            def run(self):
+                try:
+                    success, message = self.client_instance.update_resource(
+                        self.resource_type,
+                        self.resource_name,
+                        self.namespace,
+                        self.yaml_data
+                    )
+                    self.safe_emit_finished({'success': success, 'message': message})
+                except Exception as e:
+                    self.safe_emit_error(str(e))
+
+        worker = UpdateWorker(self, resource_type, resource_name, namespace, yaml_data)
+
+        worker.signals.finished.connect(
+            lambda result: self.resource_updated.emit(result) if not self._shutting_down else None
+        )
+        worker.signals.error.connect(
+            lambda error: self.error_occurred.emit(error) if not self._shutting_down else None
+        )
+
+        self._active_workers.add(worker)
+
+        def cleanup_worker(result=None):
+            if worker in self._active_workers:
+                self._active_workers.remove(worker)
+
+        worker.signals.finished.connect(cleanup_worker)
+        worker.signals.error.connect(lambda _: cleanup_worker())
+
+        self.threadpool.start(worker)
+
+    # Add new signal to the class signals section
+    resource_updated = pyqtSignal(dict)  # Add this to the existing signals
 
 # Singleton instance
 _instance = None

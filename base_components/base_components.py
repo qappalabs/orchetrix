@@ -13,139 +13,7 @@ from PyQt6.QtGui import QColor, QIcon, QCursor, QFont, QLinearGradient, QPainter
 from functools import partial
 import weakref
 
-# Centralized styles to maintain consistency and reduce duplication
-STYLES = {
-    "table": """
-        QTableWidget {
-            background-color: #1e1e1e;
-            border: none;
-            gridline-color: #2d2d2d;
-            outline: none;
-        }
-        QTableWidget::item {
-            padding: 8px;
-            border: none;
-            outline: none;
-        }
-        QTableWidget::item:hover {
-            background-color: rgba(255, 255, 255, 0.05);
-            border-radius: 4px;
-        }
-        QTableWidget::item:selected {
-            background-color: rgba(33, 150, 243, 0.2);
-            border: none;
-        }
-        QHeaderView::section {
-            background-color: #252525;
-            color: #888888;
-            padding: 8px;
-            border: none;
-            border-bottom: 1px solid #2d2d2d;
-            font-size: 12px;
-            text-align: center;
-        }
-    """,
-    "title": """
-        font-size: 20px;
-        font-weight: bold;
-        color: #ffffff;
-    """,
-    "count": """
-        color: #9ca3af;
-        font-size: 12px;
-        margin-left: 8px;
-        font-family: 'Segoe UI';
-    """,
-    "checkbox": """
-        QCheckBox {
-            spacing: 5px;
-            background: transparent;
-        }
-        QCheckBox::indicator {
-            width: 16px;
-            height: 16px;
-            border: 2px solid #666666;
-            border-radius: 3px;
-            background: transparent;
-        }
-        QCheckBox::indicator:checked {
-            background-color: #0095ff;
-            border-color: #0095ff;
-        }
-        QCheckBox::indicator:hover {
-            border-color: #888888;
-        }
-    """,
-    "header_checkbox": """
-        QCheckBox {
-            spacing: 5px;
-            background-color: #252525;
-        }
-        QCheckBox::indicator {
-            width: 16px;
-            height: 16px;
-            border: 2px solid #666666;
-            border-radius: 3px;
-            background: transparent;
-        }
-        QCheckBox::indicator:checked {
-            background-color: #0095ff;
-            border-color: #0095ff;
-        }
-        QCheckBox::indicator:hover {
-            border-color: #888888;
-        }
-    """,
-    "action_button": """
-        QToolButton {
-            color: #888888;
-            font-size: 18px;
-            background: transparent;
-            padding: 2px;
-            margin: 0;
-            border: none;
-            font-weight: bold;
-        }
-        QToolButton:hover {
-            background-color: rgba(255, 255, 255, 0.1);
-            border-radius: 3px;
-            color: #ffffff;
-        }
-        QToolButton::menu-indicator {
-            image: none;
-        }
-    """,
-    "menu": """
-        QMenu {
-            background-color: #2d2d2d;
-            border: 1px solid #3d3d3d;
-            border-radius: 4px;
-            padding: 4px;
-        }
-        QMenu::item {
-            color: #ffffff;
-            padding: 8px 24px 8px 36px;
-            border-radius: 4px;
-            font-size: 13px;
-        }
-        QMenu::item:selected {
-            background-color: rgba(33, 150, 243, 0.2);
-            color: #ffffff;
-        }
-        QMenu::item[dangerous="true"] {
-            color: #ff4444;
-        }
-        QMenu::item[dangerous="true"]:selected {
-            background-color: rgba(255, 68, 68, 0.1);
-        }
-    """,
-    "empty_state": """
-        background-color: #1e1e1e;
-        color: #aaaaaa;
-        border-radius: 8px;
-        border: 1px solid #333333;
-    """
-}
+from UI.Styles import AppStyles, AppColors, AppConstants
 
 class SortableTableWidgetItem(QTableWidgetItem):
     """
@@ -291,7 +159,7 @@ class BaseTablePage(QWidget):
         table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         
         # Configure appearance
-        table.setShowGrid(True)
+        table.setShowGrid(False)
         table.setAlternatingRowColors(False)
         table.verticalHeader().setVisible(False)
         
@@ -394,21 +262,24 @@ class BaseTablePage(QWidget):
         
         # Create menu
         menu = QMenu(button)
-        menu.setStyleSheet(STYLES["menu"])
-        
+        menu.setStyleSheet(AppStyles.MENU_STYLE)
+
+        # Connect signals to change row appearance when menu opens/closes
+        menu.aboutToShow.connect(lambda: self._highlight_active_row(row, True))
+        menu.aboutToHide.connect(lambda: self._highlight_active_row(row, False))
+
         actions  = []
         # Only show "View Logs" for pods
         if self.resource_type == "pods":
             actions.append({"text": "View Logs", "icon": "icons/logs.png", "dangerous": False})
             actions.append({"text": "SSH", "icon": "icons/terminal.png", "dangerous": False})
-        
+
         # Add default actions
         actions.extend([
             {"text": "Edit", "icon": "icons/edit.png", "dangerous": False},
             {"text": "Delete", "icon": "icons/delete.png", "dangerous": True}
         ])
-        
-        
+    
         # Add actions to menu
         for action_info in actions:
             action = menu.addAction(action_info["text"])

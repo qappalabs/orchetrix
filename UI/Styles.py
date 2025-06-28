@@ -16,6 +16,8 @@ class AppColors:
     TEXT_LINK = "#4FC3F7"
     TEXT_DANGER = "#FF5252"
     TEXT_TABLE = "#e2e8f0"
+    TEXT_SUCCESS = "#4CAF50"
+    TEXT_WARNING = "#E81123"
 
     # Accent colors
     ACCENT_BLUE = "#0095ff"
@@ -415,26 +417,29 @@ class AppStyles:
         QTableWidget {{
             background-color: {AppColors.CARD_BG};
             border: none;
-            gridline-color: {AppColors.BORDER_COLOR};
+            gridline-color: transparent;
             outline: none;
             color: {AppColors.TEXT_TABLE};
         }}
         QTableWidget::item {{
             padding: 10px 8px;
-            border-bottom: 1px solid {AppColors.BORDER_COLOR}33;
+            /* Change 2: Remove the bottom border from each cell */
+            border: none;
             outline: none;
             color: {AppColors.TEXT_TABLE};
         }}
+        
         QTableWidget::item:hover {{
-            background-color: {AppColors.HOVER_BG_DARKER};
-            border-radius: 4px;
+            background-color: rgba(53, 132, 228, 0.15); /* Light Blue with 15% opacity */
+            
         }}
+        
         QTableWidget::item:selected {{
-            background-color: {AppColors.SELECTED_BG};
+            background-color: rgba(53, 132, 228, 0.15); /* Light Blue with 40% opacity */
             border: none;
         }}
         QHeaderView::section {{
-            background-color: transparent;  /* Changed from {AppColors.HEADER_BG} */
+            background-color: transparent;
             color: {AppColors.TEXT_SECONDARY};
             padding: 10px 8px;
             border: none;
@@ -712,9 +717,6 @@ class AppStyles:
         }}
         QTreeWidget::item {{
             padding: 6px 4px;
-            border-bottom: 1px solid {AppColors.BORDER_DARK};
-            border-right: 1px solid {AppColors.BORDER_DARK};
-            border-left: 1px solid {AppColors.BORDER_DARK};
             background-color: transparent;
         }}
         QTreeWidget::item:hover {{

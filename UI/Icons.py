@@ -63,7 +63,7 @@ class Icons:
     
     COMPARE = "🔍"
     TERMINAL = "⌨️"
-    CHAT = "💬"
+    AI_ASSIS = "💬"
     
     # Navigation
     BACK = "←"

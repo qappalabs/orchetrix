@@ -654,11 +654,7 @@ class OrchestrixGUI(QMainWindow):
         font = QFont("Segoe UI", 13)
         font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
         tree_widget.setFont(font)
-        tree_widget.setStyleSheet(AppStyles.TREE_WIDGET_STYLE + """
-            QTreeWidget::item {
-                cursor: pointer;
-            }
-        """)
+        tree_widget.setStyleSheet(AppStyles.TREE_WIDGET_STYLE)
         tree_widget.setIconSize(QSize(20, 20))
         tree_widget.setIndentation(0)
         tree_widget.setAlternatingRowColors(False)
