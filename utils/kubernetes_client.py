@@ -10,11 +10,250 @@ import threading
 import queue
 import time
 
+
+import threading
+import queue
+import time
 # Kubernetes Python client imports
 from kubernetes import client, config, watch
 from kubernetes.client.rest import ApiException
 from kubernetes.config.config_exception import ConfigException
 from kubernetes.stream import stream
+
+
+
+class KubernetesLogStreamer(QObject):
+    """Kubernetes log streamer using watch API for real-time logs"""
+    
+    log_line_received = pyqtSignal(str, str, str)  # pod_name, log_line, timestamp
+    stream_error = pyqtSignal(str, str)  # pod_name, error_message
+    stream_status = pyqtSignal(str, str)  # pod_name, status_message
+    
+    def __init__(self, kube_client):
+        super().__init__()
+        self.kube_client = kube_client
+        self.active_streams = {}  # Track active log streams
+        self._shutdown = False
+    
+    def start_log_stream(self, pod_name, namespace, container=None, tail_lines=200, follow=True):
+        """Start streaming logs for a pod"""
+        try:
+            stream_key = f"{namespace}/{pod_name}"
+            if container:
+                stream_key += f"/{container}"
+            
+            # Stop existing stream if any
+            self.stop_log_stream(stream_key)
+            
+            # Create and start new stream
+            stream_thread = LogStreamThread(
+                self.kube_client,
+                pod_name,
+                namespace,
+                container,
+                tail_lines,
+                follow,
+                self
+            )
+            
+            self.active_streams[stream_key] = stream_thread
+            stream_thread.start()
+            
+            self.stream_status.emit(pod_name, "Starting log stream...")
+            
+        except Exception as e:
+            logging.error(f"Error starting log stream for {pod_name}: {e}")
+            self.stream_error.emit(pod_name, f"Failed to start stream: {str(e)}")
+    
+    def stop_log_stream(self, stream_key):
+        """Stop a specific log stream"""
+        try:
+            if stream_key in self.active_streams:
+                stream_thread = self.active_streams[stream_key]
+                stream_thread.stop()
+                stream_thread.wait(2000)  # Wait up to 2 seconds
+                
+                if stream_thread.isRunning():
+                    stream_thread.terminate()
+                
+                del self.active_streams[stream_key]
+                
+        except Exception as e:
+            logging.error(f"Error stopping log stream {stream_key}: {e}")
+    
+    def stop_all_streams(self):
+        """Stop all active log streams"""
+        self._shutdown = True
+        for stream_key in list(self.active_streams.keys()):
+            self.stop_log_stream(stream_key)
+    
+    def __del__(self):
+        """Cleanup when object is destroyed"""
+        self.stop_all_streams()
+
+class LogStreamThread(QThread):
+    """Thread for streaming logs from Kubernetes API"""
+    
+    def __init__(self, kube_client, pod_name, namespace, container, tail_lines, follow, parent_streamer):
+        super().__init__()
+        self.kube_client = kube_client
+        self.pod_name = pod_name
+        self.namespace = namespace
+        self.container = container
+        self.tail_lines = tail_lines
+        self.follow = follow
+        self.parent_streamer = parent_streamer
+        self._stop_requested = False
+    
+    def stop(self):
+        """Request thread to stop"""
+        self._stop_requested = True
+    
+    def run(self):
+        """Run the log streaming"""
+        try:
+            # First, get initial logs if tail_lines is specified
+            if self.tail_lines and self.tail_lines > 0:
+                self._fetch_initial_logs()
+            
+            # If follow mode is enabled, start streaming
+            if self.follow and not self._stop_requested:
+                self._stream_live_logs()
+                
+        except Exception as e:
+            if not self._stop_requested:
+                self.parent_streamer.stream_error.emit(
+                    self.pod_name, 
+                    f"Log streaming error: {str(e)}"
+                )
+    
+    def _fetch_initial_logs(self):
+        """Fetch initial logs"""
+        try:
+            if not self.kube_client.v1:
+                return
+            
+            kwargs = {
+                'name': self.pod_name,
+                'namespace': self.namespace,
+                'timestamps': True,
+                'tail_lines': self.tail_lines
+            }
+            
+            if self.container:
+                kwargs['container'] = self.container
+            
+            logs = self.kube_client.v1.read_namespaced_pod_log(**kwargs)
+            
+            if logs and not self._stop_requested:
+                # Parse and emit each log line
+                for line in logs.strip().split('\n'):
+                    if self._stop_requested:
+                        break
+                    
+                    if line.strip():
+                        timestamp, log_content = self._parse_log_line(line)
+                        self.parent_streamer.log_line_received.emit(
+                            self.pod_name, log_content, timestamp
+                        )
+                        # Small delay to prevent overwhelming the UI
+                        self.msleep(1)
+                        
+        except ApiException as e:
+            if not self._stop_requested:
+                if e.status == 404:
+                    self.parent_streamer.stream_error.emit(
+                        self.pod_name, f"Pod not found: {self.pod_name}"
+                    )
+                else:
+                    self.parent_streamer.stream_error.emit(
+                        self.pod_name, f"API error: {e.reason}"
+                    )
+        except Exception as e:
+            if not self._stop_requested:
+                self.parent_streamer.stream_error.emit(
+                    self.pod_name, f"Error fetching initial logs: {str(e)}"
+                )
+    
+    def _stream_live_logs(self):
+        """Stream live logs using Kubernetes watch API"""
+        try:
+            if not self.kube_client.v1:
+                return
+            
+            self.parent_streamer.stream_status.emit(self.pod_name, "🔴 Live streaming...")
+            
+            w = watch.Watch()
+            
+            kwargs = {
+                'name': self.pod_name,
+                'namespace': self.namespace,
+                'follow': True,
+                'timestamps': True,
+                'since_seconds': 1  # Only get very recent logs for streaming
+            }
+            
+            if self.container:
+                kwargs['container'] = self.container
+            
+            # Start the watch stream
+            stream = w.stream(
+                self.kube_client.v1.read_namespaced_pod_log,
+                **kwargs
+            )
+            
+            for event in stream:
+                if self._stop_requested:
+                    w.stop()
+                    break
+                
+                # Process the log event
+                if isinstance(event, str) and event.strip():
+                    timestamp, log_content = self._parse_log_line(event)
+                    self.parent_streamer.log_line_received.emit(
+                        self.pod_name, log_content, timestamp
+                    )
+                
+                # Small delay to prevent overwhelming
+                self.msleep(10)
+                
+        except ApiException as e:
+            if not self._stop_requested:
+                self.parent_streamer.stream_error.emit(
+                    self.pod_name, f"Streaming API error: {e.reason}"
+                )
+        except Exception as e:
+            if not self._stop_requested:
+                self.parent_streamer.stream_error.emit(
+                    self.pod_name, f"Streaming error: {str(e)}"
+                )
+    
+    def _parse_log_line(self, log_line):
+        """Parse log line to extract timestamp and content"""
+        try:
+            # Kubernetes logs format: 2024-01-01T12:00:00.000000000Z log content
+            if ' ' in log_line and log_line.startswith('20'):
+                parts = log_line.split(' ', 1)
+                if len(parts) == 2:
+                    timestamp_str = parts[0]
+                    log_content = parts[1]
+                    
+                    # Extract just the time part (HH:MM:SS)
+                    if 'T' in timestamp_str:
+                        time_part = timestamp_str.split('T')[1]
+                        if '.' in time_part:
+                            time_part = time_part.split('.')[0]
+                        timestamp = time_part[:8]  # HH:MM:SS
+                    else:
+                        timestamp = datetime.now().strftime("%H:%M:%S")
+                    
+                    return timestamp, log_content
+            
+            # Fallback if parsing fails
+            return datetime.now().strftime("%H:%M:%S"), log_line
+            
+        except Exception:
+            return datetime.now().strftime("%H:%M:%S"), log_line
 
 
 @dataclass
@@ -548,7 +787,6 @@ class KubernetesPodSSH(QObject):
                 self.read_thread.wait(2000)
                 if self.read_thread.isRunning():
                     self.read_thread.terminate()
-
             if self.exec_stream:
                 try:
                     self.exec_stream.close()
@@ -615,6 +853,7 @@ class SSHReadThread(QThread):
             if not self._stop_requested:
                 self.error_occurred.emit(f"SSH read thread error: {str(e)}")
 
+
 class KubernetesClient(QObject):
     """Client for interacting with Kubernetes clusters using Python kubernetes library"""
     clusters_loaded = pyqtSignal(list)
@@ -623,6 +862,14 @@ class KubernetesClient(QObject):
     node_metrics_updated = pyqtSignal(dict)
     cluster_issues_updated = pyqtSignal(list)
     resource_detail_loaded = pyqtSignal(dict)
+
+    pod_logs_loaded = pyqtSignal(dict)
+    
+    # New signals for streaming logs
+    pod_log_line_received = pyqtSignal(dict)      # Individual log line
+    pod_log_stream_error = pyqtSignal(dict)       # Stream errors
+    pod_log_stream_status = pyqtSignal(dict)      # Stream status updates
+    
     error_occurred = pyqtSignal(str)
     pod_logs_loaded = pyqtSignal(dict)
     pod_log_line_received = pyqtSignal(dict)      # Individual log line
@@ -648,6 +895,16 @@ class KubernetesClient(QObject):
         self.custom_objects_api = None
         self.metrics_api = None
         
+
+        # Add log streamer
+        self.log_streamer = KubernetesLogStreamer(self)
+        
+        # Connect log streamer signals
+        self.log_streamer.log_line_received.connect(self.handle_log_line_received)
+        self.log_streamer.stream_error.connect(self.handle_stream_error)
+        self.log_streamer.stream_status.connect(self.handle_stream_status)
+
+
         # Set up timers for periodic updates
         self.metrics_timer = QTimer(self)
         self.metrics_timer.timeout.connect(self.refresh_metrics)
@@ -722,6 +979,94 @@ class KubernetesClient(QObject):
                     
         except Exception as e:
             logging.error(f"Error in stop_all_workers: {e}")
+
+    def start_pod_log_stream(self, pod_name, namespace="default", container=None, tail_lines=200, follow=True):
+        """Start streaming logs for a pod"""
+        try:
+            if self._shutting_down:
+                return
+            
+            self.log_streamer.start_log_stream(pod_name, namespace, container, tail_lines, follow)
+            
+        except Exception as e:
+            logging.error(f"Error starting pod log stream: {e}")
+            self.error_occurred.emit(f"Failed to start log stream: {str(e)}")
+
+    def stop_pod_log_stream(self, pod_name, namespace="default", container=None):
+        """Stop streaming logs for a pod"""
+        try:
+            stream_key = f"{namespace}/{pod_name}"
+            if container:
+                stream_key += f"/{container}"
+            
+            self.log_streamer.stop_log_stream(stream_key)
+            
+        except Exception as e:
+            logging.error(f"Error stopping pod log stream: {e}")
+
+    def handle_log_line_received(self, pod_name, log_line, timestamp):
+        """Handle received log line from stream"""
+        try:
+            if not self._shutting_down:
+                # Emit signal with log data
+                self.pod_log_line_received.emit({
+                    'pod_name': pod_name,
+                    'log_line': log_line,
+                    'timestamp': timestamp
+                })
+        except Exception as e:
+            logging.error(f"Error handling log line: {e}")
+
+    def handle_stream_error(self, pod_name, error_message):
+        """Handle streaming errors"""
+        try:
+            if not self._shutting_down:
+                logging.error(f"Log stream error for {pod_name}: {error_message}")
+                self.pod_log_stream_error.emit({
+                    'pod_name': pod_name,
+                    'error': error_message
+                })
+        except Exception as e:
+            logging.error(f"Error handling stream error: {e}")
+
+    def handle_stream_status(self, pod_name, status_message):
+        """Handle streaming status updates"""
+        try:
+            if not self._shutting_down:
+                self.pod_log_stream_status.emit({
+                    'pod_name': pod_name,
+                    'status': status_message
+                })
+        except Exception as e:
+            logging.error(f"Error handling stream status: {e}")
+
+    def force_shutdown(self):
+        """Enhanced force shutdown that includes log streams"""
+        try:
+            logging.info("KubernetesClient force shutdown initiated...")
+            
+            self._shutting_down = True
+            
+            # Stop log streams first
+            if hasattr(self, 'log_streamer'):
+                self.log_streamer.stop_all_streams()
+            
+            # Disconnect all signals
+            self.disconnect_all_signals()
+            
+            # Stop everything else
+            self.stop_all_timers()
+            self.stop_all_workers()
+            
+            # Clear data
+            self.clusters.clear()
+            self.current_cluster = None
+            
+            logging.info("KubernetesClient force shutdown completed")
+            
+        except Exception as e:
+            logging.error(f"Error in kubernetes client force_shutdown: {e}")
+
 
     def force_shutdown(self):
         """Enhanced force shutdown that includes log streams"""
