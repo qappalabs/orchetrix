@@ -872,28 +872,63 @@ class ReleasesPage(BaseResourcePage):
         # Configure column widths
         self.configure_columns()
     
+    # def configure_columns(self):
+    #     """Configure column widths and behaviors"""
+    #     self.table.setColumnWidth(1, 150)  # Name
+        
+    #     fixed_widths = {
+    #         2: 120,  # Namespace
+    #         4: 80,   # Revision
+    #         7: 100,  # Status
+    #         8: 120,  # Updated
+    #         9: 40    # Actions
+    #     }
+        
+    #     for col, width in fixed_widths.items():
+    #         self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+    #         self.table.setColumnWidth(col, width)
+        
+    #     # Set flexible columns
+    #     self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)  # Chart
+    #     self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)  # Version
+    #     self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)  # App Version
+
     def configure_columns(self):
-        """Configure column widths and behaviors"""
-        # Set minimum width for name column
-        self.table.setColumnWidth(1, 150)
+        """Configure column widths for full screen utilization"""
+        if not self.table:
+            return
         
-        # Configure fixed width columns
-        fixed_widths = {
-            2: 120,  # Namespace
-            4: 80,   # Revision
-            7: 100,  # Status
-            8: 120,  # Updated
-            9: 40    # Actions
-        }
+        header = self.table.horizontalHeader()
         
-        for col, width in fixed_widths.items():
-            self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
-            self.table.setColumnWidth(col, width)
+        # Column specifications with optimized default widths
+        column_specs = [
+            (0, 40, "fixed"),        # Checkbox
+            (1, 140, "interactive"), # Name
+            (2, 90, "interactive"),  # Namespace
+            (3, 80, "interactive"),  # Chart
+            (4, 60, "interactive"),  # Revision
+            (5, 60, "interactive"),  # Version
+            (6, 60, "interactive"),  # App Version
+            (7, 60, "interactive"),  # Status
+            (8, 80, "stretch"),      # Update - stretch to fill remaining space
+            (9, 40, "fixed")        # Actions
+        ]
         
-        # Set chart and version columns to be flexible
-        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)  # Chart
-        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)  # Version
-        self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)  # App Version
+        # Apply column configuration
+        for col_index, default_width, resize_type in column_specs:
+            if col_index < self.table.columnCount():
+                if resize_type == "fixed":
+                    header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Fixed)
+                    self.table.setColumnWidth(col_index, default_width)
+                elif resize_type == "interactive":
+                    header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Interactive)
+                    self.table.setColumnWidth(col_index, default_width)
+                elif resize_type == "stretch":
+                    header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Stretch)
+                    self.table.setColumnWidth(col_index, default_width)
+        # Ensure full width utilization after configuration
+        QTimer.singleShot(100, self._ensure_full_width_utilization)
+
 
     def load_data(self, load_more=False):
         """Load resource data with improved detection of all releases including partial ones"""

@@ -50,6 +50,8 @@ class AppColors:
     STATUS_PENDING = "#FFA500"    # Orange
     STATUS_WARNING = "#FFC107"
     STATUS_PROGRESS = "#969efa"
+    STATUS_ERROR= STATUS_DISCONNECTED
+
 
     SEARCH_BAR_HEIGHT = 30
     SEARCH_BAR_MIN_WIDTH = 200
@@ -121,6 +123,7 @@ class AppConstants:
 
 
 class AppStyles:
+    
     # Main application style
     MAIN_STYLE = f"""
         QMainWindow, QWidget {{
@@ -411,8 +414,6 @@ class AppStyles:
             padding: 40px 0px;
         }}
     """
-
-    # Table and related styles (used in ReplicaSetsPage and others)
     TABLE_STYLE = f"""
         QTableWidget {{
             background-color: {AppColors.CARD_BG};
@@ -420,33 +421,54 @@ class AppStyles:
             gridline-color: transparent;
             outline: none;
             color: {AppColors.TEXT_TABLE};
+            selection-background-color: rgba(53, 132, 228, 0.15);
+            alternate-background-color: transparent;
         }}
+        
         QTableWidget::item {{
             padding: 10px 8px;
-            /* Change 2: Remove the bottom border from each cell */
             border: none;
             outline: none;
             color: {AppColors.TEXT_TABLE};
+            background-color: transparent;
         }}
         
         QTableWidget::item:hover {{
-            background-color: rgba(53, 132, 228, 0.15); /* Light Blue with 15% opacity */
-            
+            background-color: rgba(53, 132, 228, 0.10);
         }}
         
         QTableWidget::item:selected {{
-            background-color: rgba(53, 132, 228, 0.15); /* Light Blue with 40% opacity */
+            background-color: rgba(53, 132, 228, 0.15);
+            color: {AppColors.TEXT_LIGHT};
             border: none;
         }}
+        
+        QTableWidget::item:selected:hover {{
+            background-color: rgba(53, 132, 228, 0.20);
+        }}
+        
         QHeaderView::section {{
-            background-color: transparent;
+            background-color: {AppColors.HEADER_BG};
             color: {AppColors.TEXT_SECONDARY};
             padding: 10px 8px;
             border: none;
             border-bottom: 1px solid {AppColors.BORDER_COLOR};
             font-size: 12px;
             text-align: center;
+            font-weight: bold;
         }}
+        
+        QHeaderView::section:hover {{
+            background-color: {AppColors.BG_MEDIUM};
+        }}
+        
+        QHeaderView::down-arrow, QHeaderView::up-arrow {{
+            image: none;
+            width: 0px;
+            height: 0px;
+            border: none;
+        }}
+        
         {UNIFIED_SCROLL_BAR_STYLE}
     """
 
@@ -643,6 +665,70 @@ class AppStyles:
         }}
     """
 
+    # Add this new global override style at the beginning of your AppStyles class
+    GLOBAL_PLATFORM_OVERRIDE_STYLE = f"""
+        * {{
+            outline: none;
+        }}
+        
+        QApplication {{
+            font-family: 'Segoe UI', Arial, sans-serif;
+            font-size: 9pt;
+        }}
+        
+        /* Force consistent table styling across platforms */
+        QTableWidget, QTreeWidget {{
+            alternate-background-color: transparent;
+            selection-background-color: rgba(53, 132, 228, 0.15) !important;
+            selection-color: {AppColors.TEXT_LIGHT} !important;
+        }}
+        
+        QTableWidget::item, QTreeWidget::item {{
+            border: none !important;
+            outline: none !important;
+        }}
+        
+        QTableWidget::item:selected, QTreeWidget::item:selected {{
+            background-color: rgba(53, 132, 228, 0.15) !important;
+            color: {AppColors.TEXT_LIGHT} !important;
+        }}
+        
+        QTableWidget::item:hover, QTreeWidget::item:hover {{
+            background-color: rgba(53, 132, 228, 0.10) !important;
+        }}
+        
+        /* Force consistent header styling */
+        QHeaderView::section {{
+            background-color: {AppColors.HEADER_BG} !important;
+            color: {AppColors.TEXT_SECONDARY} !important;
+            border: none !important;
+            border-bottom: 1px solid {AppColors.BORDER_COLOR} !important;
+            padding: 8px !important;
+            text-align: center !important;
+        }}
+        
+        QHeaderView::section:hover {{
+            background-color: {AppColors.BG_MEDIUM} !important;
+        }}
+        
+        /* Custom sort indicator positioning */
+        QHeaderView::down-arrow {{
+            image: none;
+            border: none;
+            width: 0px;
+            height: 0px;
+        }}
+        
+        QHeaderView::up-arrow {{
+            image: none;
+            border: none;
+            width: 0px;
+            height: 0px;
+        }}
+        
+        {TOOLTIP_STYLE}
+    """
+
     SEARCH_BAR_STYLE = f"""
         QLineEdit {{
             background-color: #333333;
@@ -705,6 +791,57 @@ class AppStyles:
         }}
     """
 
+    # TREE_WIDGET_STYLE = f"""
+    #     QTreeWidget {{
+    #         background-color: {AppColors.BG_DARK};
+    #         border: none;
+    #         outline: none;
+    #         font-size: 13px;
+    #         gridline-color: {AppColors.BORDER_DARK};
+    #         margin: 0;
+    #         padding: 0;
+    #     }}
+    #     QTreeWidget::item {{
+    #         padding: 6px 4px;
+    #         background-color: transparent;
+    #     }}
+    #     QTreeWidget::item:hover {{
+    #         background-color: rgba(53, 132, 228, 0.15);
+    #     }}
+    #     QHeaderView::section {{
+    #         background-color: {AppColors.TABLE_HEADER};
+    #         color: {AppColors.TEXT_LIGHT};
+    #         padding: 8px 8px;
+    #         border-right: 1px solid {AppColors.BORDER_DARK};
+    #         border-bottom: 1px solid {AppColors.BORDER_DARK};
+    #         border-left: 1px solid {AppColors.BORDER_DARK};
+    #         border-top: none;
+    #         border-left: none;
+    #         text-align: left;
+    #         font-weight: bold;
+    #     }}
+    #     QHeaderView::section:first {{
+    #         border-left: 1px solid {AppColors.BORDER_DARK};  /* Changed from 'border-left: none;' to add left border */
+    #     }}
+    #     QHeaderView::section:last {{
+    #         padding: 0;
+    #         text-align: center;
+    #         width: {AppConstants.SIZES["ACTION_WIDTH"]}px;
+    #         max-width: {AppConstants.SIZES["ACTION_WIDTH"]}px;
+    #         min-width: {AppConstants.SIZES["ACTION_WIDTH"]}px;
+    #     }}
+    #     QTreeWidget::item:selected {{
+    #         background-color: rgba(53, 132, 228, 0.15);
+    #     }}
+    #     QTreeWidget::branch {{
+    #         border: none;
+    #         border-image: none;
+    #         outline: none;
+    #     }}
+    #     {UNIFIED_SCROLL_BAR_STYLE}
+    # """
+
+ # Enhanced tree widget style for HomePage
     TREE_WIDGET_STYLE = f"""
         QTreeWidget {{
             background-color: {AppColors.BG_DARK};
@@ -714,29 +851,46 @@ class AppStyles:
             gridline-color: {AppColors.BORDER_DARK};
             margin: 0;
             padding: 0;
+            selection-background-color: rgba(53, 132, 228, 0.15);
+            alternate-background-color: transparent;
         }}
+        
         QTreeWidget::item {{
             padding: 6px 4px;
             background-color: transparent;
+            border: none;
+            outline: none;
         }}
+        
         QTreeWidget::item:hover {{
-            background-color: rgba(53, 132, 228, 0.15);
+            background-color: rgba(53, 132, 228, 0.10);
         }}
+        
+        QTreeWidget::item:selected {{
+            background-color: rgba(53, 132, 228, 0.15);
+            color: {AppColors.TEXT_LIGHT};
+        }}
+        
+        QTreeWidget::item:selected:hover {{
+            background-color: rgba(53, 132, 228, 0.20);
+        }}
+        
         QHeaderView::section {{
             background-color: {AppColors.TABLE_HEADER};
             color: {AppColors.TEXT_LIGHT};
             padding: 8px 8px;
             border-right: 1px solid {AppColors.BORDER_DARK};
             border-bottom: 1px solid {AppColors.BORDER_DARK};
-            border-left: 1px solid {AppColors.BORDER_DARK};
             border-top: none;
-            border-left: none;
+            border-left: 1px solid {AppColors.BORDER_DARK};
             text-align: left;
             font-weight: bold;
         }}
+        
         QHeaderView::section:first {{
-            border-left: 1px solid {AppColors.BORDER_DARK};  /* Changed from 'border-left: none;' to add left border */
+            border-left: 1px solid {AppColors.BORDER_DARK};
         }}
+        
         QHeaderView::section:last {{
             padding: 0;
             text-align: center;
@@ -744,14 +898,27 @@ class AppStyles:
             max-width: {AppConstants.SIZES["ACTION_WIDTH"]}px;
             min-width: {AppConstants.SIZES["ACTION_WIDTH"]}px;
         }}
-        QTreeWidget::item:selected {{
-            background-color: rgba(53, 132, 228, 0.15);
+        
+        QHeaderView::section:hover {{
+            background-color: {AppColors.BG_MEDIUM};
         }}
+        
+        /* Hide sort indicators completely */
+        QHeaderView::down-arrow, QHeaderView::up-arrow {{
+            image: none;
+            width: 0px;
+            height: 0px;
+            border: none;
+            subcontrol-origin: content;
+            subcontrol-position: right;
+        }}
+        
         QTreeWidget::branch {{
             border: none;
             border-image: none;
             outline: none;
         }}
+        
         {UNIFIED_SCROLL_BAR_STYLE}
     """
 
@@ -1415,6 +1582,14 @@ class AppStyles:
         QMenu::item:selected {{
             background-color: rgba(33, 150, 243, 0.15);
         }}
+        QMenu::item[under_development="true"] {{
+        color: #FF9500 !important;
+        background-color: rgba(255, 149, 0, 0.15) !important;
+        }}
+        QMenu::item[under_development="true"]:hover {{
+        color: #FF9500 !important;
+        background-color: rgba(255, 149, 0, 0.25) !important;
+        }}
         QMenu::separator {{
             height: 1px;
             background-color: #444444;
@@ -1777,19 +1952,64 @@ class AppStyles:
         font-family: 'Segoe UI';
     """
 
+
+    COMBO_BOX_STYLE = f"""
+        QComboBox {{ 
+            background-color: #2d2d2d; 
+            color: #ffffff; 
+            border: 1px solid #3d3d3d;
+            border-radius: 4px; 
+            padding: 5px 10px; 
+            font-size: 13px; 
+        }}
+        QComboBox:hover {{ 
+            border: 1px solid #555555; 
+        }}
+
+        QComboBox::drop-down {{ 
+            border: none; 
+            width: 20px; 
+        }}
+        QComboBox::down-arrow {{ 
+            image: url(icons/down_btn.svg) ; 
+        }}
+        QComboBox QAbstractItemView {{ 
+            background-color: #2d2d2d; 
+            color: #ffffff; 
+            selection-background-color: #0078d7;
+            border: none;
+            outline: none;
+            padding: 0px;
+        }}
+        QComboBox QFrame {{
+            border: none;
+            background-color: #2d2d2d;
+        }}
+        """
+
     BASE_CHECKBOX_STYLE = f"""
         QCheckBox {{
-            margin: 0;
-            padding: 0;
+            margin: 0px;
+            padding: 0px;
+            spacing: 0px;
             background: transparent;
-            height: 100%;
-            width: 100%;
+            border: none;
+            outline: none;
+            width: 16px;
+            height: 16px;   
+            max-width: 16px;
+            max-height: 16px;
+            min-width: 16px;
+            min-height: 16px;
         }}
         QCheckBox::indicator {{
-            width: 18px;
-            height: 18px;
+            width: 16px;
+            height: 16px;
             border: none;
             background: transparent;
+            margin: 0px;
+            padding: 0px;
+            spacing: 0px;
             subcontrol-position: center;
             subcontrol-origin: content;
         }}

@@ -50,6 +50,10 @@ try:
     from UI.DetailPageComponent import DetailPageComponent
     from UI.detail_sections.detailpage_yamlsection import DetailPageYAMLSection
 
+    from utils.cluster_state_manager import get_cluster_state_manager, ClusterState
+    from utils.thread_manager import get_thread_manager, shutdown_thread_manager
+    from utils.data_manager import get_data_manager
+
     logging.info("All modules imported successfully")
 
     # Apply subprocess patch after other imports to avoid conflicts
@@ -157,13 +161,11 @@ class OptimizedMainWindow(QMainWindow):
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         self.setStyleSheet(AppStyles.MAIN_STYLE)
 
-        # Initialize cluster connector with proper error handling
         try:
-            self.cluster_connector = get_cluster_connector()
-            self._setup_cluster_signals()
+            self._setup_cluster_state_manager()
         except Exception as e:
-            logging.error(f"Failed to initialize cluster connector: {e}")
-            self.cluster_connector = None
+            logging.error(f"Failed to initialize cluster state manager: {e}")
+            self.cluster_state_manager = None
 
         # Initialize UI components
         self.init_ui()
@@ -177,43 +179,6 @@ class OptimizedMainWindow(QMainWindow):
         # Initialize cluster connector for home page
         if hasattr(self.home_page, 'initialize_cluster_connector'):
             self.home_page.initialize_cluster_connector()
-
-    def _setup_cluster_signals(self):
-        """Setup cluster connector signals with error handling"""
-        if not self.cluster_connector:
-            return
-            
-        try:
-            # Disconnect existing connections first
-            self._disconnect_cluster_signals()
-            
-            # Connect new signals
-            self.cluster_connector.connection_complete.connect(self._on_cluster_connection_complete_for_switch)
-            self.cluster_connector.cluster_data_loaded.connect(self._on_initial_cluster_data_ready_for_switch)
-            self.cluster_connector.error_occurred.connect(self._on_cluster_connection_error_for_switch)
-            
-        except Exception as e:
-            logging.error(f"Error setting up cluster signals: {e}")
-
-    def _disconnect_cluster_signals(self):
-        """Safely disconnect cluster signals"""
-        if not self.cluster_connector:
-            return
-            
-        try:
-            self.cluster_connector.connection_complete.disconnect(self._on_cluster_connection_complete_for_switch)
-        except (TypeError, RuntimeError):
-            pass
-            
-        try:
-            self.cluster_connector.cluster_data_loaded.disconnect(self._on_initial_cluster_data_ready_for_switch)
-        except (TypeError, RuntimeError):
-            pass
-            
-        try:
-            self.cluster_connector.error_occurred.disconnect(self._on_cluster_connection_error_for_switch)
-        except (TypeError, RuntimeError):
-            pass
 
     def _periodic_cleanup(self):
         """Periodic cleanup to prevent memory leaks"""
@@ -230,54 +195,6 @@ class OptimizedMainWindow(QMainWindow):
         except Exception as e:
             logging.error(f"Error during periodic cleanup: {e}")
 
-    def _on_cluster_connection_complete_for_switch(self, cluster_name, success, message):
-        """Handle cluster connection completion for switching"""
-        if self._is_switching_to_cluster and cluster_name == self._target_cluster_for_switch:
-            if success:
-                logging.info(f"Connection to {cluster_name} successful. Waiting for initial data...")
-            else:
-                logging.error(f"Connection to {cluster_name} failed: {message}")
-                self._is_switching_to_cluster = False
-                self._target_cluster_for_switch = None
-                if self.loading_overlay.isVisible():
-                    self.loading_overlay.hide_loading()
-                self.show_error_message(f"Failed to connect to {cluster_name}: {message}")
-
-    def _on_initial_cluster_data_ready_for_switch(self, data):
-        """Handle initial cluster data ready for switching"""
-        if not self._is_switching_to_cluster or not data or 'name' not in data:
-            return
-
-        loaded_cluster_name = data['name']
-
-        if loaded_cluster_name == self._target_cluster_for_switch:
-            logging.info(f"Initial data ready for {loaded_cluster_name}, proceeding to switch view.")
-
-            self._is_switching_to_cluster = False
-            self._target_cluster_for_switch = None
-
-            if self.loading_overlay.isVisible():
-                self.loading_overlay.hide_loading()
-
-            self.stacked_widget.setCurrentWidget(self.cluster_view)
-
-            # Preload data
-            cached_data = self.cluster_connector.get_cached_data(loaded_cluster_name)
-            cluster_page = self.cluster_view.pages.get('Cluster')
-
-            if cluster_page and cached_data:
-                if hasattr(cluster_page, 'preload_with_cached_data'):
-                    cluster_page.preload_with_cached_data(
-                        cached_data.get('cluster_info'),
-                        cached_data.get('metrics'),
-                        cached_data.get('issues')
-                    )
-                elif hasattr(cluster_page, 'update_cluster_info'):
-                    cluster_page.update_cluster_info(cached_data.get('cluster_info'))
-
-            # Post-switch operations
-            QTimer.singleShot(50, lambda: self._post_switch_operations(loaded_cluster_name))
-
     def _post_switch_operations(self, cluster_name):
         """Post-switch operations"""
         try:
@@ -291,72 +208,62 @@ class OptimizedMainWindow(QMainWindow):
         except Exception as e:
             logging.error(f"Error in post-switch operations: {e}")
 
-    def _on_cluster_connection_error_for_switch(self, error_type, error_message):
-        """Handle cluster connection errors for switching"""
-        if self._is_switching_to_cluster:
-            target_cluster = self._target_cluster_for_switch
-            logging.error(f"Error connecting to {target_cluster} (type: {error_type}): {error_message}")
+    def _setup_cluster_state_manager(self):
+        """Setup cluster state manager"""
+        try:
+            self.cluster_state_manager = get_cluster_state_manager()
+            self.cluster_state_manager.state_changed.connect(self._on_cluster_state_changed)
+            self.cluster_state_manager.switch_completed.connect(self._on_cluster_switch_completed)
+        except Exception as e:
+            logging.error(f"Failed to setup cluster state manager: {e}")
+            self.cluster_state_manager = None
 
-            self._is_switching_to_cluster = False
-            self._target_cluster_for_switch = None
+    def _on_cluster_state_changed(self, cluster_name: str, state: ClusterState):
+        """Handle cluster state changes"""
+        if state == ClusterState.CONNECTING:
+            self.loading_overlay.show_loading(f"Connecting to {cluster_name}...")
+            self.loading_overlay.resize(self.size())
+            self.loading_overlay.raise_()
+        elif state == ClusterState.CONNECTED:
+            self.loading_overlay.hide_loading()
+        elif state == ClusterState.ERROR:
+            self.loading_overlay.hide_loading()
 
-            if self.loading_overlay.isVisible():
-                self.loading_overlay.hide_loading()
-
-            self.show_error_message(f"Failed to connect to {target_cluster}: {error_message}")
+    def _on_cluster_switch_completed(self, cluster_name: str, success: bool):
+        """Handle cluster switch completion"""
+        if success:
+            # Always switch to cluster view when switch is completed successfully
+            # This ensures that even if we were "already connected", we still navigate to cluster view
+            current_widget = self.stacked_widget.currentWidget()
+            if current_widget != self.cluster_view:
+                logging.info(f"Switching to cluster view for {cluster_name}")
+                self.stacked_widget.setCurrentWidget(self.cluster_view)
+            
+            self.cluster_view.set_active_cluster(cluster_name)
+            QTimer.singleShot(50, lambda: self._post_switch_operations(cluster_name))
+        else:
+            self.show_error_message(f"Failed to switch to cluster: {cluster_name}")
 
     def switch_to_cluster_view(self, cluster_name="docker-desktop"):
-        """Optimized cluster view switching"""
-        if self._is_switching_to_cluster and self._target_cluster_for_switch == cluster_name:
-            logging.info(f"Already attempting to switch to cluster: {cluster_name}")
+        """Optimized cluster switching using state manager"""
+        if not self.cluster_state_manager:
+            self.show_error_message("Cluster state manager not initialized.")
             return
 
-        if (self.stacked_widget.currentWidget() == self.cluster_view and 
+        self.previous_page = self.stacked_widget.currentWidget()
+        
+        # Check if we're already on cluster view with the same cluster
+        current_widget = self.stacked_widget.currentWidget()
+        if (current_widget == self.cluster_view and 
             hasattr(self.cluster_view, 'active_cluster') and 
             self.cluster_view.active_cluster == cluster_name):
             logging.info(f"Already viewing cluster: {cluster_name}")
             return
-
-        if not self.cluster_connector:
-            self.show_error_message("Cluster connector not initialized.")
+        
+        # Request cluster switch through state manager
+        if not self.cluster_state_manager.request_cluster_switch(cluster_name):
+            logging.warning(f"Could not initiate switch to {cluster_name}")
             return
-
-        self.previous_page = self.stacked_widget.currentWidget()
-
-        # Check cache first
-        cached_cluster_info = None
-        if hasattr(self.cluster_connector, 'get_cached_data'):
-            cached_data_full = self.cluster_connector.get_cached_data(cluster_name)
-            if cached_data_full and 'cluster_info' in cached_data_full:
-                cached_cluster_info = cached_data_full['cluster_info']
-
-        if cached_cluster_info:
-            logging.info(f"Using cached data for {cluster_name} for initial switch.")
-            self.stacked_widget.setCurrentWidget(self.cluster_view)
-
-            cluster_page = self.cluster_view.pages.get('Cluster')
-            if cluster_page:
-                if hasattr(cluster_page, 'preload_with_cached_data'):
-                    cluster_page.preload_with_cached_data(
-                        cached_data_full.get('cluster_info'),
-                        cached_data_full.get('metrics'),
-                        cached_data_full.get('issues')
-                    )
-
-            QTimer.singleShot(50, lambda: self._post_switch_operations(cluster_name))
-            return
-
-        # If not cached, initiate loading
-        logging.info(f"No sufficient cache for {cluster_name}. Initiating load before switching.")
-        self._is_switching_to_cluster = True
-        self._target_cluster_for_switch = cluster_name
-
-        self.loading_overlay.show_loading(f"Connecting to {cluster_name}...")
-        self.loading_overlay.resize(self.size())
-        self.loading_overlay.raise_()
-
-        if self.cluster_connector:
-            self.cluster_connector.connect_to_cluster(cluster_name)
 
     def resizeEvent(self, event):
         """Handle resize event"""
@@ -707,7 +614,6 @@ class OptimizedMainWindow(QMainWindow):
         self.update_panel_positions()
 
     def closeEvent(self, event):
-        """Enhanced close event handling with proper cleanup"""
         if self._shutting_down:
             super().closeEvent(event)
             return
@@ -720,6 +626,9 @@ class OptimizedMainWindow(QMainWindow):
             if hasattr(self, '_cleanup_timer'):
                 self._cleanup_timer.stop()
 
+            # Shutdown thread manager
+            shutdown_thread_manager()
+            
             # Shutdown cluster operations
             self.shutdown_cluster_operations()
 
@@ -735,6 +644,7 @@ class OptimizedMainWindow(QMainWindow):
         except Exception as e:
             logging.error(f"Error during application shutdown: {e}")
             super().closeEvent(event)
+
 
     def shutdown_cluster_operations(self):
         """Stop all cluster-related operations"""
@@ -821,9 +731,8 @@ class OptimizedMainWindow(QMainWindow):
 # Use optimized main window
 MainWindow = OptimizedMainWindow
 
-
 def main():
-    """Application entry point with optimizations"""
+    """Application entry point with platform-consistent styling"""
     sys.excepthook = global_exception_handler
     initialize_resources()
 
@@ -832,11 +741,18 @@ def main():
     logging.info(f"Working directory: {os.getcwd()}")
     logging.info(f"Process ID: {os.getpid()}")
 
-    logging.info("Creating QApplication")
+    logging.info("Creating QApplication with consistent styling")
     app = QApplication(sys.argv)
+    
+    # Force consistent Qt style across platforms
+    app.setStyle('Fusion')  # Use Fusion style for consistency
+ 
+    # Force consistent font rendering
     app.setFont(QFont("Segoe UI", 9))
-    app.setStyleSheet(AppStyles.TOOLTIP_STYLE)
-
+    
+    # Apply global stylesheet with platform overrides
+    app.setStyleSheet(AppStyles.GLOBAL_PLATFORM_OVERRIDE_STYLE)
+    
     # Set application icon
     icon_path_ico = resource_path("icons/logoIcon.ico")
     icon_path_png = resource_path("icons/logoIcon.png")
@@ -933,8 +849,7 @@ def main():
             pass
 
         return 1
-
-
+    
 if __name__ == "__main__":
     exit_status = 1
     try:

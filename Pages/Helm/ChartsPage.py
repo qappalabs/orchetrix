@@ -674,108 +674,71 @@ class ChartsPage(BaseResourcePage):
             
             self.items_count.setText(f"{len(self.resources)} Bitnami items (scroll for more)")
         else:
-            self.is_more_available = False
-            self.items_count.setText(f"{len(self.resources)} Bitnami items (end of results)")
+            self._show_table_area()
         
-        self._apply_filters()
-    
-    def on_search_completed(self, search_results, search_term):
-        """Handle Bitnami search results"""
-        self.table.setRowCount(0)
+        if not hasattr(self, '_scroll_handler_connected'):
+            self.table.verticalScrollBar().valueChanged.connect(self._on_scroll)
+            self._scroll_handler_connected = True
+
+    def _on_scroll(self, value):
+        if self.is_loading or not self.is_more_available:
+            return
         
-        self.resources = search_results
-        self.is_searching = False
+        scrollbar = self.table.verticalScrollBar()
+        if value >= scrollbar.maximum() * 0.9: 
+            self.load_data(load_more=True)
+
+    def setup_page_ui(self):
+        headers = ["", "Name", "Description", "Version", "App Version", "Repository", ""]
+        sortable_columns = {1, 3, 4, 5}
+        super().setup_ui("Helm Charts", headers, sortable_columns)
+        self.configure_columns()
+        if hasattr(self, 'select_all_checkbox'): self.select_all_checkbox.hide()
+
+    # def configure_columns(self):
+    #     fixed_widths = {0: 50, 1: 220, 3: 120, 4: 120, 5: 150, 6: 40}
+    #     for col, width in fixed_widths.items():
+    #         self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+    #         self.table.setColumnWidth(col, width)
+    #     self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+
+    def configure_columns(self):
+        """Configure column widths for full screen utilization"""
+        if not self.table:
+            return
         
-        self.table.setSortingEnabled(False)
-        self.populate_table(search_results)
-        self.table.setSortingEnabled(True)
+        header = self.table.horizontalHeader()
         
-        self.items_count.setText(f"{len(search_results)} Bitnami results for '{search_term}'")
+        # Column specifications with optimized default widths
+        column_specs = [
+            (0, 40, "fixed"),        # Checkbox
+            (1, 140, "interactive"), # Name
+            (2, 90, "interactive"),  # Description
+            (3, 80, "interactive"),  # Version
+            (4, 60, "interactive"),  # App Version
+            (5, 80, "stretch"),      # Repository - stretch to fill remaining space
+            (6, 40, "fixed")        # Actions
+        ]
         
-    def on_search_error(self, error_message):
-        """Handle search error"""
-        self.table.setRowCount(0)
-        self.is_searching = False
+        # Apply column configuration
+        for col_index, default_width, resize_type in column_specs:
+            if col_index < self.table.columnCount():
+                if resize_type == "fixed":
+                    header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Fixed)
+                    self.table.setColumnWidth(col_index, default_width)
+                elif resize_type == "interactive":
+                    header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Interactive)
+                    self.table.setColumnWidth(col_index, default_width)
+                elif resize_type == "stretch":
+                    header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Stretch)
+                    self.table.setColumnWidth(col_index, default_width)
         
-        error_row = 0
-        self.table.setRowCount(1)
-        self.table.setSpan(error_row, 0, 1, self.table.columnCount())
-        
-        error_widget = QWidget()
-        error_layout = QVBoxLayout(error_widget)
-        error_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        error_layout.setContentsMargins(20, 30, 20, 30)
-        
-        error_text = QLabel(f"Bitnami search error: {error_message}")
-        error_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        error_text.setStyleSheet("color: #ff6b6b; font-size: 14px;")
-        error_text.setWordWrap(True)
-        
-        error_layout.addWidget(error_text)
-        
-        self.table.setCellWidget(error_row, 0, error_widget)
-    
-    def on_load_error(self, error_message):
-        """Handle error loading Bitnami data"""
-        self._loading_timer.stop()
-        
-        self.is_loading = False
-        
-        self.table.setRowCount(0)
-        
-        error_row = self.table.rowCount()
-        self.table.setRowCount(error_row + 1)
-        self.table.setSpan(error_row, 0, 1, self.table.columnCount())
-        
-        error_widget = QWidget()
-        error_layout = QVBoxLayout(error_widget)
-        error_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        error_layout.setContentsMargins(20, 30, 20, 30)
-        
-        error_text = QLabel(f"Error loading Bitnami charts: {error_message}")
-        error_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        error_text.setStyleSheet("color: #ff6b6b; font-size: 14px;")
-        error_text.setWordWrap(True)
-        
-        error_layout.addWidget(error_text)
-        
-        self.table.setCellWidget(error_row, 0, error_widget)
-    
-    def on_load_more_error(self, error_message):
-        """Handle error when loading more Bitnami data"""
-        self._loading_timer.stop()
-        
-        self.table.setRowCount(self.table.rowCount() - 1)
-        
-        self.is_loading_more = False
-        
-        row = self.table.rowCount()
-        self.table.setRowCount(row + 1)
-        self.table.setSpan(row, 0, 1, self.table.columnCount())
-        
-        error_widget = QWidget()
-        error_layout = QHBoxLayout(error_widget)
-        error_layout.setContentsMargins(10, 5, 10, 5)
-        
-        error_text = QLabel(f"Error loading more Bitnami charts: {error_message}")
-        error_text.setStyleSheet("color: #ff6b6b; font-size: 12px;")
-        error_text.setWordWrap(True)
-        
-        error_layout.addWidget(error_text)
-        
-        self.table.setCellWidget(row, 0, error_widget)
-        
-        QTimer.singleShot(5000, lambda: self.table.setRowCount(self.table.rowCount() - 1))
-    
-    def populate_table(self, data):
-        """Populate the table with Bitnami chart data"""
-        self.table.setRowCount(len(data))
-        
-        for row, chart in enumerate(data):
-            self.populate_chart_row(row, chart)
-    
-    def populate_chart_row(self, row, chart):
-        """Populate a single row with Bitnami chart data, including icons"""
+        # Ensure full width utilization after configuration
+        QTimer.singleShot(100, self._ensure_full_width_utilization)
+
+
+
+    def populate_resource_row(self, row, chart):
         self.table.setRowHeight(row, 42)
         
         chart_name = chart.get("name", "Unknown")
