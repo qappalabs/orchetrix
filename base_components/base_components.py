@@ -15,18 +15,17 @@ import weakref
 
 from UI.Styles import AppStyles, AppColors, AppConstants
 
-
 class SortableTableWidgetItem(QTableWidgetItem):
     """
     Customized QTableWidgetItem that enables sorting based on a numeric value.
-
+    
     Attributes:
         value: The numeric value used for sorting (allows proper sorting of data)
     """
     def __init__(self, text, value=None):
         super().__init__(str(text))
         self.value = value
-
+        
     def __lt__(self, other):
         if isinstance(other, SortableTableWidgetItem) and self.value is not None and other.value is not None:
             return self.value < other.value
@@ -36,7 +35,7 @@ class CustomHeader(QHeaderView):
     """
     Custom table header that enables sorting only for specific columns
     and shows a hover sort indicator.
-
+    
     Attributes:
         sortable_columns: A set containing column indices that can be sorted
         hovered_section: The currently hovered section index (-1 if none)
@@ -47,7 +46,7 @@ class CustomHeader(QHeaderView):
         self.hovered_section = -1  # Track hovered section
         self.setSectionsClickable(True)
         self.setHighlightSections(True)
-
+        
         # Set default alignment to center for all sections
         self.setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
 
@@ -186,7 +185,7 @@ class BaseTablePage(QWidget):
     """
     Base class for table-based pages with common functionality.
     Implements table creation, checkbox management, and action menu creation.
-
+    
     Attributes:
         selected_items: A set tracking selected item names
         select_all_checkbox: Reference to the select-all checkbox
@@ -196,39 +195,34 @@ class BaseTablePage(QWidget):
         self.selected_items = set()
         self.select_all_checkbox = None
         self._setup_refs()
-
+        
     def _setup_refs(self):
         """Set up weak references to avoid memory leaks"""
         self._item_widgets = weakref.WeakValueDictionary()
-
+    
     def setup_ui(self, title, headers, sortable_columns=None):
         """Set up the basic UI structure with title, table, and headers"""
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(
-            AppConstants.SPACING["MEDIUM"],
-            AppConstants.SPACING["MEDIUM"],
-            AppConstants.SPACING["MEDIUM"],
-            AppConstants.SPACING["MEDIUM"]
-        )
-        layout.setSpacing(AppConstants.SPACING["MEDIUM"])
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(16)
 
         # Header section with title and count
         header_layout = self._create_header(title)
         layout.addLayout(header_layout)
-
+        
         # Create table
         self.table = self._create_table(headers, sortable_columns)
         layout.addWidget(self.table)
-
+        
         # Create and set the select-all checkbox in header
         select_all_checkbox = self._create_select_all_checkbox()
         self._set_header_widget(0, select_all_checkbox)
-
+        
         # Install event filter and override mouse events
         self.installEventFilter(self)
-
+        
         return layout
-
+    
     def _create_header(self, title):
         """Create header with title and item count"""
         header_layout = QHBoxLayout()
@@ -246,12 +240,13 @@ class BaseTablePage(QWidget):
 
         return header_layout
     
+    
     def _create_table(self, headers, sortable_columns=None):
         """Create and configure the table with proper column resizing"""
         table = QTableWidget()
         table.setColumnCount(len(headers))
         table.setHorizontalHeaderLabels(headers)
-
+        
         # Use custom header for selective header-based sorting
         custom_header = CustomHeader(Qt.Orientation.Horizontal, sortable_columns, table)
         table.setHorizontalHeader(custom_header)
@@ -277,7 +272,7 @@ class BaseTablePage(QWidget):
 
         # Connect cell click signal
         table.cellClicked.connect(self.handle_row_click)
-
+        
         return table
 
     def _configure_table_resizing(self, table, headers):
@@ -415,9 +410,9 @@ class BaseTablePage(QWidget):
         header.setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
         header.resizeSection(col, 40)
         self.table.setHorizontalHeaderItem(col, QTableWidgetItem(""))
-
+        
         container = QWidget()
-        container.setStyleSheet("background-color: transparent;")
+        container.setStyleSheet("background-color: #252525;")
         container_layout = QHBoxLayout(container)
         container_layout.setContentsMargins(0, 0, 0, 0)
         container_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -494,8 +489,8 @@ class BaseTablePage(QWidget):
     def _handle_action(self, action, row):
         """Base implementation for handling action button clicks"""
         item_name = self.table.item(row, 1).text() if self.table.item(row, 1) else f"Item {row}"
-
-
+        
+    
     def _create_action_container(self, row, button):
         """Create a container for an action button"""
         container = QWidget()
@@ -505,13 +500,13 @@ class BaseTablePage(QWidget):
         layout.addWidget(button)
         container.setStyleSheet("background-color: transparent;")
         return container
-
+        
     def handle_row_click(self, row, column):
         """Handle row selection when a table cell is clicked"""
         if column != self.table.columnCount() - 1:  # Skip action column
             # Select the row
             self.table.selectRow(row)
-
+            
     def create_empty_state(self, message, description=None):
         """Create a standardized empty state widget"""
         # Create a container for the empty state

@@ -975,6 +975,7 @@ class ResourceDeleterThread(QThread):
         if not self._is_running: return
         try:
             delete_options = client.V1DeleteOptions()
+
             if self.resource_type == "pods":
                 if self.namespace:
                     self.kube_client.v1.delete_namespaced_pod(name=self.resource_name, namespace=self.namespace, body=delete_options)
@@ -982,6 +983,7 @@ class ResourceDeleterThread(QThread):
                 self.kube_client.v1.delete_namespaced_service(name=self.resource_name, namespace=self.namespace, body=delete_options)
             elif self.resource_type == "deployments":
                 self.kube_client.apps_v1.delete_namespaced_deployment(name=self.resource_name, namespace=self.namespace, body=delete_options)
+
             else:
                 if not self._is_running: return
                 self.delete_completed.emit(False, f"Deletion not implemented for {self.resource_type}", self.resource_name, self.namespace)
@@ -1877,7 +1879,7 @@ class BaseResourcePage(BaseTablePage):
             kube_client = get_kubernetes_client()
             if not kube_client or not kube_client.v1:
                 return False, "Kubernetes client not available"
-
+              
             # Get the pod to validate it exists and is running
             try:
                 pod = kube_client.v1.read_namespaced_pod(name=resource_name, namespace=resource_namespace)
@@ -1899,7 +1901,7 @@ class BaseResourcePage(BaseTablePage):
                     return False, "Access denied. Check RBAC permissions for pod access."
                 else:
                     return False, f"API error: {e.reason}"
-
+                  
         except Exception as e:
             return False, f"Validation error: {str(e)}"
 
@@ -1973,11 +1975,12 @@ class BaseResourcePage(BaseTablePage):
                 return
 
             # Get the terminal panel with better error handling
+
             terminal_panel = self._get_terminal_panel()
             if not terminal_panel:
                 self._show_logs_error("Terminal panel not available. Please ensure you're in cluster view.")
                 return
-
+              
             # Show the terminal if it's hidden
             if hasattr(terminal_panel, 'is_visible') and not terminal_panel.is_visible:
                 terminal_panel.show_terminal()
@@ -2091,7 +2094,6 @@ class BaseResourcePage(BaseTablePage):
             tab_widget = QWidget()
             tab_widget.setFixedHeight(28)
             tab_widget.setCursor(Qt.CursorShape.PointingHandCursor)
-
             tab_layout = QHBoxLayout(tab_widget)
             tab_layout.setContentsMargins(8, 0, 8, 0)
             tab_layout.setSpacing(6)
@@ -2107,7 +2109,7 @@ class BaseResourcePage(BaseTablePage):
                 border: none;
                 outline: none;
             """)
-
+            
             # Create close button
             close_btn = QPushButton("✕")
             close_btn.setFixedSize(16, 16)
@@ -2330,7 +2332,6 @@ class BaseResourcePage(BaseTablePage):
             # Add all items to selected set
             for resource in self.resources:
                 self.selected_items.add((resource["name"], resource.get("namespace", "")))
-
 
     def delete_selected_resources(self):
         if hasattr(self, 'delete_thread') and self.delete_thread and self.delete_thread.isRunning():

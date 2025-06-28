@@ -17,6 +17,8 @@ from kubernetes import client
 import datetime
 import logging
 
+import subprocess
+import json
 
 class StatusLabel(QWidget):
     """Widget that displays a status with consistent styling and background handling."""

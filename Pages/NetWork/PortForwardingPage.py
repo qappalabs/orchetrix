@@ -24,20 +24,27 @@ class StatusLabel(QWidget):
     def __init__(self, status_text, color=None, parent=None):
         super().__init__(parent)
         
+        # Create layout
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
+        # Create label
         self.label = QLabel(status_text)
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
+        # Set color if provided, otherwise use default color
         if color:
             self.label.setStyleSheet(f"color: {QColor(color).name()}; background-color: transparent;")
         
+        # Add label to layout
         layout.addWidget(self.label)
+        
+        # Make sure this widget has a transparent background
         self.setStyleSheet("background-color: transparent;")
     
     def mousePressEvent(self, event):
+        """Emit clicked signal when widget is clicked"""
         self.clicked.emit()
         super().mousePressEvent(event)
 
@@ -69,11 +76,14 @@ class PortForwardingPage(BaseResourcePage):
         headers = ["", "Resource", "Namespace", "Type", "Local Port", "Target Port", "Protocol", "Uptime", "Status", ""]
         sortable_columns = {1, 2, 3, 4, 5, 6, 7, 8}
         
+        # Set up the base UI components
         layout = super().setup_ui("Port Forwarding", headers, sortable_columns)
         
+        # Apply table style
         self.table.setStyleSheet(AppStyles.TABLE_STYLE)
         self.table.horizontalHeader().setStyleSheet(AppStyles.CUSTOM_HEADER_STYLE)
         
+        # Configure column widths
         self.configure_columns()
         self._add_management_buttons()
         
@@ -219,6 +229,7 @@ class PortForwardingPage(BaseResourcePage):
         """Populate a single row with port forward data"""
         self.table.setRowHeight(row, 40)
         
+        # Create checkbox for row selection
         resource_name = resource["name"]
         checkbox_container = self._create_checkbox_container(row, resource_name)
         checkbox_container.setStyleSheet(AppStyles.CHECKBOX_STYLE)
@@ -241,8 +252,10 @@ class PortForwardingPage(BaseResourcePage):
             str(resource["local_port"]),
             str(resource["target_port"]),
             resource["protocol"]
+            # Status is now handled separately using StatusLabel widget
         ]
         
+        # Add columns to table - similar to ServicesPage style
         for col, value in enumerate(columns):
             cell_col = col + 1
             
@@ -262,8 +275,13 @@ class PortForwardingPage(BaseResourcePage):
             else:
                 item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             
+            # Make cells non-editable
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            
+            # Set default text color for all non-status columns
             item.setForeground(QColor(AppColors.TEXT_TABLE))
+            
+            # Add the item to the table
             self.table.setItem(row, cell_col, item)
         
         # Uptime column
@@ -286,7 +304,9 @@ class PortForwardingPage(BaseResourcePage):
         }
         color = status_colors.get(status_text, AppColors.TEXT_TABLE)
         
+        # Create status widget with proper color
         status_widget = StatusLabel(status_text, color)
+        # Connect click event to select the row
         status_widget.clicked.connect(lambda: self.table.selectRow(row))
         self.table.setCellWidget(row, status_col, status_widget)
         

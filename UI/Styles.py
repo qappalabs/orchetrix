@@ -17,6 +17,7 @@ class AppColors:
     TEXT_DANGER = "#FF5252"
     TEXT_TABLE = "#e2e8f0"
     TEXT_SUCCESS = "#4CAF50"
+    TEXT_WARNING = "#E81123"
 
     # Accent colors
     ACCENT_BLUE = "#0095ff"
@@ -1580,6 +1581,14 @@ class AppStyles:
         }}
         QMenu::item:selected {{
             background-color: rgba(33, 150, 243, 0.15);
+        }}
+        QMenu::item[under_development="true"] {{
+        color: #FF9500 !important;
+        background-color: rgba(255, 149, 0, 0.15) !important;
+        }}
+        QMenu::item[under_development="true"]:hover {{
+        color: #FF9500 !important;
+        background-color: rgba(255, 149, 0, 0.25) !important;
         }}
         QMenu::separator {{
             height: 1px;
