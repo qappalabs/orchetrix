@@ -3,7 +3,7 @@ Dynamic implementation of the PriorityClasses page with live Kubernetes data.
 """
 
 from PyQt6.QtWidgets import QHeaderView, QPushButton
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 
 from base_components.base_components import SortableTableWidgetItem
 from base_components.base_resource_page import BaseResourcePage
@@ -73,20 +73,40 @@ class PriorityClassesPage(BaseResourcePage):
                         # Insert before the refresh button
                         item.layout().insertWidget(item.layout().count() - 1, delete_btn)
                         break
-    
+                    
     def configure_columns(self):
-        """Configure column widths and behaviors"""
-        # Column 0: Checkbox (fixed width) - already set in base class
+        """Configure column widths for full screen utilization"""
+        if not self.table:
+            return
         
-        # Configure stretch columns
-        stretch_columns = [1, 2, 3, 4]
-        for col in stretch_columns:
-            self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
+        header = self.table.horizontalHeader()
         
-        # Fixed width columns
-        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(5, 40)
-    
+        # Column specifications with optimized default widths
+        column_specs = [
+            (0, 40, "fixed"),        # Checkbox
+            (1, 140, "interactive"), # Name
+            (2, 90, "interactive"),  # Value
+            (3, 60, "interactive"),  # Global Default
+            (4, 80, "stretch"),      # Status - stretch to fill remaining space
+            (5, 40, "fixed")        # Actions
+        ]
+        
+        # Apply column configuration
+        for col_index, default_width, resize_type in column_specs:
+            if col_index < self.table.columnCount():
+                if resize_type == "fixed":
+                    header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Fixed)
+                    self.table.setColumnWidth(col_index, default_width)
+                elif resize_type == "interactive":
+                    header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Interactive)
+                    self.table.setColumnWidth(col_index, default_width)
+                elif resize_type == "stretch":
+                    header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Stretch)
+                    self.table.setColumnWidth(col_index, default_width)
+        
+        # Ensure full width utilization after configuration
+        QTimer.singleShot(100, self._ensure_full_width_utilization)
+
     def populate_resource_row(self, row, resource):
         """
         Populate a single row with PriorityClass data

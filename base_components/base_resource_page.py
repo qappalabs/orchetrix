@@ -15,7 +15,7 @@ import logging
 from PyQt6.QtWidgets import (
     QMessageBox, QWidget, QVBoxLayout, QLineEdit, QComboBox,
     QLabel, QProgressBar, QHBoxLayout, QPushButton, QApplication, QTableWidgetItem,
-    QAbstractItemView, QStackedWidget
+    QAbstractItemView, QStackedWidget, QHeaderView, QFrame, QSizePolicy
 )
 from PyQt6.QtGui import QColor, QFont # Added QFont
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QProcess
@@ -27,38 +27,26 @@ from utils.kubernetes_client import get_kubernetes_client # Assuming utils.kuber
 from kubernetes import client
 from kubernetes.client.rest import ApiException
 
+from utils.enhanced_worker import EnhancedBaseWorker
+from utils.thread_manager import get_thread_manager
 
-class KubernetesResourceLoader(QThread):
-    """
-    Thread for loading Kubernetes resources without blocking the UI.
-    Supports pagination with limit and continue_token.
-    """
-    # Signal: resources, resource_type, next_continue_token
-    resources_loaded = pyqtSignal(list, str, str)
-    error_occurred = pyqtSignal(str)
-
-    def __init__(self, resource_type, namespace=None, limit=None, continue_token=None, parent=None):
-        super().__init__(parent)
+class KubernetesResourceLoader(EnhancedBaseWorker):
+    def __init__(self, resource_type, namespace=None, limit=None, continue_token=None):
+        super().__init__(f"resource_load_{resource_type}_{namespace or 'all'}")
         self.resource_type = resource_type
         self.namespace = namespace
         self.limit = limit
         self.continue_token = continue_token
         self.kube_client = get_kubernetes_client()
-        self._is_running = True
 
-    def stop(self):
-        self._is_running = False
-
-    def run(self):
-        """Execute the Kubernetes API call and emit results."""
-        if not self._is_running:
-            return
+    def execute(self):
+        if self.is_cancelled():
+            return ([], self.resource_type, "")
+            
         try:
             resources = []
-            next_continue_token = None # Initialize next_continue_token
+            next_continue_token = None
 
-            # Map resource types to appropriate API methods
-            # Each _load_* method should now return (items, next_continue_token)
             if self.resource_type == "pods":
                 resources, next_continue_token = self._load_pods()
             elif self.resource_type == "services":
@@ -134,23 +122,15 @@ class KubernetesResourceLoader(QThread):
             else:
                 resources, next_continue_token = self._load_generic_resource()
 
-            if not self._is_running:
-                return
-            self.resources_loaded.emit(resources, self.resource_type, next_continue_token or "")
-
-        except ApiException as e:
-            if not self._is_running: return
-            if e.status == 403:
-                error_msg = f"Access denied loading {self.resource_type}. Check RBAC permissions."
-            elif e.status == 404:
-                error_msg = f"Resource type {self.resource_type} not found in cluster."
-            else:
-                error_msg = f"API error loading {self.resource_type} ({e.status}): {e.reason}"
-            self.error_occurred.emit(error_msg)
+            if self.is_cancelled():
+                return ([], self.resource_type, "")
+                
+            return (resources, self.resource_type, next_continue_token or "")
+            
         except Exception as e:
-            if not self._is_running: return
-            logging.error(f"Unexpected error in KubernetesResourceLoader for {self.resource_type}: {e}", exc_info=True)
-            self.error_occurred.emit(f"Error loading {self.resource_type}: {str(e)}")
+            if self.is_cancelled():
+                return ([], self.resource_type, "")
+            raise e
 
     def _get_continue_token(self, response_object):
         """Helper to extract continue token from response metadata."""
@@ -1075,7 +1055,7 @@ class BaseResourcePage(BaseTablePage):
         self._shutting_down = False
         self.kube_client = get_kubernetes_client()
         self._load_more_indicator_widget = None
-        self._all_loaded_label = None
+        # self._all_loaded_label = None
 
         self._message_widget_container = None
         self._table_stack = None
@@ -1171,17 +1151,14 @@ class BaseResourcePage(BaseTablePage):
             self.namespace_combo = QComboBox()
             self.namespace_combo.setFixedHeight(search_bar_height)
             self.namespace_combo.setMinimumWidth(150)
-            combo_box_style = getattr(AppStyles, "COMBO_BOX_STYLE",
-                                      """ QComboBox { background-color: #2d2d2d; color: #ffffff; border: 1px solid #3d3d3d;
-                                                      border-radius: 4px; padding: 5px 10px; font-size: 13px; }
-                                          QComboBox:hover { border: 1px solid #555555; }
-                                          QComboBox::drop-down { border: none; width: 20px; }
-                                          QComboBox::down-arrow { image: none; }
-                                          QComboBox QAbstractItemView { background-color: #2d2d2d; color: #ffffff; 
-                                                                      selection-background-color: #0078d7;
-                                                                      border: 1px solid #3d3d3d; padding: 5px; }"""
-                                      )
+            
+            # Apply the corrected combo box style
+            combo_box_style = getattr(AppStyles, "COMBO_BOX_STYLE")
             self.namespace_combo.setStyleSheet(combo_box_style)
+            
+            # Configure dropdown behavior to prevent upward opening
+            self._configure_dropdown_behavior(self.namespace_combo)
+            
             self.namespace_combo.addItem("default")
             self.namespace_combo.setCurrentText("default")
             self.namespace_combo.currentTextChanged.connect(self._handle_namespace_change)
@@ -1190,61 +1167,157 @@ class BaseResourcePage(BaseTablePage):
 
         header_layout.addWidget(filters_widget)
 
+    def _configure_dropdown_behavior(self, combo_box):
+        """Configure dropdown to ensure consistent downward opening and proper sizing"""
+        # Set maximum visible items to control popup height
+        combo_box.setMaxVisibleItems(10)
+        
+        # Configure the view to prevent unwanted scrollbars for small lists
+        view = combo_box.view()
+        view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)   
+        view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        
+        # Apply the combo box style to ensure consistency
+        combo_box.setStyleSheet(getattr(AppStyles, "COMBO_BOX_STYLE"))
+        view.setStyleSheet("border: none; background-color: #2d2d2d;")
+        
+        # Override the showPopup method to force downward opening
+        original_show_popup = combo_box.showPopup
+        
+        def custom_show_popup():
+            # Store original size policy
+            original_policy = combo_box.sizePolicy()
+            
+            # Temporarily set size policy to prevent upward expansion
+            combo_box.setSizePolicy(
+                original_policy.horizontalPolicy(),
+                QSizePolicy.Policy.Fixed
+            )
+            
+            # Call original popup method
+            original_show_popup()
+            
+            # Get the popup widget and remove borders
+            popup = combo_box.findChild(QFrame)
+            if popup:
+                popup.setStyleSheet("border: none; background-color: #2d2d2d;")
+                combo_pos = combo_box.mapToGlobal(combo_box.rect().bottomLeft())
+                popup.move(combo_pos)
+                popup.setFixedWidth(combo_box.width())
+            
+            # Restore original size policy
+            combo_box.setSizePolicy(original_policy)
+        
+        combo_box.showPopup = custom_show_popup
+
     def _show_message_in_table_area(self, message_text, description_text=None, is_error=False):
-        """Displays a message (e.g., 'No items found' or an error) in the table area."""
-        if not self._table_stack or not self._message_widget_container:
-            logging.warning("_table_stack or _message_widget_container not initialized.")
+        """Display a clean text message within the table area while preserving headers"""
+        if not self.table:
             return
+        
+        # Clear table rows but maintain headers
+        self.table.setRowCount(0)
+        
+        # Ensure table is visible to show headers
+        self._show_table_area()
+        
+        # Create simple empty state display
+        self._display_empty_state_message(message_text, description_text, is_error)
 
-        # Clear previous content from the message container's layout
-        layout = self._message_widget_container.layout()
-        if layout:
-            while layout.count():
-                child = layout.takeAt(0)
-                if child.widget():
-                    child.widget().deleteLater()
-        else: # Should not happen if setup_ui is correct
-            new_layout = QVBoxLayout(self._message_widget_container)
-            new_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            new_layout.setContentsMargins(20,20,20,20)
-
-
-        # Create the main message label
-        main_message_label = QLabel(message_text)
-        main_message_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        main_message_label.setWordWrap(True)
-        font = QFont()
-        font.setPointSize(16) # Slightly larger for main message
-        font.setBold(True)
-        main_message_label.setFont(font)
-
-        if is_error:
-            error_color = getattr(AppColors, "TEXT_ERROR", "#E53935") # A fallback red
-            main_message_label.setStyleSheet(f"color: {error_color};")
-        else: # For "No items found" or other info messages
-            info_color = getattr(AppColors, "TEXT_MUTED", "#9E9E9E") # Fallback grey
-            main_message_label.setStyleSheet(f"color: {info_color};")
-
-        self._message_widget_container.layout().addWidget(main_message_label)
-
+    def _display_empty_state_message(self, message_text, description_text=None, is_error=False):
+        """Create and display a simple empty state message"""
+        # Remove any existing empty state
+        self._remove_empty_state_message()
+        
+        # Create empty state widget as child of table viewport
+        viewport = self.table.viewport()
+        self.empty_state_widget = QWidget(viewport)
+        self.empty_state_widget.setObjectName("emptyStateWidget")
+        
+        # Set up layout
+        layout = QVBoxLayout(self.empty_state_widget)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.setContentsMargins(50, 50, 50, 50)
+        layout.setSpacing(20)
+        
+        # Apply clean styling
+        self.empty_state_widget.setStyleSheet("""
+            QWidget#emptyStateWidget {
+                background-color: transparent;
+                border: none;
+            }
+        """)
+        
+        # Create icon
+        icon_label = QLabel()
+        
+        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_label.setStyleSheet(f"""
+            font-size: 48px;
+            background-color: transparent;
+            border: none;
+            margin-bottom: 10px;
+        """)
+        layout.addWidget(icon_label)
+        
+        # Create main message
+        message_label = QLabel(message_text)
+        message_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        message_label.setWordWrap(True)
+        
+        text_color = "#E53935" if is_error else "#6B7280"
+        message_label.setStyleSheet(f"""
+            color: {text_color};
+            font-size: 16px;
+            font-weight: 600;
+            background-color: transparent;
+            border: none;
+            margin-bottom: 8px;
+        """)
+        layout.addWidget(message_label)
+        
+        # Create description if provided
         if description_text:
             desc_label = QLabel(description_text)
             desc_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             desc_label.setWordWrap(True)
-            desc_font = QFont()
-            desc_font.setPointSize(12)
-            desc_label.setFont(desc_font)
-            desc_label.setStyleSheet(f"color: {getattr(AppColors, 'TEXT_SECONDARY', '#B0BEC5')}; margin-top: 10px;")
-            self._message_widget_container.layout().addWidget(desc_label)
+            desc_label.setStyleSheet("""
+                color: #9CA3AF;
+                font-size: 14px;
+                background-color: transparent;
+                border: none;
+                line-height: 1.4;
+            """)
+            layout.addWidget(desc_label)
+        
+        # Position and show the widget
+        self._position_empty_state_widget()
+        self.empty_state_widget.show()
+        
+        # Disable table sorting while empty state is visible
+        self.table.setSortingEnabled(False)
 
-        self._table_stack.setCurrentWidget(self._message_widget_container)
+    def _position_empty_state_widget(self):
+        """Position the empty state widget to fill the table viewport"""
+        if not hasattr(self, 'empty_state_widget') or not self.empty_state_widget:
+            return
+        
+        viewport = self.table.viewport()
+        self.empty_state_widget.setGeometry(viewport.rect())
 
+    def _remove_empty_state_message(self):
+        """Remove the empty state message widget"""
+        if hasattr(self, 'empty_state_widget') and self.empty_state_widget:
+            self.empty_state_widget.hide()
+            self.empty_state_widget.deleteLater()
+            self.empty_state_widget = None
 
-    def _show_table_area(self):
-        """Ensures the table is visible in the stacked widget."""
-        if self._table_stack:
-            self._table_stack.setCurrentWidget(self.table)
-
+    def _clear_empty_state(self):
+        """Clear empty state and restore normal table functionality"""
+        self._remove_empty_state_message()
+        if self.table:
+            self.table.setRowCount(0)
+            self.table.setSortingEnabled(True)
 
     def _show_skeleton_loader(self, rows=10):
         if not hasattr(self, 'table') or self._shutting_down: return
@@ -1365,54 +1438,53 @@ class BaseResourcePage(BaseTablePage):
         self.loading_thread = None; self.delete_thread = None; self.batch_delete_thread = None
 
     def load_data(self, load_more=False):
-        """
-        Loads data for the resource page.
-        IMPORTANT: If a subclass overrides this method, it MUST accept `load_more=False`
-        in its signature and ideally call `super().load_data(load_more=load_more)`
-        if it wants to leverage the base class's loading logic. Failure to do so
-        will result in a TypeError when `force_load_data` or scroll-to-load calls this method.
-        """
-        if self._shutting_down: return
+        if self._shutting_down:
+            return
 
         if load_more:
-            if self.is_loading_more or self.all_data_loaded: return
+            if self.is_loading_more or self.all_data_loaded:
+                return
             self.is_loading_more = True
             self._show_load_more_indicator_ui(True)
         else:
-            if self.is_loading_initial: return
+            if self.is_loading_initial:
+                return
             self.is_loading_initial = True
             self.resources = []
             self.selected_items.clear()
             self.current_continue_token = None
             self.all_data_loaded = False
-            if self.table: self.table.setRowCount(0)
-            if hasattr(self, '_show_skeleton_loader') and self.table.rowCount() == 0 : # Show skeleton only if table is empty
+            if self.table:
+                self.table.setRowCount(0)
+            if hasattr(self, '_show_skeleton_loader') and self.table.rowCount() == 0:
                 self._show_skeleton_loader()
-            else: # Ensure table is shown if not showing skeleton
+            else:
                 self._show_table_area()
 
-
-        if self.loading_thread and self.loading_thread.isRunning():
-            self.loading_thread.stop(); self.loading_thread.quit(); self.loading_thread.wait()
-
-        self.loading_thread = KubernetesResourceLoader(
-            self.resource_type, self.namespace_filter,
+        worker = KubernetesResourceLoader(
+            self.resource_type, 
+            self.namespace_filter,
             limit=self.items_per_page,
             continue_token=self.current_continue_token if load_more else None
         )
-        self.loading_thread.resources_loaded.connect(
-            lambda res, r_type, next_token: self.on_resources_loaded(res, r_type, next_token, load_more)
+        
+        worker.signals.finished.connect(
+            lambda result: self.on_resources_loaded(result[0], result[1], result[2], load_more)
         )
-        self.loading_thread.error_occurred.connect(
+        worker.signals.error.connect(
             lambda err_msg: self.on_load_error(err_msg, load_more)
         )
-        self.loading_thread.start()
+        
+        thread_manager = get_thread_manager()
+        thread_manager.submit_worker(f"resource_load_{self.resource_type}_{load_more}", worker)
 
     def on_resources_loaded(self, new_resources, resource_type, next_continue_token, load_more=False):
-        if self._shutting_down: return
+        if self._shutting_down:
+            return
 
         current_scroll_pos = 0
-        if self.table and self.table.verticalScrollBar(): current_scroll_pos = self.table.verticalScrollBar().value()
+        if self.table and self.table.verticalScrollBar():
+            current_scroll_pos = self.table.verticalScrollBar().value()
 
         search_text = self.search_bar.text().lower() if self.search_bar and self.search_bar.text() else ""
 
@@ -1420,19 +1492,24 @@ class BaseResourcePage(BaseTablePage):
         if search_text:
             for r_item in new_resources:
                 match = search_text in r_item.get("name", "").lower()
-                if not match and r_item.get("namespace"): match = search_text in r_item.get("namespace", "").lower()
-                if match: filtered_new_resources.append(r_item)
-        else: filtered_new_resources = new_resources
+                if not match and r_item.get("namespace"):
+                    match = search_text in r_item.get("namespace", "").lower()
+                if match:
+                    filtered_new_resources.append(r_item)
+        else:
+            filtered_new_resources = new_resources
 
         if self.is_showing_skeleton:
             self.is_showing_skeleton = False
-            if hasattr(self, 'skeleton_timer') and self.skeleton_timer.isActive(): self.skeleton_timer.stop()
+            if hasattr(self, 'skeleton_timer') and self.skeleton_timer.isActive():
+                self.skeleton_timer.stop()
 
         if load_more:
             self.is_loading_more = False
             self._show_load_more_indicator_ui(False)
             if not new_resources and not next_continue_token:
-                self.all_data_loaded = True; self.all_items_loaded_signal.emit(); self._show_all_loaded_message_ui(True)
+                self.all_data_loaded = True
+                self.all_items_loaded_signal.emit()
                 return
             if filtered_new_resources:
                 start_row = len(self.resources)
@@ -1447,101 +1524,280 @@ class BaseResourcePage(BaseTablePage):
         else:
             self.is_loading_initial = False
             self.resources = filtered_new_resources
-            self.table.setRowCount(0)
-            self.populate_table(self.resources)
+            
+            # Clear any existing empty state
+            self._clear_empty_state()
+            
+            if filtered_new_resources:
+                # Populate table with data
+                self.table.setRowCount(0)
+                self.populate_table(self.resources)
+                self._show_table_area()
+                self.table.setSortingEnabled(True)
+            else:
+                # Show empty state within table
+                empty_message = f"No {self.resource_type} found"
+                if search_text:
+                    empty_message = f"No {self.resource_type} found matching '{search_text}'"
+                    description = "Try adjusting your search criteria or check if resources exist in other namespaces."
+                else:
+                    description = f"No {self.resource_type} are currently available in the selected namespace."
+                
+                self._show_message_in_table_area(empty_message, description)
 
         self.current_continue_token = next_continue_token
         if not self.current_continue_token:
-            self.all_data_loaded = True; self.all_items_loaded_signal.emit()
-            if load_more or not self.resources: self._show_all_loaded_message_ui(True)
+            self.all_data_loaded = True
+            self.all_items_loaded_signal.emit()
 
         self.items_count.setText(f"{len(self.resources)} items")
-
-        if not self.resources:
-            self._show_message_in_table_area(f"No {self.resource_type} found.",
-                                             "Item list is empty.")
-            if self.table: self.table.setSortingEnabled(False)
-        else:
-            self._show_table_area()
-            if self.table: self.table.setSortingEnabled(True)
 
         QApplication.processEvents()
         if self.table and self.table.verticalScrollBar() and load_more:
             self.table.verticalScrollBar().setValue(current_scroll_pos)
 
-
     def on_load_error(self, error_message, load_more=False):
-        if self._shutting_down: return
+        if self._shutting_down:
+            return
 
         if self.is_showing_skeleton:
             self.is_showing_skeleton = False
-            if hasattr(self, 'skeleton_timer') and self.skeleton_timer.isActive(): self.skeleton_timer.stop()
+            if hasattr(self, 'skeleton_timer') and self.skeleton_timer.isActive():
+                self.skeleton_timer.stop()
 
         if load_more:
             self.is_loading_more = False
             self._show_load_more_indicator_ui(False)
             logging.error(f"Error loading more items for {self.resource_type}: {error_message}")
-            if hasattr(self, 'show_transient_error_message'): self.show_transient_error_message(f"Failed to load more: {error_message}")
+            if hasattr(self, 'show_transient_error_message'):
+                self.show_transient_error_message(f"Failed to load more: {error_message}")
         else:
             self.is_loading_initial = False
             self.resources = []
-            if self.table: self.table.setRowCount(0)
-
-            desc_with_retry = error_message + "\n\nClick Retry to try again."
-            self._show_message_in_table_area(f"Error loading {self.resource_type}",
-                                             description_text=desc_with_retry,
-                                             is_error=True)
-
-            if self._message_widget_container.layout().count() > 0:
-                actual_message_widget = self._message_widget_container.layout().itemAt(0).widget()
-                if actual_message_widget and actual_message_widget.layout():
-                    # Check if a retry button already exists to avoid duplicates
-                    retry_exists = False
-                    for i in range(actual_message_widget.layout().count()):
-                        item = actual_message_widget.layout().itemAt(i).widget()
-                        if isinstance(item, QPushButton) and item.text() == "Retry":
-                            retry_exists = True
-                            break
-                    if not retry_exists:
-                        retry_button = QPushButton("Retry")
-                        retry_button_style = getattr(AppStyles, "PRIMARY_BUTTON_STYLE", "QPushButton { padding: 5px 10px; }")
-                        retry_button.setStyleSheet(retry_button_style)
-                        retry_button.clicked.connect(self.force_load_data)
-                        actual_message_widget.layout().addWidget(retry_button, alignment=Qt.AlignmentFlag.AlignCenter)
-
+            
+            # Clear any existing content and show error within table
+            self._clear_empty_state()
+            
+            error_title = f"Error loading {self.resource_type}"
+            error_description = f"{error_message}\n\nClick Refresh to try again."
+            
+            self._show_message_in_table_area(error_title, error_description, is_error=True)
+            
             logging.error(f"Initial load error for {self.resource_type}: {error_message}")
 
+    def _show_table_area(self):
+        """Ensure the table is visible in the stacked widget"""
+        if self._table_stack:
+            self._table_stack.setCurrentWidget(self.table)
 
     def _show_load_more_indicator_ui(self, show):
-        if self._shutting_down or not self.table or not self.table.viewport(): return
+        """Show or hide a simple loading more indicator"""
+        if self._shutting_down or not self.table:
+            return
+            
         if show:
             if not self._load_more_indicator_widget:
-                self._load_more_indicator_widget = QWidget(self.table.viewport())
+                self._load_more_indicator_widget = QWidget(self)
                 layout = QHBoxLayout(self._load_more_indicator_widget)
+                layout.setContentsMargins(10, 5, 10, 5)
+                
                 spinner = QLabel("Loading more...")
                 spinner.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                spinner.setStyleSheet("color: #ffffff; font-size: 12px; background: transparent;")
                 layout.addWidget(spinner)
-                self._load_more_indicator_widget.setStyleSheet("background-color: #2a2a2a; color: white; padding: 5px; border-top: 1px solid #3d3d3d;")
-            viewport_height = self.table.viewport().height()
-            indicator_height = self._load_more_indicator_widget.sizeHint().height()
-            self._load_more_indicator_widget.setGeometry(0, viewport_height - indicator_height, self.table.viewport().width(), indicator_height)
-            self._load_more_indicator_widget.show(); self._load_more_indicator_widget.raise_()
-        elif self._load_more_indicator_widget: self._load_more_indicator_widget.hide()
+                
+                self._load_more_indicator_widget.setStyleSheet("""
+                    background-color: rgba(45, 45, 45, 0.9);
+                    border-radius: 3px;
+                """)
+                self._load_more_indicator_widget.setFixedHeight(25)
+            
+            self._position_load_more_indicator()
+            self._load_more_indicator_widget.show()
+            self._load_more_indicator_widget.raise_()
+            
+        elif self._load_more_indicator_widget:
+            self._load_more_indicator_widget.hide()
 
-    def _show_all_loaded_message_ui(self, show):
-        if self._shutting_down or not self.table or not self.table.viewport(): return
-        if show:
-            if not self._all_loaded_label:
-                self._all_loaded_label = QLabel("All items loaded.", self.table.viewport())
-                self._all_loaded_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                self._all_loaded_label.setStyleSheet("background-color: #2a2a2a; color: #888888; padding: 5px; border-top: 1px solid #3d3d3d;")
-            viewport_height = self.table.viewport().height()
-            label_height = self._all_loaded_label.sizeHint().height()
-            self._all_loaded_label.setGeometry(0, viewport_height - label_height, self.table.viewport().width(), label_height)
-            self._all_loaded_label.show(); self._all_loaded_label.raise_()
-            QTimer.singleShot(3000, lambda: self._show_all_loaded_message_ui(False) if self._all_loaded_label and self._all_loaded_label.isVisible() else None)
-        elif self._all_loaded_label: self._all_loaded_label.hide()
+    def _position_load_more_indicator(self):
+        """Position the load more indicator at the bottom of the table"""
+        if not self._load_more_indicator_widget or not self.table:
+            return
+            
+        table_geometry = self.table.geometry()
+        indicator_width = table_geometry.width() - 40
+        indicator_x = table_geometry.x() + 20
+        indicator_y = table_geometry.bottom() - 30
+        
+        self._load_more_indicator_widget.setFixedWidth(indicator_width)
+        self._load_more_indicator_widget.move(indicator_x, indicator_y)
 
+    def reset_default_column_widths(self):
+        """Reset columns to their default widths"""
+        if hasattr(self, 'configure_columns'):
+            self.configure_columns()
+            
+    def fit_columns_to_content(self):
+        """Automatically resize columns to fit their content"""
+        if not hasattr(self, 'table') or not self.table:
+            return
+            
+        header = self.table.horizontalHeader()
+        
+        # Temporarily change resizable columns to ResizeToContents
+        original_modes = {}
+        for i in range(self.table.columnCount()):
+            if header.sectionResizeMode(i) == QHeaderView.ResizeMode.Interactive:
+                original_modes[i] = QHeaderView.ResizeMode.Interactive
+                header.setSectionResizeMode(i, QHeaderView.ResizeMode.ResizeToContents)
+        
+        # Allow Qt to calculate optimal sizes
+        QApplication.processEvents()
+        
+        # Restore Interactive mode with calculated widths
+        for col, mode in original_modes.items():
+            calculated_width = header.sectionSize(col)
+            header.setSectionResizeMode(col, mode)
+            # Ensure minimum width while using calculated optimal width
+            final_width = max(80, calculated_width)
+            header.resizeSection(col, final_width)
+
+    def _adapt_columns_to_screen(self):
+        """Adapt column widths to utilize full screen width"""
+        if not hasattr(self, 'table') or not self.table:
+            return
+            
+        # Get the actual usable width of the table viewport
+        viewport_width = self.table.viewport().width()
+        if viewport_width <= 0:
+            return
+        
+        header = self.table.horizontalHeader()
+        
+        # Calculate space used by fixed columns and identify interactive columns
+        fixed_width = 0
+        interactive_columns = []
+        stretch_column = None
+        
+        for i in range(self.table.columnCount()):
+            if self.table.isColumnHidden(i):
+                continue
+                
+            resize_mode = header.sectionResizeMode(i)
+            if resize_mode == QHeaderView.ResizeMode.Fixed:
+                fixed_width += header.sectionSize(i)
+            elif resize_mode == QHeaderView.ResizeMode.Interactive:
+                interactive_columns.append(i)
+            elif resize_mode == QHeaderView.ResizeMode.Stretch:
+                stretch_column = i
+        
+        # Calculate remaining space for interactive columns
+        remaining_width = viewport_width - fixed_width
+        
+        if interactive_columns and remaining_width > 0:
+            # Ensure interactive columns have reasonable widths
+            min_width_per_column = 80
+            total_min_width = len(interactive_columns) * min_width_per_column
+            
+            if stretch_column is not None:
+                # Reserve minimum space for stretch column
+                total_min_width += 100
+            
+            if remaining_width >= total_min_width:
+                # Distribute width among interactive columns, leaving space for stretch column
+                available_for_interactive = remaining_width - (100 if stretch_column is not None else 0)
+                width_per_column = max(min_width_per_column, available_for_interactive // len(interactive_columns))
+                
+                for col in interactive_columns:
+                    header.resizeSection(col, width_per_column)
+            else:
+                # Set minimum widths if space is limited
+                for col in interactive_columns:
+                    header.resizeSection(col, min_width_per_column)
+
+    def resizeEvent(self, event):
+        """Handle window resize for optimal column layout with full width utilization"""
+        super().resizeEvent(event)
+        
+        # Ensure immediate adaptation to new size
+        if hasattr(self, 'table') and self.table:
+            if not hasattr(self, '_resize_timer'):
+                self._resize_timer = QTimer()
+                self._resize_timer.setSingleShot(True)
+                self._resize_timer.timeout.connect(self._ensure_full_width_utilization)
+            
+            self._resize_timer.stop()
+            self._resize_timer.start(150)
+
+    def _ensure_full_width_utilization(self):
+        """Ensure the table uses the complete available width"""
+        if not hasattr(self, 'table') or not self.table:
+            return
+        
+        # Force the table to recalculate its layout
+        self.table.updateGeometry()
+        QApplication.processEvents()
+        
+        # Apply width adaptation
+        self._adapt_columns_to_screen()
+        
+        # Additional check to eliminate any remaining space
+        self._eliminate_rightmost_space()
+
+    def _eliminate_rightmost_space(self):
+        """Eliminate any remaining space on the right side of the table"""
+        if not hasattr(self, 'table') or not self.table:
+            return
+            
+        header = self.table.horizontalHeader()
+        viewport_width = self.table.viewport().width()
+        
+        # Calculate current total width of all visible columns
+        current_total_width = 0
+        stretch_column = None
+        last_interactive_column = None
+        
+        for i in range(self.table.columnCount()):
+            if self.table.isColumnHidden(i):
+                continue
+                
+            current_total_width += header.sectionSize(i)
+            
+            if header.sectionResizeMode(i) == QHeaderView.ResizeMode.Stretch:
+                stretch_column = i
+            elif header.sectionResizeMode(i) == QHeaderView.ResizeMode.Interactive:
+                last_interactive_column = i
+        
+        # If there is remaining space, add it to the stretch column or last interactive column
+        remaining_space = viewport_width - current_total_width
+        
+        if remaining_space > 0:
+            target_column = stretch_column if stretch_column is not None else last_interactive_column
+            
+            if target_column is not None:
+                current_width = header.sectionSize(target_column)
+                new_width = current_width + remaining_space
+                
+                # Temporarily change to interactive mode to set exact width
+                original_mode = header.sectionResizeMode(target_column)
+                header.setSectionResizeMode(target_column, QHeaderView.ResizeMode.Interactive)
+                header.resizeSection(target_column, new_width)
+                
+                # Restore original mode if it was stretch
+                if original_mode == QHeaderView.ResizeMode.Stretch:
+                    header.setSectionResizeMode(target_column, QHeaderView.ResizeMode.Stretch)
+
+    def showEvent(self, event):
+        """Ensure proper sizing when page becomes visible"""
+        super().showEvent(event)
+
+        if self.reload_on_show and not self.is_loading_initial and not self.resources:
+            self.force_load_data()
+
+        # Apply screen adaptation after the widget is fully displayed
+        if hasattr(self, 'table') and self.table:
+            QTimer.singleShot(100, self._adapt_columns_to_screen)
+ 
     def populate_table(self, resources_to_populate):
         if not self.table: return
         self.table.setUpdatesEnabled(False)
@@ -1554,26 +1810,6 @@ class BaseResourcePage(BaseTablePage):
     def populate_resource_row(self, row, resource):
         raise NotImplementedError("Subclasses must implement populate_resource_row")
 
-    # def _create_action_button(self, row, resource_name, resource_namespace):
-    #     """Create an action button with edit and delete options only."""
-    #     return super()._create_action_button(row, [
-    #         {"text": "Edit", "icon": "icons/edit.png", "dangerous": False},
-    #         {"text": "Delete", "icon": "icons/delete.png", "dangerous": True}
-    #     ])
-
-    # def _handle_action(self, action, row):
-    #     """Handle action button clicks."""
-    #     if row >= len(self.resources):
-    #         return
-
-    #     resource = self.resources[row]
-    #     resource_name = resource.get("name", "")
-    #     resource_namespace = resource.get("namespace", "")
-
-    #     if action == "View Logs":
-    #         pass
-    #     elif action == "Delete":
-    #         self.delete_resource(resource_name, resource_namespace)
 
     def _handle_action(self, action, row):
         """Handle action button clicks with pod-specific logic."""

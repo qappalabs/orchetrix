@@ -1,14 +1,21 @@
+"""
+Updated PortForwardingPage with real port forwarding data integration
+Replaces the mock implementation with actual port forward management
+"""
+
 from PyQt6.QtWidgets import (QHeaderView, QPushButton, QLabel, QVBoxLayout, 
-                            QWidget, QHBoxLayout, QMessageBox)
+                            QWidget, QHBoxLayout, QMessageBox, QMenu)
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QIcon
+from PyQt6.QtCore import QSize
 
 from base_components.base_components import SortableTableWidgetItem
 from base_components.base_resource_page import BaseResourcePage
 from UI.Styles import AppColors, AppStyles
-from kubernetes import client
-from kubernetes.client.rest import ApiException
-import random
+from utils.port_forward_manager import get_port_forward_manager, PortForwardConfig
+from utils.port_forward_dialog import PortForwardDialog, ActivePortForwardsDialog
+from functools import partial
+import time
 
 class StatusLabel(QWidget):
     """Widget that displays a status with consistent styling and background handling."""
@@ -36,60 +43,31 @@ class StatusLabel(QWidget):
 
 class PortForwardingPage(BaseResourcePage):
     """
-    Displays Kubernetes port forwarding configurations with live data.
-    
-    Features:
-    1. Dynamic loading of port forwards from internal tracking and pod validation
-    2. Editing port forwards
-    3. Deleting port forwards (individual and batch)
-    4. Status monitoring
+    Enhanced Port Forwarding page showing real active port forwards
+    with comprehensive management capabilities
     """
     
     def __init__(self, parent=None):
-        self.resources = []
-        self.resource_type = "portforwarding"
-        self.is_loading = False
-        self.port_forward_processes = {}  # Store port-forward configurations
         super().__init__(parent)
-        self.kube_client = client.CoreV1Api()  # Initialize Kubernetes API client
+        self.resource_type = "portforwarding"
+        self.port_manager = get_port_forward_manager()
         self.setup_page_ui()
-        self._initialize_sample_port_forwards()  # Initialize sample data
         
-    def _initialize_sample_port_forwards(self):
-        """Initialize sample port forwarding configurations for demonstration"""
-        try:
-            # Fetch pods to create realistic port forwards
-            pods = self.kube_client.list_pod_for_all_namespaces().items
+        # Connect to port forward manager signals for real-time updates
+        self.port_manager.port_forward_started.connect(self.on_port_forward_started)
+        self.port_manager.port_forward_stopped.connect(self.on_port_forward_stopped)
+        self.port_manager.port_forward_error.connect(self.on_port_forward_error)
+        self.port_manager.port_forwards_updated.connect(self.on_port_forwards_updated)
+        
+        # Auto-refresh timer
+        self.refresh_timer = QTimer()
+        self.refresh_timer.timeout.connect(self.refresh_port_forwards)
+        self.refresh_timer.start(5000)  # Refresh every 5 seconds
             
-            # Select up to 5 random pods for sample port forwards
-            sample_pods = random.sample(pods, min(5, len(pods))) if pods else []
-            
-            for pod in sample_pods:
-                resource_name = pod.metadata.name
-                namespace = pod.metadata.namespace or "default"
-                local_port = str(random.randint(8000, 9000))
-                target_port = str(random.randint(80, 8080))
-                name = f"{resource_name}-{local_port}-{target_port}"
-                
-                self.port_forward_processes[(name, namespace)] = {
-                    'resource_name': resource_name,
-                    'namespace': namespace,
-                    'kind': 'Pod',
-                    'target_port': target_port,
-                    'local_port': local_port,
-                    'protocol': 'TCP',
-                    'is_running': random.choice([True, False])  # Simulate active/inactive
-                }
-                
-        except ApiException as e:
-            self.on_load_error(f"API error initializing sample port forwards: {str(e)}")
-        except Exception as e:
-            self.on_load_error(f"Error initializing sample port forwards: {str(e)}")
-    
     def setup_page_ui(self):
         """Set up the main UI elements for the Port Forwarding page"""
-        headers = ["", "Name", "Namespace", "Kind", "Pod Port", "Local Port", "Protocol", "Status", ""]
-        sortable_columns = {1, 2, 3, 4, 5, 6, 7}
+        headers = ["", "Resource", "Namespace", "Type", "Local Port", "Target Port", "Protocol", "Uptime", "Status", ""]
+        sortable_columns = {1, 2, 3, 4, 5, 6, 7, 8}
         
         layout = super().setup_ui("Port Forwarding", headers, sortable_columns)
         
@@ -97,130 +75,148 @@ class PortForwardingPage(BaseResourcePage):
         self.table.horizontalHeader().setStyleSheet(AppStyles.CUSTOM_HEADER_STYLE)
         
         self.configure_columns()
-        self._add_delete_selected_button()
+        self._add_management_buttons()
         
-    def _add_delete_selected_button(self):
-        """Add a button to delete selected resources."""
-        delete_btn = QPushButton("Delete Selected")
-        delete_btn.setStyleSheet("""
+    def _add_management_buttons(self):
+        """Add port forwarding management buttons"""
+        
+        # Create Port Forward button
+        create_btn = QPushButton("Create Port Forward")
+        create_btn.setStyleSheet("""
             QPushButton {
-                background-color: #d32f2f;
+                background-color: #4CAF50;
                 color: #ffffff;
                 border: none;
                 border-radius: 4px;
                 padding: 5px 10px;
+                font-weight: bold;
             }
             QPushButton:hover {
-                background-color: #b71c1c;
+                background-color: #45a049;
             }
             QPushButton:pressed {
-                background-color: #d32f2f;
-            }
-            QPushButton:disabled {
-                background-color: #555555;
-                color: #888888;
+                background-color: #3d8b40;
             }
         """)
-        delete_btn.clicked.connect(self.delete_selected_resources)
+        create_btn.clicked.connect(self.show_create_port_forward_dialog)
         
+        # Stop All button
+        stop_all_btn = QPushButton("Stop All")
+        stop_all_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f44336;
+                color: #ffffff;
+                border: none;
+                border-radius: 4px;
+                padding: 5px 10px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #da190b;
+            }
+            QPushButton:pressed {
+                background-color: #c82333;
+            }
+        """)
+        stop_all_btn.clicked.connect(self.stop_all_port_forwards)
+        
+        # Find header layout and add buttons
         for i in range(self.layout().count()):
             item = self.layout().itemAt(i)
             if item.layout():
                 for j in range(item.layout().count()):
                     widget = item.layout().itemAt(j).widget()
                     if isinstance(widget, QPushButton) and widget.text() == "Refresh":
-                        item.layout().insertWidget(item.layout().count() - 1, delete_btn)
+                        # Insert buttons before refresh
+                        item.layout().insertWidget(item.layout().count() - 1, create_btn)
+                        item.layout().insertWidget(item.layout().count() - 1, stop_all_btn)
                         break
     
     def configure_columns(self):
-        """Configure column widths and behaviors"""
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        """Configure column widths for full screen utilization"""
+        if not self.table:
+            return
         
-        stretch_columns = [2, 3, 4, 5, 6, 7]
-        for col in stretch_columns:
-            self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
+        header = self.table.horizontalHeader()
         
-        self.table.horizontalHeader().setSectionResizeMode(8, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(8, 40)
-    
+        # Column specifications optimized for port forwarding data
+        column_specs = [
+            (0, 40, "fixed"),        # Checkbox
+            (1, 160, "interactive"), # Resource
+            (2, 100, "interactive"), # Namespace
+            (3, 80, "interactive"),  # Type
+            (4, 80, "interactive"),  # Local Port
+            (5, 80, "interactive"),  # Target Port
+            (6, 80, "interactive"),  # Protocol
+            (7, 100, "interactive"), # Uptime
+            (8, 100, "stretch"),     # Status - stretch to fill remaining space
+            (9, 40, "fixed")         # Actions
+        ]
+        
+        # Apply column configuration
+        for col_index, default_width, resize_type in column_specs:
+            if col_index < self.table.columnCount():
+                if resize_type == "fixed":
+                    header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Fixed)
+                    self.table.setColumnWidth(col_index, default_width)
+                elif resize_type == "interactive":
+                    header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Interactive)
+                    self.table.setColumnWidth(col_index, default_width)
+                elif resize_type == "stretch":
+                    header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Stretch)
+                    self.table.setColumnWidth(col_index, default_width)
+        
+        # Ensure full width utilization after configuration
+        QTimer.singleShot(100, self._ensure_full_width_utilization)
+
     def load_data(self, load_more=False):
-        """Load port forwarding data into the table with live data"""
-        if self.is_loading:
+        """Load port forwarding data - override to use real data"""
+        if hasattr(self, 'is_loading') and self.is_loading:
             return
             
         self.is_loading = True
-        self.resources = []
         self.selected_items.clear()
-        self.table.setRowCount(0)
-        self.table.setSortingEnabled(False)
         
-        loading_row = self.table.rowCount()
-        self.table.setRowCount(loading_row + 1)
-        self.table.setSpan(loading_row, 0, 1, self.table.columnCount())
+        # Get real port forwards from manager
+        port_forwards = self.port_manager.get_port_forwards()
         
-        loading_widget = QWidget()
-        loading_layout = QVBoxLayout(loading_widget)
-        loading_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        loading_layout.setContentsMargins(20, 20, 20, 20)
+        # Convert to resource format expected by base class
+        self.resources = []
+        for config in port_forwards:
+            resource = {
+                'name': f"{config.resource_name}",
+                'resource_name': config.resource_name,
+                'namespace': config.namespace,
+                'resource_type': config.resource_type,
+                'local_port': config.local_port,
+                'target_port': config.target_port,
+                'protocol': config.protocol,
+                'status': config.status,
+                'created_at': config.created_at,
+                'error_message': config.error_message,
+                'key': config.key
+            }
+            self.resources.append(resource)
         
-        loading_text = QLabel("Loading port forwards...")
-        loading_text.setStyleSheet("color: #BBBBBB; font-size: 14px;")
-        loading_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # Apply search filter if any
+        search_text = self.search_bar.text().lower() if self.search_bar and self.search_bar.text() else ""
+        if search_text:
+            filtered_resources = []
+            for resource in self.resources:
+                if (search_text in resource['resource_name'].lower() or
+                    search_text in resource['namespace'].lower() or
+                    search_text in resource['resource_type'].lower()):
+                    filtered_resources.append(resource)
+            self.resources = filtered_resources
         
-        loading_layout.addWidget(loading_text)
-        self.table.setCellWidget(loading_row, 0, loading_widget)
+        # Update table
+        self.populate_table(self.resources)
+        self.items_count.setText(f"{len(self.resources)} items")
         
-        QTimer.singleShot(50, self._load_port_forwarding_data)
-    
-    def _load_port_forwarding_data(self):
-        """Internal method to load port forwarding data using Kubernetes API"""
-        try:
-            port_forwards = []
-            
-            # Fetch all pods to validate port forwards
-            pods = self.kube_client.list_pod_for_all_namespaces().items
-            
-            # Process existing port forwards
-            for key, process_info in self.port_forward_processes.items():
-                name, namespace = key
-                resource_name = process_info.get('resource_name', name)
-                target_port = process_info.get('target_port', '<none>')
-                local_port = process_info.get('local_port', '<none>')
-                protocol = process_info.get('protocol', 'TCP')
-                kind = process_info.get('kind', 'Pod')
-                
-                # Check if the target pod still exists
-                pod_exists = False
-                for pod in pods:
-                    if (pod.metadata.name == resource_name and 
-                        pod.metadata.namespace == namespace):
-                        pod_exists = True
-                        break
-                
-                status = 'Active' if process_info.get('is_running', False) and pod_exists else 'Disconnected'
-                
-                port_forwards.append({
-                    'name': name,
-                    'resource_name': resource_name,
-                    'namespace': namespace,
-                    'kind': kind,
-                    'pod_port': target_port,
-                    'local_port': local_port,
-                    'protocol': protocol,
-                    'status': status,
-                    'pid': process_info.get('pid')
-                })
-            
-            self.resources = port_forwards
-            self.on_resources_loaded(port_forwards, self.resource_type, next_continue_token="", load_more=False)
-            
-        except ApiException as e:
-            self.on_load_error(f"API error loading port forwarding data: {str(e)}")
-        except Exception as e:
-            self.on_load_error(f"Error loading port forwarding data: {str(e)}")
-    
+        self.is_loading = False
+
     def populate_resource_row(self, row, resource):
-        """Populate a single row with port forwarding data using ServicesPage style"""
+        """Populate a single row with port forward data"""
         self.table.setRowHeight(row, 40)
         
         resource_name = resource["name"]
@@ -228,20 +224,40 @@ class PortForwardingPage(BaseResourcePage):
         checkbox_container.setStyleSheet(AppStyles.CHECKBOX_STYLE)
         self.table.setCellWidget(row, 0, checkbox_container)
         
+        # Calculate uptime
+        uptime_text = "Unknown"
+        if resource.get('created_at') and resource.get('status') == 'active':
+            uptime_seconds = time.time() - resource['created_at']
+            hours = int(uptime_seconds // 3600)
+            minutes = int((uptime_seconds % 3600) // 60)
+            uptime_text = f"{hours}h {minutes}m"
+        elif resource.get('status') != 'active':
+            uptime_text = "N/A"
+        
         columns = [
             resource["resource_name"],
             resource["namespace"],
-            resource["kind"],
-            resource["pod_port"],
-            resource["local_port"], 
+            resource["resource_type"].upper(),
+            str(resource["local_port"]),
+            str(resource["target_port"]),
             resource["protocol"]
         ]
         
         for col, value in enumerate(columns):
             cell_col = col + 1
-            item = SortableTableWidgetItem(value)
             
-            if col in [2, 3, 4, 5]:
+            # Create sortable items for numeric columns
+            if col in [3, 4]:  # Local port, target port
+                try:
+                    num_value = int(value)
+                    item = SortableTableWidgetItem(value, num_value)
+                except ValueError:
+                    item = SortableTableWidgetItem(value)
+            else:
+                item = SortableTableWidgetItem(value)
+            
+            # Set alignment
+            if col in [2, 3, 4, 5]:  # Type, ports, protocol
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             else:
                 item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
@@ -250,149 +266,255 @@ class PortForwardingPage(BaseResourcePage):
             item.setForeground(QColor(AppColors.TEXT_TABLE))
             self.table.setItem(row, cell_col, item)
         
-        status_col = 7
-        status_text = resource["status"]
-        color = AppColors.STATUS_ACTIVE if status_text == "Active" else AppColors.STATUS_DISCONNECTED
+        # Uptime column
+        uptime_item = SortableTableWidgetItem(uptime_text)
+        uptime_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        uptime_item.setFlags(uptime_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        uptime_item.setForeground(QColor(AppColors.TEXT_TABLE))
+        self.table.setItem(row, 7, uptime_item)
+        
+        # Status column with color coding
+        status_col = 8
+        status_text = resource["status"].title()
+        
+        # Map status to colors
+        status_colors = {
+            'Active': AppColors.STATUS_ACTIVE,
+            'Inactive': AppColors.STATUS_DISCONNECTED,
+            'Starting': AppColors.STATUS_WARNING,
+            'Error': AppColors.STATUS_ERROR
+        }
+        color = status_colors.get(status_text, AppColors.TEXT_TABLE)
         
         status_widget = StatusLabel(status_text, color)
         status_widget.clicked.connect(lambda: self.table.selectRow(row))
         self.table.setCellWidget(row, status_col, status_widget)
         
-        action_button = self._create_action_button(row, resource["name"], resource["namespace"])
+        # Action button
+        action_button = self._create_action_button(row, resource["resource_name"], resource["namespace"])
         action_button.setStyleSheet(AppStyles.ACTION_BUTTON_STYLE)
         action_container = self._create_action_container(row, action_button)
         action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
-        self.table.setCellWidget(row, len(columns) + 2, action_container)
-    
+        self.table.setCellWidget(row, 9, action_container)
+
+    def _create_action_button(self, row, resource_name=None, resource_namespace=None):
+        """Create action button with port forward specific actions"""
+        from PyQt6.QtWidgets import QToolButton
+        
+        button = QToolButton()
+        icon = QIcon("icons/Moreaction_Button.svg")
+        button.setIcon(icon)
+        button.setIconSize(QSize(16, 16))
+        button.setText("")
+        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        button.setFixedWidth(30)
+        button.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE)
+        button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        # Create menu
+        menu = QMenu(button)
+        menu.setStyleSheet(AppStyles.MENU_STYLE)
+
+        # Get port forward config
+        resource = self.resources[row] if row < len(self.resources) else None
+        
+        actions = []
+        
+        if resource:
+            if resource['status'] == 'active':
+                actions.append({"text": "Open in Browser", "icon": "icons/web.png", "dangerous": False})
+                actions.append({"text": "Copy URL", "icon": "icons/copy.png", "dangerous": False})
+                actions.append({"text": "Restart", "icon": "icons/refresh.png", "dangerous": False})
+            elif resource['status'] in ['inactive', 'error']:
+                actions.append({"text": "Restart", "icon": "icons/refresh.png", "dangerous": False})
+            
+            actions.append({"text": "Stop", "icon": "icons/stop.png", "dangerous": True})
+            actions.append({"text": "Delete", "icon": "icons/delete.png", "dangerous": True})
+
+        # Add actions to menu
+        for action_info in actions:
+            action = menu.addAction(action_info["text"])
+            if "icon" in action_info:
+                action.setIcon(QIcon(action_info["icon"]))
+            if action_info.get("dangerous", False):
+                action.setProperty("dangerous", True)
+            action.triggered.connect(
+                partial(self._handle_action, action_info["text"], row)
+            )
+
+        button.setMenu(menu)
+        return button
+
     def _handle_action(self, action, row):
-        """Handle action button clicks - Edit or Delete"""
+        """Handle action button clicks for port forwards"""
         if row >= len(self.resources):
             return
-            
+
         resource = self.resources[row]
-        resource_name = resource.get("name", "")
-        resource_namespace = resource.get("namespace", "")
-        
-        if action == "Edit":
-            self.edit_resource(resource)
+        port_forward_key = resource.get("key", "")
+
+        if action == "Open in Browser":
+            self._open_in_browser(resource)
+        elif action == "Copy URL":
+            self._copy_url_to_clipboard(resource)
+        elif action == "Restart":
+            self._restart_port_forward(resource)
+        elif action == "Stop":
+            self._stop_port_forward(port_forward_key)
         elif action == "Delete":
-            self.delete_resource(resource_name, resource_namespace)
-    
-    def edit_resource(self, resource):
-        """Open editor for port-forwarding configuration"""
-        if resource["status"] == "Active":
-            key = (resource["name"], resource["namespace"])
-            if key in self.port_forward_processes:
-                self.port_forward_processes[key]["is_running"] = False
-                resource["status"] = "Disconnected"
-        
-        QMessageBox.information(
-            self,
-            "Edit Port Forward",
-            f"Editing port forward to {resource['resource_name']}\n\n"
-            f"Resource: {resource['kind']}/{resource['resource_name']}\n"
-            f"Namespace: {resource['namespace']}\n"
-            f"Local Port: {resource['local_port']}\n"
-            f"Target Port: {resource['pod_port']}\n\n"
-            "To edit port-forwards, terminate the current one and create a new one."
-        )
-        
-        self.load_data()
-    
-    def delete_resource(self, resource_name, resource_namespace):
-        """Override to handle port-forward specific deletion"""
-        resource = None
-        for r in self.resources:
-            if r["name"] == resource_name and r["namespace"] == resource_namespace:
-                resource = r
-                break
-                
-        if not resource:
-            return
+            self._delete_port_forward(port_forward_key)
+
+    def _open_in_browser(self, resource):
+        """Open port forward URL in browser"""
+        try:
+            import webbrowser
+            url = f"http://localhost:{resource['local_port']}"
+            webbrowser.open(url)
+        except Exception as e:
+            QMessageBox.warning(self, "Browser Error", f"Could not open browser: {str(e)}")
+
+    def _copy_url_to_clipboard(self, resource):
+        """Copy port forward URL to clipboard"""
+        try:
+            from PyQt6.QtWidgets import QApplication
+            url = f"http://localhost:{resource['local_port']}"
+            clipboard = QApplication.clipboard()
+            clipboard.setText(url)
             
-        result = QMessageBox.warning(
-            self,
-            "Confirm Deletion",
-            f"Are you sure you want to delete the port forward to {resource['resource_name']}?",
+            # Show confirmation
+            if hasattr(self, 'show_transient_message'):
+                self.show_transient_message(f"URL copied to clipboard: {url}")
+            else:
+                QMessageBox.information(self, "Copied", f"URL copied to clipboard:\n{url}")
+        except Exception as e:
+            QMessageBox.warning(self, "Copy Error", f"Could not copy to clipboard: {str(e)}")
+
+    def _restart_port_forward(self, resource):
+        """Restart a port forward"""
+        try:
+            # Stop existing forward
+            self.port_manager.stop_port_forward(resource['key'])
+            
+            # Wait a moment
+            QTimer.singleShot(1000, lambda: self._recreate_port_forward(resource))
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Restart Error", f"Failed to restart port forward: {str(e)}")
+
+    def _recreate_port_forward(self, resource):
+        """Recreate port forward after restart"""
+        try:
+            self.port_manager.start_port_forward(
+                resource_name=resource['resource_name'],
+                resource_type=resource['resource_type'],
+                namespace=resource['namespace'],
+                target_port=resource['target_port'],
+                local_port=resource['local_port'],
+                protocol=resource['protocol']
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Restart Error", f"Failed to recreate port forward: {str(e)}")
+
+    def _stop_port_forward(self, key):
+        """Stop a specific port forward"""
+        try:
+            self.port_manager.stop_port_forward(key)
+        except Exception as e:
+            QMessageBox.critical(self, "Stop Error", f"Failed to stop port forward: {str(e)}")
+
+    def _delete_port_forward(self, key):
+        """Delete a port forward with confirmation"""
+        reply = QMessageBox.question(
+            self, "Confirm Deletion",
+            "Are you sure you want to delete this port forward?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
         )
         
-        if result != QMessageBox.StandardButton.Yes:
-            return
-            
-        key = (resource_name, resource_namespace)
-        if key in self.port_forward_processes:
-            self.port_forward_processes[key]["is_running"] = False
-            del self.port_forward_processes[key]
-        
-        self.resources = [r for r in self.resources if not (
-            r["name"] == resource_name and r["namespace"] == resource_namespace
-        )]
-        
+        if reply == QMessageBox.StandardButton.Yes:
+            self._stop_port_forward(key)
+
+    def show_create_port_forward_dialog(self):
+        """Show dialog to create new port forward"""
+        # This could be enhanced to show a resource selector
         QMessageBox.information(
-            self,
-            "Port Forward Deleted",
-            f"Port forward to {resource['resource_name']} has been deleted."
+            self, "Create Port Forward",
+            "To create port forwards, navigate to the Pods or Services page "
+            "and use the 'Port Forward' action on specific resources."
+        )
+
+    def stop_all_port_forwards(self):
+        """Stop all active port forwards"""
+        if not self.resources:
+            QMessageBox.information(self, "No Port Forwards", "No active port forwards to stop.")
+            return
+
+        reply = QMessageBox.question(
+            self, "Confirm Stop All",
+            f"Are you sure you want to stop all {len(self.resources)} port forwards?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
         )
         
+        if reply == QMessageBox.StandardButton.Yes:
+            self.port_manager.stop_all_port_forwards()
+
+    def refresh_port_forwards(self):
+        """Refresh port forwards data"""
         self.load_data()
-    
+
+    # Signal handlers for real-time updates
+    def on_port_forward_started(self, config: PortForwardConfig):
+        """Handle port forward started"""
+        self.refresh_port_forwards()
+
+    def on_port_forward_stopped(self, key: str):
+        """Handle port forward stopped"""
+        self.refresh_port_forwards()
+
+    def on_port_forward_error(self, key: str, error_message: str):
+        """Handle port forward error"""
+        self.refresh_port_forwards()
+
+    def on_port_forwards_updated(self, configs):
+        """Handle port forwards updated"""
+        self.refresh_port_forwards()
+
+    def handle_row_click(self, row, column):
+        """Handle row selection"""
+        if column != self.table.columnCount() - 1:
+            self.table.selectRow(row)
+
     def delete_selected_resources(self):
-        """Override to handle port-forward specific deletion for multiple resources"""
+        """Override to handle port forward deletion"""
         if not self.selected_items:
             QMessageBox.information(
-                self, 
-                "No Selection", 
+                self, "No Selection", 
                 "No port forwards selected for deletion."
             )
             return
-            
+
         count = len(self.selected_items)
-        result = QMessageBox.warning(
-            self,
-            "Confirm Deletion",
-            f"Are you sure you want to delete {count} selected port forwards?",
+        reply = QMessageBox.question(
+            self, "Confirm Deletion",
+            f"Are you sure you want to stop {count} selected port forwards?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
         )
         
-        if result != QMessageBox.StandardButton.Yes:
-            return
-        
-        resources_to_delete = []
-        for key in self.selected_items:
-            for resource in self.resources:
-                if resource["name"] == key[0] and resource.get("namespace", "") == key[1]:
-                    resources_to_delete.append(resource)
-                    break
-        
-        for port_forward in resources_to_delete:
-            key = (port_forward["name"], port_forward["namespace"])
-            if key in self.port_forward_processes:
-                self.port_forward_processes[key]["is_running"] = False
-                del self.port_forward_processes[key]
-        
-        QMessageBox.information(
-            self,
-            "Port Forwards Deleted",
-            f"{len(resources_to_delete)} port forwards have been deleted."
-        )
-        
-        self.selected_items.clear()
-        self.load_data()
-    
-    def handle_row_click(self, row, column):
-        if column != self.table.columnCount() - 1:
-            self.table.selectRow(row)
-            resource_name = self.table.item(row, 1).text() if self.table.item(row, 1) else None
-            namespace = self.table.item(row, 2).text() if self.table.item(row, 2) else None
+        if reply == QMessageBox.StandardButton.Yes:
+            # Find and stop selected port forwards
+            for selected_name, _ in self.selected_items:
+                for resource in self.resources:
+                    if resource['name'] == selected_name:
+                        self.port_manager.stop_port_forward(resource['key'])
+                        break
             
-            if resource_name:
-                parent = self.parent()
-                while parent and not hasattr(parent, 'detail_manager'):
-                    parent = parent.parent()
-                
-                if parent and hasattr(parent, 'detail_manager'):
-                    resource_type = self.resource_type[:-1] if self.resource_type.endswith('s') else self.resource_type
-                    parent.detail_manager.show_detail(resource_type, resource_name, namespace)
+            self.selected_items.clear()
+            self.refresh_port_forwards()
+
+    def cleanup_on_destroy(self):
+        """Cleanup when page is destroyed"""
+        if hasattr(self, 'refresh_timer'):
+            self.refresh_timer.stop()

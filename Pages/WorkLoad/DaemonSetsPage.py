@@ -3,7 +3,7 @@ Dynamic implementation of the DaemonSets page with live Kubernetes data and reso
 """
 
 from PyQt6.QtWidgets import QHeaderView, QPushButton
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor
 
 from base_components.base_components import SortableTableWidgetItem
@@ -80,19 +80,42 @@ class DaemonSetsPage(BaseResourcePage):
                         item.layout().insertWidget(item.layout().count() - 1, delete_btn)
                         break
         
+
     def configure_columns(self):
-        """Configure column widths and behaviors"""
-        # Column 0: Checkbox (fixed width) - already set in base class
+        """Configure column widths for full screen utilization"""
+        if not self.table:
+            return
         
-        # Use stretch mode for all data columns
-        stretch_columns = [1, 2, 3, 4, 5]
-        for col in stretch_columns:
-            self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
+        header = self.table.horizontalHeader()
         
-        # Set last column (action) as fixed
-        action_col = 6
-        self.table.horizontalHeader().setSectionResizeMode(action_col, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(action_col, 40)
+        # Column specifications with optimized default widths
+        column_specs = [
+            (0, 40, "fixed"),        # Checkbox
+            (1, 140, "interactive"), # Name
+            (2, 90, "interactive"),  # Namespace
+            (3, 80, "interactive"),  # Pods
+            (4, 70, "interactive"),  # Node Selector
+            (5, 130, "stretch"), # Age
+            (6, 40, "fixed"), # Actions
+
+        ]
+        
+        # Apply column configuration
+        for col_index, default_width, resize_type in column_specs:
+            if col_index < self.table.columnCount():
+                if resize_type == "fixed":
+                    header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Fixed)
+                    self.table.setColumnWidth(col_index, default_width)
+                elif resize_type == "interactive":
+                    header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Interactive)
+                    self.table.setColumnWidth(col_index, default_width)
+                elif resize_type == "stretch":
+                    header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Stretch)
+                    self.table.setColumnWidth(col_index, default_width)
+        
+        # Ensure full width utilization after configuration
+        QTimer.singleShot(100, self._ensure_full_width_utilization)
+
     
     def populate_resource_row(self, row, resource):
         """
@@ -207,7 +230,7 @@ class DaemonSetsPage(BaseResourcePage):
                 item = SortableTableWidgetItem(value)
             
             # Set text alignment
-            if col in [2, 4]:  # Pods, Age
+            if col in [1, 2, 3, 4]:  # Pods, Age
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             else:
                 item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)

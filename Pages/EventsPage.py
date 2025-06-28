@@ -48,28 +48,65 @@ class EventsPage(BaseResourcePage):
         QTimer.singleShot(100, self.force_load_data)
         
         return layout
-    def configure_columns(self):
-        """Configure column widths and behaviors"""
-        # Configure columns with fixed widths
-        fixed_widths = {
-            0: 80,  # Type
-            2: 120, # Namespace
-            3: 150, # Involved Object
-            4: 150, # Source
-            5: 60,  # Count
-            6: 80,  # Age
-            7: 100, # Last Seen
-            8: 40   # Actions
-        }
+    # def configure_columns(self):
+    #     """Configure column widths and behaviors"""
+    #     # Configure columns with fixed widths
+    #     fixed_widths = {
+    #         0: 80,  # Type
+    #         2: 120, # Namespace
+    #         3: 150, # Involved Object
+    #         4: 150, # Source
+    #         5: 60,  # Count
+    #         6: 80,  # Age
+    #         7: 100, # Last Seen
+    #         8: 40   # Actions
+    #     }
         
-        # Set column widths
-        for col, width in fixed_widths.items():
-            self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
-            self.table.setColumnWidth(col, width)
+    #     # Set column widths
+    #     for col, width in fixed_widths.items():
+    #         self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+    #         self.table.setColumnWidth(col, width)
         
-        # Make Message column stretch
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+    #     # Make Message column stretch
+    #     self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
     
+    def configure_columns(self):
+        """Configure column widths for full screen utilization"""
+        if not self.table:
+            return
+        
+        header = self.table.horizontalHeader()
+        
+        # Column specifications with optimized default widths
+        column_specs = [
+            (0, 140, "interactive"), # Type
+            (1, 90, "interactive"),  # Message
+            (2, 80, "interactive"),  # Namespace
+            (3, 70, "interactive"),  # Involved object
+            (4, 80, "interactive"),  # Scope
+            (5, 70, "interactive"),  # Count
+            (6, 60, "interactive"),  # Age
+            (7, 80, "stretch"),      # Last Seen - stretch to fill remaining space
+            (8, 40, "fixed")        # Actions
+        ]
+        
+        # Apply column configuration
+        for col_index, default_width, resize_type in column_specs:
+            if col_index < self.table.columnCount():
+                if resize_type == "fixed":
+                    header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Fixed)
+                    self.table.setColumnWidth(col_index, default_width)
+                elif resize_type == "interactive":
+                    header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Interactive)
+                    self.table.setColumnWidth(col_index, default_width)
+                elif resize_type == "stretch":
+                    header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Stretch)
+                    self.table.setColumnWidth(col_index, default_width)
+        
+        # Ensure full width utilization after configuration
+        QTimer.singleShot(100, self._ensure_full_width_utilization)
+
+
     def populate_resource_row(self, row, resource):
         """
         Populate a single row with event data from live Kubernetes resources

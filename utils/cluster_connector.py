@@ -4,60 +4,110 @@ from kubernetes.client.rest import ApiException
 from kubernetes.config.config_exception import ConfigException
 import logging
 import traceback
+from utils.enhanced_worker import EnhancedBaseWorker
+from utils.thread_manager import get_thread_manager
+from utils.data_manager import get_data_manager
 
-class WorkerSignals(QObject):
-    """Signals for worker threads with proper lifecycle management"""
-    finished = pyqtSignal(object)
-    error = pyqtSignal(str)
-    progress = pyqtSignal(str)  # New signal for progress updates
-    
-    def __init__(self):
-        super().__init__()
-        self._is_valid = True
-    
-    def is_valid(self):
-        return self._is_valid
-    
-    def invalidate(self):
-        self._is_valid = False
 
-class BaseWorker(QRunnable):
-    """Base worker class with safe signal handling"""
-    
-    def __init__(self):
-        super().__init__()
-        self.signals = WorkerSignals()
-        self._should_stop = False
+class ConnectionWorker(EnhancedBaseWorker):
+    def __init__(self, client, cluster_name):
+        super().__init__(f"cluster_connection_{cluster_name}")
+        self.client = client
+        self.cluster_name = cluster_name
         
-    def __del__(self):
-        if hasattr(self, 'signals'):
-            self.signals.invalidate()
-
-    def stop(self):
-        """Signal the worker to stop gracefully"""
-        self._should_stop = True
-
-    def safe_emit_finished(self, result):
-        if hasattr(self, 'signals') and self.signals.is_valid() and not self._should_stop:
-            try:
-                self.signals.finished.emit(result)
-            except RuntimeError:
-                logging.warning("Unable to emit finished signal - receiver may have been deleted")
+    def execute(self):
+        logging.info(f"Starting connection worker for cluster: {self.cluster_name}")
+        
+        if self.is_cancelled():
+            return None
+            
+        try:
+            success = self.client.switch_context(self.cluster_name)
+            
+            if not success:
+                raise Exception("Failed to switch to cluster context")
+            
+            if self.is_cancelled():
+                return None
+            
+            # Test connection by getting version info
+            if self.client.version_api:
+                version_info = self.client.version_api.get_code()
+                logging.info(f"Connected to cluster {self.cluster_name}, version: {version_info.git_version}")
+                return (self.cluster_name, True, f"Connected to Kubernetes {version_info.git_version}")
+            else:
+                return (self.cluster_name, True, "Connected successfully")
                 
-    def safe_emit_error(self, error_message):
-        if hasattr(self, 'signals') and self.signals.is_valid() and not self._should_stop:
-            try:
-                self.signals.error.emit(error_message)
-            except RuntimeError:
-                logging.warning(f"Unable to emit error signal: {error_message}")
-    
-    def safe_emit_progress(self, message):
-        if hasattr(self, 'signals') and self.signals.is_valid() and not self._should_stop:
-            try:
-                self.signals.progress.emit(message)
-            except RuntimeError:
-                logging.warning(f"Unable to emit progress signal: {message}")
+        except Exception as conn_error:
+            if self.is_cancelled():
+                return None
+                
+            error_msg = self._get_connection_error_message(conn_error)
+            raise Exception(error_msg)
 
+    # def _get_connection_error_message(self, error):
+    #     """Convert connection errors to user-friendly messages"""
+    #     error_str = str(error).lower()
+        
+    #     if "no connection could be made" in error_str or "connection refused" in error_str:
+    #         return f"Cannot connect to cluster '{self.cluster_name}'. The cluster appears to be offline or unreachable."
+    #     elif "timeout" in error_str:
+    #         return f"Connection to cluster '{self.cluster_name}' timed out. Check your network connection and cluster status."
+    #     elif "certificate" in error_str or "ssl" in error_str:
+    #         return f"SSL/Certificate error connecting to cluster '{self.cluster_name}'. Check your cluster certificates."
+    #     elif "authentication" in error_str or "unauthorized" in error_str:
+    #         return f"Authentication failed for cluster '{self.cluster_name}'. Check your credentials."
+    #     elif "forbidden" in error_str:
+    #         return f"Access denied to cluster '{self.cluster_name}'. Check your permissions."
+    #     elif "not found" in error_str:
+    #         return f"Cluster '{self.cluster_name}' configuration not found. Check your kubeconfig."
+    #     elif "name resolution" in error_str or "dns" in error_str:
+    #         return f"Cannot resolve cluster '{self.cluster_name}' address. Check your DNS settings."
+    #     else:
+    #         return f"Failed to connect to cluster '{self.cluster_name}': {str(error)}"
+
+    def _get_connection_error_message(self, error):
+        """Convert technical errors to user-friendly messages"""
+        error_str = str(error).lower()
+        
+        # Docker Desktop specific errors
+        if "docker-desktop" in self.cluster_name.lower():
+            if "connection refused" in error_str or "no connection could be made" in error_str:
+                return (
+                    "Docker Desktop Kubernetes is not running.\n\n"
+                    "Please start Docker Desktop and enable Kubernetes in the settings."
+                )
+        
+        # Generic connection errors
+        if "connection refused" in error_str or "no connection could be made" in error_str:
+            return f"Cannot connect to cluster '{self.cluster_name}'. The cluster appears to be offline."
+        
+        elif "timeout" in error_str:
+            return f"Connection to cluster '{self.cluster_name}' timed out. Check your network connection."
+        
+        elif "certificate" in error_str or "ssl" in error_str:
+            return f"Certificate error connecting to '{self.cluster_name}'. Check your kubeconfig."
+        
+        elif "authentication" in error_str or "unauthorized" in error_str:
+            return f"Authentication failed for '{self.cluster_name}'. Check your credentials."
+        
+        elif "not found" in error_str:
+            return f"Cluster '{self.cluster_name}' not found. Check your kubeconfig."
+        
+        # Fallback with cleaned error
+        return f"Failed to connect to '{self.cluster_name}': {str(error)[:100]}..."
+
+class NodesWorker(EnhancedBaseWorker):
+    def __init__(self, client, parent):
+        super().__init__("nodes_fetch")
+        self.client = client
+        self.parent = parent
+        
+    def execute(self):
+        if self.is_cancelled():
+            return []
+        return self.client._get_nodes()
+    
 class ClusterConnection(QObject):
     """
     Enhanced cluster connection manager with better error handling and user feedback
@@ -129,116 +179,7 @@ class ClusterConnection(QObject):
         except Exception as e:
             logging.error(f"Error during ClusterConnection cleanup: {str(e)}")
 
-    class ConnectionWorker(BaseWorker):
-        def __init__(self, client, cluster_name, parent):
-            super().__init__()
-            self.client = client
-            self.cluster_name = cluster_name
-            self.parent = parent
-            
-        @pyqtSlot()
-        def run(self):
-            try:
-                if self._should_stop:
-                    return
-                    
-                logging.info(f"Starting connection worker for cluster: {self.cluster_name}")
-                
-                # Step 1: Check if cluster context exists
-                self.safe_emit_progress("Checking cluster configuration...")
-                
-                # Step 2: Attempt context switch
-                self.safe_emit_progress("Switching to cluster context...")
-                
-                if self._should_stop:
-                    return
-                
-                success = self.client.switch_context(self.cluster_name)
-                
-                if not success:
-                    self.safe_emit_error("Failed to switch to cluster context")
-                    self.safe_emit_finished((self.cluster_name, False, "Context switch failed"))
-                    return
-                
-                if self._should_stop:
-                    return
-                
-                # Step 3: Test basic connectivity
-                self.safe_emit_progress("Testing cluster connectivity...")
-                
-                try:
-                    if self.client.version_api:
-                        version_info = self.client.version_api.get_code()
-                        logging.info(f"Connected to cluster {self.cluster_name}, version: {version_info.git_version}")
-                        self.safe_emit_progress("Connection established successfully")
-                        self.safe_emit_finished((self.cluster_name, True, f"Connected to Kubernetes {version_info.git_version}"))
-                    else:
-                        self.safe_emit_finished((self.cluster_name, True, "Connected successfully"))
-                        
-                except Exception as conn_error:
-                    if self._should_stop:
-                        return
-                        
-                    # Provide specific error messages based on error type
-                    error_msg = self._get_connection_error_message(conn_error)
-                    
-                    logging.warning(f"Connection test failed for {self.cluster_name}: {conn_error}")
-                    self.safe_emit_finished((self.cluster_name, False, error_msg))
-                    
-            except ConfigException as e:
-                if not self._should_stop:
-                    error_msg = f"Configuration error: {str(e)}"
-                    self.safe_emit_error(error_msg)
-                    self.safe_emit_finished((self.cluster_name, False, error_msg))
-            except ApiException as e:
-                if not self._should_stop:
-                    error_msg = self._get_api_error_message(e)
-                    self.safe_emit_error(error_msg)
-                    self.safe_emit_finished((self.cluster_name, False, error_msg))
-            except Exception as e:
-                if not self._should_stop:
-                    error_msg = f"Unexpected error: {str(e)}"
-                    logging.error(f"Unexpected error in connection worker: {e}")
-                    logging.error(traceback.format_exc())
-                    self.safe_emit_error(error_msg)
-                    self.safe_emit_finished((self.cluster_name, False, error_msg))
-
-        def _get_connection_error_message(self, error):
-            """Get user-friendly connection error message"""
-            error_str = str(error).lower()
-            
-            if "connection refused" in error_str:
-                return "Cluster is not running or unreachable. Please start your Kubernetes cluster."
-            elif "timeout" in error_str:
-                return "Connection timeout. Check your network connection and cluster status."
-            elif "certificate" in error_str or "tls" in error_str:
-                return "Certificate verification failed. Check cluster certificates."
-            elif "name resolution" in error_str or "dns" in error_str:
-                return "DNS resolution failed. Check cluster endpoint configuration."
-            elif "permission denied" in error_str:
-                return "Permission denied. Check cluster access permissions."
-            elif "no such host" in error_str:
-                return "Cluster endpoint not found. Check cluster configuration."
-            else:
-                return f"Connection test failed: {str(error)}"
-
-        def _get_api_error_message(self, api_error):
-            """Get user-friendly API error message"""
-            if api_error.status == 401:
-                return "Authentication failed. Check your cluster credentials."
-            elif api_error.status == 403:
-                return "Access denied. Check your cluster permissions."
-            elif api_error.status == 404:
-                return "Cluster endpoint not found. Check cluster configuration."
-            elif api_error.status == 500:
-                return "Cluster internal error. The cluster may be experiencing issues."
-            elif api_error.status == 503:
-                return "Cluster unavailable. The cluster may be starting up or under heavy load."
-            else:
-                return f"API error ({api_error.status}): {api_error.reason or str(api_error)}"
-
     def connect_to_cluster(self, cluster_name):
-        """Start the cluster connection process with enhanced feedback"""
         if self._shutting_down:
             return
                 
@@ -249,41 +190,83 @@ class ClusterConnection(QObject):
         try:
             logging.info(f"Starting connection process for cluster: {cluster_name}")
             
-            # Update connection state
             self.connection_states[cluster_name] = "connecting"
             self.connection_started.emit(cluster_name)
             
-            # Stop any existing worker for this cluster
-            self._stop_workers_for_cluster(cluster_name)
+            worker = ConnectionWorker(self.kube_client, cluster_name)
             
-            # Create and start the worker
-            worker = self.ConnectionWorker(self.kube_client, cluster_name, self)
-            
-            # Track the worker
-            self._active_workers.add(worker)
-            
-            # Set up cleanup for when the worker is done
-            def cleanup_worker(result=None):
-                if worker in self._active_workers:
-                    self._active_workers.remove(worker)
-                    
-            worker.signals.finished.connect(cleanup_worker)
-            worker.signals.error.connect(lambda _: cleanup_worker())
-            
-            # Connect signals for progress updates
-            worker.signals.progress.connect(
-                lambda msg: self.connection_progress.emit(cluster_name, msg)
-            )
-            
-            # Connect signals
             worker.signals.finished.connect(self.on_connection_complete)
-            worker.signals.error.connect(lambda error: self.handle_error("connection", error))
+            worker.signals.error.connect(lambda error: self.handle_connection_error(cluster_name, error))
             
-            self.threadpool.start(worker)
+            thread_manager = get_thread_manager()
+            thread_manager.submit_worker(f"cluster_connect_{cluster_name}", worker)
             
         except Exception as e:
             logging.error(f"Error starting connection to cluster {cluster_name}: {e}")
-            self.error_occurred.emit("connection", f"Failed to start connection: {str(e)}")
+            self.handle_connection_error(cluster_name, f"Failed to start connection: {str(e)}")
+
+    def handle_connection_error(self, cluster_name, error_message):
+        """Enhanced connection error handling"""
+        try:
+            logging.error(f"Connection error for cluster {cluster_name}: {error_message}")
+            
+            # Update connection state to failed
+            self.connection_states[cluster_name] = "failed"
+            
+            # Emit connection complete with failure
+            self.connection_complete.emit(cluster_name, False, error_message)
+            
+            # Emit specific error
+            self.error_occurred.emit("connection", error_message)
+            
+        except Exception as e:
+            logging.error(f"Error in connection error handler: {e}")
+
+    def on_connection_complete(self, result):
+        """Handle connection completion with enhanced feedback"""
+        if self._is_being_destroyed or self._shutting_down:
+            return
+                
+        try:
+            cluster_name, success, message = result
+            
+            if success:
+                self.connection_states[cluster_name] = "connected" 
+                logging.info(f"Successfully connected to cluster: {cluster_name}")
+            else:
+                self.connection_states[cluster_name] = "failed"
+                logging.error(f"Failed to connect to cluster {cluster_name}: {message}")
+            
+            self.connection_complete.emit(cluster_name, success, message)
+            
+            if success:
+                try:
+                    # Set the current cluster in the client
+                    self.kube_client.current_cluster = cluster_name
+                    
+                    # Initialize cache for this cluster
+                    if cluster_name not in self.data_cache:
+                        self.data_cache[cluster_name] = {}
+                    
+                    # Load initial data
+                    self.load_cluster_info()
+                    
+                    # Start polling timers
+                    self.start_polling()
+                    
+                except Exception as e:
+                    error_msg = f"Error initializing cluster data: {str(e)}"
+                    logging.error(f"Error in connection complete handler: {e}")
+                    self.connection_states[cluster_name] = "failed"
+                    self.handle_connection_error(cluster_name, error_msg)
+                    return
+            
+        except Exception as e:
+            logging.error(f"Error in connection complete handler: {e}")
+            if len(result) >= 1:
+                cluster_name = result[0]
+                self.connection_states[cluster_name] = "failed"
+                self.handle_connection_error(cluster_name, f"Connection processing error: {str(e)}")
 
     def _stop_workers_for_cluster(self, cluster_name):
         """Stop any active workers for a specific cluster"""
@@ -327,46 +310,6 @@ class ClusterConnection(QObject):
         except Exception as e:
             logging.error(f"Error disconnecting from cluster {cluster_name}: {e}")
 
-    def on_connection_complete(self, result):
-        """Handle connection completion with enhanced feedback"""
-        if self._is_being_destroyed or self._shutting_down:
-            return
-                
-        try:
-            cluster_name, success, message = result
-            self.connection_states[cluster_name] = "connected" if success else "failed"
-            self.connection_complete.emit(cluster_name, success, message)
-            
-            if success:
-                try:
-                    # Set the current cluster in the client
-                    self.kube_client.current_cluster = cluster_name
-                    
-                    # Initialize cache for this cluster
-                    if cluster_name not in self.data_cache:
-                        self.data_cache[cluster_name] = {}
-                    
-                    # Load initial data
-                    self.load_cluster_info()
-                    
-                    # Start polling timers
-                    self.start_polling()
-                    
-                except Exception as e:
-                    error_msg = f"Error initializing cluster data: {str(e)}"
-                    logging.error(f"Error in connection complete handler: {e}")
-                    self.error_occurred.emit("initialization", error_msg)
-                    self.connection_states[cluster_name] = "failed"
-                    return
-            else:
-                logging.warning(f"Connection failed for cluster {cluster_name}: {message}")
-                
-        except Exception as e:
-            logging.error(f"Error in connection complete handler: {e}")
-            if len(result) >= 1:
-                cluster_name = result[0]
-                self.connection_states[cluster_name] = "failed"
-    
     def get_connection_state(self, cluster_name):
         """Get current connection state for a cluster"""
         return self.connection_states.get(cluster_name, "disconnected")
@@ -547,29 +490,7 @@ class ClusterConnection(QObject):
         except Exception as e:
             logging.error(f"Error getting cached data for {cluster_name}: {e}")
             return {}
-    
-    class NodesWorker(BaseWorker):
-        def __init__(self, client, parent):
-            super().__init__()
-            self.client = client
-            self.parent = parent
-            
-        @pyqtSlot()
-        def run(self):
-            try:
-                if self._should_stop:
-                    return
-                    
-                # Get nodes using kubernetes client
-                nodes = self.client._get_nodes()
-                
-                if not self._should_stop:
-                    self.safe_emit_finished(nodes)
-            except Exception as e:
-                if not self._should_stop:
-                    self.safe_emit_error(f"Error loading nodes: {str(e)}")
-                    self.safe_emit_finished([])
-    
+
     def load_nodes(self):
         """Load nodes data from the connected cluster"""
         if self._shutting_down:
@@ -577,7 +498,7 @@ class ClusterConnection(QObject):
             
         try:
             # Create and start the worker
-            worker = self.NodesWorker(self.kube_client, self)
+            worker = NodesWorker(self.kube_client, self)
             
             # Track the worker
             self._active_workers.add(worker)

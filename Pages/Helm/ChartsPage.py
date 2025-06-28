@@ -303,12 +303,48 @@ class ChartsPage(BaseResourcePage):
         self.configure_columns()
         if hasattr(self, 'select_all_checkbox'): self.select_all_checkbox.hide()
 
+    # def configure_columns(self):
+    #     fixed_widths = {0: 50, 1: 220, 3: 120, 4: 120, 5: 150, 6: 40}
+    #     for col, width in fixed_widths.items():
+    #         self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+    #         self.table.setColumnWidth(col, width)
+    #     self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+
     def configure_columns(self):
-        fixed_widths = {0: 50, 1: 220, 3: 120, 4: 120, 5: 150, 6: 40}
-        for col, width in fixed_widths.items():
-            self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
-            self.table.setColumnWidth(col, width)
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        """Configure column widths for full screen utilization"""
+        if not self.table:
+            return
+        
+        header = self.table.horizontalHeader()
+        
+        # Column specifications with optimized default widths
+        column_specs = [
+            (0, 40, "fixed"),        # Checkbox
+            (1, 140, "interactive"), # Name
+            (2, 90, "interactive"),  # Description
+            (3, 80, "interactive"),  # Version
+            (4, 60, "interactive"),  # App Version
+            (5, 80, "stretch"),      # Repository - stretch to fill remaining space
+            (6, 40, "fixed")        # Actions
+        ]
+        
+        # Apply column configuration
+        for col_index, default_width, resize_type in column_specs:
+            if col_index < self.table.columnCount():
+                if resize_type == "fixed":
+                    header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Fixed)
+                    self.table.setColumnWidth(col_index, default_width)
+                elif resize_type == "interactive":
+                    header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Interactive)
+                    self.table.setColumnWidth(col_index, default_width)
+                elif resize_type == "stretch":
+                    header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Stretch)
+                    self.table.setColumnWidth(col_index, default_width)
+        
+        # Ensure full width utilization after configuration
+        QTimer.singleShot(100, self._ensure_full_width_utilization)
+
+
 
     def populate_resource_row(self, row, chart):
         self.table.setRowHeight(row, 42)

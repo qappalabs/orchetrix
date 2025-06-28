@@ -5,7 +5,7 @@ Status display shows color-coded status, including multiple status conditions in
 """
 
 from PyQt6.QtWidgets import QHeaderView, QPushButton, QLabel, QWidget, QHBoxLayout
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor
 
 from base_components.base_components import SortableTableWidgetItem
@@ -127,21 +127,44 @@ class DeploymentsPage(BaseResourcePage):
                         # Insert before the refresh button
                         item.layout().insertWidget(item.layout().count() - 1, delete_btn)
                         break
-        
-    def configure_columns(self):
-        """Configure column widths and behaviors"""
-        # Column 0: Checkbox (fixed width) - already set in base class
-        
-        # Use stretch mode for most columns for better responsive layout
-        stretch_columns = [1, 2, 3, 4, 5, 6]
-        for col in stretch_columns:
-            self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
-        
-        # Set last column (action) as fixed
-        action_col = 7
-        self.table.horizontalHeader().setSectionResizeMode(action_col, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(action_col, 40)
     
+    
+    def configure_columns(self):
+        """Configure column widths for full screen utilization"""
+        if not self.table:
+            return
+        
+        header = self.table.horizontalHeader()
+        
+        # Column specifications with optimized default widths
+        column_specs = [
+            (0, 40, "fixed"),        # Checkbox
+            (1, 140, "interactive"), # Name
+            (2, 90, "interactive"),  # Namespace
+            (3, 80, "interactive"),  # pod
+            (4, 70, "interactive"),  # Replicas
+            (5, 130, "interactive"), # Age
+            (6, 110, "stretch"), # Conditions
+            (7, 40, "fixed"),  # Action
+        ]
+        
+        # Apply column configuration
+        for col_index, default_width, resize_type in column_specs:
+            if col_index < self.table.columnCount():
+                if resize_type == "fixed":
+                    header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Fixed)
+                    self.table.setColumnWidth(col_index, default_width)
+                elif resize_type == "interactive":
+                    header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Interactive)
+                    self.table.setColumnWidth(col_index, default_width)
+                elif resize_type == "stretch":
+                    header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Stretch)
+                    self.table.setColumnWidth(col_index, default_width)
+        
+        # Ensure full width utilization after configuration
+        QTimer.singleShot(100, self._ensure_full_width_utilization)
+
+
     def populate_resource_row(self, row, resource):
         """
         Populate a single row with Deployment data
@@ -259,7 +282,7 @@ class DeploymentsPage(BaseResourcePage):
                 item = SortableTableWidgetItem(value)
             
             # Set text alignment
-            if col in [2, 3, 4]:  # Pods, Replicas, Age
+            if col in [1, 2, 3, 4]:  # Pods, Replicas, Age
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             else:
                 item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)

@@ -177,15 +177,49 @@ class NamespacesPage(BaseResourcePage):
         self.table.horizontalHeader().setStyleSheet(AppStyles.CUSTOM_HEADER_STYLE)
         self.configure_columns()
 
+    # def configure_columns(self):
+    #     self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+    #     self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+    #     self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+    #     self.table.setColumnWidth(3, 80)
+    #     self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
+    #     self.table.setColumnWidth(4, 100)
+    #     self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
+    #     self.table.setColumnWidth(5, 40)
+
     def configure_columns(self):
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(3, 80)
-        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(4, 100)
-        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(5, 40)
+        """Configure column widths for full screen utilization"""
+        if not self.table:
+            return
+        
+        header = self.table.horizontalHeader()
+        
+        # Column specifications with optimized default widths
+        column_specs = [
+            (0, 40, "fixed"),        # Checkbox
+            (1, 140, "interactive"), # Name
+            (2, 190, "interactive"),  # Labels
+            (3, 60, "interactive"),  # Age
+            (4, 80, "stretch"),      # Status - stretch to fill remaining space
+            (5, 40, "fixed")        # Actions
+        ]
+        
+        # Apply column configuration
+        for col_index, default_width, resize_type in column_specs:
+            if col_index < self.table.columnCount():
+                if resize_type == "fixed":
+                    header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Fixed)
+                    self.table.setColumnWidth(col_index, default_width)
+                elif resize_type == "interactive":
+                    header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Interactive)
+                    self.table.setColumnWidth(col_index, default_width)
+                elif resize_type == "stretch":
+                    header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Stretch)
+                    self.table.setColumnWidth(col_index, default_width)
+        
+        # Ensure full width utilization after configuration
+        QTimer.singleShot(100, self._ensure_full_width_utilization)
+
 
     def populate_resource_row(self, row, resource):
         self.table.setRowHeight(row, 40)
@@ -214,7 +248,7 @@ class NamespacesPage(BaseResourcePage):
             else:
                 item = SortableTableWidgetItem(value)
 
-            if col in (0, 1):
+            if col == 0:
                 item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             else:
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)

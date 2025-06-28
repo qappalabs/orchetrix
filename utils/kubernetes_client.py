@@ -7,8 +7,9 @@ from typing import Optional, Dict, List, Any
 import datetime
 import logging
 import threading
-import queue
+import socket
 import time
+from typing import Tuple
 
 # Kubernetes Python client imports
 from kubernetes import client, config, watch
@@ -16,6 +17,10 @@ from kubernetes.client.rest import ApiException
 from kubernetes.config.config_exception import ConfigException
 from kubernetes.stream import stream
 
+
+from utils.enhanced_worker import EnhancedBaseWorker
+from utils.thread_manager import get_thread_manager
+            
 
 @dataclass
 class KubeCluster:
@@ -72,73 +77,49 @@ class BaseWorker(QRunnable):
             except RuntimeError:
                 logging.warning(f"Unable to emit error signal: {error_message}")
 
-class KubeConfigWorker(BaseWorker):
-    """Worker thread for loading Kubernetes config asynchronously"""
+class KubeConfigWorker(EnhancedBaseWorker):
     def __init__(self, client_instance, config_path=None):
-        super().__init__()
+        super().__init__("kube_config_load")
         self.client_instance = client_instance
         self.config_path = config_path
         
-    @pyqtSlot()
-    def run(self):
-        try:
-            result = self.client_instance.load_kube_config(self.config_path)
-            self.safe_emit_finished(result)
-        except Exception as e:
-            self.safe_emit_error(str(e))
+    def execute(self):
+        return self.client_instance.load_kube_config(self.config_path)
 
-class KubeMetricsWorker(BaseWorker):
-    """Worker thread for fetching Kubernetes metrics asynchronously"""
+class KubeMetricsWorker(EnhancedBaseWorker):
     def __init__(self, client_instance, node_name=None):
-        super().__init__()
+        super().__init__("kube_metrics_fetch")
         self.client_instance = client_instance
         self.node_name = node_name
         
-    @pyqtSlot()
-    def run(self):
-        try:
-            if self.node_name:
-                result = self.client_instance.get_node_metrics(self.node_name)
-            else:
-                result = self.client_instance.get_cluster_metrics()
-            self.safe_emit_finished(result)
-        except Exception as e:
-            self.safe_emit_error(str(e))
+    def execute(self):
+        if self.node_name:
+            return self.client_instance.get_node_metrics(self.node_name)
+        else:
+            return self.client_instance.get_cluster_metrics()
 
-class KubeIssuesWorker(BaseWorker):
-    """Worker thread for fetching Kubernetes issues asynchronously"""
+class KubeIssuesWorker(EnhancedBaseWorker):
     def __init__(self, client_instance):
-        super().__init__()
+        super().__init__("kube_issues_fetch")
         self.client_instance = client_instance
         
-    @pyqtSlot()
-    def run(self):
-        try:
-            result = self.client_instance.get_cluster_issues()
-            self.safe_emit_finished(result)
-        except Exception as e:
-            self.safe_emit_error(str(e))
+    def execute(self):
+        return self.client_instance.get_cluster_issues()
             
-class ResourceDetailWorker(BaseWorker):
-    """Worker thread for fetching Kubernetes resource details asynchronously"""
+class ResourceDetailWorker(EnhancedBaseWorker):
     def __init__(self, client_instance, resource_type, resource_name, namespace):
-        super().__init__()
+        super().__init__(f"resource_detail_{resource_type}_{resource_name}")
         self.client_instance = client_instance
         self.resource_type = resource_type
         self.resource_name = resource_name
         self.namespace = namespace
         
-    @pyqtSlot()
-    def run(self):
-        try:
-            result = self.client_instance.get_resource_detail(
-                self.resource_type, 
-                self.resource_name, 
-                self.namespace
-            )
-            self.safe_emit_finished(result)
-        except Exception as e:
-            self.safe_emit_error(str(e))
+    def execute(self):
+        return self.client_instance.get_resource_detail(
+            self.resource_type, 
+            self.resource_name, 
+            self.namespace
+        )
 
 class KubernetesLogStreamer(QObject):
     """Kubernetes log streamer using watch API for real-time logs"""
@@ -615,6 +596,7 @@ class SSHReadThread(QThread):
             if not self._stop_requested:
                 self.error_occurred.emit(f"SSH read thread error: {str(e)}")
 
+
 class KubernetesClient(QObject):
     """Client for interacting with Kubernetes clusters using Python kubernetes library"""
     clusters_loaded = pyqtSignal(list)
@@ -664,10 +646,6 @@ class KubernetesClient(QObject):
         # Add log streamer initialization
         self.log_streamer = KubernetesLogStreamer(self)
 
-        # Connect log streamer signals
-        self.log_streamer.log_line_received.connect(self.handle_log_line_received)
-        self.log_streamer.stream_error.connect(self.handle_stream_error)
-        self.log_streamer.stream_status.connect(self.handle_stream_status)
     
     def __del__(self):
         """Clean up resources when object is deleted"""
@@ -894,60 +872,73 @@ class KubernetesClient(QObject):
         try:
             path = config_path if config_path else self._default_kubeconfig
             
+            # Check if config file exists
             if not os.path.isfile(path):
-                self.error_occurred.emit(f"Kubeconfig file not found: {path}")
+                logging.warning(f"Kubeconfig file not found: {path}")
+                # Return empty list instead of raising error - allows app to continue
                 return []
             
             # Load contexts using kubernetes library
-            contexts, active_context = config.list_kube_config_contexts(config_file=path)
+            try:
+                contexts, active_context = config.list_kube_config_contexts(config_file=path)
+            except Exception as context_error:
+                logging.error(f"Error reading kubeconfig contexts from {path}: {context_error}")
+                # Return empty list for graceful degradation
+                return []
             
             clusters = []
             
             for context_info in contexts:
-                context_name = context_info['name']
-                context_detail = context_info['context']
-                
-                cluster_name = context_detail.get('cluster', '')
-                user = context_detail.get('user', '')
-                namespace = context_detail.get('namespace', 'default')
-                
-                # Get server URL from cluster config
-                server = None
                 try:
-                    # Load the full config to get server info
-                    config_dict = config.load_kube_config_from_dict(
-                        config_dict=yaml.safe_load(open(path, 'r')),
+                    context_name = context_info['name']
+                    context_detail = context_info['context']
+                    
+                    cluster_name = context_detail.get('cluster', '')
+                    user = context_detail.get('user', '')
+                    namespace = context_detail.get('namespace', 'default')
+                    
+                    # Get server URL from cluster config
+                    server = None
+                    try:
+                        # Load the full config to get server info
+                        config_dict = config.load_kube_config_from_dict(
+                            config_dict=yaml.safe_load(open(path, 'r')),
+                            context=context_name,
+                            persist_config=False
+                        )
+                        # This would require parsing the config dict, for now we'll skip server
+                    except:
+                        pass
+                    
+                    # Create cluster object
+                    cluster = KubeCluster(
+                        name=context_name,
                         context=context_name,
-                        persist_config=False
+                        server=server,
+                        user=user,
+                        namespace=namespace
                     )
-                    # This would require parsing the config dict, for now we'll skip server
-                except:
-                    pass
-                
-                # Create cluster object
-                cluster = KubeCluster(
-                    name=context_name,
-                    context=context_name,
-                    server=server,
-                    user=user,
-                    namespace=namespace
-                )
-                
-                # Check if this is the current context
-                if active_context and active_context['name'] == context_name:
-                    cluster.status = "active"
-                
-                clusters.append(cluster)
+                    
+                    # Check if this is the current context
+                    if active_context and active_context['name'] == context_name:
+                        cluster.status = "active"
+                    
+                    clusters.append(cluster)
+                    
+                except Exception as cluster_error:
+                    logging.warning(f"Error processing cluster context {context_info.get('name', 'unknown')}: {cluster_error}")
+                    continue
             
             self.clusters = clusters
             return clusters
             
         except Exception as e:
-            self.error_occurred.emit(f"Error loading kubeconfig: {str(e)}")
+            logging.error(f"Error loading kubeconfig: {str(e)}")
+            # Return empty list instead of raising error - allows graceful fallback
             return []
     
+    
     def load_clusters_async(self, config_path=None):
-        """Load clusters asynchronously to avoid UI blocking"""
         if self._shutting_down:
             return
             
@@ -955,17 +946,9 @@ class KubernetesClient(QObject):
         worker.signals.finished.connect(lambda result: self.clusters_loaded.emit(result))
         worker.signals.error.connect(lambda error: self.error_occurred.emit(error))
         
-        self._active_workers.add(worker)
-        
-        def cleanup_worker(result=None):
-            if worker in self._active_workers:
-                self._active_workers.remove(worker)
-        
-        worker.signals.finished.connect(cleanup_worker)
-        worker.signals.error.connect(lambda _: cleanup_worker())
-        
-        self.threadpool.start(worker)
-    
+        thread_manager = get_thread_manager()
+        thread_manager.submit_worker("kube_config_load", worker)
+
     def switch_context(self, context_name: str) -> bool:
         """Switch to a specific Kubernetes context"""
         try:
@@ -1135,39 +1118,22 @@ class KubernetesClient(QObject):
                 self.error_occurred.emit(f"Error getting cluster metrics: {str(e)}")
             return None
     
+
     def get_cluster_metrics_async(self):
-        """Get cluster metrics asynchronously with shutdown check"""
         if self._shutting_down:
             return
             
-        # Additional check - verify threadpool is still valid
-        if not hasattr(self, 'threadpool') or not self.threadpool:
-            return
-            
-        try:
-            worker = KubeMetricsWorker(self)
-            
-            worker.signals.finished.connect(
-                lambda result: self.cluster_metrics_updated.emit(result) if result and not self._shutting_down else None
-            )
-            worker.signals.error.connect(
-                lambda error: self.error_occurred.emit(error) if not self._shutting_down else None
-            )
-            
-            self._active_workers.add(worker)
-            
-            def cleanup_worker(result=None):
-                if worker in self._active_workers:
-                    self._active_workers.remove(worker)
-            
-            worker.signals.finished.connect(cleanup_worker)
-            worker.signals.error.connect(lambda _: cleanup_worker())
-            
-            self.threadpool.start(worker)
-        except Exception as e:
-            if not self._shutting_down:
-                logging.error(f"Error starting metrics worker: {e}")
-    
+        worker = KubeMetricsWorker(self)
+        worker.signals.finished.connect(
+            lambda result: self.cluster_metrics_updated.emit(result) if result and not self._shutting_down else None
+        )
+        worker.signals.error.connect(
+            lambda error: self.error_occurred.emit(error) if not self._shutting_down else None
+        )
+        
+        thread_manager = get_thread_manager()
+        thread_manager.submit_worker("kube_metrics_fetch", worker)
+
     def get_cluster_issues(self):
         """Get current issues in the cluster"""
         try:
@@ -1846,66 +1812,6 @@ class KubernetesClient(QObject):
             base_value = value
         
         return history
-
-    def start_pod_log_stream(self, pod_name, namespace="default", container=None, tail_lines=200, follow=True):
-        """Start streaming logs for a pod"""
-        try:
-            if self._shutting_down:
-                return
-
-            self.log_streamer.start_log_stream(pod_name, namespace, container, tail_lines, follow)
-
-        except Exception as e:
-            logging.error(f"Error starting pod log stream: {e}")
-            self.error_occurred.emit(f"Failed to start log stream: {str(e)}")
-
-    def stop_pod_log_stream(self, pod_name, namespace="default", container=None):
-        """Stop streaming logs for a pod"""
-        try:
-            stream_key = f"{namespace}/{pod_name}"
-            if container:
-                stream_key += f"/{container}"
-
-            self.log_streamer.stop_log_stream(stream_key)
-
-        except Exception as e:
-            logging.error(f"Error stopping pod log stream: {e}")
-
-    def handle_log_line_received(self, pod_name, log_line, timestamp):
-        """Handle received log line from stream"""
-        try:
-            if not self._shutting_down:
-                # Emit signal with log data
-                self.pod_log_line_received.emit({
-                    'pod_name': pod_name,
-                    'log_line': log_line,
-                    'timestamp': timestamp
-                })
-        except Exception as e:
-            logging.error(f"Error handling log line: {e}")
-
-    def handle_stream_error(self, pod_name, error_message):
-        """Handle streaming errors"""
-        try:
-            if not self._shutting_down:
-                logging.error(f"Log stream error for {pod_name}: {error_message}")
-                self.pod_log_stream_error.emit({
-                    'pod_name': pod_name,
-                    'error': error_message
-                })
-        except Exception as e:
-            logging.error(f"Error handling stream error: {e}")
-
-    def handle_stream_status(self, pod_name, status_message):
-        """Handle streaming status updates"""
-        try:
-            if not self._shutting_down:
-                self.pod_log_stream_status.emit({
-                    'pod_name': pod_name,
-                    'status': status_message
-                })
-        except Exception as e:
-            logging.error(f"Error handling stream status: {e}")
 
 # Singleton instance
 _instance = None

@@ -8,6 +8,7 @@ from PyQt6.QtGui import QColor, QPainter, QIcon, QMouseEvent, QFont, QPixmap # A
 from UI.Styles import AppColors, AppStyles, AppConstants
 from utils.kubernetes_client import get_kubernetes_client
 from utils.cluster_connector import get_cluster_connector
+import logging
 
 from math import sin, cos
 from UI.Icons import resource_path  # Add this import at the top of the file
@@ -155,12 +156,24 @@ class OrchestrixGUI(QMainWindow):
         self.kube_client = get_kubernetes_client()
         self.cluster_connector = get_cluster_connector()
 
+        try:
+            from utils.cluster_state_manager import get_cluster_state_manager
+            self.cluster_state_manager = get_cluster_state_manager()
+            logging.info("Cluster state manager initialized in HomePage")
+        except Exception as e:
+            logging.error(f"Failed to initialize cluster state manager in HomePage: {e}")
+            self.cluster_state_manager = None
+
+
         self.kube_client.clusters_loaded.connect(self.on_clusters_loaded)
         self.kube_client.error_occurred.connect(self.show_error_message)
 
         self.cluster_connector.connection_started.connect(self.on_cluster_connection_started)
         self.cluster_connector.connection_complete.connect(self.on_cluster_connection_complete)
-        self.cluster_connector.error_occurred.connect(self.show_error_message)
+        self.cluster_connector.error_occurred.connect(
+            lambda error_type, error_msg: self.show_error_message(error_msg)
+        )
+        # self.cluster_connector.error_occurred.connect(self.show_error_message)
         self.cluster_connector.metrics_data_loaded.connect(self.check_cluster_data_loaded)
         self.cluster_connector.issues_data_loaded.connect(self.check_cluster_data_loaded)
 
@@ -286,7 +299,63 @@ class OrchestrixGUI(QMainWindow):
         self.update_content_view(self.current_view)
 
     def show_error_message(self, error_message):
-        QMessageBox.critical(self, "Error", error_message)
+        """Display error messages with better formatting"""
+        try:
+            # Clean up the message
+            if not error_message:
+                error_message = "An unknown error occurred."
+            
+            error_message = str(error_message).strip()
+            
+            # Log for debugging
+            logging.error(f"Showing error dialog: {error_message}")
+            
+            # Create message box
+            msg_box = QMessageBox(self)
+            msg_box.setIcon(QMessageBox.Icon.Critical)
+            msg_box.setWindowTitle("Connection Error")
+            msg_box.setText(error_message)
+            
+            # Add helpful suggestions for Docker Desktop issues
+            if "docker-desktop" in error_message.lower() and "refused" in error_message.lower():
+                msg_box.setInformativeText(
+                    "💡 Try these solutions:\n"
+                    "• Start Docker Desktop\n"
+                    "• Enable Kubernetes in Docker Desktop settings\n"
+                    "• Wait for Kubernetes to initialize completely"
+                )
+            
+            # Style the dialog
+            msg_box.setStyleSheet("""
+                QMessageBox {
+                    background-color: #2d2d2d;
+                    color: #ffffff;
+                    font-size: 12px;
+                    min-width: 400px;
+                }
+                QMessageBox QLabel {
+                    color: #ffffff;
+                    padding: 10px;
+                }
+                QMessageBox QPushButton {
+                    background-color: #404040;
+                    color: #ffffff;
+                    border: 1px solid #555555;
+                    padding: 8px 15px;
+                    border-radius: 3px;
+                }
+                QMessageBox QPushButton:hover {
+                    background-color: #505050;
+                }
+            """)
+            
+            msg_box.exec()
+            
+        except Exception as e:
+            logging.error(f"Error showing dialog: {e}")
+            # Fallback
+            QMessageBox.critical(self, "Error", str(error_message))
+
 
     def update_content_view(self, view_type):
         self.current_view = view_type
@@ -688,18 +757,96 @@ class OrchestrixGUI(QMainWindow):
 
     def handle_disconnect_item(self, item):
         original_name = item.data(0, Qt.ItemDataRole.UserRole)
+        
+        logging.info(f"Disconnecting cluster: {original_name}")
+        
+        # Update UI status first
         for view_type in self.all_data:
             for data_item in self.all_data[view_type]:
-                if data_item["name"] == original_name: data_item["status"] = "disconnect"
-        if hasattr(self.cluster_connector, 'data_cache') and original_name in self.cluster_connector.data_cache:
-            del self.cluster_connector.data_cache[original_name]
-        if hasattr(self.cluster_connector, 'loading_complete') and original_name in self.cluster_connector.loading_complete:
-            del self.cluster_connector.loading_complete[original_name]
-        if hasattr(self.cluster_connector, 'kube_client') and self.cluster_connector.kube_client.current_cluster == original_name:
-            self.cluster_connector.stop_polling()
-        if hasattr(self.cluster_connector, 'disconnect_cluster'):
-            self.cluster_connector.disconnect_cluster(original_name)
+                if data_item["name"] == original_name: 
+                    data_item["status"] = "disconnect"
+                    logging.info(f"Updated UI status for {original_name} to disconnect")
+        
+        # Clean up cluster connector data
+        try:
+            if hasattr(self.cluster_connector, 'data_cache') and original_name in self.cluster_connector.data_cache:
+                del self.cluster_connector.data_cache[original_name]
+                logging.info(f"Cleared data cache for {original_name}")
+                
+            if hasattr(self.cluster_connector, 'loading_complete') and original_name in self.cluster_connector.loading_complete:
+                del self.cluster_connector.loading_complete[original_name]
+                logging.info(f"Cleared loading complete flag for {original_name}")
+                
+            if (hasattr(self.cluster_connector, 'kube_client') and 
+                hasattr(self.cluster_connector.kube_client, 'current_cluster') and
+                self.cluster_connector.kube_client.current_cluster == original_name):
+                self.cluster_connector.stop_polling()
+                # Also reset the current cluster in kube_client
+                self.cluster_connector.kube_client.current_cluster = None
+                logging.info(f"Stopped polling and reset current cluster for {original_name}")
+                
+            if hasattr(self.cluster_connector, 'disconnect_cluster'):
+                self.cluster_connector.disconnect_cluster(original_name)
+                logging.info(f"Called cluster_connector.disconnect_cluster for {original_name}")
+        except Exception as e:
+            logging.error(f"Error during cluster connector cleanup for {original_name}: {e}")
+        
+        # IMPORTANT: Notify the cluster state manager about the disconnection
+        try:
+            if self.cluster_state_manager:
+                self.cluster_state_manager.disconnect_cluster(original_name)
+                logging.info(f"Notified cluster state manager about disconnect: {original_name}")
+            else:
+                logging.warning("Cluster state manager not available for disconnect notification")
+        except Exception as e:
+            logging.error(f"Error notifying cluster state manager about disconnect: {e}")
+        
+        # Remove from connecting clusters set if present
+        self.connecting_clusters.discard(original_name)
+        
+        # Reset waiting for cluster load if it matches
+        if self.waiting_for_cluster_load == original_name:
+            self.waiting_for_cluster_load = None
+            logging.info(f"Reset waiting_for_cluster_load for {original_name}")
+        
+        # Update the view
         self.update_content_view(self.current_view)
+        logging.info(f"Cluster disconnect completed for: {original_name}")
+
+    def disconnect_cluster(self, cluster_name):
+        """Disconnect from a specific cluster"""
+        try:
+            logging.info(f"Disconnecting from cluster: {cluster_name}")
+            
+            # Stop any workers for this cluster
+            self._stop_workers_for_cluster(cluster_name)
+            
+            # Update connection state
+            self.connection_states[cluster_name] = "disconnected"
+            
+            # Clean up cached data
+            if cluster_name in self.data_cache:
+                del self.data_cache[cluster_name]
+                logging.info(f"Cleared data cache for {cluster_name}")
+            
+            if cluster_name in self.loading_complete:
+                del self.loading_complete[cluster_name]
+                logging.info(f"Cleared loading complete flag for {cluster_name}")
+            
+            # Stop polling and reset current cluster if this is the current cluster
+            if (hasattr(self.kube_client, 'current_cluster') and 
+                self.kube_client.current_cluster == cluster_name):
+                self.stop_polling()
+                self.kube_client.current_cluster = None
+                logging.info(f"Stopped polling and reset current cluster for {cluster_name}")
+                
+            # Reset current cluster in the connector itself
+            if hasattr(self, 'current_cluster') and self.current_cluster == cluster_name:
+                self.current_cluster = None
+                logging.info(f"Reset cluster connector current_cluster for {cluster_name}")
+                
+        except Exception as e:
+            logging.error(f"Error disconnecting from cluster {cluster_name}: {e}")
 
     def handle_delete_item(self, item):
         original_name = item.data(0, Qt.ItemDataRole.UserRole)
