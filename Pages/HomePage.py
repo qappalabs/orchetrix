@@ -548,7 +548,7 @@ class OrchestrixGUI(QMainWindow):
         action_layout.setSpacing(0)
         action_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         menu_btn = QToolButton()
-        icon = QIcon("icons/Moreaction_Button.svg")
+        icon = QIcon(resource_path("icons/Moreaction_Button.svg"))
         menu_btn.setIcon(icon)
         menu_btn.setIconSize(QSize(AppConstants.SIZES["ICON_SIZE"], AppConstants.SIZES["ICON_SIZE"]))
         menu_btn.setText("")

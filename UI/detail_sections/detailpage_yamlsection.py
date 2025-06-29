@@ -18,6 +18,7 @@ import re
 
 from .base_detail_section import BaseDetailSection
 from UI.Styles import AppStyles, AppColors
+from UI.Icons import resource_path
 
 class YamlHighlighter(QSyntaxHighlighter):
     """Syntax highlighter for YAML content with improved color scheme"""
@@ -151,8 +152,8 @@ class SearchWidget(QFrame):
 
         # Previous button with icon
         self.prev_button = QPushButton()
-        prev_icon = QIcon("icons/Yaml_uparrow.svg")
-        self.prev_button.setIcon(prev_icon)
+        prev_icon = resource_path("icons/Yaml_uparrow.svg")
+        self.prev_button.setIcon(QIcon(prev_icon))
         self.prev_button.setIconSize(QSize(14, 14))
         self.prev_button.setFixedSize(24, 24)
         self.prev_button.setToolTip("Previous (Shift+Enter)")
@@ -161,8 +162,8 @@ class SearchWidget(QFrame):
 
         # Next button with icon
         self.next_button = QPushButton()
-        next_icon = QIcon("icons/Yaml_downarrow.svg")
-        self.next_button.setIcon(next_icon)
+        next_icon =resource_path("icons/Yaml_downarrow.svg")
+        self.next_button.setIcon(QIcon(next_icon))
         self.next_button.setIconSize(QSize(14, 14))
         self.next_button.setFixedSize(24, 24)
         self.next_button.setToolTip("Next (Enter)")
@@ -171,8 +172,8 @@ class SearchWidget(QFrame):
 
         # Case sensitive toggle with icon
         self.case_button = QPushButton()
-        case_icon = QIcon("icons/Yaml_Casesensitive.svg")
-        self.case_button.setIcon(case_icon)
+        case_icon = resource_path("icons/Yaml_Casesensitive.svg")
+        self.case_button.setIcon(QIcon(case_icon))
         self.case_button.setIconSize(QSize(14, 14))
         self.case_button.setFixedSize(24, 24)
         self.case_button.setCheckable(True)
@@ -182,8 +183,8 @@ class SearchWidget(QFrame):
 
         # Close button with icon
         self.close_button = QPushButton()
-        close_icon = QIcon("icons/close.svg")
-        self.close_button.setIcon(close_icon)
+        close_icon = resource_path("icons/close.svg")
+        self.close_button.setIcon(QIcon(close_icon))
         self.close_button.setIconSize(QSize(12, 12))
         self.close_button.setFixedSize(18, 18)
         self.close_button.setToolTip("Close (Escape)")

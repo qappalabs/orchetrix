@@ -14,6 +14,7 @@ from PyQt6.QtCore import (
 from PyQt6.QtGui import QColor, QIcon
 from typing import Optional, Dict, Any
 import logging
+from UI.Icons import resource_path
 import subprocess
 import tempfile
 import os
@@ -111,7 +112,7 @@ class DetailPageComponent(QWidget):
 
         # Back/Close button - FIXED: Added icon and proper styling
         self.back_button = QPushButton()
-        self.back_button.setIcon(QIcon("icons/Detailpage_Close.svg"))
+        self.back_button.setIcon(QIcon(resource_path("icons/Detailpage_Close.svg")))
         self.back_button.setIconSize(QSize(20, 20))
         self.back_button.setFixedSize(40, 40)
         self.back_button.setCursor(Qt.CursorShape.PointingHandCursor)  # Hand cursor on hover

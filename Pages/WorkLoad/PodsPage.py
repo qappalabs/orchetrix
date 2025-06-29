@@ -9,6 +9,8 @@ from PyQt6.QtGui import QColor
 from base_components.base_components import SortableTableWidgetItem
 from base_components.base_resource_page import BaseResourcePage
 from UI.Styles import AppColors, AppStyles
+from UI.Icons import resource_path
+
 from utils.port_forward_manager import get_port_forward_manager, PortForwardConfig
 from utils.port_forward_dialog import PortForwardDialog, ActivePortForwardsDialog
 
@@ -340,8 +342,8 @@ class PodsPage(BaseResourcePage):
         button = QToolButton()
 
         # Use custom SVG icon instead of text
-        icon = QIcon("icons/Moreaction_Button.svg")
-        button.setIcon(icon)
+        icon = resource_path("icons/Moreaction_Button.svg")
+        button.setIcon(QIcon(icon))
         button.setIconSize(QSize(16, 16))
 
         # Remove text and change to icon-only style

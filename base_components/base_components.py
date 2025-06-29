@@ -14,6 +14,9 @@ from functools import partial
 import weakref
 
 from UI.Styles import AppStyles, AppColors, AppConstants
+from UI.Icons import resource_path
+import logging
+import os
 
 class SortableTableWidgetItem(QTableWidgetItem):
     """
@@ -327,12 +330,27 @@ class BaseTablePage(QWidget):
         
         self._item_widgets[f"checkbox_{row}_{item_name}"] = container
         return container
-    
+      
     def _create_checkbox(self, row, item_name):
-        """Create a checkbox with zero margins and padding"""
+        """Create a checkbox with proper icon loading and zero margins"""
         checkbox = QCheckBox()
-        checkbox.setStyleSheet("""
-            QCheckBox {
+        
+        # Get resolved icon paths using the resource_path function
+        unchecked_icon_path = resource_path("icons/check_box_unchecked.svg")
+        checked_icon_path = resource_path("icons/check_box_checked.svg")
+        
+        # Verify icons exist, use fallback if needed
+        if not os.path.exists(unchecked_icon_path):
+            logging.warning(f"Unchecked icon not found: {unchecked_icon_path}")
+            unchecked_icon_path = self._create_fallback_checkbox_icon(False)
+        
+        if not os.path.exists(checked_icon_path):
+            logging.warning(f"Checked icon not found: {checked_icon_path}")
+            checked_icon_path = self._create_fallback_checkbox_icon(True)
+        
+        # Create stylesheet with resolved paths
+        checkbox_style = f"""
+            QCheckBox {{
                 margin: 0px;
                 padding: 0px;
                 spacing: 0px;
@@ -345,8 +363,8 @@ class BaseTablePage(QWidget):
                 max-height: 16px;
                 min-width: 16px;
                 min-height: 16px;
-            }
-            QCheckBox::indicator {
+            }}
+            QCheckBox::indicator {{
                 width: 16px;
                 height: 16px;
                 border: none;
@@ -356,18 +374,19 @@ class BaseTablePage(QWidget):
                 spacing: 0px;
                 subcontrol-position: center;
                 subcontrol-origin: content;
-            }
-            QCheckBox::indicator:unchecked {
-                image: url(icons/check_box_unchecked.svg);
-            }
-            QCheckBox::indicator:checked {
-                image: url(icons/check_box_checked.svg);
-            }
-            QCheckBox::indicator:hover {
+            }}
+            QCheckBox::indicator:unchecked {{
+                image: url({unchecked_icon_path.replace(os.sep, '/')});
+            }}
+            QCheckBox::indicator:checked {{
+                image: url({checked_icon_path.replace(os.sep, '/')});
+            }}
+            QCheckBox::indicator:hover {{
                 opacity: 0.8;
-            }
-        """)
+            }}
+        """
         
+        checkbox.setStyleSheet(checkbox_style)
         checkbox.setFixedSize(16, 16)
         checkbox.stateChanged.connect(partial(self._handle_checkbox_change, item_name=item_name))
         return checkbox
@@ -386,10 +405,63 @@ class BaseTablePage(QWidget):
                 self.select_all_checkbox.setChecked(False)
                 self.select_all_checkbox.blockSignals(False)
 
+    # def _create_select_all_checkbox(self):
+    #     """Create the select-all checkbox for the header using the same SVG icon as row checkboxes"""
+    #     checkbox = QCheckBox()
+    #     checkbox.setStyleSheet(AppStyles.BASE_CHECKBOX_STYLE)
+    #     checkbox.stateChanged.connect(self._handle_select_all)
+    #     self.select_all_checkbox = checkbox
+    #     return checkbox
+
     def _create_select_all_checkbox(self):
-        """Create the select-all checkbox for the header using the same SVG icon as row checkboxes"""
+        """Create the select-all checkbox for the header using resolved icon paths"""
         checkbox = QCheckBox()
-        checkbox.setStyleSheet(AppStyles.BASE_CHECKBOX_STYLE)
+        
+        # Get resolved icon paths
+        unchecked_icon_path = resource_path("icons/check_box_unchecked.svg")
+        checked_icon_path = resource_path("icons/check_box_checked.svg")
+        
+        # Verify icons exist, use fallback if needed
+        if not os.path.exists(unchecked_icon_path):
+            unchecked_icon_path = self._create_fallback_checkbox_icon(False)
+        
+        if not os.path.exists(checked_icon_path):
+            checked_icon_path = self._create_fallback_checkbox_icon(True)
+        
+        # Apply consistent styling with resolved paths
+        select_all_style = f"""
+            QCheckBox {{
+                margin: 0px;
+                padding: 0px;
+                spacing: 0px;
+                background: transparent;
+                border: none;
+                outline: none;
+                width: 16px;
+                height: 16px;
+            }}
+            QCheckBox::indicator {{
+                width: 16px;
+                height: 16px;
+                border: none;
+                background: transparent;
+                margin: 0px;
+                padding: 0px;
+                subcontrol-position: center;
+                subcontrol-origin: content;
+            }}
+            QCheckBox::indicator:unchecked {{
+                image: url({unchecked_icon_path.replace(os.sep, '/')});
+            }}
+            QCheckBox::indicator:checked {{
+                image: url({checked_icon_path.replace(os.sep, '/')});
+            }}
+            QCheckBox::indicator:hover {{
+                opacity: 0.8;
+            }}
+        """
+        
+        checkbox.setStyleSheet(select_all_style)
         checkbox.stateChanged.connect(self._handle_select_all)
         self.select_all_checkbox = checkbox
         return checkbox
@@ -428,8 +500,8 @@ class BaseTablePage(QWidget):
         button = QToolButton()
 
         # Use custom SVG icon instead of text
-        icon = QIcon("icons/Moreaction_Button.svg")
-        button.setIcon(icon)
+        icon = resource_path("icons/Moreaction_Button.svg")
+        button.setIcon(QIcon(icon))
         button.setIconSize(QSize(AppConstants.SIZES["ICON_SIZE"], AppConstants.SIZES["ICON_SIZE"]))
 
         # Remove text and change to icon-only style

@@ -18,6 +18,7 @@ from enum import Enum
 
 
 from Styles import AppColors, AppStyles
+from Icons import resource_path
 
 class StyleConstants:
     """Centralized stylesheet constants"""
@@ -1713,7 +1714,7 @@ class UnifiedTerminalHeader(QWidget):
     def create_header_button(self, text, tooltip, callback):
         button = QToolButton()
         if text.endswith('.svg'):
-            button.setIcon(QIcon(text))
+            button.setIcon(QIcon(resource_path(text)))
             button.setIconSize(QSize(10, 10))
         else:
             button.setText(text)
@@ -1748,7 +1749,7 @@ class UnifiedTerminalHeader(QWidget):
         self.edit_mode = False
         self.current_file = None
         self.save_btn.hide()
-        self.refresh_btn.setIcon(QIcon("icons/terminal_refresh.svg"))
+        self.refresh_btn.setIcon(QIcon(resource_path("icons/terminal_refresh.svg")))
         self.refresh_btn.setToolTip("Refresh Terminal")
         if self._active_terminal_widget():
             self._active_terminal_widget().exit_edit_mode()
@@ -1843,7 +1844,7 @@ class UnifiedTerminalHeader(QWidget):
     def toggle_maximize(self):
         if hasattr(self.parent_terminal, 'toggle_maximize'):
             self.parent_terminal.toggle_maximize()
-            self.maximize_btn.setIcon(QIcon("icons/terminal_up_down.svg"))
+            self.maximize_btn.setIcon(QIcon(resource_path("icons/terminal_up_down.svg")))
             self.maximize_btn.setToolTip("Restore Terminal" if self.parent_terminal.is_maximized else "Maximize Terminal")
 
     def hide_terminal(self):
@@ -3003,11 +3004,11 @@ class TerminalPanel(QWidget):
             self.normal_height = self.height()
             max_height = top_level_window.height() - 50 if top_level_window else 1030
             self.setFixedHeight(int(max_height))
-            self.unified_header.maximize_btn.setIcon(QIcon("icons/terminal_up_down.svg"))
+            self.unified_header.maximize_btn.setIcon(QIcon(resource_path("icons/terminal_up_down.svg")))
             self.unified_header.maximize_btn.setToolTip("Restore Terminal")
         else:
             self.setFixedHeight(self.normal_height)
-            self.unified_header.maximize_btn.setIcon(QIcon("icons/terminal_up_down.svg"))
+            self.unified_header.maximize_btn.setIcon(QIcon(resource_path("icons/terminal_up_down.svg")))
             self.unified_header.maximize_btn.setToolTip("Maximize Terminal")
         self.reposition()
 

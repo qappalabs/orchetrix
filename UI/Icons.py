@@ -20,6 +20,21 @@ def resource_path(relative_path):
             exists = os.path.exists(full_path)
             logging.debug(f"Resolved path {full_path} exists: {exists}")
             
+            # If file doesn't exist, try alternative paths
+            if not exists:
+                # Try without subdirectory
+                filename = os.path.basename(relative_path)
+                alt_path = os.path.join(base_path, filename)
+                if os.path.exists(alt_path):
+                    logging.debug(f"Found alternative path: {alt_path}")
+                    return alt_path
+                
+                # Try in root directory
+                alt_path2 = os.path.join(base_path, "icons", filename)
+                if os.path.exists(alt_path2):
+                    logging.debug(f"Found in icons subdirectory: {alt_path2}")
+                    return alt_path2
+            
             return full_path
         else:
             # Running in normal Python environment
@@ -88,17 +103,12 @@ class Icons:
     # Cache to store loaded icons
     _icon_cache = {}
     
+    
     @staticmethod
     def get_icon_from_path(icon_path, fallback_text=None):
         """
         Load an icon from a local file path with emoji fallback
-        
-        Args:
-            icon_path (str): Path to the icon file
-            fallback_text (str, optional): Text/emoji to use if loading fails
-            
-        Returns:
-            QIcon: The loaded icon or fallback
+        Enhanced with better error handling for PyInstaller
         """
         # Check if already cached
         if icon_path in Icons._icon_cache:
@@ -108,22 +118,32 @@ class Icons:
         try:
             # Use resource_path to resolve the path
             resolved_path = resource_path(icon_path)
-            icon = QIcon(resolved_path)
             
-            # Test if icon loaded successfully
-            if not icon.isNull():
-                # Cache the icon
-                Icons._icon_cache[icon_path] = icon
-                return icon
+            # Check if file exists before creating QIcon
+            if os.path.exists(resolved_path):
+                icon = QIcon(resolved_path)
+                
+                # Test if icon loaded successfully
+                if not icon.isNull():
+                    # Cache the icon
+                    Icons._icon_cache[icon_path] = icon
+                    logging.debug(f"Successfully loaded icon: {icon_path}")
+                    return icon
+                else:
+                    logging.warning(f"QIcon created but is null for: {icon_path}")
+            else:
+                logging.warning(f"Icon file does not exist: {resolved_path}")
+                
         except Exception as e:
-            logging.debug(f"Failed to load icon from {icon_path}: {e}")
+            logging.error(f"Failed to load icon from {icon_path}: {e}")
         
         # If we get here, loading failed - use fallback
         if fallback_text:
-            # Create a simple text-based icon
+            logging.debug(f"Using fallback text '{fallback_text}' for icon: {icon_path}")
             return Icons.create_text_icon(fallback_text)
         
         # Last resort - empty icon
+        logging.warning(f"No fallback available for icon: {icon_path}")
         return QIcon()
     
     @staticmethod
