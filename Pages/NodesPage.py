@@ -16,6 +16,7 @@ from base_components.base_components import SortableTableWidgetItem
 from base_components.base_resource_page import BaseResourcePage
 from utils.cluster_connector import get_cluster_connector
 from utils.data_manager import get_data_manager
+from UI.Icons import resource_path
 import random
 import datetime
 import re
@@ -886,8 +887,8 @@ class NodesPage(BaseResourcePage):
         button = QToolButton()
 
         # Use custom SVG icon instead of text
-        icon = QIcon("icons/Moreaction_Button.svg")
-        button.setIcon(icon)
+        icon = resource_path("icons/Moreaction_Button.svg")
+        button.setIcon(QIcon(icon))
         button.setIconSize(QSize(AppConstants.SIZES["ICON_SIZE"], AppConstants.SIZES["ICON_SIZE"]))
 
         # Remove text and change to icon-only style
@@ -904,16 +905,16 @@ class NodesPage(BaseResourcePage):
         menu.setStyleSheet(AppStyles.MENU_STYLE)
         # Add actions to menu
         edit_action = menu.addAction("Edit")
-        edit_action.setIcon(QIcon("icons/edit.png"))
+        edit_action.setIcon(QIcon(resource_path("icons/edit.png")))
         edit_action.triggered.connect(lambda: self._handle_node_action("Edit", row, node_name))
         
         delete_action = menu.addAction("Delete")
-        delete_action.setIcon(QIcon("icons/delete.png"))
+        delete_action.setIcon(QIcon(resource_path("icons/delete.png")))
         delete_action.setProperty("dangerous", True)
         delete_action.triggered.connect(lambda: self._handle_node_action("Delete", row, node_name))
         
         view_metrics = menu.addAction("View Metrics")
-        view_metrics.setIcon(QIcon("icons/chart.png"))
+        view_metrics.setIcon(QIcon(resource_path("icons/chart.png")))
         view_metrics.triggered.connect(lambda: self._handle_node_action("View Metrics", row, node_name))
         
         button.setMenu(menu)

@@ -14,6 +14,7 @@ from PyQt6.QtCore import (
 from PyQt6.QtGui import QColor, QIcon
 from typing import Optional, Dict, Any
 import logging
+from UI.Icons import resource_path
 import subprocess
 import tempfile
 import os
@@ -38,6 +39,7 @@ class DetailPageComponent(QWidget):
     detail_closed_signal = pyqtSignal()
     back_signal = pyqtSignal()
     resource_updated_signal = pyqtSignal(str, str, str)
+    refresh_main_page_signal = pyqtSignal(str, str, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -110,7 +112,7 @@ class DetailPageComponent(QWidget):
 
         # Back/Close button - FIXED: Added icon and proper styling
         self.back_button = QPushButton()
-        self.back_button.setIcon(QIcon("icons/Detailpage_Close.svg"))
+        self.back_button.setIcon(QIcon(resource_path("icons/Detailpage_Close.svg")))
         self.back_button.setIconSize(QSize(20, 20))
         self.back_button.setFixedSize(40, 40)
         self.back_button.setCursor(Qt.CursorShape.PointingHandCursor)  # Hand cursor on hover
@@ -528,8 +530,24 @@ class DetailPageComponent(QWidget):
         logging.error(f"Error in {section_name}: {error_message}")
 
     def handle_section_data_loaded(self, section_name: str, data: Dict[str, Any]):
-        """Handle section data loaded"""
+        """Handle section data loaded - including refresh requests"""
         logging.debug(f"Data loaded for {section_name}")
+
+        # Check if this is a refresh request from YAML section
+        if isinstance(data, dict) and data.get('action') == 'refresh_main_page':
+            resource_type = data.get('resource_type')
+            resource_name = data.get('resource_name')
+            namespace = data.get('namespace')
+
+            if resource_type and resource_name:
+                # Emit signal to refresh main page
+                self.refresh_main_page_signal.emit(resource_type, resource_name, namespace or "")
+                logging.info(f"Requesting main page refresh for {resource_type}/{resource_name}")
+
+    def setup_refresh_connection(self):
+        """Setup connection for main page refresh"""
+    # This will be connected by the DetailManager to ClusterView
+    pass
 
     def update_global_loading_state(self):
         """Update global loading indicator based on section states"""

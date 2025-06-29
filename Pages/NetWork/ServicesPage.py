@@ -14,6 +14,7 @@ from kubernetes import client
 from kubernetes.client.rest import ApiException
 from utils.port_forward_manager import get_port_forward_manager, PortForwardConfig
 from utils.port_forward_dialog import PortForwardDialog, ActivePortForwardsDialog
+from UI.Icons import resource_path
 
 class StatusLabel(QWidget):
     """Widget that displays a status with consistent styling and background handling."""
@@ -271,8 +272,8 @@ class ServicesPage(BaseResourcePage):
         button = QToolButton()
 
         # Use custom SVG icon instead of text
-        icon = QIcon("icons/Moreaction_Button.svg")
-        button.setIcon(icon)
+        icon = resource_path("icons/Moreaction_Button.svg")
+        button.setIcon(QIcon(icon))
         button.setIconSize(QSize(16, 16))
 
         button.setText("")

@@ -9,6 +9,7 @@ from typing import Optional, Dict, Any
 
 from .DetailPageComponent import DetailPageComponent
 
+import logging
 
 class DetailManager(QObject):
     """
@@ -18,6 +19,7 @@ class DetailManager(QObject):
 
     # Signals
     resource_updated = pyqtSignal(str, str, str)  # Resource type, name, namespace
+    refresh_main_page = pyqtSignal(str, str, str)  # resource_type, resource_name, namespace
 
     def __init__(self, parent: Optional[QObject] = None):
         super().__init__(parent)
@@ -37,15 +39,24 @@ class DetailManager(QObject):
         # Lazy initialization flag
         self._is_initialized = False
 
-    def _ensure_detail_page(self) -> DetailPageComponent:  # Fixed: Changed DetailPage to DetailPageComponent
+    def _ensure_detail_page(self) -> DetailPageComponent:
         """Lazy initialization of detail page for better startup performance"""
         if self._detail_page is None:
-            self._detail_page = DetailPageComponent(self.parent_window)  # Fixed: Changed DetailPage to DetailPageComponent
+            self._detail_page = DetailPageComponent(self.parent_window)
             self._detail_page.resource_updated_signal.connect(self._handle_resource_updated)
+
+            # Connect the new refresh signal
+            self._detail_page.refresh_main_page_signal.connect(self._handle_refresh_main_page)
+
             self._init_sizing()
             self._is_initialized = True
 
         return self._detail_page
+
+    def _handle_refresh_main_page(self, resource_type: str, resource_name: str, namespace: str):
+        """Handle request to refresh main page after YAML update"""
+        logging.info(f"DetailManager: Requesting main page refresh for {resource_type}/{resource_name}")
+        self.refresh_main_page.emit(resource_type, resource_name, namespace)
 
     def _init_sizing(self) -> None:
         """Pre-calculate sizes to improve animation performance"""

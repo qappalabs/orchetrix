@@ -16,8 +16,9 @@ from PyQt6.QtCore import Qt, QSize, QPropertyAnimation, QEasingCurve, QPoint, QT
 from datetime import datetime
 from enum import Enum
 
-from Styles import AppColors, AppStyles
 
+from Styles import AppColors, AppStyles
+from Icons import resource_path
 
 class StyleConstants:
     """Centralized stylesheet constants"""
@@ -30,7 +31,9 @@ class StyleConstants:
             selection-color: #E0E0E0;
             padding: 8px;
         }}
+
         {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
+
     """
     TERMINAL_WRAPPER = f"""
         QWidget#terminal_wrapper {{
@@ -123,6 +126,7 @@ class StyleConstants:
             image: url(icons/down_btn.svg);
             width: 12px;
             height: 12px;
+
         }}
         QComboBox QAbstractItemView {{
             background-color: {AppColors.BG_DARKER};
@@ -130,6 +134,7 @@ class StyleConstants:
             selection-background-color: {AppColors.HOVER_BG};
             border: 1px solid {AppColors.BORDER_COLOR};
         }}
+
         QComboBox QAbstractItemView::item {{
             cursor: pointer;
             padding: 6px 8px;
@@ -320,6 +325,7 @@ class UnifiedTerminalWidget(QTextEdit):
             cursor = self.textCursor()
             if self.edit_mode:
                 if cursor.position() < self.edit_start_pos or cursor.position() > self.edit_end_pos:
+
                     cursor.setPosition(self.edit_end_pos)
                     self.setTextCursor(cursor)
             else:
@@ -532,6 +538,7 @@ class UnifiedTerminalWidget(QTextEdit):
             # Get containers from the logs viewer header
             if (hasattr(logs_info['logs_viewer'], 'header') and
                     hasattr(logs_info['logs_viewer'].header, 'containers')):
+
                 return logs_info['logs_viewer'].header.containers
 
             # Fallback: Get containers directly from Kubernetes API
@@ -639,6 +646,7 @@ class UnifiedTerminalWidget(QTextEdit):
             Qt.Key.Key_Left, Qt.Key.Key_Right, Qt.Key.Key_PageUp, Qt.Key.Key_PageDown
         }
         if cursor_pos < self.input_position and key not in nav_keys and not event.matches(QKeySequence.StandardKey.SelectAll):
+          
             # If a non-navigation key is pressed in the output area, move the cursor to the end
             cursor.movePosition(QTextCursor.MoveOperation.End)
             self.setTextCursor(cursor)
@@ -1137,6 +1145,7 @@ class SSHTerminalWidget(UnifiedTerminalWidget):
     def keyPressEvent(self, event):
         """Handle key events for SSH terminal"""
         if not self.is_ssh_connected:
+
             # Still allow copy/paste even if not connected
             if event.matches(QKeySequence.StandardKey.Copy) or event.matches(QKeySequence.StandardKey.Paste):
                 super().keyPressEvent(event)
@@ -1467,9 +1476,11 @@ class UnifiedTerminalHeader(QWidget):
 
         # Shell dropdown (for regular terminals)
         self.shell_dropdown = QComboBox()
+
         self.shell_dropdown.setFixedSize(160, 24)
         self.shell_dropdown.setStyleSheet(StyleConstants.SHELL_DROPDOWN)
         self.shell_dropdown.setCursor(Qt.CursorShape.PointingHandCursor)
+
         for name, _ in self.available_shells:
             self.shell_dropdown.addItem(name)
         self.shell_dropdown.currentIndexChanged.connect(self._update_selected_shell)
@@ -1561,6 +1572,7 @@ class UnifiedTerminalHeader(QWidget):
                     hasattr(self.parent_terminal, 'active_terminal_index') and
                     self.parent_terminal.active_terminal_index < len(self.parent_terminal.terminal_tabs)):
 
+
                 active_tab_data = self.parent_terminal.terminal_tabs[self.parent_terminal.active_terminal_index]
                 return active_tab_data.get('is_logs_tab', False)
         except Exception as e:
@@ -1573,6 +1585,7 @@ class UnifiedTerminalHeader(QWidget):
             if (self.parent_terminal and
                     hasattr(self.parent_terminal, 'active_terminal_index') and
                     self.parent_terminal.active_terminal_index < len(self.parent_terminal.terminal_tabs)):
+
 
                 active_tab_data = self.parent_terminal.terminal_tabs[self.parent_terminal.active_terminal_index]
                 if active_tab_data.get('is_logs_tab', False):
@@ -1701,7 +1714,7 @@ class UnifiedTerminalHeader(QWidget):
     def create_header_button(self, text, tooltip, callback):
         button = QToolButton()
         if text.endswith('.svg'):
-            button.setIcon(QIcon(text))
+            button.setIcon(QIcon(resource_path(text)))
             button.setIconSize(QSize(10, 10))
         else:
             button.setText(text)
@@ -1736,7 +1749,7 @@ class UnifiedTerminalHeader(QWidget):
         self.edit_mode = False
         self.current_file = None
         self.save_btn.hide()
-        self.refresh_btn.setIcon(QIcon("icons/terminal_refresh.svg"))
+        self.refresh_btn.setIcon(QIcon(resource_path("icons/terminal_refresh.svg")))
         self.refresh_btn.setToolTip("Refresh Terminal")
         if self._active_terminal_widget():
             self._active_terminal_widget().exit_edit_mode()
@@ -1831,7 +1844,7 @@ class UnifiedTerminalHeader(QWidget):
     def toggle_maximize(self):
         if hasattr(self.parent_terminal, 'toggle_maximize'):
             self.parent_terminal.toggle_maximize()
-            self.maximize_btn.setIcon(QIcon("icons/terminal_up_down.svg"))
+            self.maximize_btn.setIcon(QIcon(resource_path("icons/terminal_up_down.svg")))
             self.maximize_btn.setToolTip("Restore Terminal" if self.parent_terminal.is_maximized else "Maximize Terminal")
 
     def hide_terminal(self):
@@ -2206,9 +2219,9 @@ class EnhancedLogsViewer(QWidget):
         # Set font for logs
         font = QFont("Consolas", 9)
         self.logs_display.setFont(font)
-
         self.logs_display.setStyleSheet(f"""
             QTextEdit {{
+
                 background-color: #1e1e1e;
                 color: #e0e0e0;
                 border: none;
@@ -2991,11 +3004,11 @@ class TerminalPanel(QWidget):
             self.normal_height = self.height()
             max_height = top_level_window.height() - 50 if top_level_window else 1030
             self.setFixedHeight(int(max_height))
-            self.unified_header.maximize_btn.setIcon(QIcon("icons/terminal_up_down.svg"))
+            self.unified_header.maximize_btn.setIcon(QIcon(resource_path("icons/terminal_up_down.svg")))
             self.unified_header.maximize_btn.setToolTip("Restore Terminal")
         else:
             self.setFixedHeight(self.normal_height)
-            self.unified_header.maximize_btn.setIcon(QIcon("icons/terminal_up_down.svg"))
+            self.unified_header.maximize_btn.setIcon(QIcon(resource_path("icons/terminal_up_down.svg")))
             self.unified_header.maximize_btn.setToolTip("Maximize Terminal")
         self.reposition()
 

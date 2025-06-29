@@ -13,6 +13,7 @@ from PyQt6.QtGui import QFont, QIcon, QColor, QPalette, QPainter
 from PyQt6.QtCore import Qt, QSize, QPropertyAnimation, QEasingCurve, pyqtSignal, QTimer
 
 from UI.Styles import AppStyles, AppColors
+from UI.Icons import resource_path
 
 class ToggleSwitch(QCheckBox):
     def __init__(self, parent=None):
@@ -293,7 +294,8 @@ class PreferencesWidget(QWidget):
 
     def create_back_button(self):
         back_btn = QPushButton()
-        back_btn.setIcon(QIcon("icons/back_arrow.png"))
+        icon = resource_path("icons/back_arrow.png")
+        back_btn.setIcon(QIcon(icon))
         back_btn.setIconSize(QSize(24, 24))
         back_btn.setFixedSize(30, 30)
         back_btn.setStyleSheet("QPushButton { background-color: transparent; border: none; }")

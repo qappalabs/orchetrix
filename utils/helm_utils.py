@@ -657,6 +657,437 @@ class ChartValuesThread(QThread):
                 logging.error(f"Error cleaning up values thread download: {e}")
 
 
+class HelmInstallThread(QThread):
+    """Thread for installing Helm charts without blocking the UI"""
+    
+    # Signals for progress updates
+    progress_update = pyqtSignal(str)  # Progress message
+    progress_percentage = pyqtSignal(int)  # Progress percentage (0-100)
+    installation_complete = pyqtSignal(bool, str)  # Success, message
+    
+    def __init__(self, chart_name, repository, options):
+        super().__init__()
+        self.chart_name = chart_name
+        self.repository = repository
+        self.options = options
+        self._is_cancelled = False
+        
+    def cancel(self):
+        """Cancel the installation"""
+        self._is_cancelled = True
+        
+    def run(self):
+        """Execute the Helm installation in a separate thread"""
+        try:
+            self.progress_update.emit("Initializing installation...")
+            self.progress_percentage.emit(5)
+            
+            if self._is_cancelled:
+                return
+                
+            # Find the helm binary
+            self.progress_update.emit("Locating Helm executable...")
+            self.progress_percentage.emit(10)
+            
+            helm_exe = "helm.exe" if platform.system() == "Windows" else "helm"
+            helm_path = shutil.which(helm_exe)
+            
+            if not helm_path:
+                common_paths = self._get_common_helm_paths()
+                for path in common_paths:
+                    if os.path.isfile(path):
+                        helm_path = path
+                        break
+            
+            if not helm_path:
+                self.installation_complete.emit(False, "Helm executable not found. Please install Helm to install charts.")
+                return
+                
+            if self._is_cancelled:
+                return
+                
+            # Validate inputs
+            release_name = self.options.get("release_name", "").strip()
+            namespace = self.options.get("namespace", "default").strip()
+            version = self.options.get("version")
+            values_yaml = self.options.get("values", "").strip()
+            create_namespace = self.options.get("create_namespace", True)
+            
+            if not release_name:
+                self.installation_complete.emit(False, "Release name is required.")
+                return
+                
+            self.progress_update.emit("Checking for existing releases...")
+            self.progress_percentage.emit(15)
+            
+            # Check if release already exists
+            if self._check_release_exists(helm_path, release_name):
+                return
+                
+            if self._is_cancelled:
+                return
+                
+            # Get repository information
+            repository_info = self.options.get("repository", {})
+            if not repository_info:
+                repository_info = {
+                    "type": "name" if not self.repository or not self.repository.startswith(("http://", "https://")) else "url",
+                    "value": self.repository
+                }
+                
+            self.progress_update.emit("Setting up repository...")
+            self.progress_percentage.emit(25)
+            
+            # Setup repository
+            if not self._setup_repository(helm_path, repository_info):
+                return
+                
+            if self._is_cancelled:
+                return
+                
+            self.progress_update.emit("Creating namespace if needed...")
+            self.progress_percentage.emit(35)
+            
+            # Create namespace if needed
+            if create_namespace:
+                self._create_namespace_if_needed(namespace)
+                
+            if self._is_cancelled:
+                return
+                
+            self.progress_update.emit("Preparing installation command...")
+            self.progress_percentage.emit(45)
+            
+            # Prepare installation command
+            install_cmd = self._build_install_command(helm_path, release_name, repository_info, namespace, version, values_yaml, create_namespace)
+            
+            if self._is_cancelled:
+                return
+                
+            self.progress_update.emit(f"Installing {self.chart_name}...")
+            self.progress_percentage.emit(60)
+            
+            # Execute the command
+            self._execute_install_command(install_cmd)
+            
+        except Exception as e:
+            logging.error(f"Error in helm install thread: {e}")
+            self.installation_complete.emit(False, f"Installation error: {str(e)}")
+            
+    def _get_common_helm_paths(self):
+        """Get common Helm installation paths"""
+        if platform.system() == "Windows":
+            return [
+                os.path.expanduser("~\\helm\\helm.exe"),
+                "C:\\Program Files\\Helm\\helm.exe",
+                "C:\\helm\\helm.exe",
+                os.path.expanduser("~\\.windows-package-manager\\helm\\helm.exe"),
+                os.path.expanduser("~\\AppData\\Local\\Programs\\Helm\\helm.exe")
+            ]
+        else:
+            return [
+                "/usr/local/bin/helm",
+                "/usr/bin/helm",
+                os.path.expanduser("~/bin/helm"),
+                "/opt/homebrew/bin/helm"
+            ]
+            
+    def _check_release_exists(self, helm_path, release_name):
+        """Check if release already exists"""
+        try:
+            check_release = subprocess.run(
+                [helm_path, "list", "--all-namespaces", "--filter", release_name, "--output", "json"],
+                capture_output=True,
+                text=True,
+                timeout=15
+            )
+            
+            if check_release.returncode == 0:
+                try:
+                    releases = json.loads(check_release.stdout)
+                    if releases:
+                        exact_matches = [r for r in releases if r.get("name") == release_name]
+                        if exact_matches:
+                            suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+                            suggested_name = f"{release_name}-{suffix}"
+                            self.installation_complete.emit(False, f"Release name '{release_name}' is already in use. Try using '{suggested_name}' instead.")
+                            return True
+                except json.JSONDecodeError:
+                    pass
+        except Exception as e:
+            logging.warning(f"Error checking release existence: {e}")
+            
+        return False
+        
+    def _setup_repository(self, helm_path, repository_info):
+        """Setup Helm repository"""
+        try:
+            repo_type = repository_info.get("type", "name")
+            repo_value = repository_info.get("value", "")
+            
+            repository_urls = {
+                "apache": "https://pulsar.apache.org/charts",
+                "bitnami": "https://charts.bitnami.com/bitnami",
+                "elastic": "https://helm.elastic.co",
+                "prometheus": "https://prometheus-community.github.io/helm-charts",
+                "jetstack": "https://charts.jetstack.io",
+                "nginx": "https://helm.nginx.com/stable",
+                "grafana": "https://grafana.github.io/helm-charts",
+                "hashicorp": "https://helm.releases.hashicorp.com",
+            }
+            
+            if repo_type == "name" and repo_value:
+                # Check if repository exists
+                repo_check = subprocess.run(
+                    [helm_path, "repo", "list", "-o", "json"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                
+                repo_exists = False
+                if repo_check.returncode == 0:
+                    try:
+                        repos = json.loads(repo_check.stdout)
+                        for repo in repos:
+                            if repo.get("name") == repo_value:
+                                repo_exists = True
+                                break
+                    except json.JSONDecodeError:
+                        pass
+                
+                if not repo_exists:
+                    self.progress_update.emit(f"Adding repository {repo_value}...")
+                    
+                    repo_url = repository_urls.get(repo_value)
+                    if not repo_url:
+                        # Try different URL patterns
+                        url_patterns = [
+                            f"https://{repo_value}.github.io/helm-charts",
+                            f"https://charts.{repo_value}.io",
+                            f"https://{repo_value}.github.io/charts",
+                        ]
+                        
+                        for pattern in url_patterns:
+                            try:
+                                test_result = subprocess.run(
+                                    [helm_path, "repo", "add", "--force-update", repo_value, pattern],
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=15
+                                )
+                                
+                                if test_result.returncode == 0:
+                                    repo_url = pattern
+                                    repo_exists = True
+                                    break
+                            except:
+                                continue
+                    
+                    if repo_url and not repo_exists:
+                        add_result = subprocess.run(
+                            [helm_path, "repo", "add", "--force-update", repo_value, repo_url],
+                            capture_output=True,
+                            text=True,
+                            timeout=30
+                        )
+                        
+                        if add_result.returncode != 0:
+                            self.installation_complete.emit(False, f"Error adding repository: {add_result.stderr}")
+                            return False
+                    
+                    # Update repos
+                    self.progress_update.emit("Updating repositories...")
+                    try:
+                        subprocess.run(
+                            [helm_path, "repo", "update"],
+                            capture_output=True,
+                            text=True,
+                            timeout=60
+                        )
+                    except Exception as e:
+                        logging.warning(f"Warning: Error updating repositories: {e}")
+                        
+            return True
+            
+        except Exception as e:
+            self.installation_complete.emit(False, f"Error setting up repository: {str(e)}")
+            return False
+            
+    def _create_namespace_if_needed(self, namespace):
+        """Create namespace if it doesn't exist"""
+        try:
+            ns_check = subprocess.run(
+                ["kubectl", "get", "namespace", namespace],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            
+            if ns_check.returncode != 0:
+                subprocess.run(
+                    ["kubectl", "create", "namespace", namespace],
+                    capture_output=True,
+                    text=True,
+                    timeout=15
+                )
+        except Exception as e:
+            logging.warning(f"Warning: Namespace creation failed: {e}")
+            
+    def _build_install_command(self, helm_path, release_name, repository_info, namespace, version, values_yaml, create_namespace):
+        """Build the Helm install command"""
+        install_cmd = [helm_path, "install", release_name]
+        
+        if create_namespace:
+            install_cmd.append("--create-namespace")
+        
+        # Add chart name with repository or URL
+        repo_type = repository_info.get("type", "name")
+        repo_value = repository_info.get("value", "")
+        
+        if repo_type == "name" and repo_value:
+            install_cmd.append(f"{repo_value}/{self.chart_name}")
+        elif repo_type == "url" and repo_value:
+            install_cmd.append(self.chart_name)
+            install_cmd.extend(["--repo", repo_value])
+        else:
+            install_cmd.append(self.chart_name)
+        
+        install_cmd.extend(["-n", namespace])
+        
+        if version:
+            install_cmd.extend(["--version", version])
+        
+        # Add values if provided
+        if values_yaml:
+            try:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".yaml", mode="w") as temp:
+                    temp.write(values_yaml)
+                    values_file = temp.name
+                install_cmd.extend(["-f", values_file])
+                self._values_file = values_file  # Store for cleanup
+            except Exception as e:
+                self.installation_complete.emit(False, f"Error creating values file: {str(e)}")
+                return None
+                
+        return install_cmd
+        
+    def _execute_install_command(self, install_cmd):
+        """Execute the Helm install command with improved monitoring"""
+        try:
+            if self._is_cancelled:
+                return
+                
+            logging.info(f"Executing: {' '.join(install_cmd)}")
+            
+            # Start the process
+            process = subprocess.Popen(
+                install_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+                universal_newlines=True
+            )
+            
+            self.progress_percentage.emit(70)
+            
+            # Monitor process with better timeout handling
+            check_interval = 1.0  # Check every second
+            max_wait_time = 300  # 5 minutes maximum
+            elapsed_time = 0
+            last_progress_update = 70
+            
+            while process.poll() is None and elapsed_time < max_wait_time:
+                if self._is_cancelled:
+                    logging.info("Installation cancelled by user, terminating process")
+                    try:
+                        process.terminate()
+                        # Give process 10 seconds to terminate gracefully
+                        process.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        logging.warning("Process didn't terminate gracefully, killing it")
+                        process.kill()
+                        process.wait()
+                    return
+                
+                # Update progress gradually
+                if elapsed_time > 30 and last_progress_update < 80:
+                    self.progress_percentage.emit(80)
+                    last_progress_update = 80
+                elif elapsed_time > 60 and last_progress_update < 85:
+                    self.progress_percentage.emit(85)
+                    last_progress_update = 85
+                elif elapsed_time > 120 and last_progress_update < 90:
+                    self.progress_percentage.emit(90)
+                    last_progress_update = 90
+                elif elapsed_time > 180 and last_progress_update < 95:
+                    self.progress_percentage.emit(95)
+                    last_progress_update = 95
+                
+                # Wait and update elapsed time
+                self.msleep(int(check_interval * 1000))
+                elapsed_time += check_interval
+            
+            # Handle timeout
+            if elapsed_time >= max_wait_time and process.poll() is None:
+                logging.error("Helm installation timed out")
+                try:
+                    process.terminate()
+                    process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+                
+                # Clean up values file if created
+                if hasattr(self, '_values_file') and os.path.exists(self._values_file):
+                    os.unlink(self._values_file)
+                
+                self.installation_complete.emit(False, "Installation timed out. The process took longer than expected.")
+                return
+            
+            # Get the result
+            stdout, stderr = process.communicate()
+            
+            # Clean up values file if created
+            if hasattr(self, '_values_file') and os.path.exists(self._values_file):
+                os.unlink(self._values_file)
+            
+            self.progress_percentage.emit(100)
+            
+            if process.returncode == 0:
+                success_msg = f"Chart installed successfully as '{self.options.get('release_name')}' in namespace '{self.options.get('namespace', 'default')}'."
+                
+                # Add helpful information for common charts
+                if self.chart_name == "nginx-ingress" or self.chart_name == "ingress-nginx":
+                    success_msg += "\n\nTo access the NGINX Ingress Controller, you may need to set up port forwarding or a LoadBalancer service."
+                elif self.chart_name == "prometheus":
+                    success_msg += f"\n\nAccess Prometheus UI with: kubectl port-forward -n {self.options.get('namespace', 'default')} svc/{self.options.get('release_name')}-prometheus-server 9090:80"
+                elif self.chart_name == "grafana":
+                    success_msg += f"\n\nAccess Grafana with: kubectl port-forward -n {self.options.get('namespace', 'default')} svc/{self.options.get('release_name')}-grafana 3000:80"
+                
+                logging.info(f"Helm installation successful: {success_msg}")
+                self.installation_complete.emit(True, success_msg)
+            else:
+                error_msg = stderr.strip() if stderr.strip() else stdout.strip()
+                logging.error(f"Helm installation failed with return code {process.returncode}: {error_msg}")
+                
+                # Handle specific error cases
+                if "already exists" in error_msg or "cannot re-use a name" in error_msg:
+                    suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+                    suggested_name = f"{self.options.get('release_name')}-{suffix}"
+                    self.installation_complete.emit(False, f"Release name '{self.options.get('release_name')}' is already in use. Try using '{suggested_name}' instead.")
+                else:
+                    self.installation_complete.emit(False, f"Error installing chart: {error_msg}")
+                    
+        except Exception as e:
+            logging.error(f"Exception during Helm installation: {str(e)}")
+            # Clean up values file if created
+            if hasattr(self, '_values_file') and os.path.exists(self._values_file):
+                os.unlink(self._values_file)
+            self.installation_complete.emit(False, f"Error during installation: {str(e)}")
+
+
 class ChartInstallDialog(QDialog):
     """Enhanced chart install dialog with improved validation and user experience"""
     
