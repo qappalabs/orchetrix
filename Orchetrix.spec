@@ -41,7 +41,6 @@ def collect_ui_files():
 # Get all resource files
 icon_data = collect_icons()
 ui_data = collect_ui_files()
-
 def collect_data_files():
     """Collect all data files, filtering out non-existent directories"""
     data_files = []
@@ -69,7 +68,6 @@ def collect_data_files():
             print(f"Skipping missing directory: {src_dir}")
     
     return data_files
-
 # Comprehensive hidden imports list
 hidden_imports = [
     # PyQt6 modules
@@ -243,6 +241,9 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+
+# Filter out None values from datas
+a.datas = [(dest, source, kind) for dest, source, kind in a.datas if dest is not None]
 
 pyz = PYZ(a.pure)
 
