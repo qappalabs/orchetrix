@@ -78,6 +78,39 @@ Full usage guides, feature explanations, and setup tutorials for **Orchetrix (OX
 
 **[https://www.orchetrix.com/documentation](https://www.orchetrix.com/documentation)**
 
+## How to Use
+
+Follow the instructions below to install and run **Orchetrix (OX)** on your operating system.
+
+### Windows
+
+1. [Download Orchetrix for Windows](https://github.com/qappalabs/orchetrix/releases/latest/download/orchetrix-windows.zip)
+2. Unzip the file to any location.
+3. Open the extracted folder.
+4. Double-click `orchetrix.exe` to launch the application.
+
+> If Windows shows a security warning, click "More info" → "Run anyway".
+
+---
+
+### macOS
+
+1. [Download Orchetrix for macOS](https://github.com/qappalabs/orchetrix/releases/latest/download/orchetrix-macos.zip)
+2. Unzip the file to your `Applications` or preferred directory.
+3. Open `orchetrix.app`.
+
+> If you get a message like *“App can’t be opened because it is from an unidentified developer”*, go to `System Preferences > Security & Privacy > General`, and click **Open Anyway**.
+
+---
+
+### Linux
+
+1. [Download Orchetrix for Linux](https://github.com/qappalabs/orchetrix/releases/latest/download/orchetrix-linux.zip)
+2. Unzip the file:
+   ```bash
+   unzip orchetrix-linux.zip
+   cd orchetrix-linux
+
 ###  What You Will Find:
 
 - **Welcome to OX:**  
