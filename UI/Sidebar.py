@@ -372,17 +372,8 @@ class NavIconButton(QToolButton):
 
             for item in menu_items:
                 action = self.dropdown_menu.addAction(item)
-
-                # Special handling for Port Forwarding
-                if item == "Port Forwarding":
-                    # Style the action to look "under development"
-                    action.setText("Port Forwarding")
-                    action.setEnabled(False)  # Disable the action
-                    # Set custom style for this action
-                    action.setProperty("under_development", True)
-                else:
-                    action.triggered.connect(lambda checked=False, item_name=item:
-                                             self.parent_window.handle_dropdown_selection(item_name))
+                action.triggered.connect(lambda checked=False, item_name=item:
+                                         self.parent_window.handle_dropdown_selection(item_name))
 
         except Exception as e:
             logging.error(f"Error setting up dropdown for {self.item_text}: {e}")

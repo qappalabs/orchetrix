@@ -599,7 +599,22 @@ class SSHReadThread(QThread):
             if not self._stop_requested:
                 self.error_occurred.emit(f"SSH read thread error: {str(e)}")
 
+class ResourceUpdateWorker(EnhancedBaseWorker):
+    def __init__(self, client_instance, resource_type, resource_name, namespace, yaml_data):
+        super().__init__(f"resource_update_{resource_type}_{resource_name}")
+        self.client_instance = client_instance
+        self.resource_type = resource_type
+        self.resource_name = resource_name
+        self.namespace = namespace
+        self.yaml_data = yaml_data
 
+    def execute(self):
+        return self.client_instance.update_resource(
+            self.resource_type,
+            self.resource_name,
+            self.namespace,
+            self.yaml_data
+        )
 
 class KubernetesClient(QObject):
     """Client for interacting with Kubernetes clusters using Python kubernetes library"""
@@ -609,7 +624,7 @@ class KubernetesClient(QObject):
     node_metrics_updated = pyqtSignal(dict)
     cluster_issues_updated = pyqtSignal(list)
     resource_detail_loaded = pyqtSignal(dict)
-
+    resource_updated = pyqtSignal(dict)
     pod_logs_loaded = pyqtSignal(dict)
     
     # New signals for streaming logs
@@ -1732,6 +1747,80 @@ class KubernetesClient(QObject):
         worker.signals.error.connect(lambda _: cleanup_worker())
         
         self.threadpool.start(worker)
+
+    def validate_kubernetes_schema(self, yaml_data):
+        """Validate Kubernetes resource schema"""
+        try:
+            if not isinstance(yaml_data, dict):
+                return False, "YAML must be a valid Kubernetes resource object"
+
+            required_fields = ['apiVersion', 'kind', 'metadata']
+            missing_fields = [field for field in required_fields if field not in yaml_data]
+
+            if missing_fields:
+                return False, f"Missing required fields: {', '.join(missing_fields)}"
+
+            metadata = yaml_data.get('metadata', {})
+            if 'name' not in metadata:
+                return False, "metadata.name is required"
+
+            return True, "Validation successful"
+
+        except Exception as e:
+            return False, f"Validation error: {str(e)}"
+
+    def update_resource_async(self, resource_type, resource_name, namespace, yaml_data):
+        """Update a Kubernetes resource asynchronously"""
+        if self._shutting_down:
+            return
+
+        worker = ResourceUpdateWorker(self, resource_type, resource_name, namespace, yaml_data)
+
+        worker.signals.finished.connect(
+            lambda result: self.resource_updated.emit(result) if not self._shutting_down else None
+        )
+        worker.signals.error.connect(
+            lambda error: self.resource_updated.emit({
+                'success': False,
+                'message': error
+            }) if not self._shutting_down else None
+        )
+
+        thread_manager = get_thread_manager()
+        thread_manager.submit_worker(f"resource_update_{resource_type}_{resource_name}", worker)
+
+    def update_resource(self, resource_type, resource_name, namespace, yaml_data):
+        """Update a Kubernetes resource"""
+        try:
+            resource_type_lower = resource_type.lower()
+
+            if resource_type_lower in ["deployment", "deployments", "deploy"]:
+                result = self.apps_v1.patch_namespaced_deployment(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+            elif resource_type_lower in ["service", "services", "svc"]:
+                result = self.v1.patch_namespaced_service(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+            elif resource_type_lower in ["pod", "pods"]:
+                result = self.v1.patch_namespaced_pod(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=yaml_data
+                )
+            else:
+                return {"success": False, "message": f"Resource type '{resource_type}' update not supported"}
+
+            return {"success": True, "message": f"Successfully updated {resource_type}/{resource_name}"}
+
+        except ApiException as e:
+            return {"success": False, "message": f"Kubernetes API error: {e.reason}"}
+        except Exception as e:
+            return {"success": False, "message": f"Update failed: {str(e)}"}
 
     def _get_resource_events(self, resource_type, resource_name, namespace="default"):
         """Get events related to a specific resource"""
