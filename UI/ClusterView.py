@@ -63,8 +63,8 @@ from Pages.AccessControl.ClusterRoleBindingsPage import ClusterRoleBindingsPage
 from Pages.AccessControl.RoleBinidingsPage import RoleBindingsPage
 
 # Helm pages
-from Pages.Helm.ChartsPage import ChartsPage
-from Pages.Helm.ReleasesPage import ReleasesPage
+# from Pages.Helm.ChartsPage import ChartsPage
+# from Pages.Helm.ReleasesPage import ReleasesPage
 
 # Custom Resource pages
 from Pages.CustomResources.DefinitionsPage import DefinitionsPage
@@ -121,9 +121,9 @@ PAGE_CONFIG = {
     'Cluster Role Bindings': ClusterRoleBindingsPage,
     'Role Bindings': RoleBindingsPage,
 
-    # Helm pages
-    'Charts': ChartsPage,
-    'Releases': ReleasesPage,
+    # # Helm pages
+    # 'Charts': ChartsPage,
+    # 'Releases': ReleasesPage,
 
     # Custom Resource pages
     'Definitions': DefinitionsPage,
@@ -144,7 +144,7 @@ DROPDOWN_MENUS = {
     "Access Control": ["Service Accounts", "Cluster Roles", "Roles",
                        "Cluster Role Bindings", "Role Bindings"],
     "Custom Resources": ["Definitions"],
-    "Helm": ["Releases", "Charts"]
+    # "Helm": ["Releases", "Charts"]
 }
 
 # Cluster-scoped resources that don't have namespaces

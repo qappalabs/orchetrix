@@ -55,19 +55,7 @@ try:
     from utils.data_manager import get_data_manager
 
     logging.info("All modules imported successfully")
-
-    # Apply subprocess patch after other imports to avoid conflicts
-    try:
-        import sys
-        if not hasattr(sys, '_subprocess_patched'):
-            from subprocess_patch import *
-            sys._subprocess_patched = True
-            logging.info("Subprocess patch applied successfully")
-    except ImportError as e:
-        logging.warning(f"Subprocess patch not available: {e}")
-    except Exception as e:
-        logging.warning(f"Failed to apply subprocess patch: {e}")
-
+    
 except ImportError as e:
     logging.critical(f"Failed to import application modules: {e}")
     raise
