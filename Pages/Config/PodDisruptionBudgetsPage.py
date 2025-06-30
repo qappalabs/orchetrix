@@ -3,7 +3,7 @@ Dynamic implementation of the PodDisruptionBudgets page with live Kubernetes dat
 """
 
 from PyQt6.QtWidgets import QHeaderView, QPushButton
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor
 
 from base_components.base_components import SortableTableWidgetItem
@@ -77,18 +77,41 @@ class PodDisruptionBudgetsPage(BaseResourcePage):
                         break
     
     def configure_columns(self):
-        """Configure column widths and behaviors"""
-        # Column 0: Checkbox (fixed width) - already set in base class
+        """Configure column widths for full screen utilization"""
+        if not self.table:
+            return
         
-        # Configure stretch columns
-        stretch_columns = [1, 2, 3, 4, 5, 6, 7]
-        for col in stretch_columns:
-            self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
+        header = self.table.horizontalHeader()
         
-        # Fixed width columns
-        self.table.horizontalHeader().setSectionResizeMode(8, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(8, 40)
-    
+        # Column specifications with optimized default widths
+        column_specs = [
+            (0, 40, "fixed"),        # Checkbox
+            (1, 140, "interactive"), # Name
+            (2, 90, "interactive"),  # Namespace
+            (3, 80, "interactive"),  # Min Available
+            (4, 80, "interactive"),  # Max UnAvailable
+            (5, 60, "interactive"),  # Current Healthy
+            (6, 60, "interactive"),  # Desired Healthy
+            (7, 80, "stretch"),      # Age - stretch to fill remaining space
+            (8, 40, "fixed")        # Actions
+        ]
+        
+        # Apply column configuration
+        for col_index, default_width, resize_type in column_specs:
+            if col_index < self.table.columnCount():
+                if resize_type == "fixed":
+                    header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Fixed)
+                    self.table.setColumnWidth(col_index, default_width)
+                elif resize_type == "interactive":
+                    header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Interactive)
+                    self.table.setColumnWidth(col_index, default_width)
+                elif resize_type == "stretch":
+                    header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Stretch)
+                    self.table.setColumnWidth(col_index, default_width)
+        
+        # Ensure full width utilization after configuration
+        QTimer.singleShot(100, self._ensure_full_width_utilization)
+
     def populate_resource_row(self, row, resource):
         """
         Populate a single row with PodDisruptionBudget data extracted from raw_data
@@ -160,7 +183,7 @@ class PodDisruptionBudgetsPage(BaseResourcePage):
                 item = SortableTableWidgetItem(value)
             
             # Set text alignment
-            if col == 0:  # Name column
+            if col in  (1, 2, 3, 4, 5, 6):  # Name column
                 item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             else:
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)

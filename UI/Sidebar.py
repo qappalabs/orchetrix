@@ -1,6 +1,6 @@
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QToolButton, QLabel, 
-                            QGraphicsDropShadowEffect, QMenu, QToolTip, QSizePolicy,
-                            QFrame, QLayout)
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QToolButton, QLabel,
+                             QGraphicsDropShadowEffect, QMenu, QToolTip, QSizePolicy,
+                             QFrame, QLayout)
 from PyQt6.QtCore import Qt, QSize, QPropertyAnimation, QEasingCurve, QEvent, QTimer, QPoint, QRect
 from PyQt6.QtGui import QIcon, QFont, QColor, QAction, QPixmap
 
@@ -13,10 +13,10 @@ class NavMenuDropdown(QMenu):
         super().__init__(parent)
         # Simplified window flags to avoid Windows layered window issues
         self.setWindowFlags(Qt.WindowType.Popup)
-        
+
         # Remove problematic attributes that cause Windows layered window errors
         # self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        
+
         self.setStyleSheet(AppStyles.NAV_MENU_DROPDOWN_STYLE)
 
         # Only add shadow effect on non-Windows platforms or disable it entirely
@@ -46,10 +46,10 @@ class SidebarToggleButton(QToolButton):
             from UI.Icons import resource_path  # Import the resource_path function
             back_icon_path = resource_path("icons/back.svg")
             forward_icon_path = resource_path("icons/forward.svg")
-            
+
             self.expanded_icon = QIcon(back_icon_path)
             self.collapsed_icon = QIcon(forward_icon_path)
-            
+
             # Check if icons loaded successfully
             if self.expanded_icon.isNull() or self.collapsed_icon.isNull():
                 # Fallback to text-based icons
@@ -60,7 +60,7 @@ class SidebarToggleButton(QToolButton):
             # Fallback to text-based icons
             self.expanded_icon = None
             self.collapsed_icon = None
-        
+
         # Set the initial icon
         self.update_icon()
         self.setIconSize(QSize(24, 24))
@@ -241,9 +241,12 @@ class NavIconButton(QToolButton):
             self.setIcon(QIcon())
             self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
 
-        # Set tooltip - include coming soon message if applicable
+        # Set tooltip - include under development or coming soon message if applicable
         if self.coming_soon:
-            self.setToolTip("**Coming Soon**\nThis feature will be available in a future update.")
+            if self.item_text == "Helm":
+                self.setToolTip("**Under Development**\nThis feature is currently being developed.")
+            else:
+                self.setToolTip("**Coming Soon**\nThis feature will be available in a future update.")
         else:
             self.setToolTip(self.item_text)
 
@@ -279,7 +282,7 @@ class NavIconButton(QToolButton):
         if not hasattr(self, 'loading_indicator'):
             self.loading_indicator = QLabel("⟳")
             self.loading_indicator.setStyleSheet("color: #00A0FF;")
-            
+
             # Add loading indicator to button layout without changing item_text
             if self.expanded:
                 # Find the layout
@@ -287,25 +290,25 @@ class NavIconButton(QToolButton):
                     if isinstance(child, QLayout):
                         child.addWidget(self.loading_indicator)
                         break
-        
+
         # Show the loading indicator
         if hasattr(self, 'loading_indicator'):
             self.loading_indicator.show()
-        
+
         # Start animation timer
         if not hasattr(self, 'loading_timer'):
             self.loading_timer = QTimer(self)
             self.loading_timer.timeout.connect(self._update_loading_animation)
             self.loading_animation_step = 0
             self.loading_symbols = ["⟳", "⟲", "⟳", "⟲"]
-        
+
         self.loading_timer.start(200)  # Update every 200ms
 
     def hide_loading_state(self):
         """Hide the loading indicator"""
         if hasattr(self, 'loading_timer') and self.loading_timer.isActive():
             self.loading_timer.stop()
-        
+
         if hasattr(self, 'loading_indicator'):
             self.loading_indicator.hide()
 
@@ -313,7 +316,7 @@ class NavIconButton(QToolButton):
         """Update the loading animation symbol"""
         if not hasattr(self, 'loading_indicator'):
             return
-            
+
         # Update the loading symbol
         symbol = self.loading_symbols[self.loading_animation_step % len(self.loading_symbols)]
         self.loading_indicator.setText(symbol)
@@ -332,10 +335,10 @@ class NavIconButton(QToolButton):
             if self.dropdown_menu:
                 self.dropdown_menu.deleteLater()
                 self.dropdown_menu = None
-            
+
             # Clear previous connections
             self._clear_dropdown_connections()
-            
+
             self.dropdown_menu = NavMenuDropdown(self.parent_window)
 
             title_action = QAction(f"{self.icon_text} {self.item_text}", self)
@@ -371,6 +374,7 @@ class NavIconButton(QToolButton):
                 action = self.dropdown_menu.addAction(item)
                 action.triggered.connect(lambda checked=False, item_name=item:
                                          self.parent_window.handle_dropdown_selection(item_name))
+
         except Exception as e:
             logging.error(f"Error setting up dropdown for {self.item_text}: {e}")
             self.dropdown_menu = None
@@ -388,30 +392,30 @@ class NavIconButton(QToolButton):
         """Show dropdown menu with improved error handling"""
         if not self.has_dropdown or not self.dropdown_menu:
             return
-            
+
         try:
             self.dropdown_open = True
             self.update_style()
-            
+
             # Calculate position
             if self.expanded:
                 pos = self.mapToGlobal(QPoint(self.width(), 0))
             else:
                 pos = self.mapToGlobal(QPoint(40, 0))
-            
+
             # Clear any existing aboutToHide connections for this dropdown
             try:
                 self.dropdown_menu.aboutToHide.disconnect()
             except TypeError:
                 pass  # No connections to disconnect
-            
+
             # Connect the aboutToHide signal
             connection = self.dropdown_menu.aboutToHide.connect(self.dropdown_closed)
             self._dropdown_connections.append(connection)
-            
+
             # Show the dropdown
             self.dropdown_menu.popup(pos)
-            
+
         except Exception as e:
             logging.error(f"Error showing dropdown for {self.item_text}: {e}")
             self.dropdown_open = False
@@ -458,10 +462,15 @@ class NavIconButton(QToolButton):
     def eventFilter(self, obj, event):
         if event.type() == QEvent.Type.Enter:
             if self.coming_soon:
-                # Show custom tooltip for coming soon features
+                # Show custom tooltip for coming soon/under development features
+                if self.item_text == "Helm":
+                    message = "**Under Development**\nThis feature is currently being developed."
+                else:
+                    message = "**Coming Soon**\nThis feature will be available in a future update."
+
                 QToolTip.showText(
                     self.mapToGlobal(QPoint(self.width() + 5, self.height() // 2)),
-                    "**Coming Soon**\nThis feature will be available in a future update.",
+                    message,
                     self,
                     QRect(),
                     3000
@@ -491,80 +500,80 @@ class Sidebar(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.parent_window = parent
-        
+
         # States and dimensions
         self.sidebar_expanded = True
         self.sidebar_width_expanded = 180
         self.sidebar_width_collapsed = 40
-        
+
         # Initialize the UI
         self.setup_ui()
-        
+
     def setup_ui(self):
         # Main container layout
         main_layout = QHBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
-        
+
         # Create the main sidebar content widget
         self.content_widget = QWidget()
         self.content_widget.setObjectName("sidebar_content")
-        
+
         # Set initial width based on expanded state
         if self.sidebar_expanded:
             self.content_widget.setFixedWidth(self.sidebar_width_expanded)
         else:
             self.content_widget.setFixedWidth(self.sidebar_width_collapsed)
-            
+
         # Apply basic styles
         self.content_widget.setStyleSheet(AppStyles.SIDEBAR_STYLE)
-        
+
         # Create the vertical layout for sidebar content
         self.sidebar_layout = QVBoxLayout(self.content_widget)
         self.sidebar_layout.setContentsMargins(0, 0, 0, 0)
         self.sidebar_layout.setSpacing(0)
-        
+
         # Create the border widget (a vertical line)
         self.border = QFrame()
         self.border.setFrameShape(QFrame.Shape.VLine)
         self.border.setFrameShadow(QFrame.Shadow.Plain)
         self.border.setLineWidth(1)
         self.border.setStyleSheet(AppStyles.SIDEBAR_BORDER_STYLE)
-        
+
         # Add the sidebar content and border to the main layout
         main_layout.addWidget(self.content_widget)
         main_layout.addWidget(self.border)
-        
+
         # Add toggle controls
         self.create_toggle_controls()
-        
+
         # Create navigation buttons
         self.create_nav_buttons()
-        
+
         # Add spacer
         self.sidebar_layout.addStretch(1)
-        
+
         # Create utility buttons at the bottom
         self.create_utility_buttons()
-    
+
     def create_toggle_controls(self):
         sidebar_controls = QWidget()
         sidebar_controls.setObjectName("sidebar_controls")
         sidebar_controls.setFixedHeight(40)
         sidebar_controls.setStyleSheet(AppStyles.SIDEBAR_CONTROLS_STYLE)
         controls_layout = QHBoxLayout(sidebar_controls)
-        
+
         # Set margins to position the toggle button correctly
         if self.sidebar_expanded:
             controls_layout.setContentsMargins(self.sidebar_width_expanded - 35, 5, 5, 5)
         else:
             controls_layout.setContentsMargins(5, 5, 5, 5)
-            
+
         # Add toggle button
         self.toggle_btn = SidebarToggleButton()
         self.toggle_btn.clicked.connect(self.toggle_sidebar)
         controls_layout.addWidget(self.toggle_btn)
-        
+
         self.sidebar_layout.addWidget(sidebar_controls)
 
     def create_nav_buttons(self):
@@ -578,7 +587,7 @@ class Sidebar(QWidget):
             ("config", "Config", False, True),
             ("network", "Network", False, True),
             ("storage", "Storage", False, True),
-            ("helm", "Helm", False, True),
+            ("helm", "Helm", False, True, True),
             ("access_control", "Access Control", False, True),
             ("custom_resources", "Custom Resources", False, True),
             ("namespaces", "Namespaces", False),
@@ -598,7 +607,7 @@ class Sidebar(QWidget):
             )
             self.nav_buttons.append(nav_btn)
             self.sidebar_layout.addWidget(nav_btn)
-    
+
     def toggle_complete_event(self):
         """Fire an event when sidebar toggle animation completes"""
         # This is a placeholder that will be connected to by the parent window
@@ -672,25 +681,25 @@ class Sidebar(QWidget):
         except TypeError:
             pass  # No connections to disconnect
 
-        chat_btn = NavIconButton(
-            "chat", "Chat", False, False,
+        ai_assis_btn = NavIconButton(
+            "ai_assis", "AI Assistant", False, False,
             self.parent_window, self.sidebar_expanded, coming_soon=True  # Add this parameter
         )
 
         self.nav_buttons.append(compare_btn)
         self.nav_buttons.append(terminal_btn)
-        self.nav_buttons.append(chat_btn)
+        self.nav_buttons.append(ai_assis_btn)
 
         self.sidebar_layout.addWidget(compare_btn)
         self.sidebar_layout.addWidget(terminal_btn)
-        self.sidebar_layout.addWidget(chat_btn)
+        self.sidebar_layout.addWidget(ai_assis_btn)
 
     def update_sidebar_state(self):
         # Create animation for smooth transition
         self.sidebar_animation = QPropertyAnimation(self.content_widget, b"minimumWidth")
         self.sidebar_animation.setDuration(200)
         self.sidebar_animation.setEasingCurve(QEasingCurve.Type.InOutQuad)
-        
+
         if self.sidebar_expanded:
             self.sidebar_animation.setStartValue(self.sidebar_width_collapsed)
             self.sidebar_animation.setEndValue(self.sidebar_width_expanded)
@@ -703,9 +712,9 @@ class Sidebar(QWidget):
             # Update toggle button position for collapsed state
             controls_layout = self.content_widget.findChild(QWidget, "sidebar_controls").layout()
             controls_layout.setContentsMargins(5, 5, 5, 5)
-            
+
         self.sidebar_animation.start()
-        
+
         # Update all nav buttons
         for btn in self.nav_buttons:
             btn.set_expanded(self.sidebar_expanded)

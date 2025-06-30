@@ -14,6 +14,7 @@ from PyQt6.QtCore import (
 from PyQt6.QtGui import QColor, QIcon
 from typing import Optional, Dict, Any
 import logging
+from UI.Icons import resource_path
 import subprocess
 import tempfile
 import os
@@ -29,7 +30,7 @@ from .detail_sections.detailpage_eventssection import DetailPageEventsSection
 
 from UI.Styles import AppStyles, AppColors
 from PyQt6.QtWidgets import QPushButton, QFrame
-from utils.helm_utils import ChartInstallDialog, install_helm_chart
+# from utils.helm_utils import ChartInstallDialog, install_helm_chart
 
 
 class DetailPageComponent(QWidget):
@@ -38,6 +39,7 @@ class DetailPageComponent(QWidget):
     detail_closed_signal = pyqtSignal()
     back_signal = pyqtSignal()
     resource_updated_signal = pyqtSignal(str, str, str)
+    refresh_main_page_signal = pyqtSignal(str, str, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -110,7 +112,7 @@ class DetailPageComponent(QWidget):
 
         # Back/Close button - FIXED: Added icon and proper styling
         self.back_button = QPushButton()
-        self.back_button.setIcon(QIcon("icons/Detailpage_Close.svg"))
+        self.back_button.setIcon(QIcon(resource_path("icons/Detailpage_Close.svg")))
         self.back_button.setIconSize(QSize(20, 20))
         self.back_button.setFixedSize(40, 40)
         self.back_button.setCursor(Qt.CursorShape.PointingHandCursor)  # Hand cursor on hover
@@ -411,63 +413,63 @@ class DetailPageComponent(QWidget):
             self.action_button.hide()
 
     def handle_action_button(self):
-        """Handle action button click"""
-        if self.resource_type == "chart":
-            self._install_chart()
-        elif self.resource_type == "helmrelease":
-            self._upgrade_chart()
+        # """Handle action button click"""
+        # if self.resource_type == "chart":
+        #     self._install_chart()
+        # elif self.resource_type == "helmrelease":
+        #     self._upgrade_chart()
+        pass
+    # def _install_chart(self):
+    #     """Handle chart installation (Helm operations kept as subprocess)"""
+    #     # Get chart info
+    #     chart_name = self.resource_name
+    #     repository = None
 
-    def _install_chart(self):
-        """Handle chart installation (Helm operations kept as subprocess)"""
-        # Get chart info
-        chart_name = self.resource_name
-        repository = None
+    #     # Create and show the installation dialog
+    #     dialog = ChartInstallDialog(chart_name, repository, self)
+    #     if dialog.exec() == QDialog.DialogCode.Accepted:
+    #         # Get installation options
+    #         options = dialog.get_values()
 
-        # Create and show the installation dialog
-        dialog = ChartInstallDialog(chart_name, repository, self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            # Get installation options
-            options = dialog.get_values()
+    #         # Install the chart
+    #         success, message = install_helm_chart(chart_name, repository, options, self)
 
-            # Install the chart
-            success, message = install_helm_chart(chart_name, repository, options, self)
+    #         # Show result message
+    #         if success:
+    #             QMessageBox.information(self, "Installation Successful", message)
 
-            # Show result message
-            if success:
-                QMessageBox.information(self, "Installation Successful", message)
+    #             # Emit signal to refresh the Releases page
+    #             self.resource_updated_signal.emit(
+    #                 "helmrelease",
+    #                 options["release_name"],
+    #                 options["namespace"]
+    #             )
+    #         else:
+    #             QMessageBox.critical(self, "Installation Failed", message)
 
-                # Emit signal to refresh the Releases page
-                self.resource_updated_signal.emit(
-                    "helmrelease",
-                    options["release_name"],
-                    options["namespace"]
-                )
-            else:
-                QMessageBox.critical(self, "Installation Failed", message)
+    # def _upgrade_chart(self):
+    #     """Handle chart upgrade (Helm operations kept as subprocess)"""
+    #     # Find the Releases page instance first
+    #     releases_page = None
+    #     for widget in QApplication.allWidgets():
+    #         if isinstance(widget, QWidget) and hasattr(widget, 'upgrade_release') and hasattr(widget, 'resource_type'):
+    #             if getattr(widget, 'resource_type', None) == "helmreleases":
+    #                 releases_page = widget
+    #                 break
 
-    def _upgrade_chart(self):
-        """Handle chart upgrade (Helm operations kept as subprocess)"""
-        # Find the Releases page instance first
-        releases_page = None
-        for widget in QApplication.allWidgets():
-            if isinstance(widget, QWidget) and hasattr(widget, 'upgrade_release') and hasattr(widget, 'resource_type'):
-                if getattr(widget, 'resource_type', None) == "helmreleases":
-                    releases_page = widget
-                    break
+    #     if not releases_page:
+    #         QMessageBox.information(
+    #             self,
+    #             "Upgrade",
+    #             "Could not find releases manager. Chart upgrade functionality is currently unavailable."
+    #         )
+    #         return
 
-        if not releases_page:
-            QMessageBox.information(
-                self,
-                "Upgrade",
-                "Could not find releases manager. Chart upgrade functionality is currently unavailable."
-            )
-            return
+    #     # Now call the upgrade_release method from the ReleasesPage
+    #     releases_page.upgrade_release(self.resource_name, self.resource_namespace)
 
-        # Now call the upgrade_release method from the ReleasesPage
-        releases_page.upgrade_release(self.resource_name, self.resource_namespace)
-
-        # After upgrading, reload the details
-        QTimer.singleShot(500, self.load_current_tab_data)
+    #     # After upgrading, reload the details
+    #     QTimer.singleShot(500, self.load_current_tab_data)
 
     def set_resource_for_all_sections(self, resource_type: str, resource_name: str, namespace: Optional[str]):
         """Set resource information for all sections"""
@@ -528,8 +530,24 @@ class DetailPageComponent(QWidget):
         logging.error(f"Error in {section_name}: {error_message}")
 
     def handle_section_data_loaded(self, section_name: str, data: Dict[str, Any]):
-        """Handle section data loaded"""
+        """Handle section data loaded - including refresh requests"""
         logging.debug(f"Data loaded for {section_name}")
+
+        # Check if this is a refresh request from YAML section
+        if isinstance(data, dict) and data.get('action') == 'refresh_main_page':
+            resource_type = data.get('resource_type')
+            resource_name = data.get('resource_name')
+            namespace = data.get('namespace')
+
+            if resource_type and resource_name:
+                # Emit signal to refresh main page
+                self.refresh_main_page_signal.emit(resource_type, resource_name, namespace or "")
+                logging.info(f"Requesting main page refresh for {resource_type}/{resource_name}")
+
+    def setup_refresh_connection(self):
+        """Setup connection for main page refresh"""
+    # This will be connected by the DetailManager to ClusterView
+    pass
 
     def update_global_loading_state(self):
         """Update global loading indicator based on section states"""

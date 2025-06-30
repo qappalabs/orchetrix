@@ -8,6 +8,8 @@ from PyQt6.QtGui import QColor, QPainter, QIcon, QMouseEvent, QFont, QPixmap # A
 from UI.Styles import AppColors, AppStyles, AppConstants
 from utils.kubernetes_client import get_kubernetes_client
 from utils.cluster_connector import get_cluster_connector
+import logging
+import webbrowser  # Added for opening URLs
 
 from math import sin, cos
 from UI.Icons import resource_path  # Add this import at the top of the file
@@ -155,12 +157,24 @@ class OrchestrixGUI(QMainWindow):
         self.kube_client = get_kubernetes_client()
         self.cluster_connector = get_cluster_connector()
 
+        try:
+            from utils.cluster_state_manager import get_cluster_state_manager
+            self.cluster_state_manager = get_cluster_state_manager()
+            logging.info("Cluster state manager initialized in HomePage")
+        except Exception as e:
+            logging.error(f"Failed to initialize cluster state manager in HomePage: {e}")
+            self.cluster_state_manager = None
+
+
         self.kube_client.clusters_loaded.connect(self.on_clusters_loaded)
         self.kube_client.error_occurred.connect(self.show_error_message)
 
         self.cluster_connector.connection_started.connect(self.on_cluster_connection_started)
         self.cluster_connector.connection_complete.connect(self.on_cluster_connection_complete)
-        self.cluster_connector.error_occurred.connect(self.show_error_message)
+        self.cluster_connector.error_occurred.connect(
+            lambda error_type, error_msg: self.show_error_message(error_msg)
+        )
+        # self.cluster_connector.error_occurred.connect(self.show_error_message)
         self.cluster_connector.metrics_data_loaded.connect(self.check_cluster_data_loaded)
         self.cluster_connector.issues_data_loaded.connect(self.check_cluster_data_loaded)
 
@@ -286,7 +300,63 @@ class OrchestrixGUI(QMainWindow):
         self.update_content_view(self.current_view)
 
     def show_error_message(self, error_message):
-        QMessageBox.critical(self, "Error", error_message)
+        """Display error messages with better formatting"""
+        try:
+            # Clean up the message
+            if not error_message:
+                error_message = "An unknown error occurred."
+            
+            error_message = str(error_message).strip()
+            
+            # Log for debugging
+            logging.error(f"Showing error dialog: {error_message}")
+            
+            # Create message box
+            msg_box = QMessageBox(self)
+            msg_box.setIcon(QMessageBox.Icon.Critical)
+            msg_box.setWindowTitle("Connection Error")
+            msg_box.setText(error_message)
+            
+            # Add helpful suggestions for Docker Desktop issues
+            if "docker-desktop" in error_message.lower() and "refused" in error_message.lower():
+                msg_box.setInformativeText(
+                    "💡 Try these solutions:\n"
+                    "• Start Docker Desktop\n"
+                    "• Enable Kubernetes in Docker Desktop settings\n"
+                    "• Wait for Kubernetes to initialize completely"
+                )
+            
+            # Style the dialog
+            msg_box.setStyleSheet("""
+                QMessageBox {
+                    background-color: #2d2d2d;
+                    color: #ffffff;
+                    font-size: 12px;
+                    min-width: 400px;
+                }
+                QMessageBox QLabel {
+                    color: #ffffff;
+                    padding: 10px;
+                }
+                QMessageBox QPushButton {
+                    background-color: #404040;
+                    color: #ffffff;
+                    border: 1px solid #555555;
+                    padding: 8px 15px;
+                    border-radius: 3px;
+                }
+                QMessageBox QPushButton:hover {
+                    background-color: #505050;
+                }
+            """)
+            
+            msg_box.exec()
+            
+        except Exception as e:
+            logging.error(f"Error showing dialog: {e}")
+            # Fallback
+            QMessageBox.critical(self, "Error", str(error_message))
+
 
     def update_content_view(self, view_type):
         self.current_view = view_type
@@ -366,7 +436,7 @@ class OrchestrixGUI(QMainWindow):
         if original_data and 'cluster_data' in original_data:
             pin_btn = QPushButton()
             pin_btn.setFixedSize(20, 20)
-            pin_icon_path = resource_path("icons/pin.png") if name not in self.pinned_items else resource_path("icons/unpin.png")
+            pin_icon_path = resource_path("icons/pin.svg") if name not in self.pinned_items else resource_path("icons/unpin.svg")
             pin_btn.setIcon(QIcon(pin_icon_path))
             pin_btn.setIconSize(QSize(16, 16))
             pin_btn.setStyleSheet("""
@@ -479,7 +549,7 @@ class OrchestrixGUI(QMainWindow):
         action_layout.setSpacing(0)
         action_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         menu_btn = QToolButton()
-        icon = QIcon("icons/Moreaction_Button.svg")
+        icon = QIcon(resource_path("icons/Moreaction_Button.svg"))
         menu_btn.setIcon(icon)
         menu_btn.setIconSize(QSize(AppConstants.SIZES["ICON_SIZE"], AppConstants.SIZES["ICON_SIZE"]))
         menu_btn.setText("")
@@ -544,81 +614,95 @@ class OrchestrixGUI(QMainWindow):
         """
         Creates a colored version of an icon while preserving its shape and details.
         """
-        # Load the original icon
-        original_pixmap = QPixmap(resource_path(icon_path))
-        if original_pixmap.isNull():
-            return QPixmap()  # Return empty pixmap if loading fails
+        try:
+            # Load the original icon
+            original_pixmap = QPixmap(resource_path(icon_path))
+            if original_pixmap.isNull():
+                return QPixmap()  # Return empty pixmap if loading fails
 
-        # Scale the icon to the desired size
-        scaled_pixmap = original_pixmap.scaled(
-            size, size,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation
-        )
+            # Scale the icon to the desired size
+            scaled_pixmap = original_pixmap.scaled(
+                size, size,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            )
 
-        # Create a new pixmap with the same size and transparency
-        colored_pixmap = QPixmap(scaled_pixmap.size())
-        colored_pixmap.fill(Qt.GlobalColor.transparent)
+            # Create a new pixmap with the same size and transparency
+            colored_pixmap = QPixmap(scaled_pixmap.size())
+            colored_pixmap.fill(Qt.GlobalColor.transparent)
 
-        # Use QPainter to draw the colored version
-        painter = QPainter(colored_pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+            # Use QPainter to draw the colored version
+            painter = QPainter(colored_pixmap)
+            try:
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
 
-        # Draw the original icon
-        painter.drawPixmap(0, 0, scaled_pixmap)
+                # Draw the original icon
+                painter.drawPixmap(0, 0, scaled_pixmap)
 
-        # Apply color overlay using composition mode
-        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
-        painter.fillRect(colored_pixmap.rect(), color)
-
-        painter.end()
-        return colored_pixmap
+                # Apply color overlay using composition mode
+                painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+                painter.fillRect(colored_pixmap.rect(), color)
+            finally:
+                painter.end()
+            
+            return colored_pixmap
+        except Exception as e:
+            print(f"Error creating colored icon for {icon_path}: {e}")
+            return QPixmap()
 
     def create_colored_icon_alternative(self, icon_path: str, color: QColor, size: int) -> QPixmap:
         """
         Alternative method using QIcon for better SVG handling.
         """
-        # Create QIcon from the SVG file
-        icon = QIcon(resource_path(icon_path))
-        if icon.isNull():
+        try:
+            # Create QIcon from the SVG file
+            icon = QIcon(resource_path(icon_path))
+            if icon.isNull():
+                return QPixmap()
+
+            # Get pixmap from icon
+            original_pixmap = icon.pixmap(QSize(size, size))
+
+            # Create colored version
+            colored_pixmap = QPixmap(original_pixmap.size())
+            colored_pixmap.fill(Qt.GlobalColor.transparent)
+
+            painter = QPainter(colored_pixmap)
+            try:
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+                # Draw the icon
+                painter.drawPixmap(0, 0, original_pixmap)
+
+                # Apply color tint
+                painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+                painter.fillRect(colored_pixmap.rect(), color)
+            finally:
+                painter.end()
+            
+            return colored_pixmap
+        except Exception as e:
+            print(f"Error creating colored icon alternative for {icon_path}: {e}")
             return QPixmap()
-
-        # Get pixmap from icon
-        original_pixmap = icon.pixmap(QSize(size, size))
-
-        # Create colored version
-        colored_pixmap = QPixmap(original_pixmap.size())
-        colored_pixmap.fill(Qt.GlobalColor.transparent)
-
-        painter = QPainter(colored_pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        # Draw the icon
-        painter.drawPixmap(0, 0, original_pixmap)
-
-        # Apply color tint
-        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
-        painter.fillRect(colored_pixmap.rect(), color)
-
-        painter.end()
-        return colored_pixmap
 
     def init_data_model(self):
         self.all_data = {
             "Browse All": [
-                {"name": "Welcome Page", "kind": "General", "source": "app", "label": "",
-                 "status": "active", "badge_color": None, "action": self.navigate_to_welcome},
                 {"name": "Settings", "kind": "General", "source": "app", "label": "",
                  "status": "active", "badge_color": None, "action": self.navigate_to_preferences},
                 {"name": "OxW Orchetrix Website", "kind": "Weblinks", "source": "local", "label": "",
-                 "status": "available", "badge_color": "#f0ad4e", "action": self.open_web_link},
+                 "status": "available", "badge_color": "#f0ad4e", "action": self.open_web_link, 
+                 "url": "https://www.orchetrix.com/home"},
                 {"name": "OxD Orchetrix Documentation", "kind": "Weblinks", "source": "local", "label": "",
-                 "status": "available", "badge_color": "#ecd06f", "action": self.open_web_link},
+                 "status": "available", "badge_color": "#ecd06f", "action": self.open_web_link,
+                 "url": "https://www.orchetrix.com/documentation"},
                 {"name": "OxOB Orchetrix Official blog", "kind": "Weblinks", "source": "local", "label": "",
-                 "status": "available", "badge_color": "#d9534f", "action": self.open_web_link},
+                 "status": "available", "badge_color": "#d9534f", "action": self.open_web_link,
+                 "url": "https://www.orchetrix.com/blogs"},
                 {"name": "KD Kubernetes Document", "kind": "Weblinks", "source": "local", "label": "",
-                 "status": "available", "badge_color": "#5cb85c", "action": self.open_web_link}
+                 "status": "available", "badge_color": "#5cb85c", "action": self.open_web_link,
+                 "url": "https://kubernetes.io/docs/home/"}
             ]
         }
         self.update_filtered_views()
@@ -654,11 +738,7 @@ class OrchestrixGUI(QMainWindow):
         font = QFont("Segoe UI", 13)
         font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
         tree_widget.setFont(font)
-        tree_widget.setStyleSheet(AppStyles.TREE_WIDGET_STYLE + """
-            QTreeWidget::item {
-                cursor: pointer;
-            }
-        """)
+        tree_widget.setStyleSheet(AppStyles.TREE_WIDGET_STYLE)
         tree_widget.setIconSize(QSize(20, 20))
         tree_widget.setIndentation(0)
         tree_widget.setAlternatingRowColors(False)
@@ -692,18 +772,96 @@ class OrchestrixGUI(QMainWindow):
 
     def handle_disconnect_item(self, item):
         original_name = item.data(0, Qt.ItemDataRole.UserRole)
+        
+        logging.info(f"Disconnecting cluster: {original_name}")
+        
+        # Update UI status first
         for view_type in self.all_data:
             for data_item in self.all_data[view_type]:
-                if data_item["name"] == original_name: data_item["status"] = "disconnect"
-        if hasattr(self.cluster_connector, 'data_cache') and original_name in self.cluster_connector.data_cache:
-            del self.cluster_connector.data_cache[original_name]
-        if hasattr(self.cluster_connector, 'loading_complete') and original_name in self.cluster_connector.loading_complete:
-            del self.cluster_connector.loading_complete[original_name]
-        if hasattr(self.cluster_connector, 'kube_client') and self.cluster_connector.kube_client.current_cluster == original_name:
-            self.cluster_connector.stop_polling()
-        if hasattr(self.cluster_connector, 'disconnect_cluster'):
-            self.cluster_connector.disconnect_cluster(original_name)
+                if data_item["name"] == original_name: 
+                    data_item["status"] = "disconnect"
+                    logging.info(f"Updated UI status for {original_name} to disconnect")
+        
+        # Clean up cluster connector data
+        try:
+            if hasattr(self.cluster_connector, 'data_cache') and original_name in self.cluster_connector.data_cache:
+                del self.cluster_connector.data_cache[original_name]
+                logging.info(f"Cleared data cache for {original_name}")
+                
+            if hasattr(self.cluster_connector, 'loading_complete') and original_name in self.cluster_connector.loading_complete:
+                del self.cluster_connector.loading_complete[original_name]
+                logging.info(f"Cleared loading complete flag for {original_name}")
+                
+            if (hasattr(self.cluster_connector, 'kube_client') and 
+                hasattr(self.cluster_connector.kube_client, 'current_cluster') and
+                self.cluster_connector.kube_client.current_cluster == original_name):
+                self.cluster_connector.stop_polling()
+                # Also reset the current cluster in kube_client
+                self.cluster_connector.kube_client.current_cluster = None
+                logging.info(f"Stopped polling and reset current cluster for {original_name}")
+                
+            if hasattr(self.cluster_connector, 'disconnect_cluster'):
+                self.cluster_connector.disconnect_cluster(original_name)
+                logging.info(f"Called cluster_connector.disconnect_cluster for {original_name}")
+        except Exception as e:
+            logging.error(f"Error during cluster connector cleanup for {original_name}: {e}")
+        
+        # IMPORTANT: Notify the cluster state manager about the disconnection
+        try:
+            if self.cluster_state_manager:
+                self.cluster_state_manager.disconnect_cluster(original_name)
+                logging.info(f"Notified cluster state manager about disconnect: {original_name}")
+            else:
+                logging.warning("Cluster state manager not available for disconnect notification")
+        except Exception as e:
+            logging.error(f"Error notifying cluster state manager about disconnect: {e}")
+        
+        # Remove from connecting clusters set if present
+        self.connecting_clusters.discard(original_name)
+        
+        # Reset waiting for cluster load if it matches
+        if self.waiting_for_cluster_load == original_name:
+            self.waiting_for_cluster_load = None
+            logging.info(f"Reset waiting_for_cluster_load for {original_name}")
+        
+        # Update the view
         self.update_content_view(self.current_view)
+        logging.info(f"Cluster disconnect completed for: {original_name}")
+
+    def disconnect_cluster(self, cluster_name):
+        """Disconnect from a specific cluster"""
+        try:
+            logging.info(f"Disconnecting from cluster: {cluster_name}")
+            
+            # Stop any workers for this cluster
+            self._stop_workers_for_cluster(cluster_name)
+            
+            # Update connection state
+            self.connection_states[cluster_name] = "disconnected"
+            
+            # Clean up cached data
+            if cluster_name in self.data_cache:
+                del self.data_cache[cluster_name]
+                logging.info(f"Cleared data cache for {cluster_name}")
+            
+            if cluster_name in self.loading_complete:
+                del self.loading_complete[cluster_name]
+                logging.info(f"Cleared loading complete flag for {cluster_name}")
+            
+            # Stop polling and reset current cluster if this is the current cluster
+            if (hasattr(self.kube_client, 'current_cluster') and 
+                self.kube_client.current_cluster == cluster_name):
+                self.stop_polling()
+                self.kube_client.current_cluster = None
+                logging.info(f"Stopped polling and reset current cluster for {cluster_name}")
+                
+            # Reset current cluster in the connector itself
+            if hasattr(self, 'current_cluster') and self.current_cluster == cluster_name:
+                self.current_cluster = None
+                logging.info(f"Reset cluster connector current_cluster for {cluster_name}")
+                
+        except Exception as e:
+            logging.error(f"Error disconnecting from cluster {cluster_name}: {e}")
 
     def handle_delete_item(self, item):
         original_name = item.data(0, Qt.ItemDataRole.UserRole)
@@ -733,7 +891,43 @@ class OrchestrixGUI(QMainWindow):
         self.update_content_view(self.current_view)
         QTimer.singleShot(100, lambda: self.cluster_connector.connect_to_cluster(cluster_name))
 
-    def open_web_link(self, item): pass
+    def open_web_link(self, item):
+        """Open web links in the default browser"""
+        try:
+            # Get the URL from the item data
+            url = item.get("url")
+            if url:
+                logging.info(f"Opening URL: {url}")
+                webbrowser.open(url)
+            else:
+                # Fallback mapping for backward compatibility
+                url_mapping = {
+                    "OxW Orchetrix Website": "https://www.orchetrix.com/home",
+                    "OxD Orchetrix Documentation": "https://www.orchetrix.com/documentation", 
+                    "OxOB Orchetrix Official blog": "https://www.orchetrix.com/blogs",
+                    "KD Kubernetes Document": "https://kubernetes.io/docs/home/"
+                }
+                
+                item_name = item.get("name", "")
+                if item_name in url_mapping:
+                    url = url_mapping[item_name]
+                    logging.info(f"Opening URL from mapping: {url}")
+                    webbrowser.open(url)
+                else:
+                    logging.warning(f"No URL found for web link: {item_name}")
+                    # Show a message to the user
+                    QMessageBox.warning(
+                        self, 
+                        "URL Not Found", 
+                        f"No URL configured for '{item_name}'"
+                    )
+        except Exception as e:
+            logging.error(f"Error opening web link: {e}")
+            QMessageBox.critical(
+                self, 
+                "Error Opening Link", 
+                f"Failed to open web link: {str(e)}"
+            )
 
     def setup_ui(self):
         self.central_widget = QWidget()
@@ -879,6 +1073,6 @@ class OrchestrixGUI(QMainWindow):
                         if isinstance(child_widget, QPushButton) and hasattr(child_widget, 'setIcon'): # Check if it's the pin button
                             # Check the actual name again to be super sure it's a pin button for this item
                             # This logic assumes the pin button is a direct child and identifiable
-                            current_pin_icon_path = resource_path("icons/pin.png") if name not in self.pinned_items else resource_path("icons/unpin.png")
+                            current_pin_icon_path = resource_path("icons/pin.svg") if name not in self.pinned_items else resource_path("icons/unpin.svg")
                             child_widget.setIcon(QIcon(current_pin_icon_path))
                             break # Found and updated the pin button
