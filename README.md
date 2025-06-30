@@ -103,6 +103,14 @@ Full usage guides, feature explanations, and setup tutorials for **Orchetrix (OX
 ### Explore the docs now →
 **[OX Documentation](https://www.orchetrix.com/documentation)**
 
+## Troubleshooting & Dependencies
+If you encounter any issues or module-related errors while installing or running **Orchetrix (OX)**, ensure all required dependencies are properly installed.
+
+You can use the provided `requirements.txt` file to install them:
+
+```bash
+pip install -r requirements.txt
+
 ## Usage
 
 Once you have installed and launched **Orchetrix (OX)**, follow these steps to start managing your Kubernetes clusters:
@@ -153,25 +161,11 @@ Here are some upcoming features and improvements planned for Orchetrix (OX):
 - **Updated UI:**  
   A refreshed, more modern and user-centric interface that improves navigation, responsiveness, and usability, optimized for both new users and power users alike.
 
-## Contributing
-
-We welcome contributions from the community. Whether it is bug fixes, feature enhancements, or documentation improvements, your input is valued.
-
-To contribute:
-
-- Fork the repository
-- Create your feature branch (**`git checkout -b feature/your-feature`**)
-- Commit your changes (**`git commit -m 'Add some feature'`**)
-- Push to the branch (**`git push origin feature/your-feature`**)
-- Open a pull request
-
-For detailed contribution guidelines, please refer to **[Contribute to OX](https://www.orchetrix.com/documentation/contribute-to-ox)**
-
 ## Feedback and Support
 
 We are here to help. If you have any questions, suggestions, or run into issues:
 
-- Email us at: **support@orchetrix.com**
+- Email us at: **management@qappalabs.com**
 - Submit issues or feature requests via [GitHub Issues](https://github.com/qappalabs/orchetrix/issues)
 
 We also welcome feedback on features you would like to see in future releases.
