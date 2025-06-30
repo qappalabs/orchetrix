@@ -30,7 +30,7 @@ from .detail_sections.detailpage_eventssection import DetailPageEventsSection
 
 from UI.Styles import AppStyles, AppColors
 from PyQt6.QtWidgets import QPushButton, QFrame
-from utils.helm_utils import ChartInstallDialog, install_helm_chart
+# from utils.helm_utils import ChartInstallDialog, install_helm_chart
 
 
 class DetailPageComponent(QWidget):
@@ -413,63 +413,63 @@ class DetailPageComponent(QWidget):
             self.action_button.hide()
 
     def handle_action_button(self):
-        """Handle action button click"""
-        if self.resource_type == "chart":
-            self._install_chart()
-        elif self.resource_type == "helmrelease":
-            self._upgrade_chart()
+        # """Handle action button click"""
+        # if self.resource_type == "chart":
+        #     self._install_chart()
+        # elif self.resource_type == "helmrelease":
+        #     self._upgrade_chart()
+        pass
+    # def _install_chart(self):
+    #     """Handle chart installation (Helm operations kept as subprocess)"""
+    #     # Get chart info
+    #     chart_name = self.resource_name
+    #     repository = None
 
-    def _install_chart(self):
-        """Handle chart installation (Helm operations kept as subprocess)"""
-        # Get chart info
-        chart_name = self.resource_name
-        repository = None
+    #     # Create and show the installation dialog
+    #     dialog = ChartInstallDialog(chart_name, repository, self)
+    #     if dialog.exec() == QDialog.DialogCode.Accepted:
+    #         # Get installation options
+    #         options = dialog.get_values()
 
-        # Create and show the installation dialog
-        dialog = ChartInstallDialog(chart_name, repository, self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            # Get installation options
-            options = dialog.get_values()
+    #         # Install the chart
+    #         success, message = install_helm_chart(chart_name, repository, options, self)
 
-            # Install the chart
-            success, message = install_helm_chart(chart_name, repository, options, self)
+    #         # Show result message
+    #         if success:
+    #             QMessageBox.information(self, "Installation Successful", message)
 
-            # Show result message
-            if success:
-                QMessageBox.information(self, "Installation Successful", message)
+    #             # Emit signal to refresh the Releases page
+    #             self.resource_updated_signal.emit(
+    #                 "helmrelease",
+    #                 options["release_name"],
+    #                 options["namespace"]
+    #             )
+    #         else:
+    #             QMessageBox.critical(self, "Installation Failed", message)
 
-                # Emit signal to refresh the Releases page
-                self.resource_updated_signal.emit(
-                    "helmrelease",
-                    options["release_name"],
-                    options["namespace"]
-                )
-            else:
-                QMessageBox.critical(self, "Installation Failed", message)
+    # def _upgrade_chart(self):
+    #     """Handle chart upgrade (Helm operations kept as subprocess)"""
+    #     # Find the Releases page instance first
+    #     releases_page = None
+    #     for widget in QApplication.allWidgets():
+    #         if isinstance(widget, QWidget) and hasattr(widget, 'upgrade_release') and hasattr(widget, 'resource_type'):
+    #             if getattr(widget, 'resource_type', None) == "helmreleases":
+    #                 releases_page = widget
+    #                 break
 
-    def _upgrade_chart(self):
-        """Handle chart upgrade (Helm operations kept as subprocess)"""
-        # Find the Releases page instance first
-        releases_page = None
-        for widget in QApplication.allWidgets():
-            if isinstance(widget, QWidget) and hasattr(widget, 'upgrade_release') and hasattr(widget, 'resource_type'):
-                if getattr(widget, 'resource_type', None) == "helmreleases":
-                    releases_page = widget
-                    break
+    #     if not releases_page:
+    #         QMessageBox.information(
+    #             self,
+    #             "Upgrade",
+    #             "Could not find releases manager. Chart upgrade functionality is currently unavailable."
+    #         )
+    #         return
 
-        if not releases_page:
-            QMessageBox.information(
-                self,
-                "Upgrade",
-                "Could not find releases manager. Chart upgrade functionality is currently unavailable."
-            )
-            return
+    #     # Now call the upgrade_release method from the ReleasesPage
+    #     releases_page.upgrade_release(self.resource_name, self.resource_namespace)
 
-        # Now call the upgrade_release method from the ReleasesPage
-        releases_page.upgrade_release(self.resource_name, self.resource_namespace)
-
-        # After upgrading, reload the details
-        QTimer.singleShot(500, self.load_current_tab_data)
+    #     # After upgrading, reload the details
+    #     QTimer.singleShot(500, self.load_current_tab_data)
 
     def set_resource_for_all_sections(self, resource_type: str, resource_name: str, namespace: Optional[str]):
         """Set resource information for all sections"""

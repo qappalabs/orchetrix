@@ -9,6 +9,7 @@ from UI.Styles import AppColors, AppStyles, AppConstants
 from utils.kubernetes_client import get_kubernetes_client
 from utils.cluster_connector import get_cluster_connector
 import logging
+import webbrowser  # Added for opening URLs
 
 from math import sin, cos
 from UI.Icons import resource_path  # Add this import at the top of the file
@@ -613,81 +614,95 @@ class OrchestrixGUI(QMainWindow):
         """
         Creates a colored version of an icon while preserving its shape and details.
         """
-        # Load the original icon
-        original_pixmap = QPixmap(resource_path(icon_path))
-        if original_pixmap.isNull():
-            return QPixmap()  # Return empty pixmap if loading fails
+        try:
+            # Load the original icon
+            original_pixmap = QPixmap(resource_path(icon_path))
+            if original_pixmap.isNull():
+                return QPixmap()  # Return empty pixmap if loading fails
 
-        # Scale the icon to the desired size
-        scaled_pixmap = original_pixmap.scaled(
-            size, size,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation
-        )
+            # Scale the icon to the desired size
+            scaled_pixmap = original_pixmap.scaled(
+                size, size,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            )
 
-        # Create a new pixmap with the same size and transparency
-        colored_pixmap = QPixmap(scaled_pixmap.size())
-        colored_pixmap.fill(Qt.GlobalColor.transparent)
+            # Create a new pixmap with the same size and transparency
+            colored_pixmap = QPixmap(scaled_pixmap.size())
+            colored_pixmap.fill(Qt.GlobalColor.transparent)
 
-        # Use QPainter to draw the colored version
-        painter = QPainter(colored_pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+            # Use QPainter to draw the colored version
+            painter = QPainter(colored_pixmap)
+            try:
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
 
-        # Draw the original icon
-        painter.drawPixmap(0, 0, scaled_pixmap)
+                # Draw the original icon
+                painter.drawPixmap(0, 0, scaled_pixmap)
 
-        # Apply color overlay using composition mode
-        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
-        painter.fillRect(colored_pixmap.rect(), color)
-
-        painter.end()
-        return colored_pixmap
+                # Apply color overlay using composition mode
+                painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+                painter.fillRect(colored_pixmap.rect(), color)
+            finally:
+                painter.end()
+            
+            return colored_pixmap
+        except Exception as e:
+            print(f"Error creating colored icon for {icon_path}: {e}")
+            return QPixmap()
 
     def create_colored_icon_alternative(self, icon_path: str, color: QColor, size: int) -> QPixmap:
         """
         Alternative method using QIcon for better SVG handling.
         """
-        # Create QIcon from the SVG file
-        icon = QIcon(resource_path(icon_path))
-        if icon.isNull():
+        try:
+            # Create QIcon from the SVG file
+            icon = QIcon(resource_path(icon_path))
+            if icon.isNull():
+                return QPixmap()
+
+            # Get pixmap from icon
+            original_pixmap = icon.pixmap(QSize(size, size))
+
+            # Create colored version
+            colored_pixmap = QPixmap(original_pixmap.size())
+            colored_pixmap.fill(Qt.GlobalColor.transparent)
+
+            painter = QPainter(colored_pixmap)
+            try:
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+                # Draw the icon
+                painter.drawPixmap(0, 0, original_pixmap)
+
+                # Apply color tint
+                painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+                painter.fillRect(colored_pixmap.rect(), color)
+            finally:
+                painter.end()
+            
+            return colored_pixmap
+        except Exception as e:
+            print(f"Error creating colored icon alternative for {icon_path}: {e}")
             return QPixmap()
-
-        # Get pixmap from icon
-        original_pixmap = icon.pixmap(QSize(size, size))
-
-        # Create colored version
-        colored_pixmap = QPixmap(original_pixmap.size())
-        colored_pixmap.fill(Qt.GlobalColor.transparent)
-
-        painter = QPainter(colored_pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        # Draw the icon
-        painter.drawPixmap(0, 0, original_pixmap)
-
-        # Apply color tint
-        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
-        painter.fillRect(colored_pixmap.rect(), color)
-
-        painter.end()
-        return colored_pixmap
 
     def init_data_model(self):
         self.all_data = {
             "Browse All": [
-                {"name": "Welcome Page", "kind": "General", "source": "app", "label": "",
-                 "status": "active", "badge_color": None, "action": self.navigate_to_welcome},
                 {"name": "Settings", "kind": "General", "source": "app", "label": "",
                  "status": "active", "badge_color": None, "action": self.navigate_to_preferences},
                 {"name": "OxW Orchetrix Website", "kind": "Weblinks", "source": "local", "label": "",
-                 "status": "available", "badge_color": "#f0ad4e", "action": self.open_web_link},
+                 "status": "available", "badge_color": "#f0ad4e", "action": self.open_web_link, 
+                 "url": "https://www.orchetrix.com/home"},
                 {"name": "OxD Orchetrix Documentation", "kind": "Weblinks", "source": "local", "label": "",
-                 "status": "available", "badge_color": "#ecd06f", "action": self.open_web_link},
+                 "status": "available", "badge_color": "#ecd06f", "action": self.open_web_link,
+                 "url": "https://www.orchetrix.com/documentation"},
                 {"name": "OxOB Orchetrix Official blog", "kind": "Weblinks", "source": "local", "label": "",
-                 "status": "available", "badge_color": "#d9534f", "action": self.open_web_link},
+                 "status": "available", "badge_color": "#d9534f", "action": self.open_web_link,
+                 "url": "https://www.orchetrix.com/blogs"},
                 {"name": "KD Kubernetes Document", "kind": "Weblinks", "source": "local", "label": "",
-                 "status": "available", "badge_color": "#5cb85c", "action": self.open_web_link}
+                 "status": "available", "badge_color": "#5cb85c", "action": self.open_web_link,
+                 "url": "https://kubernetes.io/docs/home/"}
             ]
         }
         self.update_filtered_views()
@@ -876,7 +891,43 @@ class OrchestrixGUI(QMainWindow):
         self.update_content_view(self.current_view)
         QTimer.singleShot(100, lambda: self.cluster_connector.connect_to_cluster(cluster_name))
 
-    def open_web_link(self, item): pass
+    def open_web_link(self, item):
+        """Open web links in the default browser"""
+        try:
+            # Get the URL from the item data
+            url = item.get("url")
+            if url:
+                logging.info(f"Opening URL: {url}")
+                webbrowser.open(url)
+            else:
+                # Fallback mapping for backward compatibility
+                url_mapping = {
+                    "OxW Orchetrix Website": "https://www.orchetrix.com/home",
+                    "OxD Orchetrix Documentation": "https://www.orchetrix.com/documentation", 
+                    "OxOB Orchetrix Official blog": "https://www.orchetrix.com/blogs",
+                    "KD Kubernetes Document": "https://kubernetes.io/docs/home/"
+                }
+                
+                item_name = item.get("name", "")
+                if item_name in url_mapping:
+                    url = url_mapping[item_name]
+                    logging.info(f"Opening URL from mapping: {url}")
+                    webbrowser.open(url)
+                else:
+                    logging.warning(f"No URL found for web link: {item_name}")
+                    # Show a message to the user
+                    QMessageBox.warning(
+                        self, 
+                        "URL Not Found", 
+                        f"No URL configured for '{item_name}'"
+                    )
+        except Exception as e:
+            logging.error(f"Error opening web link: {e}")
+            QMessageBox.critical(
+                self, 
+                "Error Opening Link", 
+                f"Failed to open web link: {str(e)}"
+            )
 
     def setup_ui(self):
         self.central_widget = QWidget()
