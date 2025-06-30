@@ -435,7 +435,7 @@ class OrchestrixGUI(QMainWindow):
         if original_data and 'cluster_data' in original_data:
             pin_btn = QPushButton()
             pin_btn.setFixedSize(20, 20)
-            pin_icon_path = resource_path("icons/pin.png") if name not in self.pinned_items else resource_path("icons/unpin.png")
+            pin_icon_path = resource_path("icons/pin.svg") if name not in self.pinned_items else resource_path("icons/unpin.svg")
             pin_btn.setIcon(QIcon(pin_icon_path))
             pin_btn.setIconSize(QSize(16, 16))
             pin_btn.setStyleSheet("""
@@ -1022,6 +1022,6 @@ class OrchestrixGUI(QMainWindow):
                         if isinstance(child_widget, QPushButton) and hasattr(child_widget, 'setIcon'): # Check if it's the pin button
                             # Check the actual name again to be super sure it's a pin button for this item
                             # This logic assumes the pin button is a direct child and identifiable
-                            current_pin_icon_path = resource_path("icons/pin.png") if name not in self.pinned_items else resource_path("icons/unpin.png")
+                            current_pin_icon_path = resource_path("icons/pin.svg") if name not in self.pinned_items else resource_path("icons/unpin.svg")
                             child_widget.setIcon(QIcon(current_pin_icon_path))
                             break # Found and updated the pin button
