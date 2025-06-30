@@ -7,6 +7,7 @@ An intelligent and intuitive Kubernetes cluster management IDE built for develop
 ## OX - Logo
 
 ![Orchetrix Logo](./images/logo.png)
+![OX](./images/orchetrix_splash.png)
 
 ##  Table of content
 
@@ -44,17 +45,17 @@ An intelligent and intuitive Kubernetes cluster management IDE built for develop
 
 ## Screenshots
 
-![Dashboard](path/to/dashboard.png)
+![OX Desktop Layout](./images/Ox desktop layout.png)
 
-![OX-1](path/to/logs.png)
+![Node View](./images/Node view.png)
 
-![OX-2](path/to/logs.png)
+![Workload View](./images/Workload view.png)
 
-![OX-3](path/to/logs.png)
+![Detail Panel](./images/Detail Panel.png)
 
-![OX-4](path/to/logs.png)
+![Overview](./images/Overview.png)
 
-![OX-5](path/to/logs.png)
+![Terminal](./images/Terminal.png)
 
 
 ## Tech Stack
