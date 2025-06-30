@@ -41,7 +41,33 @@ def collect_ui_files():
 # Get all resource files
 icon_data = collect_icons()
 ui_data = collect_ui_files()
-
+def collect_data_files():
+    """Collect all data files, filtering out non-existent directories"""
+    data_files = []
+    
+    # Add collected icons and UI files
+    data_files.extend(icon_data)
+    data_files.extend(ui_data)
+    
+    # Add directories that exist
+    directories_to_check = [
+        ('icons', 'icons'),
+        ('images', 'images'), 
+        ('logos', 'logos'),
+        ('UI', 'UI'),
+        ('Pages', 'Pages'),
+        ('utils', 'utils'),
+        ('base_components', 'base_components'),
+    ]
+    
+    for src_dir, dest_dir in directories_to_check:
+        if os.path.exists(src_dir) and os.path.isdir(src_dir):
+            data_files.append((src_dir, dest_dir))
+            print(f"Including directory: {src_dir} -> {dest_dir}")
+        else:
+            print(f"Skipping missing directory: {src_dir}")
+    
+    return data_files
 # Comprehensive hidden imports list
 hidden_imports = [
     # PyQt6 modules
@@ -206,19 +232,7 @@ a = Analysis(
     ['main.py'],  # Main entry point
     pathex=['.'],  # Add current directory to path
     binaries=[],
-    datas=[
-        # Include all collected icons and UI files
-        *icon_data,
-        *ui_data,
-        # Include directories if they exist
-        ('icons', 'icons') if os.path.exists('icons') else None,
-        ('images', 'images') if os.path.exists('images') else None,
-        ('logos', 'logos') if os.path.exists('logos') else None,
-        ('UI', 'UI') if os.path.exists('UI') else None,
-        ('Pages', 'Pages') if os.path.exists('Pages') else None,
-        ('utils', 'utils') if os.path.exists('utils') else None,
-        ('base_components', 'base_components') if os.path.exists('base_components') else None,
-    ],
+    datas=collect_data_files(),  # Use the function that properly filters None values
     hiddenimports=hidden_imports,
     hookspath=[],
     hooksconfig={},
