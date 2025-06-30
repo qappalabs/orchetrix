@@ -46,7 +46,9 @@ An intelligent and intuitive Kubernetes cluster management IDE built for develop
 
 ## Screenshots
 
-![OX Desktop Layout](./images/Oxdesktoplayout.png)
+![OX Desktop Layout]
+
+(./images/Oxdesktoplayout.png)
 
 ![Node View](./images/Nodeview.png)
 
