@@ -237,19 +237,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[
-        # Exclude unnecessary modules to reduce size
-        'tkinter',
-        'unittest',
-        'test',
-        'pydoc',
-        'doctest',
-        'argparse',
-        'pdb',
-        'profile',
-        'cProfile',
-        'pstats',
-    ],
+    excludes=[],
     noarchive=False,
     optimize=0,
 )
