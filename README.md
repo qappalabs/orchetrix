@@ -84,7 +84,7 @@ Follow the instructions below to install and run **Orchetrix (OX)** on your oper
 
 ### Windows
 
-1. [Download Orchetrix for Windows](https://github.com/qappalabs/orchetrix/releases/latest/download/orchetrix-windows.zip)
+1. [Download Orchetrix for Windows](https://github.com/qappalabs/orchetrix/releases/download/v0.0.1-beta/Orchetrix_Windows.zip)
 2. Unzip the file to any location.
 3. Open the extracted folder.
 4. Double-click `orchetrix.exe` to launch the application.
@@ -105,8 +105,9 @@ Follow the instructions below to install and run **Orchetrix (OX)** on your oper
 
 ### Linux
 
-1. [Download Orchetrix for Linux](https://github.com/qappalabs/orchetrix/releases/latest/download/orchetrix-linux.zip)
-2. Unzip the file:
+1. [Download Orchetrix for Ubantu22](https://github.com/qappalabs/orchetrix/releases/download/v0.0.1-beta/Orchetrix_ubuntu22.zip)
+2. [Download Orchetrix for Ubantu24](https://github.com/qappalabs/orchetrix/releases/download/v0.0.1-beta/Orchetrix_ubuntu24.zip)
+3. Unzip the file:
    ```bash
    unzip orchetrix-linux.zip
    cd orchetrix-linux
