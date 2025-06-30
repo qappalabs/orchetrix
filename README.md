@@ -108,8 +108,7 @@ If you encounter any issues or module-related errors while installing or running
 
 You can use the provided `requirements.txt` file to install them:
 
-```bash
-pip install -r requirements.txt
+*pip install -r requirements.txt*
 
 ## Usage
 
