@@ -3,9 +3,6 @@
 
 An intelligent and intuitive Kubernetes cluster management IDE built for developers, SREs, and DevOps teams.
 
-
-
-
 ![OX](./images/orchetrix_splash.png)
 
 ##  Table of content
@@ -78,6 +75,29 @@ Full usage guides, feature explanations, and setup tutorials for **Orchetrix (OX
 
 **[https://www.orchetrix.com/documentation](https://www.orchetrix.com/documentation)**
 
+###  What You Will Find:
+
+- **Welcome to OX:**  
+  Get started with Orchetrix in minutes — learn the basics, install the app, and explore its capabilities.
+
+- **How to:**  
+  Step-by-step guides on using OX to manage clusters, workloads, logs, pods, and more.
+
+- **User Interface Overview:**  
+  Discover the layout, navigation, workloads, storage, and access control panels that power your Kubernetes management.
+
+- **FAQ:**  
+  Find answers to the most common questions and troubleshoot common issues.
+
+- **Contribute to OX:**  
+  Learn how to join the community, contribute to development, and grow with us.
+
+- **Support:**  
+  Need help? Get in touch with the Orchetrix team or reach out to the community.
+
+### Explore the docs now →
+**[OX Documentation](https://www.orchetrix.com/documentation)**
+
 ## How to Use
 
 Follow the instructions below to install and run **Orchetrix (OX)** on your operating system.
@@ -111,29 +131,6 @@ Follow the instructions below to install and run **Orchetrix (OX)** on your oper
    ```bash
    unzip orchetrix-linux.zip
    cd orchetrix-linux
-
-###  What You Will Find:
-
-- **Welcome to OX:**  
-  Get started with Orchetrix in minutes — learn the basics, install the app, and explore its capabilities.
-
-- **How to:**  
-  Step-by-step guides on using OX to manage clusters, workloads, logs, pods, and more.
-
-- **User Interface Overview:**  
-  Discover the layout, navigation, workloads, storage, and access control panels that power your Kubernetes management.
-
-- **FAQ:**  
-  Find answers to the most common questions and troubleshoot common issues.
-
-- **Contribute to OX:**  
-  Learn how to join the community, contribute to development, and grow with us.
-
-- **Support:**  
-  Need help? Get in touch with the Orchetrix team or reach out to the community.
-
-### Explore the docs now →
-**[OX Documentation](https://www.orchetrix.com/documentation)**
 
 ## Troubleshooting & Dependencies
 If you encounter any issues or module-related errors while installing or running **Orchetrix (OX)**, ensure all required dependencies are properly installed.
