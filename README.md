@@ -4,9 +4,7 @@
 An intelligent and intuitive Kubernetes cluster management IDE built for developers, SREs, and DevOps teams.
 
 
-## OX - Logo
-
-![Orchetrix Logo](./images/logo.png)
+## OX - Splashscreen
 
 ![OX](./images/orchetrix_splash.png)
 
