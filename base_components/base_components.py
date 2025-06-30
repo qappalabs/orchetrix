@@ -330,8 +330,7 @@ class BaseTablePage(QWidget):
         
         self._item_widgets[f"checkbox_{row}_{item_name}"] = container
         return container
-    
-
+      
     def _create_checkbox(self, row, item_name):
         """Create a checkbox with proper icon loading and zero margins"""
         checkbox = QCheckBox()

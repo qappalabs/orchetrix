@@ -18,6 +18,7 @@ from functools import partial
 import time
 from UI.Icons import resource_path
 
+
 class StatusLabel(QWidget):
     """Widget that displays a status with consistent styling and background handling."""
     clicked = pyqtSignal()
