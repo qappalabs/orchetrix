@@ -95,7 +95,7 @@ Follow the instructions below to install and run **Orchetrix (OX)** on your oper
 
 ### macOS
 
-1. [Download Orchetrix for macOS](https://github.com/qappalabs/orchetrix/releases/latest/download/orchetrix-macos.zip)
+1. [Download Orchetrix for macOS](sha256:33dd3e0d14dba27ebaf615f672b2f97ee3f4705e21f33a0f80977be2311cb767)
 2. Unzip the file to your `Applications` or preferred directory.
 3. Open `orchetrix.app`.
 
