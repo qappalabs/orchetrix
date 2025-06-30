@@ -6,7 +6,7 @@ An intelligent and intuitive Kubernetes cluster management IDE built for develop
 
 ## OX - Logo
 
-![Orchetrix Logo](path/to/logo.png)
+![Orchetrix Logo](./images/logo.png)
 
 ##  Table of content
 
