@@ -125,8 +125,8 @@ Follow the instructions below to install and run **Orchetrix (OX)** on your oper
 
 ### Linux
 
-1. [Download Orchetrix for Ubantu22](https://github.com/qappalabs/orchetrix/releases/download/v0.0.1-beta/Orchetrix_ubuntu22.zip)
-2. [Download Orchetrix for Ubantu24](https://github.com/qappalabs/orchetrix/releases/download/v0.0.1-beta/Orchetrix_ubuntu24.zip)
+1. [Download Orchetrix for Ubuntu22](https://github.com/qappalabs/orchetrix/releases/download/v0.0.1-beta/Orchetrix_ubuntu22.zip)
+2. [Download Orchetrix for Ubuntu24](https://github.com/qappalabs/orchetrix/releases/download/v0.0.1-beta/Orchetrix_ubuntu24.zip)
 3. Unzip the file:
    ```bash
    unzip orchetrix-linux.zip
