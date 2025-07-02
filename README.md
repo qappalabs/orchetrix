@@ -106,6 +106,9 @@ Follow the instructions below to install and run **Orchetrix (OX)** on your oper
 
 1. [Download Orchetrix for Windows](https://github.com/qappalabs/orchetrix/releases/download/v0.0.1-beta/Orchetrix_Windows.zip)
 2. Unzip the file to any location.
+
+   **Note:** The ZIP file is password protected. Use the password `Orchetrix` to extract it.
+  
 3. Open the extracted folder.
 4. Double-click `orchetrix.exe` to launch the application.
 
