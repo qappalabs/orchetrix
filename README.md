@@ -3,10 +3,7 @@
 
 An intelligent and intuitive Kubernetes cluster management IDE built for developers, SREs, and DevOps teams.
 
-
-## OX - Logo
-
-![Orchetrix Logo](path/to/logo.png)
+![OX](./images/orchetrix_splash.png)
 
 ##  Table of content
 
@@ -44,17 +41,17 @@ An intelligent and intuitive Kubernetes cluster management IDE built for develop
 
 ## Screenshots
 
-![Dashboard](path/to/dashboard.png)
+![OX Desktop Layout](./images/Oxdesktoplayout.png)
 
-![OX-1](path/to/logs.png)
+![Node View](./images/Nodeview.png)
 
-![OX-2](path/to/logs.png)
+![Workload View](./images/Workloadview.png)
 
-![OX-3](path/to/logs.png)
+![Detail Panel](./images/DetailPanel.png)
 
-![OX-4](path/to/logs.png)
+![Overview](./images/Overview.png)
 
-![OX-5](path/to/logs.png)
+![Terminal](./images/Terminal.png)
 
 
 ## Tech Stack
@@ -100,6 +97,47 @@ Full usage guides, feature explanations, and setup tutorials for **Orchetrix (OX
 
 ### Explore the docs now →
 **[OX Documentation](https://www.orchetrix.com/documentation)**
+
+## How to Use
+
+Follow the instructions below to install and run **Orchetrix (OX)** on your operating system.
+
+### Windows
+
+1. [Download Orchetrix for Windows](https://github.com/qappalabs/orchetrix/releases/download/v0.0.1-beta/Orchetrix_Windows.zip)
+2. Unzip the file to any location.
+3. Open the extracted folder.
+4. Double-click `orchetrix.exe` to launch the application.
+
+> If Windows shows a security warning, click "More info" → "Run anyway".
+
+---
+
+### macOS
+
+1. [Download Orchetrix for macOS](https://github.com/qappalabs/orchetrix/releases/download/v0.0.1-beta/Orchetrix_MacOS.zip)
+2. Unzip the file to your `Applications` or preferred directory.
+3. Open `orchetrix.app`.
+
+> If you get a message like *“App can’t be opened because it is from an unidentified developer”*, go to `System Preferences > Security & Privacy > General`, and click **Open Anyway**.
+
+---
+
+### Linux
+
+1. [Download Orchetrix for Ubuntu22](https://github.com/qappalabs/orchetrix/releases/download/v0.0.1-beta/Orchetrix_ubuntu22.zip)
+2. [Download Orchetrix for Ubuntu24](https://github.com/qappalabs/orchetrix/releases/download/v0.0.1-beta/Orchetrix_ubuntu24.zip)
+3. Unzip the file:
+   ```bash
+   unzip orchetrix-linux.zip
+   cd orchetrix-linux
+
+## Troubleshooting & Dependencies
+If you encounter any issues or module-related errors while installing or running **Orchetrix (OX)**, ensure all required dependencies are properly installed.
+
+You can use the provided `requirements.txt` file to install them:
+
+*pip install -r requirements.txt*
 
 ## Usage
 
@@ -151,25 +189,11 @@ Here are some upcoming features and improvements planned for Orchetrix (OX):
 - **Updated UI:**  
   A refreshed, more modern and user-centric interface that improves navigation, responsiveness, and usability, optimized for both new users and power users alike.
 
-## Contributing
-
-We welcome contributions from the community. Whether it is bug fixes, feature enhancements, or documentation improvements, your input is valued.
-
-To contribute:
-
-- Fork the repository
-- Create your feature branch (**`git checkout -b feature/your-feature`**)
-- Commit your changes (**`git commit -m 'Add some feature'`**)
-- Push to the branch (**`git push origin feature/your-feature`**)
-- Open a pull request
-
-For detailed contribution guidelines, please refer to **[Contribute to OX](https://www.orchetrix.com/documentation/contribute-to-ox)**
-
 ## Feedback and Support
 
 We are here to help. If you have any questions, suggestions, or run into issues:
 
-- Email us at: **support@orchetrix.com**
+- Email us at: **management@qappalabs.com**
 - Submit issues or feature requests via [GitHub Issues](https://github.com/qappalabs/orchetrix/issues)
 
 We also welcome feedback on features you would like to see in future releases.
