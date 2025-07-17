@@ -876,8 +876,17 @@ class KubernetesClient(QObject):
 
 
     def _initialize_api_clients(self):
-        """Initialize Kubernetes API clients"""
+        """Initialize Kubernetes API clients with caching"""
         try:
+            # Use cached clients if available and context hasn't changed
+            if hasattr(self, '_cached_clients') and hasattr(self, '_cached_context'):
+                if self._cached_context == self.current_cluster:
+                    logging.debug("Using cached API clients")
+                    return True
+            
+            # Initialize clients
+            logging.debug("Initializing fresh API clients")
+            
             # Core API
             self.v1 = client.CoreV1Api()
 
@@ -958,6 +967,11 @@ class KubernetesClient(QObject):
                 self.scheduling_v1 = client.SchedulingV1Api()
             except:
                 pass
+
+            # Cache the clients and context
+            self._cached_clients = True
+            self._cached_context = self.current_cluster
+            logging.debug(f"Cached API clients for context: {self.current_cluster}")
 
             return True
         except Exception as e:
@@ -1264,23 +1278,53 @@ class KubernetesClient(QObject):
         try:
             issues = []
             
-            # Get events with warnings or errors
+            # Ensure API clients are initialized
+            if not hasattr(self, 'v1') or not self.v1:
+                if not self._initialize_api_clients():
+                    logging.warning("Could not initialize API clients for cluster issues")
+                    return []
+            
+            # Check if we have a current cluster connection
+            if not self.current_cluster:
+                logging.debug("No current cluster connection for issues")
+                return []
+            
+            # Get events with warnings or errors from accessible namespaces
             try:
-                events_list = self.v1.list_event_for_all_namespaces()
+                # Get list of namespaces first
+                namespaces = []
+                try:
+                    namespaces_list = self.v1.list_namespace()
+                    namespaces = [ns.metadata.name for ns in namespaces_list.items]
+                except Exception:
+                    # If we can't get namespaces, try common ones
+                    namespaces = ["default", "kube-system", "kube-public"]
                 
-                for event in events_list.items:
-                    if event.type != "Normal":  # Warning, Error, etc.
-                        age = self._format_age(event.metadata.creation_timestamp) if event.metadata.creation_timestamp else "Unknown"
+                # Get events from each namespace
+                for namespace in namespaces:
+                    try:
+                        events_list = self.v1.list_namespaced_event(namespace=namespace)
                         
-                        issue = {
-                            "message": event.message or "No message",
-                            "object": f"{event.involved_object.kind}/{event.involved_object.name}" if event.involved_object else "Unknown",
-                            "type": event.type or "Unknown",
-                            "age": age,
-                            "namespace": event.metadata.namespace or "default",
-                            "reason": event.reason or "Unknown"
-                        }
-                        issues.append(issue)
+                        for event in events_list.items:
+                            if event.type != "Normal":  # Warning, Error, etc.
+                                age = self._format_age(event.metadata.creation_timestamp) if event.metadata.creation_timestamp else "Unknown"
+                                
+                                issue = {
+                                    "message": event.message or "No message",
+                                    "object": f"{event.involved_object.kind}/{event.involved_object.name}" if event.involved_object else "Unknown",
+                                    "type": event.type or "Unknown",
+                                    "age": age,
+                                    "namespace": event.metadata.namespace or namespace,
+                                    "reason": event.reason or "Unknown"
+                                }
+                                issues.append(issue)
+                    except ApiException as api_e:
+                        # Skip namespaces we can't access
+                        if api_e.status != 404:
+                            logging.debug(f"Could not get events from namespace {namespace}: {api_e.reason}")
+                    except Exception as e:
+                        logging.debug(f"Error getting events from namespace {namespace}: {e}")
+                        
             except Exception as e:
                 logging.warning(f"Could not get events: {e}")
             
@@ -1383,17 +1427,9 @@ class KubernetesClient(QObject):
 
             resource_type_lower = resource_type.lower()
 
-            # FORCE initialize API clients if they don't exist
-            missing_clients = []
-            if not hasattr(self, 'networking_v1') or self.networking_v1 is None:
-                missing_clients.append('networking_v1')
-            if not hasattr(self, 'api_extensions_v1') or self.api_extensions_v1 is None:
-                missing_clients.append('api_extensions_v1')
-            if not hasattr(self, 'admissionregistration_v1') or self.admissionregistration_v1 is None:
-                missing_clients.append('admissionregistration_v1')
-
-            if missing_clients:
-                logging.warning(f"Reinitializing missing API clients: {missing_clients}")
+            # Ensure API clients are initialized (using cached version if available)
+            if not hasattr(self, '_cached_clients') or not self._cached_clients:
+                logging.debug("Initializing API clients for resource detail fetch")
                 self._initialize_api_clients()
 
             # Core V1 API resources
@@ -1677,9 +1713,12 @@ class KubernetesClient(QObject):
                 else:
                     resource_dict = client.ApiClient().sanitize_for_serialization(resource_data)
 
-                # Add related events
-                events = self._get_resource_events(resource_type, resource_name, namespace)
-                resource_dict["events"] = events
+                # Add related events (only for namespaced resources)
+                if namespace:  # Only get events for namespaced resources
+                    events = self._get_resource_events(resource_type, resource_name, namespace)
+                    resource_dict["events"] = events
+                else:
+                    resource_dict["events"] = []  # Cluster-scoped resources don't have namespace events
 
                 return resource_dict
             else:
@@ -1827,10 +1866,22 @@ class KubernetesClient(QObject):
         try:
             events = []
             
-            if namespace:
+            # Always use a valid namespace, default to "default" if none provided
+            if not namespace or namespace == "":
+                namespace = "default"
+            
+            # Try to get events from the specified namespace
+            try:
                 events_list = self.v1.list_namespaced_event(namespace=namespace)
-            else:
-                events_list = self.v1.list_event_for_all_namespaces()
+            except ApiException as api_e:
+                # If namespace doesn't exist or no permission, try default namespace
+                if api_e.status == 404 and namespace != "default":
+                    logging.debug(f"Namespace '{namespace}' not found, trying default namespace")
+                    events_list = self.v1.list_namespaced_event(namespace="default")
+                else:
+                    # If still failing, log and return empty
+                    logging.debug(f"Could not access events in namespace '{namespace}': {api_e.reason}")
+                    return []
             
             # Filter events for the specific resource
             for event in events_list.items:
@@ -1852,6 +1903,14 @@ class KubernetesClient(QObject):
             
             return events
                 
+        except ApiException as e:
+            # Handle 404 errors gracefully - resource might not have events
+            if e.status == 404:
+                logging.debug(f"No events found for resource {resource_type}/{resource_name} in namespace {namespace}")
+                return []
+            else:
+                logging.warning(f"API error getting resource events: {e.status} - {e.reason}")
+                return []
         except Exception as e:
             logging.warning(f"Error getting resource events: {str(e)}")
             return []
@@ -1929,39 +1988,53 @@ class KubernetesClient(QObject):
             return 0
     
     def _parse_resource_value(self, value_str):
-        """Parse Kubernetes resource value strings to float"""
+        """Parse Kubernetes resource value strings to float with caching"""
         if not value_str or not isinstance(value_str, str):
             return 0.0
         
+        # Check cache first
+        if not hasattr(self, '_resource_value_cache'):
+            self._resource_value_cache = {}
+        
+        if value_str in self._resource_value_cache:
+            return self._resource_value_cache[value_str]
+        
+        result = 0.0
+        
         # CPU parsing (e.g., "100m" = 0.1 cores)
         if value_str.endswith('m'):
-            return float(value_str[:-1]) / 1000
+            result = float(value_str[:-1]) / 1000
+        else:
+            # Memory parsing
+            memory_suffixes = {
+                'Ki': 1024,
+                'Mi': 1024 ** 2,
+                'Gi': 1024 ** 3,
+                'Ti': 1024 ** 4,
+                'Pi': 1024 ** 5,
+                'Ei': 1024 ** 6,
+                'K': 1000,
+                'M': 1000 ** 2,
+                'G': 1000 ** 3,
+                'T': 1000 ** 4,
+                'P': 1000 ** 5,
+                'E': 1000 ** 6
+            }
+            
+            for suffix, multiplier in memory_suffixes.items():
+                if value_str.endswith(suffix):
+                    result = float(value_str[:-len(suffix)]) * multiplier
+                    break
+            else:
+                # If no suffix, try to parse as a number
+                try:
+                    result = float(value_str)
+                except ValueError:
+                    result = 0.0
         
-        # Memory parsing
-        memory_suffixes = {
-            'Ki': 1024,
-            'Mi': 1024 ** 2,
-            'Gi': 1024 ** 3,
-            'Ti': 1024 ** 4,
-            'Pi': 1024 ** 5,
-            'Ei': 1024 ** 6,
-            'K': 1000,
-            'M': 1000 ** 2,
-            'G': 1000 ** 3,
-            'T': 1000 ** 4,
-            'P': 1000 ** 5,
-            'E': 1000 ** 6
-        }
-        
-        for suffix, multiplier in memory_suffixes.items():
-            if value_str.endswith(suffix):
-                return float(value_str[:-len(suffix)]) * multiplier
-        
-        # If no suffix, try to parse as a number
-        try:
-            return float(value_str)
-        except ValueError:
-            return 0.0
+        # Cache the result
+        self._resource_value_cache[value_str] = result
+        return result
     
     def _format_age(self, timestamp):
         """Format timestamp to age string (e.g., "2d", "5h")"""

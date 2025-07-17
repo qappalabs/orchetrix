@@ -195,8 +195,21 @@ class OverviewPage(QWidget):
         try:
             self.kube_client = get_kubernetes_client()
             if not self.kube_client.current_cluster:
-                # Try to load default kubeconfig and switch to active context
-                clusters = self.kube_client.load_kube_config()
+                # Load kubeconfig asynchronously to avoid blocking UI
+                self._load_kubeconfig_async()
+        except Exception as e:
+            logging.error(f"Error initializing Kubernetes client: {e}")
+
+    def _load_kubeconfig_async(self):
+        """Load kubeconfig asynchronously in background thread"""
+        try:
+            from utils.kubernetes_client import KubeConfigWorker
+            from utils.thread_manager import get_thread_manager
+            
+            thread_manager = get_thread_manager()
+            worker = KubeConfigWorker(self.kube_client)
+            
+            def on_config_loaded(clusters):
                 if clusters:
                     # Find active cluster or use first available
                     active_cluster = next((c for c in clusters if c.status == "active"), None)
@@ -205,8 +218,16 @@ class OverviewPage(QWidget):
 
                     if active_cluster:
                         self.kube_client.switch_context(active_cluster.name)
+            
+            def on_error(error):
+                logging.error(f"Error loading kubeconfig async: {error}")
+            
+            worker.signals.finished.connect(on_config_loaded)
+            worker.signals.error.connect(on_error)
+            thread_manager.submit_worker(f"kubeconfig_load_{id(self)}", worker)
+            
         except Exception as e:
-            logging.error(f"Error initializing Kubernetes client: {e}")
+            logging.error(f"Error starting async kubeconfig load: {e}")
             self.show_connection_error(f"Failed to initialize: {str(e)}")
 
     def setup_ui(self):

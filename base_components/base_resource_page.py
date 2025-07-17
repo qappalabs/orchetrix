@@ -1439,6 +1439,69 @@ class BaseResourcePage(BaseTablePage):
                     thread.terminate()
         self.loading_thread = None; self.delete_thread = None; self.batch_delete_thread = None
 
+    def cleanup_on_destroy(self):
+        """Clean up resources to prevent memory leaks"""
+        try:
+            self._shutting_down = True
+            
+            # Clean up threads
+            self.cleanup_threads()
+            
+            # Clear data caches
+            if hasattr(self, '_data_cache'):
+                self._data_cache.clear()
+            if hasattr(self, '_cache_timestamps'):
+                self._cache_timestamps.clear()
+            
+            # Clear resources list
+            if hasattr(self, 'resources'):
+                self.resources.clear()
+            
+            # Clear selected items
+            if hasattr(self, 'selected_items'):
+                self.selected_items.clear()
+            
+            # Disconnect signals to prevent memory leaks
+            if hasattr(self, 'table') and self.table:
+                try:
+                    self.table.verticalScrollBar().valueChanged.disconnect()
+                except:
+                    pass
+            
+            # Clear search bar connection
+            if hasattr(self, 'search_bar') and self.search_bar:
+                try:
+                    self.search_bar.textChanged.disconnect()
+                except:
+                    pass
+            
+            # Clear namespace combo connection
+            if hasattr(self, 'namespace_combo') and self.namespace_combo:
+                try:
+                    self.namespace_combo.currentTextChanged.disconnect()
+                except:
+                    pass
+            
+            logging.debug(f"Cleanup completed for {self.__class__.__name__}")
+            
+        except Exception as e:
+            logging.error(f"Error during cleanup in {self.__class__.__name__}: {e}")
+
+    def closeEvent(self, event):
+        """Handle close event with proper cleanup"""
+        self.cleanup_on_destroy()
+        if hasattr(super(), 'closeEvent'):
+            super().closeEvent(event)
+        else:
+            event.accept()
+
+    def __del__(self):
+        """Destructor to ensure cleanup"""
+        try:
+            self.cleanup_on_destroy()
+        except:
+            pass
+
     def load_data(self, load_more=False):
         if self._shutting_down:
             return

@@ -363,21 +363,16 @@ class ClusterView(QWidget):
             if page_name and page_name in self.pages:
                 page = self.pages[page_name]
 
-                # Force reload the page data
-                if hasattr(page, 'force_load_data'):
-                    QTimer.singleShot(500, page.force_load_data)  # Small delay to let Kubernetes propagate changes
-                elif hasattr(page, 'load_data'):
-                    QTimer.singleShot(500, page.load_data)
+                # Use async refresh instead of timer-based delays
+                self._refresh_page_async(page, page_name)
 
                 logging.info(f"Refreshed page: {page_name}")
 
             # Always refresh Events page as well since events may be generated
             if "Events" in self.pages:
                 events_page = self.pages["Events"]
-                if hasattr(events_page, 'force_load_data'):
-                    QTimer.singleShot(1000, events_page.force_load_data)  # Slightly longer delay for events
-                elif hasattr(events_page, 'load_data'):
-                    QTimer.singleShot(1000, events_page.load_data)
+                # Use async refresh for events page too
+                self._refresh_page_async(events_page, "Events", delay_ms=1000)
 
         except Exception as e:
             logging.error(f"Error refreshing main page: {e}")
@@ -513,6 +508,59 @@ class ClusterView(QWidget):
         }
 
         return type_to_page.get(resource_type_lower, None)
+
+    def _refresh_page_async(self, page, page_name: str, delay_ms: int = 500):
+        """Refresh a page asynchronously without blocking UI"""
+        try:
+            from utils.thread_manager import get_thread_manager
+            from utils.enhanced_worker import EnhancedBaseWorker
+            
+            # Create a worker for the refresh operation
+            class PageRefreshWorker(EnhancedBaseWorker):
+                def __init__(self, page_instance, delay_ms):
+                    super().__init__(f"page_refresh_{page_name}")
+                    self.page_instance = page_instance
+                    self.delay_ms = delay_ms
+                    self._timeout = 30  # 30 second timeout for refresh operations
+                
+                def execute(self):
+                    # Small delay to let Kubernetes propagate changes
+                    import time
+                    time.sleep(self.delay_ms / 1000.0)
+                    
+                    # Refresh the page data
+                    if hasattr(self.page_instance, 'force_load_data'):
+                        self.page_instance.force_load_data()
+                    elif hasattr(self.page_instance, 'load_data'):
+                        self.page_instance.load_data()
+                    
+                    return f"Refreshed {page_name}"
+            
+            # Submit the worker to thread manager
+            thread_manager = get_thread_manager()
+            worker = PageRefreshWorker(page, delay_ms)
+            
+            def on_refresh_complete(result):
+                logging.debug(f"Page refresh completed: {result}")
+            
+            def on_refresh_error(error):
+                logging.error(f"Page refresh error for {page_name}: {error}")
+            
+            worker.signals.finished.connect(on_refresh_complete)
+            worker.signals.error.connect(on_refresh_error)
+            
+            thread_manager.submit_worker(f"page_refresh_{page_name}_{id(page)}", worker)
+            
+        except Exception as e:
+            logging.error(f"Error starting async page refresh for {page_name}: {e}")
+            # Fallback to sync refresh if async fails
+            try:
+                if hasattr(page, 'force_load_data'):
+                    page.force_load_data()
+                elif hasattr(page, 'load_data'):
+                    page.load_data()
+            except Exception as fallback_error:
+                logging.error(f"Fallback sync refresh also failed for {page_name}: {fallback_error}")
 
     def _initialize_terminal(self) -> None:
         """Initialize the terminal panel"""

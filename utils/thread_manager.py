@@ -73,19 +73,25 @@ class EnhancedThreadPoolManager(QObject):
             return
             
         with self.lock:
-            expired_workers = []
             current_time = time.time()
+            expired_workers = []
             
+            # More efficient cleanup - use timestamps dict for faster lookup
             for worker_id, worker in list(self.active_workers.items()):
                 if hasattr(worker, '_start_time'):
-                    if current_time - worker._start_time > 60:  # 60 second timeout
+                    # Dynamic timeout based on worker type
+                    timeout = getattr(worker, '_timeout', 120)  # Default 2 minutes
+                    if current_time - worker._start_time > timeout:
                         expired_workers.append(worker_id)
                         if hasattr(worker, 'cancel'):
                             worker.cancel()
             
-            for worker_id in expired_workers:
-                self.active_workers.pop(worker_id, None)
-                logging.warning(f"Cleaned up expired worker: {worker_id}")
+            # Batch cleanup to reduce lock contention
+            if expired_workers:
+                for worker_id in expired_workers:
+                    self.active_workers.pop(worker_id, None)
+                    self.worker_refs.pop(worker_id, None)
+                logging.info(f"Cleaned up {len(expired_workers)} expired workers: {expired_workers}")
     
     def get_active_count(self):
         with self.lock:
@@ -101,9 +107,13 @@ class EnhancedThreadPoolManager(QObject):
                 if hasattr(worker, 'cancel'):
                     worker.cancel()
             
-            # Wait for completion
-            self.thread_pool.waitForDone(3000)
+            # Non-blocking shutdown approach
+            # Wait briefly for graceful shutdown, then force cleanup
+            if not self.thread_pool.waitForDone(1000):  # Reduced from 3000ms to 1000ms
+                logging.warning("Thread pool did not shut down gracefully within 1 second")
+            
             self.active_workers.clear()
+            self.worker_refs.clear()
 
 # Singleton with better management
 _thread_manager_instance = None

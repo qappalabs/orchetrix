@@ -52,7 +52,7 @@ try:
 
     from utils.cluster_state_manager import get_cluster_state_manager, ClusterState
     from utils.thread_manager import get_thread_manager, shutdown_thread_manager
-    from utils.data_manager import get_data_manager
+
 
     logging.info("All modules imported successfully")
     

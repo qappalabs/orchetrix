@@ -15,7 +15,6 @@ from UI.Styles import AppStyles, AppColors, AppConstants
 from base_components.base_components import SortableTableWidgetItem
 from base_components.base_resource_page import BaseResourcePage
 from utils.cluster_connector import get_cluster_connector
-from utils.data_manager import get_data_manager
 from UI.Icons import resource_path
 import random
 import datetime
@@ -291,8 +290,13 @@ class NodesPage(BaseResourcePage):
         # Get the cluster connector
         self.cluster_connector = get_cluster_connector()
         
-        # Connect to node data signal
-        self.cluster_connector.node_data_loaded.connect(self.update_nodes)
+        # Connect to node data signal with error handling
+        if self.cluster_connector:
+            try:
+                self.cluster_connector.node_data_loaded.connect(self.update_nodes)
+            except Exception as e:
+                logging.error(f"Error connecting to cluster connector signals: {e}")
+                self.cluster_connector = None
         
         # Initialize data structure
         self.nodes_data = []

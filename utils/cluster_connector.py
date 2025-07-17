@@ -6,7 +6,7 @@ import logging
 import traceback
 from utils.enhanced_worker import EnhancedBaseWorker
 from utils.thread_manager import get_thread_manager
-from utils.data_manager import get_data_manager
+
 
 
 class ConnectionWorker(EnhancedBaseWorker):
@@ -124,10 +124,14 @@ class ClusterConnection(QObject):
     def __init__(self):
         super().__init__()
         self.kube_client = get_kubernetes_client()
-        self.threadpool = QThreadPool()
+        # Use singleton thread manager instead of creating new threadpool
+        self.thread_manager = get_thread_manager()
         self._active_workers = set()
         
+        # Add TTL for data cache to prevent memory leaks
         self.data_cache = {}
+        self.cache_timestamps = {}  # Track cache creation time
+        self.cache_ttl = 300  # 5 minutes TTL
         self.loading_complete = {}
         self.connection_states = {}  # Track connection states
         
@@ -168,10 +172,11 @@ class ClusterConnection(QObject):
                 if hasattr(worker, 'stop'):
                     worker.stop()
             
-            # Wait for threadpool to finish
-            if hasattr(self, 'threadpool'):
-                self.threadpool.waitForDone(300)
-                self.threadpool.clear()
+            # Cancel all active workers
+            if hasattr(self, 'thread_manager') and self.thread_manager:
+                for worker in list(self._active_workers):
+                    if hasattr(worker, 'cancel'):
+                        worker.cancel()
                 
             if hasattr(self, '_active_workers'):
                 self._active_workers.clear()
@@ -366,6 +371,7 @@ class ClusterConnection(QObject):
                 if cluster_name not in self.data_cache:
                     self.data_cache[cluster_name] = {}
                 self.data_cache[cluster_name]['cluster_info'] = info
+                self._update_cache_timestamp(cluster_name)
                 
                 # Check if we have all required data now
                 self._check_data_completeness(cluster_name)
@@ -386,6 +392,7 @@ class ClusterConnection(QObject):
                 if cluster_name not in self.data_cache:
                     self.data_cache[cluster_name] = {}
                 self.data_cache[cluster_name]['metrics'] = metrics
+                self._update_cache_timestamp(cluster_name)
                 
                 # Check if we have all required data now
                 self._check_data_completeness(cluster_name)
@@ -406,6 +413,7 @@ class ClusterConnection(QObject):
                 if cluster_name not in self.data_cache:
                     self.data_cache[cluster_name] = {}
                 self.data_cache[cluster_name]['issues'] = issues
+                self._update_cache_timestamp(cluster_name)
                 
                 # Check if we have all required data now
                 self._check_data_completeness(cluster_name)
@@ -486,10 +494,37 @@ class ClusterConnection(QObject):
     def get_cached_data(self, cluster_name):
         """Get cached data for a cluster if available"""
         try:
+            # Check cache validity first
+            self._cleanup_expired_cache()
             return self.data_cache.get(cluster_name, {})
         except Exception as e:
             logging.error(f"Error getting cached data for {cluster_name}: {e}")
             return {}
+    
+    def _cleanup_expired_cache(self):
+        """Clean up expired cache entries to prevent memory leaks"""
+        try:
+            import time
+            current_time = time.time()
+            expired_keys = []
+            
+            for cluster_name, timestamp in self.cache_timestamps.items():
+                if current_time - timestamp > self.cache_ttl:
+                    expired_keys.append(cluster_name)
+            
+            for key in expired_keys:
+                self.data_cache.pop(key, None)
+                self.cache_timestamps.pop(key, None)
+                self.loading_complete.pop(key, None)
+                logging.debug(f"Cleaned up expired cache for cluster: {key}")
+                
+        except Exception as e:
+            logging.error(f"Error cleaning up expired cache: {e}")
+    
+    def _update_cache_timestamp(self, cluster_name):
+        """Update cache timestamp for a cluster"""
+        import time
+        self.cache_timestamps[cluster_name] = time.time()
 
     def load_nodes(self):
         """Load nodes data from the connected cluster"""
@@ -515,7 +550,8 @@ class ClusterConnection(QObject):
             worker.signals.finished.connect(self.on_nodes_loaded)
             worker.signals.error.connect(lambda error: self.handle_error("nodes", error))
             
-            self.threadpool.start(worker)
+            # Submit worker to thread manager
+            self.thread_manager.submit_worker(f"nodes_load_{id(worker)}", worker)
             
         except Exception as e:
             logging.error(f"Error loading nodes: {e}")

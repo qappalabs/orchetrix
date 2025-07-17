@@ -2143,3 +2143,65 @@ class EnhancedStyles:
                 padding: 2px 0px;
             }}
         """
+
+
+class StyleLoader:
+    """Lazy loading style manager to improve performance"""
+    
+    def __init__(self):
+        self._loaded_styles = {}
+        self._style_cache = {}
+    
+    def get_style(self, style_name):
+        """Get a style with caching"""
+        if style_name in self._style_cache:
+            return self._style_cache[style_name]
+        
+        # Get style from AppStyles
+        style = getattr(AppStyles, style_name, None)
+        if style:
+            self._style_cache[style_name] = style
+            return style
+        
+        return ""
+    
+    def get_component_styles(self, component_name):
+        """Get styles for a specific component"""
+        if component_name in self._loaded_styles:
+            return self._loaded_styles[component_name]
+        
+        styles = {}
+        
+        # Component-specific style mapping
+        component_styles = {
+            'table': ['TABLE_STYLE', 'TABLE_HEADER_STYLE', 'TABLE_ROW_STYLE'],
+            'button': ['BUTTON_STYLE', 'SECONDARY_BUTTON_STYLE', 'DANGER_BUTTON_STYLE'],
+            'input': ['INPUT_STYLE', 'SEARCH_BAR_STYLE', 'COMBO_BOX_STYLE'],
+            'terminal': ['TERMINAL_STYLE', 'TERMINAL_TEXTEDIT', 'TERMINAL_OUTPUT_STYLE'],
+            'sidebar': ['SIDEBAR_STYLE', 'SIDEBAR_BUTTON_STYLE'],
+            'main': ['MAIN_STYLE', 'TITLE_STYLE', 'COUNT_STYLE']
+        }
+        
+        if component_name in component_styles:
+            for style_name in component_styles[component_name]:
+                styles[style_name] = self.get_style(style_name)
+        
+        self._loaded_styles[component_name] = styles
+        return styles
+    
+    def clear_cache(self):
+        """Clear style cache"""
+        self._style_cache.clear()
+        self._loaded_styles.clear()
+
+
+# Global style loader instance
+_style_loader = StyleLoader()
+
+def get_style_loader():
+    """Get the global style loader instance"""
+    return _style_loader
+
+def get_component_styles(component_name):
+    """Convenience function to get component styles"""
+    return _style_loader.get_component_styles(component_name)

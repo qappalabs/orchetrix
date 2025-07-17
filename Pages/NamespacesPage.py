@@ -179,16 +179,6 @@ class NamespacesPage(BaseResourcePage):
         self.table.horizontalHeader().setStyleSheet(AppStyles.CUSTOM_HEADER_STYLE)
         self.configure_columns()
 
-    # def configure_columns(self):
-    #     self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-    #     self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-    #     self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
-    #     self.table.setColumnWidth(3, 80)
-    #     self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
-    #     self.table.setColumnWidth(4, 100)
-    #     self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
-    #     self.table.setColumnWidth(5, 40)
-
     def configure_columns(self):
         """Configure column widths for full screen utilization"""
         if not self.table:
@@ -504,9 +494,13 @@ class NamespacesPage(BaseResourcePage):
             QMessageBox.critical(self, "Error", message)
 
         # Clean up thread
-        if self.operation_thread:
-            self.operation_thread.deleteLater()
-            self.operation_thread = None
+        if hasattr(self, 'operation_thread') and self.operation_thread:
+            try:
+                self.operation_thread.deleteLater()
+            except Exception as e:
+                logging.error(f"Error deleting operation thread: {e}")
+            finally:
+                self.operation_thread = None
 
     def delete_resource(self, resource_name, resource_namespace):
         """Override to handle namespace deletion specifics - called by base class"""
@@ -515,8 +509,11 @@ class NamespacesPage(BaseResourcePage):
     def closeEvent(self, event):
         """Clean up when the widget is closed"""
         # Stop any running operations
-        if self.operation_thread and self.operation_thread.isRunning():
-            self.operation_thread.quit()
-            self.operation_thread.wait(1000)
+        if hasattr(self, 'operation_thread') and self.operation_thread and self.operation_thread.isRunning():
+            try:
+                self.operation_thread.quit()
+                self.operation_thread.wait(1000)
+            except Exception as e:
+                logging.error(f"Error stopping operation thread: {e}")
 
         super().closeEvent(event)

@@ -130,12 +130,9 @@ class ClusterStateManager(QObject):
                 self.current_cluster = None
                 logging.info(f"Reset current_cluster to None after disconnecting {cluster_name}")
             
-            # Clean up cluster data
-            self._cleanup_cluster_resources(cluster_name)
+
             
     def _initiate_cluster_switch(self, cluster_name: str):
-        if self.current_cluster and self.current_cluster != cluster_name:
-            self._cleanup_cluster_resources(self.current_cluster)
             
         self.cluster_states[cluster_name] = ClusterState.CONNECTING
         self.state_changed.emit(cluster_name, ClusterState.CONNECTING)
@@ -176,12 +173,6 @@ class ClusterStateManager(QObject):
             self.state_changed.emit(cluster_name, ClusterState.ERROR)
             self.switch_completed.emit(cluster_name, False)
             
-    def _cleanup_cluster_resources(self, cluster_name: str):
-        self.cluster_data.pop(cluster_name, None)
-        
-        from utils.data_manager import get_data_manager
-        data_manager = get_data_manager()
-        data_manager.clear_cluster_data(cluster_name)
         
     def get_cluster_state(self, cluster_name: str) -> ClusterState:
         return self.cluster_states.get(cluster_name, ClusterState.DISCONNECTED)

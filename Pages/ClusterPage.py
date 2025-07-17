@@ -950,8 +950,16 @@ class ClusterPage(QWidget):
         # This method might be called by ClusterView's handle_page_change.
         # It should be smart enough not to immediately re-fetch if preloaded data is fresh,
         # or it could simply always trigger a refresh.
+        if hasattr(self, '_loading') and self._loading:
+            logging.debug("ClusterPage: force_load_data skipped - already loading")
+            return
+            
         logging.info("ClusterPage: force_load_data called.")
-        self.refresh_data()
+        self._loading = True
+        try:
+            self.refresh_data()
+        finally:
+            self._loading = False
 
     def _generate_time_points(self, count):
         """Generate time points for charts"""
