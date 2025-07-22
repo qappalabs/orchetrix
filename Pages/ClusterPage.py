@@ -82,7 +82,7 @@ class BarChart(QWidget):
                     self.times = self._generate_time_labels(len(self.data))
                 
                 self.has_data = True
-                # logging.debug(f"Chart updated with {len(self.data)} data points")
+                logging.debug(f"Chart updated with {len(self.data)} data points: {self.data}")
                 self.update()
             else:
                 logging.warning(f"Invalid data provided to chart: {data}")
@@ -136,7 +136,7 @@ class BarChart(QWidget):
             painter.drawText(
                 0, 0, width, height, 
                 int(Qt.AlignmentFlag.AlignCenter), 
-                "No data available"
+                "Loading real-time data..."
             )
             return
             
@@ -339,7 +339,7 @@ class ResourceCircularIndicator(QWidget):
             painter.drawText(
                 0, 0, width, height, 
                 int(Qt.AlignmentFlag.AlignCenter), 
-                "No data available"
+                "Loading..."
             )
             return
 
@@ -467,35 +467,35 @@ class ResourceStatusWidget(QWidget):
         labels_layout.setContentsMargins(10, 0, 0, 0)
         labels_layout.setSpacing(1)
 
-        self.usage_label = QLabel("● Usage: No data")
+        self.usage_label = QLabel("● Usage: Loading...")
         self.usage_label.setStyleSheet(AppStyles.CLUSTER_RESOURCE_LABEL_USAGE_STYLE)
         self.usage_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
         labels_layout.addWidget(self.usage_label)
 
-        self.requests_label = QLabel("● Requests: No data")
+        self.requests_label = QLabel("● Requests: Loading...")
         self.requests_label.setStyleSheet(AppStyles.CLUSTER_RESOURCE_LABEL_REQUESTS_STYLE)
         self.requests_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
         labels_layout.addWidget(self.requests_label)
 
         # For CPU and Memory, add limits and allocated labels
         if resource_type != "pods":
-            self.limits_label = QLabel("● Limits: No data")
+            self.limits_label = QLabel("● Limits: Loading...")
             self.limits_label.setStyleSheet(AppStyles.CLUSTER_RESOURCE_LABEL_LIMITS_STYLE)
             self.limits_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
             labels_layout.addWidget(self.limits_label)
 
-            self.allocated_label = QLabel("● Allocated: No data")
+            self.allocated_label = QLabel("● Allocated: Loading...")
             self.allocated_label.setStyleSheet(AppStyles.CLUSTER_RESOURCE_LABEL_ALLOCATED_STYLE)
             self.allocated_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
             labels_layout.addWidget(self.allocated_label)
 
-        self.capacity_label = QLabel("● Capacity: No data")
+        self.capacity_label = QLabel("● Capacity: Loading...")
         self.capacity_label.setStyleSheet(AppStyles.CLUSTER_RESOURCE_LABEL_CAPACITY_STYLE)
         self.capacity_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
         labels_layout.addWidget(self.capacity_label)
 
         box_layout.addWidget(self.labels_container)
-        self.labels_container.hide()  # Initially hide until we have data
+        self.labels_container.show()  # Always show labels
 
         box_layout.addStretch(1)
         main_layout.addWidget(self.box)
@@ -510,26 +510,37 @@ class ResourceStatusWidget(QWidget):
             
             self.progress.update_metrics(usage, requests, limits, allocated, self.progress.capacity)
             
-            # Show the labels container now that we have data
-            self.labels_container.show()
-            
             # Update labels based on resource type
             if self.resource_type == "cpu":
-                self.usage_label.setText(f"● Usage: {usage:.1f}% ({requests:.2f} cores)")
+                usage_cores = (usage / 100) * self.progress.capacity if self.progress.capacity > 0 else 0
+                self.usage_label.setText(f"● Usage: {usage:.1f}% ({usage_cores:.2f} cores)")
                 self.requests_label.setText(f"● Requests: {requests:.2f} cores")
                 if hasattr(self, 'limits_label') and limits > 0:
                     self.limits_label.setText(f"● Limits: {limits:.2f} cores")
+                else:
+                    if hasattr(self, 'limits_label'):
+                        self.limits_label.setText("● Limits: Not set")
                 if hasattr(self, 'allocated_label') and allocated > 0:
                     self.allocated_label.setText(f"● Allocated: {allocated:.2f} cores")
+                else:
+                    if hasattr(self, 'allocated_label'):
+                        self.allocated_label.setText("● Allocated: Not set")
                 self.capacity_label.setText(f"● Capacity: {self.progress.capacity:.2f} cores")
                 
             elif self.resource_type == "memory":
-                self.usage_label.setText(f"● Usage: {usage:.1f}% ({self.format_memory(requests)})")
+                usage_memory = (usage / 100) * self.progress.capacity if self.progress.capacity > 0 else 0
+                self.usage_label.setText(f"● Usage: {usage:.1f}% ({self.format_memory(usage_memory)})")
                 self.requests_label.setText(f"● Requests: {self.format_memory(requests)}")
                 if hasattr(self, 'limits_label') and limits > 0:
                     self.limits_label.setText(f"● Limits: {self.format_memory(limits)}")
+                else:
+                    if hasattr(self, 'limits_label'):
+                        self.limits_label.setText("● Limits: Not set")
                 if hasattr(self, 'allocated_label') and allocated > 0:
                     self.allocated_label.setText(f"● Allocated: {self.format_memory(allocated)}")
+                else:
+                    if hasattr(self, 'allocated_label'):
+                        self.allocated_label.setText("● Allocated: Not set")
                 self.capacity_label.setText(f"● Capacity: {self.format_memory(self.progress.capacity)}")
                 
             elif self.resource_type == "pods":
@@ -647,6 +658,11 @@ class ClusterPage(QWidget):
         # Data refresh timer
         self.refresh_timer = QTimer(self)
         self.refresh_timer.timeout.connect(self.refresh_data)
+        
+        # Store historical data for charts
+        self.cpu_history = []
+        self.memory_history = []
+        self.max_history_points = 20
         
         # UI setup
         self.setup_ui()
@@ -873,68 +889,90 @@ class ClusterPage(QWidget):
             if metrics:
                 self.update_metrics(metrics)
             else:
-                # Clear or show loading state for metrics-dependent UI elements
-                if hasattr(self, 'cpu_chart'): self.cpu_chart.update_data([], [])
-                if hasattr(self, 'memory_chart'): self.memory_chart.update_data([], [])
-                if hasattr(self, 'cpu_status'): self.cpu_status.update_metrics(0,0,0,0,0)
-                if hasattr(self, 'memory_status'): self.memory_status.update_metrics(0,0,0,0,0)
-                if hasattr(self, 'disk_status'): self.disk_status.update_metrics(0,0,0,0,0)
+                # Show loading state for metrics-dependent UI elements
+                logging.info("No cached metrics available, will wait for real data")
 
-            
-            # if issues:
-            #     self.update_issues(issues)
             if issues is not None: # Allow empty list of issues
                 self.update_issues(issues)
             else:
-                if hasattr(self, 'issues_table'): self.update_issues([])
+                if hasattr(self, 'issues_table'): 
+                    self.update_issues([])
 
             logging.info("Preloaded cluster page with cached data")
         except Exception as e:
             logging.error(f"Error preloading cached data: {e}")
 
     def update_metrics(self, metrics):
+        """Update metrics with real data and maintain history"""
         self.metrics_data = metrics
         if not metrics:
             logging.warning("ClusterPage: No metrics data to update.")
-            # Optionally clear metric displays or show "Loading..."
-            if hasattr(self, 'cpu_chart'): self.cpu_chart.update_data([], [])
-            # ... clear other metric UIs ...
             return
 
-        # logging.info(f"ClusterPage: Metrics data updated.")
+        logging.info(f"ClusterPage: Updating metrics with real data: {list(metrics.keys())}")
         try:
             if "cpu" in metrics and hasattr(self, 'cpu_status') and hasattr(self, 'cpu_chart'):
                 cpu = metrics["cpu"]
-                self.cpu_status.update_metrics(
-                    float(cpu.get("usage", 0)), float(cpu.get("requests", 0)),
-                    float(cpu.get("limits", 0)), float(cpu.get("allocatable", 0)),
-                    float(cpu.get("capacity", 100))
-                )
-                self.cpu_chart.update_data(cpu.get("history", []), cpu.get("timestamps", self._generate_time_points(len(cpu.get("history", [])))))
+                usage = float(cpu.get("usage", 0))
+                requests = float(cpu.get("requests", 0))
+                limits = float(cpu.get("limits", 0))
+                allocatable = float(cpu.get("allocatable", 0))
+                capacity = float(cpu.get("capacity", 100))
+                
+                # Update status widget
+                self.cpu_status.update_metrics(usage, requests, limits, allocatable, capacity)
+                
+                # Maintain historical data for chart
+                self.cpu_history.append(usage)
+                if len(self.cpu_history) > self.max_history_points:
+                    self.cpu_history = self.cpu_history[-self.max_history_points:]
+                
+                # Update chart with real historical data
+                timestamps = cpu.get("timestamps", self._generate_time_points(len(self.cpu_history)))
+                self.cpu_chart.update_data(self.cpu_history.copy(), timestamps)
+                
+                logging.info(f"Updated CPU metrics: usage={usage}%, requests={requests}, capacity={capacity}")
             
             if "memory" in metrics and hasattr(self, 'memory_status') and hasattr(self, 'memory_chart'):
                 memory = metrics["memory"]
-                self.memory_status.update_metrics(
-                    float(memory.get("usage", 0)), float(memory.get("requests", 0)),
-                    float(memory.get("limits", 0)), float(memory.get("allocatable", 0)),
-                    float(memory.get("capacity", 100))
-                )
-                self.memory_chart.update_data(memory.get("history", []), memory.get("timestamps", self._generate_time_points(len(memory.get("history", [])))))
+                usage = float(memory.get("usage", 0))
+                requests = float(memory.get("requests", 0))
+                limits = float(memory.get("limits", 0))
+                allocatable = float(memory.get("allocatable", 0))
+                capacity = float(memory.get("capacity", 100))
+                
+                # Update status widget
+                self.memory_status.update_metrics(usage, requests, limits, allocatable, capacity)
+                
+                # Maintain historical data for chart
+                self.memory_history.append(usage)
+                if len(self.memory_history) > self.max_history_points:
+                    self.memory_history = self.memory_history[-self.max_history_points:]
+                
+                # Update chart with real historical data
+                timestamps = memory.get("timestamps", self._generate_time_points(len(self.memory_history)))
+                self.memory_chart.update_data(self.memory_history.copy(), timestamps)
+                
+                logging.info(f"Updated Memory metrics: usage={usage}%, requests={requests}, capacity={capacity}")
 
-            if "pods" in metrics and hasattr(self, 'disk_status'): # Assuming disk_status is for pods
+            if "pods" in metrics and hasattr(self, 'disk_status'):
                 pods = metrics["pods"]
-                self.disk_status.update_metrics(
-                    float(pods.get("usage", 0)), int(pods.get("count", 0)),
-                    0,0, # limits, allocated not typically for pods overview like this
-                    int(pods.get("capacity", 100))
-                )
+                usage = float(pods.get("usage", 0))
+                count = int(pods.get("count", 0))
+                capacity = int(pods.get("capacity", 100))
+                
+                # For pods, we use count as requests and don't have limits/allocated
+                self.disk_status.update_metrics(usage, count, 0, 0, capacity)
+                
+                logging.info(f"Updated Pod metrics: usage={usage}%, count={count}, capacity={capacity}")
+                
         except Exception as e:
             logging.error(f"ClusterPage: Error updating metrics UI: {e}")
 
-
     def update_issues(self, issues):
+        """Update issues display with real data"""
         self.issues_data = issues if issues is not None else []
-        # logging.info(f"ClusterPage: Issues data updated with {len(self.issues_data)} issues.")
+        logging.info(f"ClusterPage: Issues data updated with {len(self.issues_data)} issues.")
         try:
             if hasattr(self, 'stacked_layout') and hasattr(self, 'issues_table'):
                 if self.issues_data:
@@ -947,14 +985,11 @@ class ClusterPage(QWidget):
 
     def force_load_data(self):
         """Request fresh data for the current cluster if one is active."""
-        # This method might be called by ClusterView's handle_page_change.
-        # It should be smart enough not to immediately re-fetch if preloaded data is fresh,
-        # or it could simply always trigger a refresh.
         if hasattr(self, '_loading') and self._loading:
             logging.debug("ClusterPage: force_load_data skipped - already loading")
             return
             
-        logging.info("ClusterPage: force_load_data called.")
+        logging.info("ClusterPage: force_load_data called - requesting fresh metrics and issues")
         self._loading = True
         try:
             self.refresh_data()
@@ -987,6 +1022,7 @@ class ClusterPage(QWidget):
     def refresh_data(self):
         """Refresh cluster data"""
         try:
+            logging.info("ClusterPage: Refreshing metrics and issues data")
             if self.cluster_connector and hasattr(self.cluster_connector, 'load_metrics'):
                 self.cluster_connector.load_metrics()
             if self.cluster_connector and hasattr(self.cluster_connector, 'load_issues'):
@@ -999,6 +1035,8 @@ class ClusterPage(QWidget):
         super().showEvent(event)
         if not self.refresh_timer.isActive():
             self.refresh_timer.start(30000)  # Refresh every 30 seconds
+            # Also refresh immediately when shown
+            QTimer.singleShot(1000, self.refresh_data)
 
     def hideEvent(self, event):
         """Stop refresh timer when page is hidden"""

@@ -1,30 +1,41 @@
+"""
+Optimized KubernetesClient with performance improvements:
+- Request batching for multiple resource types
+- Efficient log streaming with buffering
+- Connection reuse and pooling
+- Lazy API client initialization
+- Optimized metrics calculation with caching
+- Reduced memory footprint
+"""
+
 import os
-import json
 import yaml
-from PyQt6.QtCore import QObject, pyqtSignal, QRunnable, QThreadPool, pyqtSlot, QTimer, QThread
-from dataclasses import dataclass
-from typing import Optional, Dict, List, Any
-import datetime
+import time
 import logging
 import threading
-import socket
-import time
-from typing import Tuple
+import weakref
+from datetime import datetime, timedelta
+from collections import defaultdict, deque
+from functools import lru_cache
+from typing import Optional, Dict, List, Any, Tuple
 
-
-import threading
-import queue
-import time
-# Kubernetes Python client imports
+from PyQt6.QtCore import QObject, pyqtSignal, QTimer, QThread, QRunnable, QThreadPool
+from dataclasses import dataclass
 from kubernetes import client, config, watch
 from kubernetes.client.rest import ApiException
 from kubernetes.config.config_exception import ConfigException
 from kubernetes.stream import stream
 
-
 from utils.enhanced_worker import EnhancedBaseWorker
 from utils.thread_manager import get_thread_manager
-            
+
+# Performance constants
+API_TIMEOUT = 10
+BATCH_REQUEST_SIZE = 50
+LOG_BUFFER_SIZE = 1000
+METRICS_CACHE_TTL = 30  # seconds
+EVENT_BATCH_SIZE = 100
+MAX_CONCURRENT_REQUESTS = 5   
 
 @dataclass
 class KubeCluster:
@@ -40,6 +51,28 @@ class KubeCluster:
     user: Optional[str] = None
     namespace: Optional[str] = None
     version: Optional[str] = None
+
+class LazyAPIClient:
+    """Lazy initialization wrapper for Kubernetes API clients"""
+    
+    def __init__(self, api_class):
+        self.api_class = api_class
+        self._instance = None
+        self._lock = threading.Lock()
+    
+    def __getattr__(self, name):
+        if self._instance is None:
+            with self._lock:
+                if self._instance is None:
+                    self._instance = self.api_class()
+        return getattr(self._instance, name)
+    
+    def reset(self):
+        """Reset the cached instance"""
+        with self._lock:
+            self._instance = None
+
+
 
 class WorkerSignals(QObject):
     """Signals for worker threads with proper lifecycle management"""
@@ -128,61 +161,83 @@ class ResourceDetailWorker(EnhancedBaseWorker):
 class KubernetesLogStreamer(QObject):
     """Kubernetes log streamer using watch API for real-time logs"""
 
-    log_line_received = pyqtSignal(str, str, str)  # pod_name, log_line, timestamp
+    log_batch_received = pyqtSignal(str, list)  # pod_name, log_lines
+    # log_line_received = pyqtSignal(str, str, str)  # pod_name, log_line, timestamp
     stream_error = pyqtSignal(str, str)  # pod_name, error_message
     stream_status = pyqtSignal(str, str)  # pod_name, status_message
 
     def __init__(self, kube_client):
         super().__init__()
         self.kube_client = kube_client
-        self.active_streams = {}  # Track active log streams
+        self.active_streams = {}
+        self.log_buffers = defaultdict(deque)
         self._shutdown = False
+        
+        # Buffer flush timer
+        self._flush_timer = QTimer()
+        self._flush_timer.timeout.connect(self._flush_buffers)
+        self._flush_timer.start(100)  # Flush every 100ms
+    
 
-    def start_log_stream(self, pod_name, namespace, container=None, tail_lines=200, follow=True):
-        """Start streaming logs for a pod"""
-        try:
-            stream_key = f"{namespace}/{pod_name}"
-            if container:
-                stream_key += f"/{container}"
-
-            # Stop existing stream if any
-            self.stop_log_stream(stream_key)
-
-            # Create and start new stream
-            stream_thread = LogStreamThread(
-                self.kube_client,
-                pod_name,
-                namespace,
-                container,
-                tail_lines,
-                follow,
-                self
-            )
-
-            self.active_streams[stream_key] = stream_thread
-            stream_thread.start()
-
-            self.stream_status.emit(pod_name, "Starting log stream...")
-
-        except Exception as e:
-            logging.error(f"Error starting log stream for {pod_name}: {e}")
-            self.stream_error.emit(pod_name, f"Failed to start stream: {str(e)}")
-
+    def start_log_stream(self, pod_name, namespace, container=None, tail_lines=200):
+        """Start optimized log streaming"""
+        stream_key = f"{namespace}/{pod_name}"
+        if container:
+            stream_key += f"/{container}"
+        
+        # Stop existing stream
+        self.stop_log_stream(stream_key)
+        
+        # Create buffered stream thread
+        stream_thread = LogStreamThread(
+            self.kube_client,
+            pod_name,
+            namespace,
+            container,
+            tail_lines,
+            self.log_buffers[stream_key]
+        )
+        
+        self.active_streams[stream_key] = stream_thread
+        stream_thread.start()
+        
+        self.stream_status.emit(pod_name, "Starting log stream...")
+    
     def stop_log_stream(self, stream_key):
-        """Stop a specific log stream"""
-        try:
-            if stream_key in self.active_streams:
-                stream_thread = self.active_streams[stream_key]
-                stream_thread.stop()
-                stream_thread.wait(2000)  # Wait up to 2 seconds
-
-                if stream_thread.isRunning():
-                    stream_thread.terminate()
-
-                del self.active_streams[stream_key]
-
-        except Exception as e:
-            logging.error(f"Error stopping log stream {stream_key}: {e}")
+        """Stop a log stream and flush buffer"""
+        if stream_key in self.active_streams:
+            self.active_streams[stream_key].stop()
+            self.active_streams[stream_key].wait(1000)
+            del self.active_streams[stream_key]
+        
+        # Flush remaining logs
+        if stream_key in self.log_buffers:
+            self._flush_buffer(stream_key)
+            del self.log_buffers[stream_key]
+    
+    def _flush_buffers(self):
+        """Flush all log buffers"""
+        for stream_key in list(self.log_buffers.keys()):
+            self._flush_buffer(stream_key)
+    
+    def _flush_buffer(self, stream_key):
+        """Flush a specific buffer"""
+        buffer = self.log_buffers[stream_key]
+        if not buffer:
+            return
+        
+        # Extract pod name from stream key
+        parts = stream_key.split('/')
+        pod_name = parts[1] if len(parts) > 1 else stream_key
+        
+        # Emit batch of logs
+        log_batch = []
+        while buffer and len(log_batch) < LOG_BUFFER_SIZE:
+            log_batch.append(buffer.popleft())
+        
+        if log_batch:
+            self.log_batch_received.emit(pod_name, log_batch)
+    
 
     def stop_all_streams(self):
         """Stop all active log streams"""
@@ -190,173 +245,182 @@ class KubernetesLogStreamer(QObject):
         for stream_key in list(self.active_streams.keys()):
             self.stop_log_stream(stream_key)
 
+    def cleanup(self):
+        """Cleanup all streams"""
+        self._shutdown = True
+        self._flush_timer.stop()
+        
+        for stream_key in list(self.active_streams.keys()):
+            self.stop_log_stream(stream_key)
+
     def __del__(self):
         """Cleanup when object is destroyed"""
         self.stop_all_streams()
 
+
 class LogStreamThread(QThread):
     """Thread for streaming logs from Kubernetes API"""
 
-    def __init__(self, kube_client, pod_name, namespace, container, tail_lines, follow, parent_streamer):
+
+    def __init__(self, kube_client, pod_name, namespace, container, tail_lines, buffer):
         super().__init__()
         self.kube_client = kube_client
         self.pod_name = pod_name
         self.namespace = namespace
         self.container = container
         self.tail_lines = tail_lines
-        self.follow = follow
-        self.parent_streamer = parent_streamer
+        self.buffer = buffer
         self._stop_requested = False
-
+    
     def stop(self):
-        """Request thread to stop"""
         self._stop_requested = True
-
+    
     def run(self):
-        """Run the log streaming"""
+        """Stream logs with buffering"""
         try:
-            # First, get initial logs if tail_lines is specified
-            if self.tail_lines and self.tail_lines > 0:
+            # Get initial logs
+            if self.tail_lines > 0:
                 self._fetch_initial_logs()
-
-            # If follow mode is enabled, start streaming
-            if self.follow and not self._stop_requested:
-                self._stream_live_logs()
-
-        except Exception as e:
+            
+            # Stream live logs
             if not self._stop_requested:
-                self.parent_streamer.stream_error.emit(
-                    self.pod_name,
-                    f"Log streaming error: {str(e)}"
-                )
-
+                self._stream_live_logs()
+                
+        except Exception as e:
+            logging.error(f"Log streaming error for {self.pod_name}: {e}")
+    
     def _fetch_initial_logs(self):
-        """Fetch initial logs"""
+        """Fetch initial logs efficiently"""
         try:
-            if not self.kube_client.v1:
-                return
-
             kwargs = {
                 'name': self.pod_name,
                 'namespace': self.namespace,
                 'timestamps': True,
                 'tail_lines': self.tail_lines
             }
-
+            
             if self.container:
                 kwargs['container'] = self.container
-
+            
             logs = self.kube_client.v1.read_namespaced_pod_log(**kwargs)
-
-            if logs and not self._stop_requested:
-                # Parse and emit each log line
+            
+            if logs:
                 for line in logs.strip().split('\n'):
                     if self._stop_requested:
                         break
-
                     if line.strip():
-                        timestamp, log_content = self._parse_log_line(line)
-                        self.parent_streamer.log_line_received.emit(
-                            self.pod_name, log_content, timestamp
-                        )
-                        # Small delay to prevent overwhelming the UI
-                        self.msleep(1)
-
-        except ApiException as e:
-            if not self._stop_requested:
-                if e.status == 404:
-                    self.parent_streamer.stream_error.emit(
-                        self.pod_name, f"Pod not found: {self.pod_name}"
-                    )
-                else:
-                    self.parent_streamer.stream_error.emit(
-                        self.pod_name, f"API error: {e.reason}"
-                    )
+                        timestamp, content = self._parse_log_line(line)
+                        self.buffer.append({
+                            'timestamp': timestamp,
+                            'content': content
+                        })
+                        
         except Exception as e:
-            if not self._stop_requested:
-                self.parent_streamer.stream_error.emit(
-                    self.pod_name, f"Error fetching initial logs: {str(e)}"
-                )
-
+            logging.error(f"Error fetching initial logs: {e}")
+    
     def _stream_live_logs(self):
-        """Stream live logs using Kubernetes watch API"""
+        """Stream live logs with watch API"""
         try:
-            if not self.kube_client.v1:
-                return
-
-            self.parent_streamer.stream_status.emit(self.pod_name, "🔴 Live streaming...")
-
             w = watch.Watch()
-
+            
             kwargs = {
                 'name': self.pod_name,
                 'namespace': self.namespace,
                 'follow': True,
                 'timestamps': True,
-                'since_seconds': 1  # Only get very recent logs for streaming
+                '_preload_content': False
             }
-
+            
             if self.container:
                 kwargs['container'] = self.container
-
-            # Start the watch stream
-            stream_iter = w.stream(
-                self.kube_client.v1.read_namespaced_pod_log,
-                **kwargs
-            )
-
-            for event in stream_iter:
+            
+            for event in w.stream(self.kube_client.v1.read_namespaced_pod_log, **kwargs):
                 if self._stop_requested:
                     w.stop()
                     break
-
-                # Process the log event
+                
                 if isinstance(event, str) and event.strip():
-                    timestamp, log_content = self._parse_log_line(event)
-                    self.parent_streamer.log_line_received.emit(
-                        self.pod_name, log_content, timestamp
-                    )
-
-                # Small delay to prevent overwhelming
-                self.msleep(10)
-
-        except ApiException as e:
-            if not self._stop_requested:
-                self.parent_streamer.stream_error.emit(
-                    self.pod_name, f"Streaming API error: {e.reason}"
-                )
+                    timestamp, content = self._parse_log_line(event)
+                    self.buffer.append({
+                        'timestamp': timestamp,
+                        'content': content
+                    })
+                    
         except Exception as e:
             if not self._stop_requested:
-                self.parent_streamer.stream_error.emit(
-                    self.pod_name, f"Streaming error: {str(e)}"
-                )
-
+                logging.error(f"Error streaming logs: {e}")
+    
     def _parse_log_line(self, log_line):
-        """Parse log line to extract timestamp and content"""
+        """Parse log line efficiently"""
         try:
-            # Kubernetes logs format: 2024-01-01T12:00:00.000000000Z log content
             if ' ' in log_line and log_line.startswith('20'):
                 parts = log_line.split(' ', 1)
                 if len(parts) == 2:
-                    timestamp_str = parts[0]
-                    log_content = parts[1]
+                    timestamp = parts[0].split('T')[1].split('.')[0][:8]
+                    return timestamp, parts[1]
+            return datetime.now().strftime("%H:%M:%S"), log_line
+        except:
+            return datetime.now().strftime("%H:%M:%S"), log_line
 
-                    # Extract just the time part (HH:MM:SS)
-                    if 'T' in timestamp_str:
-                        time_part = timestamp_str.split('T')[1]
-                        if '.' in time_part:
-                            time_part = time_part.split('.')[0]
-                        timestamp = time_part[:8]  # HH:MM:SS
-                    else:
-                        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
-
-                    return timestamp, log_content
-
-            # Fallback if parsing fails
-            return datetime.datetime.now().strftime("%H:%M:%S"), log_line
-
-        except Exception:
-            return datetime.datetime.now().strftime("%H:%M:%S"), log_line
+class ResourceBatcher:
+    """Batches multiple resource requests for efficiency"""
+    
+    def __init__(self, kube_client):
+        self.kube_client = kube_client
+        self._request_queue = defaultdict(list)
+        self._lock = threading.Lock()
+    
+    def queue_request(self, resource_type, namespace=None):
+        """Queue a resource request"""
+        with self._lock:
+            key = (resource_type, namespace)
+            self._request_queue[key].append(time.time())
+    
+    def process_batch(self):
+        """Process queued requests in batch"""
+        with self._lock:
+            if not self._request_queue:
+                return {}
+            
+            results = {}
+            
+            # Group by resource type
+            for (resource_type, namespace), _ in self._request_queue.items():
+                try:
+                    if resource_type == "pods":
+                        results[resource_type] = self._batch_get_pods(namespace)
+                    elif resource_type == "services":
+                        results[resource_type] = self._batch_get_services(namespace)
+                    # Add other resource types as needed
+                except Exception as e:
+                    logging.error(f"Error batch loading {resource_type}: {e}")
+            
+            self._request_queue.clear()
+            return results
+    
+    def _batch_get_pods(self, namespace):
+        """Get pods with minimal API calls"""
+        if namespace:
+            return self.kube_client.v1.list_namespaced_pod(
+                namespace=namespace,
+                limit=BATCH_REQUEST_SIZE
+            ).items
+        else:
+            return self.kube_client.v1.list_pod_for_all_namespaces(
+                limit=BATCH_REQUEST_SIZE
+            ).items
+    
+    def _batch_get_services(self, namespace):
+        """Get services with minimal API calls"""
+        if namespace:
+            return self.kube_client.v1.list_namespaced_service(
+                namespace=namespace,
+                limit=BATCH_REQUEST_SIZE
+            ).items
+        else:
+            return self.kube_client.v1.list_service_for_all_namespaces(
+                limit=BATCH_REQUEST_SIZE
+            ).items
 
 
 class KubernetesPodSSH(QObject):
@@ -618,71 +682,69 @@ class ResourceUpdateWorker(EnhancedBaseWorker):
 
 class KubernetesClient(QObject):
     """Client for interacting with Kubernetes clusters using Python kubernetes library"""
+    # Signals
     clusters_loaded = pyqtSignal(list)
     cluster_info_loaded = pyqtSignal(dict)
     cluster_metrics_updated = pyqtSignal(dict)
-    node_metrics_updated = pyqtSignal(dict)
     cluster_issues_updated = pyqtSignal(list)
     resource_detail_loaded = pyqtSignal(dict)
     resource_updated = pyqtSignal(dict)
     pod_logs_loaded = pyqtSignal(dict)
-    
-    # New signals for streaming logs
-    pod_log_line_received = pyqtSignal(dict)      # Individual log line
-    pod_log_stream_error = pyqtSignal(dict)       # Stream errors
-    pod_log_stream_status = pyqtSignal(dict)      # Stream status updates
-    
     error_occurred = pyqtSignal(str)
-    pod_logs_loaded = pyqtSignal(dict)
-    pod_log_line_received = pyqtSignal(dict)      # Individual log line
-    pod_log_stream_error = pyqtSignal(dict)       # Stream errors
-    pod_log_stream_status = pyqtSignal(dict)      # Stream status updates
 
     def __init__(self):
         super().__init__()
-        self.threadpool = QThreadPool()
         self.clusters = []
         self.current_cluster = None
         self._default_kubeconfig = os.path.expanduser("~/.kube/config")
         
-        # Kubernetes API clients
-        self.v1 = None
-        self.apps_v1 = None
-        self.extensions_v1beta1 = None
-        self.networking_v1 = None
-        self.storage_v1 = None
-        self.rbac_v1 = None
-        self.batch_v1 = None
-        self.autoscaling_v1 = None
-        self.custom_objects_api = None
-        self.metrics_api = None
-        
+        # Lazy initialization of API clients
+        self._api_clients = {}
+        self._init_lazy_clients()
 
-        # Add log streamer
+        self.threadpool = QThreadPool()
+        self.threadpool.setMaxThreadCount(8)  # Set appropriate thread count
+        
+        # Resource batcher
+        self.resource_batcher = ResourceBatcher(self)
+        
+        # Optimized log streamer
         self.log_streamer = KubernetesLogStreamer(self)
         
-        # Connect log streamer signals
-        self.log_streamer.log_line_received.connect(self.handle_log_line_received)
-        self.log_streamer.stream_error.connect(self.handle_stream_error)
-        self.log_streamer.stream_status.connect(self.handle_stream_status)
+        # Caching
+        self._metrics_cache = {}
+        self._metrics_cache_time = {}
+        self._issues_cache = {}
+        self._issues_cache_time = {}
+        
+        # Thread management
+        self.thread_manager = get_thread_manager()
+        self._active_workers = weakref.WeakSet()
+        
+        # Polling timers
+        self._setup_timers()
+        
+        self._shutting_down = False
 
+    def _init_lazy_clients(self):
+        """Initialize lazy API clients"""
+        self.v1 = LazyAPIClient(client.CoreV1Api)
+        self.apps_v1 = LazyAPIClient(client.AppsV1Api)
+        self.networking_v1 = LazyAPIClient(client.NetworkingV1Api)
+        self.storage_v1 = LazyAPIClient(client.StorageV1Api)
+        self.rbac_v1 = LazyAPIClient(client.RbacAuthorizationV1Api)
+        self.batch_v1 = LazyAPIClient(client.BatchV1Api)
+        self.autoscaling_v1 = LazyAPIClient(client.AutoscalingV1Api)
+        self.custom_objects_api = LazyAPIClient(client.CustomObjectsApi)
+        self.version_api = LazyAPIClient(client.VersionApi)
 
-        # Set up timers for periodic updates
+    def _setup_timers(self):
+        """Setup polling timers"""
         self.metrics_timer = QTimer(self)
         self.metrics_timer.timeout.connect(self.refresh_metrics)
         
         self.issues_timer = QTimer(self)
         self.issues_timer.timeout.connect(self.refresh_issues)
-        
-        # Track active workers
-        self._active_workers = set()
-        
-        # Shutdown flag
-        self._shutting_down = False
-
-        # Add log streamer initialization
-        self.log_streamer = KubernetesLogStreamer(self)
-
     
     def __del__(self):
         """Clean up resources when object is deleted"""
@@ -1091,28 +1153,28 @@ class KubernetesClient(QObject):
     def switch_context(self, context_name: str) -> bool:
         """Switch to a specific Kubernetes context"""
         try:
-            # Load configuration for the specific context
+            # Load configuration
             config.load_kube_config(context=context_name)
             
-            # Initialize API clients
-            if not self._initialize_api_clients():
-                return False
+            # Reset lazy clients
+            for client_attr in ['v1', 'apps_v1', 'networking_v1', 'storage_v1', 
+                              'rbac_v1', 'batch_v1', 'autoscaling_v1']:
+                if hasattr(self, client_attr):
+                    getattr(self, client_attr).reset()
             
             self.current_cluster = context_name
             
             # Update cluster status
             for cluster in self.clusters:
-                if cluster.name == context_name:
-                    cluster.status = "active"
-                else:
-                    cluster.status = "disconnect"
+                cluster.status = "active" if cluster.name == context_name else "disconnect"
             
             return True
             
         except Exception as e:
-            self.error_occurred.emit(f"Failed to switch context to {context_name}: {str(e)}")
+            self.error_occurred.emit(f"Failed to switch context: {str(e)}")
             return False
     
+
     def get_cluster_info(self, cluster_name):
         """Get detailed information about a specific cluster"""
         try:
@@ -1177,87 +1239,6 @@ class KubernetesClient(QObject):
             self.error_occurred.emit(f"Error getting cluster info: {str(e)}")
             return None
     
-    def get_cluster_metrics(self):
-        """Get real-time resource metrics for the cluster"""
-        try:
-            # Get nodes for capacity calculation
-            nodes_list = self.v1.list_node()
-            
-            cpu_total = 0
-            memory_total = 0
-            pods_capacity = 0
-            
-            # Calculate total capacity
-            for node in nodes_list.items:
-                if node.status and node.status.capacity:
-                    cpu_capacity = self._parse_resource_value(node.status.capacity.get('cpu', '0'))
-                    memory_capacity = self._parse_resource_value(node.status.capacity.get('memory', '0Ki'))
-                    pod_capacity = int(node.status.capacity.get('pods', '110'))
-                    
-                    cpu_total += cpu_capacity
-                    memory_total += memory_capacity
-                    pods_capacity += pod_capacity
-            
-            # Try to get metrics from metrics server
-            cpu_used = 0
-            memory_used = 0
-            
-            try:
-                # This would require metrics-server to be installed
-                # For now, we'll use a percentage estimation
-                pass
-            except:
-                # Fallback to estimation
-                cpu_used = cpu_total * 0.3  # 30% usage estimation
-                memory_used = memory_total * 0.4  # 40% usage estimation
-            
-            # Get pod count
-            pods_list = self.v1.list_pod_for_all_namespaces()
-            pods_total = len(pods_list.items)
-            
-            # Calculate usage percentages
-            cpu_usage = (cpu_used / cpu_total * 100) if cpu_total > 0 else 0
-            memory_usage = (memory_used / memory_total * 100) if memory_total > 0 else 0
-            pods_usage = (pods_total / pods_capacity * 100) if pods_capacity > 0 else 0
-            
-            # Generate historical data points for charts
-            cpu_history = self._generate_metrics_history('cpu', 12, cpu_usage)
-            memory_history = self._generate_metrics_history('memory', 12, memory_usage)
-            
-            metrics = {
-                "cpu": {
-                    "usage": round(cpu_usage, 2),
-                    "requests": round(cpu_used, 2),
-                    "limits": round(cpu_total * 0.8, 2),
-                    "capacity": round(cpu_total, 2),
-                    "allocatable": round(cpu_total, 2),
-                    "history": cpu_history
-                },
-                "memory": {
-                    "usage": round(memory_usage, 2),
-                    "requests": round(memory_used / (1024**3), 2),  # Convert to GB
-                    "limits": round(memory_total * 0.8 / (1024**3), 2),
-                    "capacity": round(memory_total / (1024**3), 2),
-                    "allocatable": round(memory_total / (1024**3), 2),
-                    "history": memory_history
-                },
-                "pods": {
-                    "usage": round(pods_usage, 2),
-                    "count": pods_total,
-                    "capacity": pods_capacity
-                }
-            }
-            
-            if not self._shutting_down:
-                self.cluster_metrics_updated.emit(metrics)
-            return metrics
-            
-        except Exception as e:
-            if not self._shutting_down:
-                self.error_occurred.emit(f"Error getting cluster metrics: {str(e)}")
-            return None
-    
-
     def get_cluster_metrics_async(self):
         if self._shutting_down:
             return
@@ -1273,104 +1254,6 @@ class KubernetesClient(QObject):
         thread_manager = get_thread_manager()
         thread_manager.submit_worker("kube_metrics_fetch", worker)
 
-    def get_cluster_issues(self):
-        """Get current issues in the cluster"""
-        try:
-            issues = []
-            
-            # Ensure API clients are initialized
-            if not hasattr(self, 'v1') or not self.v1:
-                if not self._initialize_api_clients():
-                    logging.warning("Could not initialize API clients for cluster issues")
-                    return []
-            
-            # Check if we have a current cluster connection
-            if not self.current_cluster:
-                logging.debug("No current cluster connection for issues")
-                return []
-            
-            # Get events with warnings or errors from accessible namespaces
-            try:
-                # Get list of namespaces first
-                namespaces = []
-                try:
-                    namespaces_list = self.v1.list_namespace()
-                    namespaces = [ns.metadata.name for ns in namespaces_list.items]
-                except Exception:
-                    # If we can't get namespaces, try common ones
-                    namespaces = ["default", "kube-system", "kube-public"]
-                
-                # Get events from each namespace
-                for namespace in namespaces:
-                    try:
-                        events_list = self.v1.list_namespaced_event(namespace=namespace)
-                        
-                        for event in events_list.items:
-                            if event.type != "Normal":  # Warning, Error, etc.
-                                age = self._format_age(event.metadata.creation_timestamp) if event.metadata.creation_timestamp else "Unknown"
-                                
-                                issue = {
-                                    "message": event.message or "No message",
-                                    "object": f"{event.involved_object.kind}/{event.involved_object.name}" if event.involved_object else "Unknown",
-                                    "type": event.type or "Unknown",
-                                    "age": age,
-                                    "namespace": event.metadata.namespace or namespace,
-                                    "reason": event.reason or "Unknown"
-                                }
-                                issues.append(issue)
-                    except ApiException as api_e:
-                        # Skip namespaces we can't access
-                        if api_e.status != 404:
-                            logging.debug(f"Could not get events from namespace {namespace}: {api_e.reason}")
-                    except Exception as e:
-                        logging.debug(f"Error getting events from namespace {namespace}: {e}")
-                        
-            except Exception as e:
-                logging.warning(f"Could not get events: {e}")
-            
-            # Get pods that are not in Running or Succeeded state
-            try:
-                pods_list = self.v1.list_pod_for_all_namespaces()
-                
-                for pod in pods_list.items:
-                    if pod.status.phase not in ["Running", "Succeeded", "Completed"]:
-                        age = self._format_age(pod.metadata.creation_timestamp) if pod.metadata.creation_timestamp else "Unknown"
-                        
-                        # Get container status for more detailed message
-                        message = "Pod not running"
-                        if pod.status.container_statuses:
-                            for container in pod.status.container_statuses:
-                                if not container.ready:
-                                    if container.state.waiting:
-                                        message = container.state.waiting.message or "Container waiting"
-                                    elif container.state.terminated:
-                                        message = container.state.terminated.message or "Container terminated"
-                                    break
-                        
-                        issue = {
-                            "message": message,
-                            "object": f"Pod/{pod.metadata.name}",
-                            "type": "Warning",
-                            "age": age,
-                            "namespace": pod.metadata.namespace or "default",
-                            "reason": pod.status.reason or "PodIssue"
-                        }
-                        issues.append(issue)
-            except Exception as e:
-                logging.warning(f"Could not get pods: {e}")
-            
-            # Sort issues by age (newest first)
-            issues.sort(key=lambda x: x["age"], reverse=True)
-            
-            if not self._shutting_down:
-                self.cluster_issues_updated.emit(issues)
-            return issues
-            
-        except Exception as e:
-            if not self._shutting_down:
-                self.error_occurred.emit(f"Error getting cluster issues: {str(e)}")
-            return []
-    
     def get_cluster_issues_async(self):
         """Get cluster issues asynchronously with shutdown check"""
         if self._shutting_down:
@@ -1987,83 +1870,6 @@ class KubernetesClient(QObject):
             logging.warning(f"Error getting {resource_type} count: {e}")
             return 0
     
-    def _parse_resource_value(self, value_str):
-        """Parse Kubernetes resource value strings to float with caching"""
-        if not value_str or not isinstance(value_str, str):
-            return 0.0
-        
-        # Check cache first
-        if not hasattr(self, '_resource_value_cache'):
-            self._resource_value_cache = {}
-        
-        if value_str in self._resource_value_cache:
-            return self._resource_value_cache[value_str]
-        
-        result = 0.0
-        
-        # CPU parsing (e.g., "100m" = 0.1 cores)
-        if value_str.endswith('m'):
-            result = float(value_str[:-1]) / 1000
-        else:
-            # Memory parsing
-            memory_suffixes = {
-                'Ki': 1024,
-                'Mi': 1024 ** 2,
-                'Gi': 1024 ** 3,
-                'Ti': 1024 ** 4,
-                'Pi': 1024 ** 5,
-                'Ei': 1024 ** 6,
-                'K': 1000,
-                'M': 1000 ** 2,
-                'G': 1000 ** 3,
-                'T': 1000 ** 4,
-                'P': 1000 ** 5,
-                'E': 1000 ** 6
-            }
-            
-            for suffix, multiplier in memory_suffixes.items():
-                if value_str.endswith(suffix):
-                    result = float(value_str[:-len(suffix)]) * multiplier
-                    break
-            else:
-                # If no suffix, try to parse as a number
-                try:
-                    result = float(value_str)
-                except ValueError:
-                    result = 0.0
-        
-        # Cache the result
-        self._resource_value_cache[value_str] = result
-        return result
-    
-    def _format_age(self, timestamp):
-        """Format timestamp to age string (e.g., "2d", "5h")"""
-        if not timestamp:
-            return "Unknown"
-        
-        try:
-            if isinstance(timestamp, str):
-                created_time = datetime.datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-            else:
-                # Assume it's already a datetime object
-                created_time = timestamp.replace(tzinfo=datetime.timezone.utc)
-            
-            now = datetime.datetime.now(datetime.timezone.utc)
-            diff = now - created_time
-            
-            days = diff.days
-            hours = diff.seconds // 3600
-            minutes = (diff.seconds % 3600) // 60
-            
-            if days > 0:
-                return f"{days}d"
-            elif hours > 0:
-                return f"{hours}h"
-            else:
-                return f"{minutes}m"
-        except Exception:
-            return "Unknown"
-    
     def _generate_metrics_history(self, metric_key, points, current_value):
         """Generate historical data points for metrics visualization"""
         import random
@@ -2084,25 +1890,389 @@ class KubernetesClient(QObject):
             base_value = value
         
         return history
+    
+    def _calculate_cluster_metrics(self):
+        """Calculate cluster metrics efficiently with real data"""
+        try:
+            # Get nodes with their actual resource information
+            nodes_list = self.v1.list_node()
+            
+            # Initialize totals
+            cpu_total_cores = 0
+            memory_total_bytes = 0
+            pods_capacity_total = 0
+            cpu_allocatable_cores = 0
+            memory_allocatable_bytes = 0
+            
+            for node in nodes_list.items:
+                if node.status and node.status.capacity:
+                    # CPU capacity and allocatable
+                    cpu_capacity = self._parse_cpu_value(node.status.capacity.get('cpu', '0'))
+                    cpu_total_cores += cpu_capacity
+                    
+                    if node.status.allocatable:
+                        cpu_allocatable = self._parse_cpu_value(node.status.allocatable.get('cpu', '0'))
+                        cpu_allocatable_cores += cpu_allocatable
+                    else:
+                        cpu_allocatable_cores += cpu_capacity
+                    
+                    # Memory capacity and allocatable
+                    memory_capacity = self._parse_memory_value(node.status.capacity.get('memory', '0Ki'))
+                    memory_total_bytes += memory_capacity
+                    
+                    if node.status.allocatable:
+                        memory_allocatable = self._parse_memory_value(node.status.allocatable.get('memory', '0Ki'))
+                        memory_allocatable_bytes += memory_allocatable
+                    else:
+                        memory_allocatable_bytes += memory_capacity
+                    
+                    # Pod capacity
+                    pods_capacity_total += int(node.status.capacity.get('pods', '110'))
+            
+            # Get actual pod resource usage
+            pods_list = self.v1.list_pod_for_all_namespaces()
+            
+            # Calculate actual resource requests and usage
+            cpu_requests_total = 0
+            memory_requests_total = 0
+            cpu_limits_total = 0
+            memory_limits_total = 0
+            running_pods_count = 0
+            
+            for pod in pods_list.items:
+                # Only count running pods
+                if pod.status and pod.status.phase == "Running":
+                    running_pods_count += 1
+                    
+                    if pod.spec and pod.spec.containers:
+                        for container in pod.spec.containers:
+                            if container.resources:
+                                # CPU requests
+                                if container.resources.requests:
+                                    cpu_request = container.resources.requests.get('cpu', '0')
+                                    cpu_requests_total += self._parse_cpu_value(cpu_request)
+                                    
+                                    memory_request = container.resources.requests.get('memory', '0')
+                                    memory_requests_total += self._parse_memory_value(memory_request)
+                                
+                                # CPU limits
+                                if container.resources.limits:
+                                    cpu_limit = container.resources.limits.get('cpu', '0')
+                                    cpu_limits_total += self._parse_cpu_value(cpu_limit)
+                                    
+                                    memory_limit = container.resources.limits.get('memory', '0')
+                                    memory_limits_total += self._parse_memory_value(memory_limit)
+            
+            # Calculate usage percentages based on requests vs capacity
+            cpu_usage_percent = (cpu_requests_total / cpu_total_cores * 100) if cpu_total_cores > 0 else 0
+            memory_usage_percent = (memory_requests_total / memory_total_bytes * 100) if memory_total_bytes > 0 else 0
+            pods_usage_percent = (running_pods_count / pods_capacity_total * 100) if pods_capacity_total > 0 else 0
+            
+            # Ensure values are reasonable
+            cpu_usage_percent = min(cpu_usage_percent, 100)
+            memory_usage_percent = min(memory_usage_percent, 100)
+            pods_usage_percent = min(pods_usage_percent, 100)
+            
+            metrics = {
+                "cpu": {
+                    "usage": round(cpu_usage_percent, 2),
+                    "requests": round(cpu_requests_total, 2),
+                    "limits": round(cpu_limits_total, 2),
+                    "allocatable": round(cpu_allocatable_cores, 2),
+                    "capacity": round(cpu_total_cores, 2)
+                },
+                "memory": {
+                    "usage": round(memory_usage_percent, 2),
+                    "requests": round(memory_requests_total / (1024**2), 2),  # Convert to MB
+                    "limits": round(memory_limits_total / (1024**2), 2),      # Convert to MB
+                    "allocatable": round(memory_allocatable_bytes / (1024**2), 2),  # Convert to MB
+                    "capacity": round(memory_total_bytes / (1024**2), 2)     # Convert to MB
+                },
+                "pods": {
+                    "usage": round(pods_usage_percent, 2),
+                    "count": running_pods_count,
+                    "capacity": pods_capacity_total
+                }
+            }
+            
+            logging.info(f"Calculated real cluster metrics: CPU {cpu_usage_percent:.1f}%, Memory {memory_usage_percent:.1f}%, Pods {pods_usage_percent:.1f}%")
+            return metrics
+            
+        except Exception as e:
+            logging.error(f"Error calculating cluster metrics: {e}")
+            # Return default metrics if calculation fails
+            return {
+                "cpu": {"usage": 0, "requests": 0, "limits": 0, "allocatable": 0, "capacity": 1},
+                "memory": {"usage": 0, "requests": 0, "limits": 0, "allocatable": 0, "capacity": 1024},
+                "pods": {"usage": 0, "count": 0, "capacity": 100}
+            }
+    
+    def _parse_cpu_value(self, cpu_str):
+        """Parse CPU values (cores, millicores) to cores"""
+        if not cpu_str or not isinstance(cpu_str, str):
+            return 0.0
+        
+        cpu_str = cpu_str.strip()
+        
+        # Handle millicores (e.g., "500m" = 0.5 cores)
+        if cpu_str.endswith('m'):
+            try:
+                return float(cpu_str[:-1]) / 1000.0
+            except ValueError:
+                return 0.0
+        
+        # Handle cores (e.g., "2" = 2 cores)
+        try:
+            return float(cpu_str)
+        except ValueError:
+            return 0.0
+    
+    def _parse_memory_value(self, memory_str):
+        """Parse memory values to bytes"""
+        if not memory_str or not isinstance(memory_str, str):
+            return 0
+        
+        memory_str = memory_str.strip()
+        
+        # Memory unit multipliers
+        multipliers = {
+            'Ki': 1024,
+            'Mi': 1024**2,
+            'Gi': 1024**3,
+            'Ti': 1024**4,
+            'K': 1000,
+            'M': 1000**2,
+            'G': 1000**3,
+            'T': 1000**4
+        }
+        
+        # Check for unit suffixes
+        for suffix, multiplier in multipliers.items():
+            if memory_str.endswith(suffix):
+                try:
+                    value = float(memory_str[:-len(suffix)])
+                    return int(value * multiplier)
+                except ValueError:
+                    return 0
+        
+        # Handle plain numbers (assume bytes)
+        try:
+            return int(float(memory_str))
+        except ValueError:
+            return 0
 
-# Singleton instance
+    def get_cluster_metrics(self):
+        """Get cluster metrics with improved caching and real data"""
+        # Check cache first
+        cache_key = self.current_cluster
+        if cache_key in self._metrics_cache:
+            cache_time = self._metrics_cache_time.get(cache_key, 0)
+            if time.time() - cache_time < METRICS_CACHE_TTL:
+                cached_metrics = self._metrics_cache[cache_key]
+                logging.debug(f"Using cached metrics for {cache_key}")
+                return cached_metrics
+        
+        try:
+            # Get real metrics
+            metrics = self._calculate_cluster_metrics()
+            
+            # Cache results
+            self._metrics_cache[cache_key] = metrics
+            self._metrics_cache_time[cache_key] = time.time()
+            
+            # Clean old cache entries
+            self._cleanup_cache()
+            
+            if not self._shutting_down:
+                logging.info(f"Emitting real metrics data: {metrics}")
+                self.cluster_metrics_updated.emit(metrics)
+            
+            return metrics
+            
+        except Exception as e:
+            if not self._shutting_down:
+                logging.error(f"Error getting real metrics: {str(e)}")
+                self.error_occurred.emit(f"Error getting metrics: {str(e)}")
+            return None
+
+    def get_cluster_issues(self):
+        """Get cluster issues with real data and improved filtering"""
+        # Check cache
+        cache_key = self.current_cluster
+        if cache_key in self._issues_cache:
+            cache_time = self._issues_cache_time.get(cache_key, 0)
+            if time.time() - cache_time < METRICS_CACHE_TTL:
+                cached_issues = self._issues_cache[cache_key]
+                logging.debug(f"Using cached issues for {cache_key}")
+                return cached_issues
+        
+        try:
+            issues = []
+            
+            # Get events efficiently with field selector for non-normal events
+            try:
+                events_list = self.v1.list_event_for_all_namespaces(
+                    field_selector="type!=Normal",
+                    limit=EVENT_BATCH_SIZE
+                )
+            except Exception as e:
+                logging.warning(f"Failed to get events with field selector, trying without: {e}")
+                events_list = self.v1.list_event_for_all_namespaces(limit=EVENT_BATCH_SIZE)
+            
+            # Process events and filter for actual issues
+            for event in events_list.items:
+                # Skip normal events if they got through
+                if event.type == "Normal":
+                    continue
+                
+                # Filter for recent events (last 24 hours)
+                if event.metadata.creation_timestamp:
+                    event_time = event.metadata.creation_timestamp
+                    now = datetime.now(event_time.tzinfo) if event_time.tzinfo else datetime.now()
+                    age_hours = (now - event_time).total_seconds() / 3600
+                    
+                    # Only include events from last 24 hours
+                    if age_hours > 24:
+                        continue
+                
+                # Create issue object
+                issue = {
+                    "type": event.type or "Warning",
+                    "reason": event.reason or "Unknown",
+                    "message": (event.message or "No message")[:200],  # Truncate long messages
+                    "object": f"{event.involved_object.kind}/{event.involved_object.name}" if event.involved_object else "Unknown",
+                    "age": self._format_age(event.metadata.creation_timestamp) if event.metadata.creation_timestamp else "Unknown",
+                    "namespace": event.metadata.namespace or "default"
+                }
+                
+                issues.append(issue)
+            
+            # Sort by most recent first
+            issues.sort(key=lambda x: x.get("age", ""), reverse=False)
+            
+            # Limit to most recent issues
+            issues = issues[:50]  # Limit to 50 most recent issues
+            
+            # Cache results
+            self._issues_cache[cache_key] = issues
+            self._issues_cache_time[cache_key] = time.time()
+            
+            logging.info(f"Found {len(issues)} real cluster issues")
+            
+            if not self._shutting_down:
+                self.cluster_issues_updated.emit(issues)
+            
+            return issues
+            
+        except Exception as e:
+            if not self._shutting_down:
+                logging.error(f"Error getting real issues: {str(e)}")
+                self.error_occurred.emit(f"Error getting issues: {str(e)}")
+            return []
+
+    @lru_cache(maxsize=128)
+    def _parse_resource_value(self, value_str):
+        """Parse resource values with caching"""
+        if not value_str or not isinstance(value_str, str):
+            return 0.0
+        
+        # CPU parsing
+        if value_str.endswith('m'):
+            return float(value_str[:-1]) / 1000
+        
+        # Memory parsing
+        multipliers = {
+            'Ki': 1024, 'Mi': 1024**2, 'Gi': 1024**3,
+            'K': 1000, 'M': 1000**2, 'G': 1000**3
+        }
+        
+        for suffix, multiplier in multipliers.items():
+            if value_str.endswith(suffix):
+                return float(value_str[:-len(suffix)]) * multiplier
+        
+        try:
+            return float(value_str)
+        except ValueError:
+            return 0.0
+    
+    @lru_cache(maxsize=256)
+    def _format_age(self, timestamp):
+        """Format age with caching"""
+        if not timestamp:
+            return "Unknown"
+        
+        try:
+            if isinstance(timestamp, str):
+                created = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+            else:
+                created = timestamp
+            
+            now = datetime.now(created.tzinfo or datetime.now().astimezone().tzinfo)
+            diff = now - created
+            
+            if diff.days > 0:
+                return f"{diff.days}d"
+            elif diff.seconds >= 3600:
+                return f"{diff.seconds // 3600}h"
+            else:
+                return f"{diff.seconds // 60}m"
+                
+        except:
+            return "Unknown"
+    
+    def _cleanup_cache(self):
+        """Clean up old cache entries"""
+        current_time = time.time()
+        
+        # Clean metrics cache
+        old_metrics = [k for k, t in self._metrics_cache_time.items() 
+                      if current_time - t > 300]
+        for k in old_metrics:
+            self._metrics_cache.pop(k, None)
+            self._metrics_cache_time.pop(k, None)
+        
+        # Clean issues cache
+        old_issues = [k for k, t in self._issues_cache_time.items() 
+                     if current_time - t > 300]
+        for k in old_issues:
+            self._issues_cache.pop(k, None)
+            self._issues_cache_time.pop(k, None)
+    
+    def cleanup(self):
+        """Cleanup resources"""
+        self._shutting_down = True
+        
+        # Stop timers
+        for timer in [self.metrics_timer, self.issues_timer]:
+            if timer.isActive():
+                timer.stop()
+        
+        # Cleanup log streamer
+        if hasattr(self, 'log_streamer'):
+            self.log_streamer.cleanup()
+        
+        # Clear caches
+        self._metrics_cache.clear()
+        self._issues_cache.clear()
+        
+        # Clear LRU caches
+        self._parse_resource_value.cache_clear()
+        self._format_age.cache_clear()
+
+
+# Singleton management
 _instance = None
 
-def shutdown_kubernetes_client():
-    """Shutdown the kubernetes client singleton safely"""
-    global _instance
-    if _instance is not None:
-        try:
-            _instance.force_shutdown()
-            _instance = None
-            logging.info("Kubernetes client singleton shut down successfully")
-        except Exception as e:
-            logging.error(f"Error shutting down kubernetes client: {e}")
-            _instance = None
-            
 def get_kubernetes_client():
     """Get or create Kubernetes client singleton"""
     global _instance
     if _instance is None:
         _instance = KubernetesClient()
     return _instance
+
+def shutdown_kubernetes_client():
+    """Shutdown the kubernetes client"""
+    global _instance
+    if _instance is not None:
+        _instance.cleanup()
+        _instance = None
