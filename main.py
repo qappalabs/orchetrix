@@ -183,18 +183,18 @@ class OptimizedMainWindow(QMainWindow):
         except Exception as e:
             logging.error(f"Error during periodic cleanup: {e}")
 
-    def _post_switch_operations(self, cluster_name):
-        """Post-switch operations"""
-        try:
-            self.cluster_view.set_active_cluster(cluster_name)
-            if (hasattr(self.cluster_view, 'terminal_panel') and
-                    self.cluster_view.terminal_panel.is_visible and
-                    hasattr(self.cluster_view.terminal_panel, 'reposition')):
-                self.cluster_view.terminal_panel.reposition()
-            if hasattr(self.cluster_view, 'handle_page_change'):
-                self.cluster_view.handle_page_change(self.cluster_view.stacked_widget.currentWidget())
-        except Exception as e:
-            logging.error(f"Error in post-switch operations: {e}")
+        # def _post_switch_operations(self, cluster_name):
+        #     """Post-switch operations"""
+        #     try:
+        #         self.cluster_view.set_active_cluster(cluster_name)
+        #         if (hasattr(self.cluster_view, 'terminal_panel') and
+        #                 self.cluster_view.terminal_panel.is_visible and
+        #                 hasattr(self.cluster_view.terminal_panel, 'reposition')):
+        #             self.cluster_view.terminal_panel.reposition()
+        #         if hasattr(self.cluster_view, 'handle_page_change'):
+        #             self.cluster_view.handle_page_change(self.cluster_view.stacked_widget.currentWidget())
+        #     except Exception as e:
+        #         logging.error(f"Error in post-switch operations: {e}")
 
     def _setup_cluster_state_manager(self):
         """Setup cluster state manager"""
@@ -206,52 +206,52 @@ class OptimizedMainWindow(QMainWindow):
             logging.error(f"Failed to setup cluster state manager: {e}")
             self.cluster_state_manager = None
 
-    def _on_cluster_state_changed(self, cluster_name: str, state: ClusterState):
-        """Handle cluster state changes"""
-        if state == ClusterState.CONNECTING:
-            self.loading_overlay.show_loading(f"Connecting to {cluster_name}...")
-            self.loading_overlay.resize(self.size())
-            self.loading_overlay.raise_()
-        elif state == ClusterState.CONNECTED:
-            self.loading_overlay.hide_loading()
-        elif state == ClusterState.ERROR:
-            self.loading_overlay.hide_loading()
+    # def _on_cluster_state_changed(self, cluster_name: str, state: ClusterState):
+    #     """Handle cluster state changes"""
+    #     if state == ClusterState.CONNECTING:
+    #         self.loading_overlay.show_loading(f"Connecting to {cluster_name}...")
+    #         self.loading_overlay.resize(self.size())
+    #         self.loading_overlay.raise_()
+    #     elif state == ClusterState.CONNECTED:
+    #         self.loading_overlay.hide_loading()
+    #     elif state == ClusterState.ERROR:
+    #         self.loading_overlay.hide_loading()
 
-    def _on_cluster_switch_completed(self, cluster_name: str, success: bool):
-        """Handle cluster switch completion"""
-        if success:
-            # Always switch to cluster view when switch is completed successfully
-            # This ensures that even if we were "already connected", we still navigate to cluster view
-            current_widget = self.stacked_widget.currentWidget()
-            if current_widget != self.cluster_view:
-                logging.info(f"Switching to cluster view for {cluster_name}")
-                self.stacked_widget.setCurrentWidget(self.cluster_view)
+    # def _on_cluster_switch_completed(self, cluster_name: str, success: bool):
+    #     """Handle cluster switch completion"""
+    #     if success:
+    #         # Always switch to cluster view when switch is completed successfully
+    #         # This ensures that even if we were "already connected", we still navigate to cluster view
+    #         current_widget = self.stacked_widget.currentWidget()
+    #         if current_widget != self.cluster_view:
+    #             logging.info(f"Switching to cluster view for {cluster_name}")
+    #             self.stacked_widget.setCurrentWidget(self.cluster_view)
             
-            self.cluster_view.set_active_cluster(cluster_name)
-            QTimer.singleShot(50, lambda: self._post_switch_operations(cluster_name))
-        else:
-            self.show_error_message(f"Failed to switch to cluster: {cluster_name}")
+    #         self.cluster_view.set_active_cluster(cluster_name)
+    #         QTimer.singleShot(50, lambda: self._post_switch_operations(cluster_name))
+    #     else:
+    #         self.show_error_message(f"Failed to switch to cluster: {cluster_name}")
 
-    def switch_to_cluster_view(self, cluster_name="docker-desktop"):
-        """Optimized cluster switching using state manager"""
-        if not self.cluster_state_manager:
-            self.show_error_message("Cluster state manager not initialized.")
-            return
+    # def switch_to_cluster_view(self, cluster_name="docker-desktop"):
+    #     """Optimized cluster switching using state manager"""
+    #     if not self.cluster_state_manager:
+    #         self.show_error_message("Cluster state manager not initialized.")
+    #         return
 
-        self.previous_page = self.stacked_widget.currentWidget()
+    #     self.previous_page = self.stacked_widget.currentWidget()
         
-        # Check if we're already on cluster view with the same cluster
-        current_widget = self.stacked_widget.currentWidget()
-        if (current_widget == self.cluster_view and 
-            hasattr(self.cluster_view, 'active_cluster') and 
-            self.cluster_view.active_cluster == cluster_name):
-            logging.info(f"Already viewing cluster: {cluster_name}")
-            return
+    #     # Check if we're already on cluster view with the same cluster
+    #     current_widget = self.stacked_widget.currentWidget()
+    #     if (current_widget == self.cluster_view and 
+    #         hasattr(self.cluster_view, 'active_cluster') and 
+    #         self.cluster_view.active_cluster == cluster_name):
+    #         logging.info(f"Already viewing cluster: {cluster_name}")
+    #         return
         
-        # Request cluster switch through state manager
-        if not self.cluster_state_manager.request_cluster_switch(cluster_name):
-            logging.warning(f"Could not initiate switch to {cluster_name}")
-            return
+    #     # Request cluster switch through state manager
+    #     if not self.cluster_state_manager.request_cluster_switch(cluster_name):
+    #         logging.warning(f"Could not initiate switch to {cluster_name}")
+    #         return
 
     def resizeEvent(self, event):
         """Handle resize event"""
@@ -536,25 +536,180 @@ class OptimizedMainWindow(QMainWindow):
             self.switch_to_home()
         self.previous_page = None
 
+    def _on_cluster_state_changed(self, cluster_name: str, state: ClusterState):
+        """Handle cluster state changes with better error handling"""
+        try:
+            if state == ClusterState.CONNECTING:
+                self.loading_overlay.show_loading(f"Connecting to {cluster_name}...")
+                self.loading_overlay.resize(self.size())
+                self.loading_overlay.raise_()
+                logging.info(f"Started connecting to cluster: {cluster_name}")
+                
+            elif state == ClusterState.CONNECTED:
+                self.loading_overlay.show_loading(f"Loading data from {cluster_name}...")
+                logging.info(f"Successfully connected to cluster: {cluster_name}")
+                
+            elif state == ClusterState.ERROR:
+                self.loading_overlay.hide_loading()
+                logging.error(f"Failed to connect to cluster: {cluster_name}")
+                
+        except Exception as e:
+            logging.error(f"Error handling cluster state change: {e}")
+
+    def _on_cluster_switch_completed(self, cluster_name: str, success: bool):
+        """Handle cluster switch completion with better error handling"""
+        try:
+            self.loading_overlay.hide_loading()
+            
+            if success:
+                # Always switch to cluster view when switch is completed successfully
+                current_widget = self.stacked_widget.currentWidget()
+                if current_widget != self.cluster_view:
+                    logging.info(f"Switching to cluster view for {cluster_name}")
+                    self.stacked_widget.setCurrentWidget(self.cluster_view)
+                
+                # FIXED: Set active cluster without triggering another connection
+                self.cluster_view.set_active_cluster(cluster_name)
+                
+                # FIXED: Post-switch operations with error handling
+                QTimer.singleShot(50, lambda: self._post_switch_operations(cluster_name))
+                
+            else:
+                # FIXED: Better error message
+                error_msg = f"Failed to connect to cluster: {cluster_name}"
+                self.show_error_message(error_msg)
+                
+                # FIXED: Update homepage status back to available
+                if hasattr(self.home_page, 'all_data'):
+                    for view_type in self.home_page.all_data:
+                        for data_item in self.home_page.all_data[view_type]:
+                            if data_item.get("name") == cluster_name:
+                                data_item["status"] = "available"
+                    self.home_page.update_content_view(self.home_page.current_view)
+                    
+        except Exception as e:
+            logging.error(f"Error handling cluster switch completion: {e}")
+            self.loading_overlay.hide_loading()
+
+    def _post_switch_operations(self, cluster_name):
+        """Post-switch operations with better error handling"""
+        try:
+            # FIXED: Don't call set_active_cluster again, it was already called
+            
+            # Update terminal panel position if visible
+            if (hasattr(self.cluster_view, 'terminal_panel') and
+                    self.cluster_view.terminal_panel.is_visible and
+                    hasattr(self.cluster_view.terminal_panel, 'reposition')):
+                self.cluster_view.terminal_panel.reposition()
+                
+            # Handle page change for current cluster view page
+            if hasattr(self.cluster_view, 'handle_page_change'):
+                current_page = self.cluster_view.stacked_widget.currentWidget()
+                if current_page:
+                    self.cluster_view.handle_page_change(current_page)
+                    
+            logging.info(f"Post-switch operations completed for {cluster_name}")
+            
+        except Exception as e:
+            logging.error(f"Error in post-switch operations for {cluster_name}: {e}")
+
+    def switch_to_cluster_view(self, cluster_name="docker-desktop"):
+        """Improved cluster switching with better error handling"""
+        try:
+            if not self.cluster_state_manager:
+                self.show_error_message("Cluster state manager not initialized.")
+                return
+
+            self.previous_page = self.stacked_widget.currentWidget()
+            
+            # FIXED: Check if we're already connected and on cluster view
+            current_widget = self.stacked_widget.currentWidget()
+            if (current_widget == self.cluster_view and 
+                hasattr(self.cluster_view, 'active_cluster') and 
+                self.cluster_view.active_cluster == cluster_name):
+                
+                # Check actual connection state
+                cluster_state = self.cluster_state_manager.get_cluster_state(cluster_name)
+                if cluster_state == ClusterState.CONNECTED:
+                    logging.info(f"Already viewing connected cluster: {cluster_name}")
+                    return
+            
+            # FIXED: Request cluster switch with better error handling
+            logging.info(f"Requesting cluster switch to: {cluster_name}")
+            
+            if not self.cluster_state_manager.request_cluster_switch(cluster_name):
+                error_msg = f"Could not initiate switch to {cluster_name}"
+                logging.warning(error_msg)
+                self.show_error_message(error_msg)
+                return
+                
+        except Exception as e:
+            logging.error(f"Error in switch_to_cluster_view for {cluster_name}: {e}")
+            self.show_error_message(f"Error switching to cluster: {str(e)}")
+
     def show_error_message(self, error_message):
-        """Display error messages"""
+        """Display error messages with improved handling"""
         if self._shutting_down:
             return
 
-        if not hasattr(self, '_error_shown'):
-            self._error_shown = False
+        try:
+            # FIXED: Prevent error dialog spam
+            if not hasattr(self, '_error_shown'):
+                self._error_shown = False
 
-        if self._error_shown and not self._is_switching_to_cluster:
-            logging.error(f"Suppressed duplicate error dialog: {error_message}")
-            return
+            if self._error_shown:
+                logging.error(f"Suppressed duplicate error dialog: {error_message}")
+                return
 
-        self._error_shown = True
-        QMessageBox.critical(self, "Error", error_message)
-        QTimer.singleShot(1000, self._reset_error_flag)
+            self._error_shown = True
+            
+            # FIXED: Hide loading overlay when showing error
+            if hasattr(self, 'loading_overlay'):
+                self.loading_overlay.hide_loading()
+            
+            # Create and show error message
+            msg = QMessageBox(self)
+            msg.setIcon(QMessageBox.Icon.Critical)
+            msg.setWindowTitle("Error")
+            msg.setText(str(error_message))
+            msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+            
+            # FIXED: Add timeout to prevent hanging dialogs
+            QTimer.singleShot(10000, msg.close)  # Auto-close after 10 seconds
+            
+            msg.exec()
+            
+            # Reset error flag after showing
+            QTimer.singleShot(2000, self._reset_error_flag)
+            
+        except Exception as e:
+            logging.error(f"Error showing error message: {e}")
 
     def _reset_error_flag(self):
         """Reset the error dialog flag"""
-        self._error_shown = False
+        try:
+            self._error_shown = False
+        except:
+            pass
+    # def show_error_message(self, error_message):
+    #     """Display error messages"""
+    #     if self._shutting_down:
+    #         return
+
+    #     if not hasattr(self, '_error_shown'):
+    #         self._error_shown = False
+
+    #     if self._error_shown and not self._is_switching_to_cluster:
+    #         logging.error(f"Suppressed duplicate error dialog: {error_message}")
+    #         return
+
+    #     self._error_shown = True
+    #     QMessageBox.critical(self, "Error", error_message)
+    #     QTimer.singleShot(1000, self._reset_error_flag)
+
+    # def _reset_error_flag(self):
+    #     """Reset the error dialog flag"""
+    #     self._error_shown = False
 
     def handle_page_change(self, index):
         """Handle page changes in the stacked widget"""

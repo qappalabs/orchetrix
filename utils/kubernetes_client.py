@@ -52,6 +52,7 @@ class KubeCluster:
     namespace: Optional[str] = None
     version: Optional[str] = None
 
+
 class LazyAPIClient:
     """Lazy initialization wrapper for Kubernetes API clients"""
     
@@ -59,19 +60,38 @@ class LazyAPIClient:
         self.api_class = api_class
         self._instance = None
         self._lock = threading.Lock()
+        self._initialization_failed = False
+        self._last_error = None
     
     def __getattr__(self, name):
-        if self._instance is None:
+        if self._instance is None and not self._initialization_failed:
             with self._lock:
-                if self._instance is None:
-                    self._instance = self.api_class()
+                if self._instance is None and not self._initialization_failed:
+                    try:
+                        # FIXED: Add proper error handling for API client creation
+                        self._instance = self.api_class()
+                        logging.debug(f"Successfully initialized {self.api_class.__name__}")
+                    except Exception as e:
+                        self._initialization_failed = True
+                        self._last_error = str(e)
+                        logging.error(f"Failed to initialize {self.api_class.__name__}: {e}")
+                        raise Exception(f"Failed to initialize Kubernetes API client {self.api_class.__name__}: {e}")
+        
+        if self._initialization_failed:
+            raise Exception(f"API client initialization failed: {self._last_error}")
+            
+        if self._instance is None:
+            raise Exception(f"API client not initialized: {self.api_class.__name__}")
+            
         return getattr(self._instance, name)
     
     def reset(self):
         """Reset the cached instance"""
         with self._lock:
             self._instance = None
-
+            self._initialization_failed = False
+            self._last_error = None
+            logging.debug(f"Reset {self.api_class.__name__} lazy client")
 
 
 class WorkerSignals(QObject):
@@ -1150,19 +1170,66 @@ class KubernetesClient(QObject):
         thread_manager = get_thread_manager()
         thread_manager.submit_worker("kube_config_load", worker)
 
+    # def switch_context(self, context_name: str) -> bool:
+    #     """Switch to a specific Kubernetes context"""
+    #     try:
+    #         # Load configuration
+    #         config.load_kube_config(context=context_name)
+            
+    #         # Reset lazy clients
+    #         for client_attr in ['v1', 'apps_v1', 'networking_v1', 'storage_v1', 
+    #                           'rbac_v1', 'batch_v1', 'autoscaling_v1']:
+    #             if hasattr(self, client_attr):
+    #                 getattr(self, client_attr).reset()
+            
+    #         self.current_cluster = context_name
+            
+    #         # Update cluster status
+    #         for cluster in self.clusters:
+    #             cluster.status = "active" if cluster.name == context_name else "disconnect"
+            
+    #         return True
+            
+    #     except Exception as e:
+    #         self.error_occurred.emit(f"Failed to switch context: {str(e)}")
+    #         return False
+
     def switch_context(self, context_name: str) -> bool:
         """Switch to a specific Kubernetes context"""
         try:
-            # Load configuration
-            config.load_kube_config(context=context_name)
+            logging.info(f"Switching to Kubernetes context: {context_name}")
             
-            # Reset lazy clients
-            for client_attr in ['v1', 'apps_v1', 'networking_v1', 'storage_v1', 
-                              'rbac_v1', 'batch_v1', 'autoscaling_v1']:
+            # FIXED: Load configuration with better error handling
+            try:
+                config.load_kube_config(context=context_name)
+            except Exception as e:
+                logging.error(f"Failed to load kubeconfig for context {context_name}: {e}")
+                return False
+            
+            # FIXED: Reset lazy clients with error handling
+            lazy_clients = ['v1', 'apps_v1', 'networking_v1', 'storage_v1', 
+                        'rbac_v1', 'batch_v1', 'autoscaling_v1', 'custom_objects_api', 
+                        'version_api']
+            
+            for client_attr in lazy_clients:
                 if hasattr(self, client_attr):
-                    getattr(self, client_attr).reset()
+                    try:
+                        getattr(self, client_attr).reset()
+                        logging.debug(f"Reset {client_attr} client")
+                    except Exception as e:
+                        logging.warning(f"Error resetting {client_attr}: {e}")
             
             self.current_cluster = context_name
+            
+            # FIXED: Test connection immediately after switching
+            try:
+                # Try to access a simple API to verify connection
+                version_info = self.version_api.get_code()
+                logging.info(f"Successfully connected to cluster {context_name}, version: {version_info.git_version}")
+            except Exception as e:
+                logging.error(f"Failed to verify connection to {context_name}: {e}")
+                self.error_occurred.emit(f"Failed to verify connection: {str(e)}")
+                return False
             
             # Update cluster status
             for cluster in self.clusters:
@@ -1171,6 +1238,7 @@ class KubernetesClient(QObject):
             return True
             
         except Exception as e:
+            logging.error(f"Error switching context to {context_name}: {e}")
             self.error_occurred.emit(f"Failed to switch context: {str(e)}")
             return False
     

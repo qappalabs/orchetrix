@@ -736,7 +736,6 @@ class ClusterView(QWidget):
         self.loading_overlay.hide_loading()
         return True
 
-    # Public API methods
     def set_active_cluster(self, cluster_name: str) -> None:
         """Set the active cluster and update the UI accordingly"""
         if self.active_cluster == cluster_name:
@@ -744,18 +743,28 @@ class ClusterView(QWidget):
 
         self.active_cluster = cluster_name
 
-        # Try to use cached data first
-        if self._update_cached_cluster_data(cluster_name):
-            return
+        # FIXED: Check if cluster state manager already connected
+        # Don't trigger another connection if we're already connected
+        if (hasattr(self, 'cluster_connector') and 
+            self.cluster_connector and
+            hasattr(self.cluster_connector, 'connection_states')):
+            
+            current_state = self.cluster_connector.connection_states.get(cluster_name, "disconnected")
+            
+            # If already connected, just update UI with cached data
+            if current_state == "connected":
+                if self._update_cached_cluster_data(cluster_name):
+                    return
+        
+        # FIXED: Don't show loading overlay immediately, let connection events handle it
+        # The cluster state manager will emit proper state change events
+        
+        # FIXED: Don't call cluster_connector.connect_to_cluster here
+        # The connection should already be handled by cluster state manager
+        # Just wait for the connection events to update UI
+        
+        logging.info(f"Set active cluster to {cluster_name}, waiting for connection events")
 
-        # Show loading and connect to cluster
-        self.loading_overlay.show_loading(f"Loading cluster: {cluster_name}")
-        self.loading_overlay.resize(self.size())
-
-        if self.cluster_connector:
-            self.cluster_connector.connect_to_cluster(cluster_name)
-        else:
-            self._on_error("Cluster connector not initialized")
 
     def show_detail_for_table_item(self, row: int, col: int, page, page_name: str) -> None:
         """Show detail page for clicked table item"""
@@ -856,7 +865,6 @@ class ClusterView(QWidget):
         if self.terminal_panel.is_visible:
             self._adjust_terminal_position()
 
-    # Event handlers
     def _on_connection_started(self, cluster_name: str) -> None:
         """Handle connection start"""
         if cluster_name == self.active_cluster:
@@ -868,6 +876,8 @@ class ClusterView(QWidget):
         if cluster_name == self.active_cluster:
             if success:
                 self.loading_overlay.show_loading(f"Loading data from: {cluster_name}")
+                # Try to load cached data
+                self._update_cached_cluster_data(cluster_name)
             else:
                 self.loading_overlay.hide_loading()
                 if hasattr(self.parent_window, 'show_error_message'):
@@ -876,7 +886,7 @@ class ClusterView(QWidget):
     def _on_cluster_data_loaded(self, cluster_info: Dict[str, Any]) -> None:
         """Handle cluster data loaded"""
         self.loading_overlay.hide_loading()
-
+        
     def _on_error(self, error_message: str) -> None:
         """Handle error messages"""
         self.loading_overlay.hide_loading()

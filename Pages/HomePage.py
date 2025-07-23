@@ -947,15 +947,21 @@ class OrchestrixGUI(QMainWindow):
     def navigate_to_cluster(self, item):
         cluster_name = item["name"]
         cluster_status = item["status"]
-        if cluster_status in ["connecting", "loading"]: return
-        if hasattr(self.cluster_connector, 'is_data_loaded') and self.cluster_connector.is_data_loaded(cluster_name):
-            self.open_cluster_signal.emit(cluster_name)
+        
+        # Prevent multiple connection attempts
+        if cluster_status in ["connecting", "loading"]: 
             return
+        
+        # Update UI to show connecting state immediately
         for view_type in self.all_data:
             for data_item in self.all_data[view_type]:
-                if data_item["name"] == cluster_name: data_item["status"] = "connecting"
+                if data_item["name"] == cluster_name: 
+                    data_item["status"] = "connecting"
         self.update_content_view(self.current_view)
-        QTimer.singleShot(100, lambda: self.cluster_connector.connect_to_cluster(cluster_name))
+        
+        # FIXED: Only emit signal to main window, don't call cluster_connector directly
+        # Let the main window handle the connection through cluster state manager
+        self.open_cluster_signal.emit(cluster_name)
 
     def open_web_link(self, item):
         """Open web links in the default browser"""
