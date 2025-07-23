@@ -1170,30 +1170,6 @@ class KubernetesClient(QObject):
         thread_manager = get_thread_manager()
         thread_manager.submit_worker("kube_config_load", worker)
 
-    # def switch_context(self, context_name: str) -> bool:
-    #     """Switch to a specific Kubernetes context"""
-    #     try:
-    #         # Load configuration
-    #         config.load_kube_config(context=context_name)
-            
-    #         # Reset lazy clients
-    #         for client_attr in ['v1', 'apps_v1', 'networking_v1', 'storage_v1', 
-    #                           'rbac_v1', 'batch_v1', 'autoscaling_v1']:
-    #             if hasattr(self, client_attr):
-    #                 getattr(self, client_attr).reset()
-            
-    #         self.current_cluster = context_name
-            
-    #         # Update cluster status
-    #         for cluster in self.clusters:
-    #             cluster.status = "active" if cluster.name == context_name else "disconnect"
-            
-    #         return True
-            
-    #     except Exception as e:
-    #         self.error_occurred.emit(f"Failed to switch context: {str(e)}")
-    #         return False
-
     def switch_context(self, context_name: str) -> bool:
         """Switch to a specific Kubernetes context"""
         try:
@@ -2152,8 +2128,13 @@ class KubernetesClient(QObject):
             self._cleanup_cache()
             
             if not self._shutting_down:
-                logging.info(f"Emitting real metrics data: {metrics}")
-                self.cluster_metrics_updated.emit(metrics)
+                logging.info(f"KubernetesClient: Emitting real metrics data: {metrics}")
+                # FIXED: Ensure signal emission with error handling
+                try:
+                    self.cluster_metrics_updated.emit(metrics)
+                    logging.info(f"KubernetesClient: Successfully emitted cluster_metrics_updated signal")
+                except Exception as signal_error:
+                    logging.error(f"KubernetesClient: Error emitting metrics signal: {signal_error}")
             
             return metrics
             
@@ -2225,10 +2206,15 @@ class KubernetesClient(QObject):
             self._issues_cache[cache_key] = issues
             self._issues_cache_time[cache_key] = time.time()
             
-            logging.info(f"Found {len(issues)} real cluster issues")
+            logging.info(f"KubernetesClient: Found {len(issues)} real cluster issues")
             
             if not self._shutting_down:
-                self.cluster_issues_updated.emit(issues)
+                # FIXED: Ensure signal emission with error handling
+                try:
+                    self.cluster_issues_updated.emit(issues)
+                    logging.info(f"KubernetesClient: Successfully emitted cluster_issues_updated signal")
+                except Exception as signal_error:
+                    logging.error(f"KubernetesClient: Error emitting issues signal: {signal_error}")
             
             return issues
             

@@ -715,56 +715,94 @@ class ClusterView(QWidget):
 
     def _update_cached_cluster_data(self, cluster_name: str) -> bool:
         """Update UI with cached cluster data if available"""
-        if not (hasattr(self.cluster_connector, 'is_data_loaded') and
-                self.cluster_connector.is_data_loaded(cluster_name)):
+        try:
+            if not (hasattr(self.cluster_connector, 'is_data_loaded') and
+                    self.cluster_connector.is_data_loaded(cluster_name)):
+                logging.info(f"ClusterView: No cached data available for {cluster_name}")
+                return False
+
+            cached_data = self.cluster_connector.get_cached_data(cluster_name)
+            
+            if not cached_data:
+                logging.info(f"ClusterView: Empty cached data for {cluster_name}")
+                return False
+
+            logging.info(f"ClusterView: Found cached data for {cluster_name}: {list(cached_data.keys())}")
+
+            # Update cluster info
+            if 'cluster_info' in cached_data:
+                self._on_cluster_data_loaded(cached_data['cluster_info'])
+                logging.info(f"ClusterView: Updated cluster info from cache")
+
+            # Update cluster page if loaded
+            if 'Cluster' in self.pages:
+                cluster_page = self.pages['Cluster']
+                
+                # FIXED: Ensure page is properly connected before updating
+                if hasattr(cluster_page, '_connect_cluster_signals'):
+                    cluster_page._connect_cluster_signals()
+                
+                if 'metrics' in cached_data:
+                    logging.info(f"ClusterView: Updating metrics from cache: {cached_data['metrics']}")
+                    cluster_page.update_metrics(cached_data['metrics'])
+                    
+                if 'issues' in cached_data:
+                    logging.info(f"ClusterView: Updating issues from cache: {len(cached_data['issues'])} issues")
+                    cluster_page.update_issues(cached_data['issues'])
+                
+                # FIXED: If no cached metrics/issues, request fresh data
+                if 'metrics' not in cached_data or 'issues' not in cached_data:
+                    logging.info(f"ClusterView: Missing cached data, requesting fresh data")
+                    if hasattr(cluster_page, 'refresh_data'):
+                        QTimer.singleShot(500, cluster_page.refresh_data)
+
+            self.loading_overlay.hide_loading()
+            return True
+            
+        except Exception as e:
+            logging.error(f"ClusterView: Error updating cached cluster data: {e}")
             return False
 
-        cached_data = self.cluster_connector.get_cached_data(cluster_name)
-
-        # Update cluster info
-        if 'cluster_info' in cached_data:
-            self._on_cluster_data_loaded(cached_data['cluster_info'])
-
-        # Update cluster page if loaded
-        if 'Cluster' in self.pages:
-            cluster_page = self.pages['Cluster']
-            if 'metrics' in cached_data:
-                cluster_page.update_metrics(cached_data['metrics'])
-            if 'issues' in cached_data:
-                cluster_page.update_issues(cached_data['issues'])
-
-        self.loading_overlay.hide_loading()
-        return True
-
     def set_active_cluster(self, cluster_name: str) -> None:
-        """Set the active cluster and update the UI accordingly"""
+        """Set the active cluster and update the UI accordingly - FIXED"""
         if self.active_cluster == cluster_name:
+            logging.info(f"ClusterView: Already active cluster {cluster_name}, ensuring data is loaded")
+            
+            # FIXED: Even if same cluster, ensure UI is updated
+            if 'Cluster' in self.pages:
+                cluster_page = self.pages['Cluster']
+                if hasattr(cluster_page, 'refresh_data'):
+                    QTimer.singleShot(100, cluster_page.refresh_data)
             return
 
         self.active_cluster = cluster_name
+        logging.info(f"ClusterView: Setting active cluster to {cluster_name}")
 
-        # FIXED: Check if cluster state manager already connected
-        # Don't trigger another connection if we're already connected
+        # FIXED: Ensure cluster connector knows about the current cluster
+        if hasattr(self, 'cluster_connector') and self.cluster_connector:
+            self.cluster_connector.set_current_cluster(cluster_name)
+            logging.info(f"ClusterView: Set cluster connector current cluster to {cluster_name}")
+
+        # Check if cluster state manager already connected
         if (hasattr(self, 'cluster_connector') and 
             self.cluster_connector and
             hasattr(self.cluster_connector, 'connection_states')):
             
             current_state = self.cluster_connector.connection_states.get(cluster_name, "disconnected")
             
-            # If already connected, just update UI with cached data
+            # If already connected, try to update UI with cached data
             if current_state == "connected":
-                if self._update_cached_cluster_data(cluster_name):
-                    return
+                logging.info(f"ClusterView: Cluster {cluster_name} already connected, updating from cache")
+                if not self._update_cached_cluster_data(cluster_name):
+                    # If no cached data, request fresh data
+                    logging.info(f"ClusterView: No cached data for {cluster_name}, requesting fresh data")
+                    if 'Cluster' in self.pages:
+                        cluster_page = self.pages['Cluster']
+                        if hasattr(cluster_page, 'refresh_data'):
+                            QTimer.singleShot(500, cluster_page.refresh_data)
+                return
         
-        # FIXED: Don't show loading overlay immediately, let connection events handle it
-        # The cluster state manager will emit proper state change events
-        
-        # FIXED: Don't call cluster_connector.connect_to_cluster here
-        # The connection should already be handled by cluster state manager
-        # Just wait for the connection events to update UI
-        
-        logging.info(f"Set active cluster to {cluster_name}, waiting for connection events")
-
+        logging.info(f"ClusterView: Set active cluster to {cluster_name}, waiting for connection events")
 
     def show_detail_for_table_item(self, row: int, col: int, page, page_name: str) -> None:
         """Show detail page for clicked table item"""

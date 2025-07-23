@@ -636,24 +636,20 @@ class IssuesTable(QTableWidget):
 
 
 class ClusterPage(QWidget):
+
     def __init__(self, parent=None):
         super().__init__(parent)
         
         # Get the cluster connector
         self.cluster_connector = get_cluster_connector()
         
-        # Connect signals from the connector with error handling
-        try:
-            self.cluster_connector.cluster_data_loaded.connect(self.update_cluster_info)
-            self.cluster_connector.metrics_data_loaded.connect(self.update_metrics)
-            self.cluster_connector.issues_data_loaded.connect(self.update_issues)
-        except Exception as e:
-            logging.error(f"Error connecting cluster signals: {e}")
-        
         # Initialize data
         self.cluster_info = None
         self.metrics_data = None
         self.issues_data = []
+        
+        # FIXED: Connect signals with better error handling and logging
+        self._connect_cluster_signals()
         
         # Data refresh timer
         self.refresh_timer = QTimer(self)
@@ -666,6 +662,28 @@ class ClusterPage(QWidget):
         
         # UI setup
         self.setup_ui()
+
+    def _connect_cluster_signals(self):
+        """Connect cluster connector signals with improved error handling"""
+        try:
+            # Disconnect any existing connections first
+            try:
+                self.cluster_connector.cluster_data_loaded.disconnect()
+                self.cluster_connector.metrics_data_loaded.disconnect()
+                self.cluster_connector.issues_data_loaded.disconnect()
+            except (TypeError, RuntimeError):
+                pass  # No existing connections
+            
+            # Connect signals
+            self.cluster_connector.cluster_data_loaded.connect(self.update_cluster_info)
+            self.cluster_connector.metrics_data_loaded.connect(self.update_metrics)
+            self.cluster_connector.issues_data_loaded.connect(self.update_issues)
+            
+            logging.info("ClusterPage: Successfully connected cluster connector signals")
+            
+        except Exception as e:
+            logging.error(f"ClusterPage: Error connecting cluster signals: {e}")
+
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
@@ -873,12 +891,7 @@ class ClusterPage(QWidget):
         
         container_layout.addWidget(self.status_widget)
         return container
-
-    def update_cluster_info(self, info):
-        """Update cluster information from real data"""
-        self.cluster_info = info
-        logging.info(f"Cluster info updated: {info.get('name', 'Unknown')}")
-
+    
     def preload_with_cached_data(self, cluster_info, metrics, issues):
         """Preload the page with cached data"""
         logging.info(f"ClusterPage: Preloading with data for cluster: {cluster_info.get('name') if cluster_info else 'Unknown'}")
@@ -904,14 +917,18 @@ class ClusterPage(QWidget):
 
     def update_metrics(self, metrics):
         """Update metrics with real data and maintain history"""
+        logging.info(f"ClusterPage: update_metrics called with data: {metrics}")
+        
         self.metrics_data = metrics
         if not metrics:
             logging.warning("ClusterPage: No metrics data to update.")
             return
 
-        logging.info(f"ClusterPage: Updating metrics with real data: {list(metrics.keys())}")
+        logging.info(f"ClusterPage: Processing metrics with keys: {list(metrics.keys())}")
+        
         try:
-            if "cpu" in metrics and hasattr(self, 'cpu_status') and hasattr(self, 'cpu_chart'):
+            # Update CPU metrics
+            if "cpu" in metrics:
                 cpu = metrics["cpu"]
                 usage = float(cpu.get("usage", 0))
                 requests = float(cpu.get("requests", 0))
@@ -919,21 +936,28 @@ class ClusterPage(QWidget):
                 allocatable = float(cpu.get("allocatable", 0))
                 capacity = float(cpu.get("capacity", 100))
                 
-                # Update status widget
-                self.cpu_status.update_metrics(usage, requests, limits, allocatable, capacity)
+                logging.info(f"ClusterPage: Updating CPU - usage={usage}%, capacity={capacity}")
                 
-                # Maintain historical data for chart
-                self.cpu_history.append(usage)
-                if len(self.cpu_history) > self.max_history_points:
-                    self.cpu_history = self.cpu_history[-self.max_history_points:]
+                if hasattr(self, 'cpu_status'):
+                    self.cpu_status.update_metrics(usage, requests, limits, allocatable, capacity)
+                    logging.info(f"ClusterPage: CPU status widget updated successfully")
+                else:
+                    logging.error("ClusterPage: cpu_status widget not found")
                 
-                # Update chart with real historical data
-                timestamps = cpu.get("timestamps", self._generate_time_points(len(self.cpu_history)))
-                self.cpu_chart.update_data(self.cpu_history.copy(), timestamps)
-                
-                logging.info(f"Updated CPU metrics: usage={usage}%, requests={requests}, capacity={capacity}")
+                # Update CPU chart
+                if hasattr(self, 'cpu_chart'):
+                    self.cpu_history.append(usage)
+                    if len(self.cpu_history) > self.max_history_points:
+                        self.cpu_history = self.cpu_history[-self.max_history_points:]
+                    
+                    timestamps = cpu.get("timestamps", self._generate_time_points(len(self.cpu_history)))
+                    self.cpu_chart.update_data(self.cpu_history.copy(), timestamps)
+                    logging.info(f"ClusterPage: CPU chart updated successfully")
+                else:
+                    logging.error("ClusterPage: cpu_chart widget not found")
             
-            if "memory" in metrics and hasattr(self, 'memory_status') and hasattr(self, 'memory_chart'):
+            # Update Memory metrics
+            if "memory" in metrics:
                 memory = metrics["memory"]
                 usage = float(memory.get("usage", 0))
                 requests = float(memory.get("requests", 0))
@@ -941,48 +965,76 @@ class ClusterPage(QWidget):
                 allocatable = float(memory.get("allocatable", 0))
                 capacity = float(memory.get("capacity", 100))
                 
-                # Update status widget
-                self.memory_status.update_metrics(usage, requests, limits, allocatable, capacity)
+                logging.info(f"ClusterPage: Updating Memory - usage={usage}%, capacity={capacity}")
                 
-                # Maintain historical data for chart
-                self.memory_history.append(usage)
-                if len(self.memory_history) > self.max_history_points:
-                    self.memory_history = self.memory_history[-self.max_history_points:]
-                
-                # Update chart with real historical data
-                timestamps = memory.get("timestamps", self._generate_time_points(len(self.memory_history)))
-                self.memory_chart.update_data(self.memory_history.copy(), timestamps)
-                
-                logging.info(f"Updated Memory metrics: usage={usage}%, requests={requests}, capacity={capacity}")
+                if hasattr(self, 'memory_status'):
+                    self.memory_status.update_metrics(usage, requests, limits, allocatable, capacity)
+                    logging.info(f"ClusterPage: Memory status widget updated successfully")
+                else:
+                    logging.error("ClusterPage: memory_status widget not found")
+                    
+                # Update Memory chart
+                if hasattr(self, 'memory_chart'):
+                    self.memory_history.append(usage)
+                    if len(self.memory_history) > self.max_history_points:
+                        self.memory_history = self.memory_history[-self.max_history_points:]
+                    
+                    timestamps = memory.get("timestamps", self._generate_time_points(len(self.memory_history)))
+                    self.memory_chart.update_data(self.memory_history.copy(), timestamps)
+                    logging.info(f"ClusterPage: Memory chart updated successfully")
+                else:
+                    logging.error("ClusterPage: memory_chart widget not found")
 
-            if "pods" in metrics and hasattr(self, 'disk_status'):
+            # Update Pod metrics
+            if "pods" in metrics:
                 pods = metrics["pods"]
                 usage = float(pods.get("usage", 0))
                 count = int(pods.get("count", 0))
                 capacity = int(pods.get("capacity", 100))
                 
-                # For pods, we use count as requests and don't have limits/allocated
-                self.disk_status.update_metrics(usage, count, 0, 0, capacity)
+                logging.info(f"ClusterPage: Updating Pods - usage={usage}%, count={count}, capacity={capacity}")
                 
-                logging.info(f"Updated Pod metrics: usage={usage}%, count={count}, capacity={capacity}")
-                
+                if hasattr(self, 'disk_status'):
+                    # For pods, we use count as requests and don't have limits/allocated
+                    self.disk_status.update_metrics(usage, count, 0, 0, capacity)
+                    logging.info(f"ClusterPage: Pod status widget updated successfully")
+                else:
+                    logging.error("ClusterPage: disk_status widget not found")
+                    
+            logging.info("ClusterPage: All metrics widgets updated successfully")
+            
         except Exception as e:
             logging.error(f"ClusterPage: Error updating metrics UI: {e}")
+            import traceback
+            logging.error(f"ClusterPage: Full traceback: {traceback.format_exc()}")
 
     def update_issues(self, issues):
         """Update issues display with real data"""
+        logging.info(f"ClusterPage: update_issues called with {len(issues) if issues else 0} issues")
+        
         self.issues_data = issues if issues is not None else []
-        logging.info(f"ClusterPage: Issues data updated with {len(self.issues_data)} issues.")
+        
         try:
             if hasattr(self, 'stacked_layout') and hasattr(self, 'issues_table'):
                 if self.issues_data:
+                    logging.info(f"ClusterPage: Displaying {len(self.issues_data)} issues")
                     self.stacked_layout.setCurrentIndex(1)  # Show issues view
                     self.issues_table.update_issues(self.issues_data)
                 else:
+                    logging.info("ClusterPage: No issues found, showing success view")
                     self.stacked_layout.setCurrentIndex(0)  # Show no issues view
+            else:
+                logging.error("ClusterPage: Issues display widgets not found")
+                
         except Exception as e:
             logging.error(f"ClusterPage: Error updating issues UI: {e}")
 
+    def update_cluster_info(self, info):
+        """Update cluster information from real data"""
+        logging.info(f"ClusterPage: update_cluster_info called with: {info.get('name', 'Unknown') if info else 'None'}")
+        self.cluster_info = info
+
+    # Add this method to force an immediate UI update:
     def force_load_data(self):
         """Request fresh data for the current cluster if one is active."""
         if hasattr(self, '_loading') and self._loading:
@@ -992,9 +1044,26 @@ class ClusterPage(QWidget):
         logging.info("ClusterPage: force_load_data called - requesting fresh metrics and issues")
         self._loading = True
         try:
+            # Ensure signals are connected
+            self._connect_cluster_signals()
+            
+            # Request fresh data
             self.refresh_data()
+            
+            # Also try to get any cached data immediately
+            if hasattr(self, 'cluster_connector') and self.cluster_connector.current_cluster:
+                cached_data = self.cluster_connector.get_cached_data(self.cluster_connector.current_cluster)
+                if cached_data:
+                    logging.info(f"ClusterPage: Found cached data: {list(cached_data.keys())}")
+                    if 'metrics' in cached_data:
+                        self.update_metrics(cached_data['metrics'])
+                    if 'issues' in cached_data:
+                        self.update_issues(cached_data['issues'])
+                    if 'cluster_info' in cached_data:
+                        self.update_cluster_info(cached_data['cluster_info'])
         finally:
             self._loading = False
+
 
     def _generate_time_points(self, count):
         """Generate time points for charts"""

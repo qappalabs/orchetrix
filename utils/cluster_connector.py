@@ -1,10 +1,5 @@
 """
-Optimized ClusterConnector with performance improvements:
-- Adaptive polling intervals based on cluster activity
-- Connection pooling for reuse
-- Intelligent caching with TTL
-- Request batching for metrics and issues
-- Memory leak prevention with automatic cleanup
+Fixed ClusterConnector with proper current cluster handling
 """
 
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer
@@ -118,7 +113,6 @@ class ConnectionPool:
         for cluster in stale_clusters:
             self.remove_connection(cluster)
 
-
 class SmartCache:
     """Intelligent cache with TTL and size management"""
     
@@ -179,7 +173,6 @@ class SmartCache:
             for key, _ in sorted_items[:to_remove]:
                 self.remove(key)
 
-
 class ConnectionWorker(EnhancedBaseWorker):
 
     def __init__(self, client, cluster_name, connection_pool):
@@ -239,7 +232,6 @@ class ConnectionWorker(EnhancedBaseWorker):
         
         return f"Connection failed: {str(error)[:100]}..."
 
-
 class NodesWorker(EnhancedBaseWorker):
     def __init__(self, client, parent):
         super().__init__("nodes_fetch")
@@ -293,7 +285,7 @@ class ClusterConnection(QObject):
         self.issues_timer = QTimer(self)
         self.issues_timer.timeout.connect(self._poll_issues_adaptive)
         
-        # State tracking
+        # State tracking - FIXED: Initialize current_cluster properly
         self.current_cluster = None
         self.connection_states = {}
         self._shutting_down = False
@@ -308,16 +300,28 @@ class ClusterConnection(QObject):
         self._connect_signals()
     
     def _connect_signals(self):
-        """Connect Kubernetes client signals"""
+        """Connect Kubernetes client signals with enhanced logging"""
         try:
+            # Disconnect any existing connections first
+            try:
+                self.kube_client.cluster_info_loaded.disconnect()
+                self.kube_client.cluster_metrics_updated.disconnect()
+                self.kube_client.cluster_issues_updated.disconnect()
+                self.kube_client.error_occurred.disconnect()
+            except (TypeError, RuntimeError):
+                pass  # No existing connections
+                
+            # Connect signals
             self.kube_client.cluster_info_loaded.connect(self.handle_cluster_info_loaded)
             self.kube_client.cluster_metrics_updated.connect(self.handle_metrics_updated)
             self.kube_client.cluster_issues_updated.connect(self.handle_issues_updated)
             self.kube_client.error_occurred.connect(self.handle_kubernetes_error)
+            
+            logging.info("ClusterConnector: Successfully connected to KubernetesClient signals")
+            
         except Exception as e:
-            logging.error(f"Error connecting signals: {e}")
-    
-    
+            logging.error(f"ClusterConnector: Error connecting signals: {e}")
+
     def __del__(self):
         """Clean up resources when object is deleted"""
         try:
@@ -348,39 +352,6 @@ class ClusterConnection(QObject):
         except Exception as e:
             logging.error(f"Error during ClusterConnection cleanup: {str(e)}")
 
-
-    def connect_to_cluster(self, cluster_name):
-        """Connect to cluster with optimizations"""
-        if self._shutting_down or not cluster_name:
-            return
-        
-        # Check cache first
-        cache_key = f"{cluster_name}:info"
-        cached_info = self.smart_cache.get(cache_key)
-        if cached_info:
-            self.cluster_data_loaded.emit(cached_info)
-            self.connection_complete.emit(cluster_name, True, "Connected (cached)")
-            self._start_adaptive_polling(cluster_name)
-            return
-        
-        # Start connection
-        self.connection_states[cluster_name] = "connecting"
-        self.connection_started.emit(cluster_name)
-        
-        # Create optimized worker
-        worker = ConnectionWorker(
-            self.kube_client,
-            cluster_name,
-            self.connection_pool
-        )
-        
-        worker.signals.finished.connect(self.on_connection_complete)
-        worker.signals.error.connect(
-            lambda error: self.handle_connection_error(cluster_name, error)
-        )
-        
-        self.thread_manager.submit_worker(f"connect_{cluster_name}", worker)
-    
     def on_connection_complete(self, result):
         """Handle connection completion"""
         if self._shutting_down or not result:
@@ -390,7 +361,7 @@ class ClusterConnection(QObject):
         
         if success:
             self.connection_states[cluster_name] = "connected"
-            self.current_cluster = cluster_name
+            self.current_cluster = cluster_name  # FIXED: Set current_cluster here
             self.connection_complete.emit(cluster_name, success, message)
             
             # Queue initial data load requests
@@ -496,17 +467,33 @@ class ClusterConnection(QObject):
         self.kube_client.get_cluster_issues_async()
     
     def handle_metrics_updated(self, metrics):
-        """Handle metrics update with adaptive polling adjustment"""
+        """Handle metrics update with proper signal forwarding - FIXED"""
         if self._shutting_down:
             return
         
-        cluster_name = self.current_cluster
+        # FIXED: Get cluster name from KubernetesClient instead of self.current_cluster
+        cluster_name = self.kube_client.current_cluster if hasattr(self.kube_client, 'current_cluster') else self.current_cluster
+        
         if not cluster_name:
+            logging.warning("ClusterConnector: No current cluster set for metrics update")
             return
         
-        # Cache metrics
+        # FIXED: Set current_cluster from KubernetesClient if not already set
+        if not self.current_cluster and cluster_name:
+            self.current_cluster = cluster_name
+            self.connection_states[cluster_name] = "connected"
+        
+        logging.info(f"ClusterConnector: Received metrics from KubernetesClient for {cluster_name}")
+        
+        # Cache metrics in BOTH cache systems for consistency
         cache_key = f"{cluster_name}:metrics"
         self.smart_cache.set(cache_key, metrics)
+        
+        # Store in data_cache for ClusterView compatibility
+        if cluster_name not in self.data_cache:
+            self.data_cache[cluster_name] = {}
+        self.data_cache[cluster_name]['metrics'] = metrics
+        self._update_cache_timestamp(cluster_name)
         
         # Calculate data hash for change detection
         data_hash = hash(str(metrics))
@@ -520,21 +507,42 @@ class ClusterConnection(QObject):
             if self.metrics_timer.isActive():
                 self.metrics_timer.setInterval(new_interval)
         
-        # Emit signal
-        self.metrics_data_loaded.emit(metrics)
-    
+        # Emit signal to ClusterPage
+        try:
+            logging.info(f"ClusterConnector: Emitting metrics_data_loaded signal for {cluster_name}")
+            self.metrics_data_loaded.emit(metrics)
+            logging.info(f"ClusterConnector: Successfully emitted metrics_data_loaded signal")
+        except Exception as e:
+            logging.error(f"ClusterConnector: Error emitting metrics signal: {e}")
+
     def handle_issues_updated(self, issues):
-        """Handle issues update with adaptive polling adjustment"""
+        """Handle issues update with proper signal forwarding - FIXED"""
         if self._shutting_down:
             return
         
-        cluster_name = self.current_cluster
+        # FIXED: Get cluster name from KubernetesClient instead of self.current_cluster
+        cluster_name = self.kube_client.current_cluster if hasattr(self.kube_client, 'current_cluster') else self.current_cluster
+        
         if not cluster_name:
+            logging.warning("ClusterConnector: No current cluster set for issues update")
             return
         
-        # Cache issues
+        # FIXED: Set current_cluster from KubernetesClient if not already set
+        if not self.current_cluster and cluster_name:
+            self.current_cluster = cluster_name
+            self.connection_states[cluster_name] = "connected"
+        
+        logging.info(f"ClusterConnector: Received {len(issues)} issues from KubernetesClient for {cluster_name}")
+        
+        # Cache issues in BOTH cache systems for consistency
         cache_key = f"{cluster_name}:issues"
         self.smart_cache.set(cache_key, issues)
+        
+        # Store in data_cache for ClusterView compatibility
+        if cluster_name not in self.data_cache:
+            self.data_cache[cluster_name] = {}
+        self.data_cache[cluster_name]['issues'] = issues
+        self._update_cache_timestamp(cluster_name)
         
         # Calculate data hash
         data_hash = hash(str(issues))
@@ -548,9 +556,127 @@ class ClusterConnection(QObject):
             if self.issues_timer.isActive():
                 self.issues_timer.setInterval(new_interval)
         
-        # Emit signal
-        self.issues_data_loaded.emit(issues)
-    
+        # Emit signal to ClusterPage
+        try:
+            logging.info(f"ClusterConnector: Emitting issues_data_loaded signal for {cluster_name}")
+            self.issues_data_loaded.emit(issues)
+            logging.info(f"ClusterConnector: Successfully emitted issues_data_loaded signal")
+        except Exception as e:
+            logging.error(f"ClusterConnector: Error emitting issues signal: {e}")
+
+    def handle_cluster_info_loaded(self, info):
+        """Handle when cluster info is loaded from the client"""
+        if self._is_being_destroyed or self._shutting_down:
+            return
+            
+        try:
+            # FIXED: Get cluster name properly
+            cluster_name = self.kube_client.current_cluster if hasattr(self.kube_client, 'current_cluster') else self.current_cluster
+            
+            if cluster_name:
+                logging.info(f"ClusterConnector: Received cluster info from KubernetesClient for {cluster_name}")
+                
+                # FIXED: Set current_cluster if not already set
+                if not self.current_cluster:
+                    self.current_cluster = cluster_name
+                    self.connection_states[cluster_name] = "connected"
+                
+                # Store in data_cache for consistency
+                if cluster_name not in self.data_cache:
+                    self.data_cache[cluster_name] = {}
+                self.data_cache[cluster_name]['cluster_info'] = info
+                self._update_cache_timestamp(cluster_name)
+                
+                # Check if we have all required data now
+                self._check_data_completeness(cluster_name)
+                
+            try:
+                logging.info(f"ClusterConnector: Emitting cluster_data_loaded signal for {cluster_name}")
+                self.cluster_data_loaded.emit(info)
+                logging.info(f"ClusterConnector: Successfully emitted cluster_data_loaded signal")
+            except Exception as e:
+                logging.error(f"ClusterConnector: Error emitting cluster info signal: {e}")
+            
+        except Exception as e:
+            logging.error(f"ClusterConnector: Error handling cluster info loaded: {e}")
+
+    # FIXED: Add method to set current cluster externally
+    def set_current_cluster(self, cluster_name):
+        """Set the current cluster - called from ClusterView"""
+        if cluster_name and cluster_name != self.current_cluster:
+            logging.info(f"ClusterConnector: Setting current cluster to {cluster_name}")
+            self.current_cluster = cluster_name
+            self.connection_states[cluster_name] = "connected"
+
+    def connect_to_cluster(self, cluster_name):
+        """Connect to cluster with optimizations and proper signal setup"""
+        if self._shutting_down or not cluster_name:
+            return
+        
+        # Ensure signals are connected
+        self._connect_signals()
+        
+        # FIXED: Set current cluster immediately when starting connection
+        self.current_cluster = cluster_name
+        
+        # Check cache first
+        cache_key = f"{cluster_name}:info"
+        cached_info = self.smart_cache.get(cache_key)
+        if cached_info:
+            self.cluster_data_loaded.emit(cached_info)
+            self.connection_complete.emit(cluster_name, True, "Connected (cached)")
+            self._start_adaptive_polling(cluster_name)
+            return
+        
+        # Start connection
+        self.connection_states[cluster_name] = "connecting"
+        self.connection_started.emit(cluster_name)
+        
+        # Create optimized worker
+        worker = ConnectionWorker(
+            self.kube_client,
+            cluster_name,
+            self.connection_pool
+        )
+        
+        worker.signals.finished.connect(self.on_connection_complete)
+        worker.signals.error.connect(
+            lambda error: self.handle_connection_error(cluster_name, error)
+        )
+        
+        self.thread_manager.submit_worker(f"connect_{cluster_name}", worker)
+
+    def get_cached_data(self, cluster_name):
+        """Get cached data for a cluster if available"""
+        try:
+            # Check cache validity first
+            self._cleanup_expired_cache()
+            
+            cached_data = self.data_cache.get(cluster_name, {})
+            
+            # FIXED: Also check smart_cache for missing data
+            if cluster_name not in cached_data or not cached_data:
+                cached_data = {}
+                
+                # Try to get from smart_cache
+                metrics_key = f"{cluster_name}:metrics"
+                issues_key = f"{cluster_name}:issues"
+                
+                metrics = self.smart_cache.get(metrics_key)
+                issues = self.smart_cache.get(issues_key)
+                
+                if metrics:
+                    cached_data['metrics'] = metrics
+                if issues:
+                    cached_data['issues'] = issues
+                    
+            logging.info(f"ClusterConnector: Retrieved cached data for {cluster_name}: {list(cached_data.keys())}")
+            return cached_data
+            
+        except Exception as e:
+            logging.error(f"Error getting cached data for {cluster_name}: {e}")
+            return {}
+
     def disconnect_cluster(self, cluster_name):
         """Disconnect from cluster and cleanup resources"""
         try:
@@ -558,6 +684,10 @@ class ClusterConnection(QObject):
             
             # Update state
             self.connection_states[cluster_name] = "disconnected"
+            
+            # FIXED: Clear current_cluster if disconnecting from current cluster
+            if self.current_cluster == cluster_name:
+                self.current_cluster = None
             
             # Clear caches
             self.smart_cache.clear_cluster(cluster_name)
@@ -588,6 +718,10 @@ class ClusterConnection(QObject):
             # Update connection state to failed
             self.connection_states[cluster_name] = "failed"
             
+            # FIXED: Clear current_cluster if connection failed
+            if self.current_cluster == cluster_name:
+                self.current_cluster = None
+            
             # Emit connection complete with failure
             self.connection_complete.emit(cluster_name, False, error_message)
             
@@ -596,7 +730,6 @@ class ClusterConnection(QObject):
             
         except Exception as e:
             logging.error(f"Error in connection error handler: {e}")
-
 
     def _stop_workers_for_cluster(self, cluster_name):
         """Stop any active workers for a specific cluster"""
@@ -765,16 +898,6 @@ class ClusterConnection(QObject):
             logging.error(f"Error checking if data is loaded for {cluster_name}: {e}")
             return False
 
-    def get_cached_data(self, cluster_name):
-        """Get cached data for a cluster if available"""
-        try:
-            # Check cache validity first
-            self._cleanup_expired_cache()
-            return self.data_cache.get(cluster_name, {})
-        except Exception as e:
-            logging.error(f"Error getting cached data for {cluster_name}: {e}")
-            return {}
-
     def _cleanup_expired_cache(self):
         """Clean up expired cache entries to prevent memory leaks"""
         try:
@@ -794,27 +917,6 @@ class ClusterConnection(QObject):
                 
         except Exception as e:
             logging.error(f"Error cleaning up expired cache: {e}")
-    
-    def handle_cluster_info_loaded(self, info):
-        """Handle when cluster info is loaded from the client"""
-        if self._is_being_destroyed or self._shutting_down:
-            return
-            
-        try:
-            cluster_name = self.kube_client.current_cluster
-            if cluster_name:
-                if cluster_name not in self.data_cache:
-                    self.data_cache[cluster_name] = {}
-                self.data_cache[cluster_name]['cluster_info'] = info
-                self._update_cache_timestamp(cluster_name)
-                
-                # Check if we have all required data now
-                self._check_data_completeness(cluster_name)
-                
-            self.cluster_data_loaded.emit(info)
-            
-        except Exception as e:
-            logging.error(f"Error handling cluster info loaded: {e}")
 
     def handle_kubernetes_error(self, error_message):
         """Handle Kubernetes client errors with filtering"""
