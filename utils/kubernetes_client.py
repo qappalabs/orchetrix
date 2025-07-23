@@ -33,7 +33,7 @@ from utils.thread_manager import get_thread_manager
 API_TIMEOUT = 10
 BATCH_REQUEST_SIZE = 50
 LOG_BUFFER_SIZE = 1000
-METRICS_CACHE_TTL = 30  # seconds
+METRICS_CACHE_TTL = 10  # seconds - faster refresh for real-time data
 EVENT_BATCH_SIZE = 100
 MAX_CONCURRENT_REQUESTS = 5   
 

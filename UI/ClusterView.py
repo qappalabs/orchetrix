@@ -69,6 +69,9 @@ from Pages.AccessControl.RoleBinidingsPage import RoleBindingsPage
 # Custom Resource pages
 from Pages.CustomResources.DefinitionsPage import DefinitionsPage
 
+# Apps page
+from Pages.AppsPage import AppsPage
+
 # Page configuration with direct class references (PyInstaller compatible)
 PAGE_CONFIG = {
     # Core pages
@@ -127,6 +130,9 @@ PAGE_CONFIG = {
 
     # Custom Resource pages
     'Definitions': DefinitionsPage,
+    
+    # Apps page
+    'Apps': AppsPage,
 }
 
 # Dropdown menu configuration

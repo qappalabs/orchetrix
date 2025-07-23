@@ -17,8 +17,8 @@ from datetime import datetime
 from enum import Enum
 
 
-from Styles import AppColors, AppStyles
-from Icons import resource_path
+from UI.Styles import AppColors, AppStyles
+from UI.Icons import resource_path
 
 class StyleConstants:
     """Centralized stylesheet constants"""
