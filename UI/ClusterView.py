@@ -190,7 +190,7 @@ class LoadingOverlay(QWidget):
         self.spinner_label.setMinimumSize(64, 64)
         self.spinner_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        self.message = QLabel("Connecting to cluster...")
+        self.message = QLabel("Loading...")
         self.message.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         layout.addWidget(self.spinner_label)
@@ -240,7 +240,7 @@ class LoadingOverlay(QWidget):
             painter.setPen(Qt.PenStyle.NoPen)
             painter.drawEllipse(QPointF(x, y), 5, 5)
 
-    def show_loading(self, message: str = "Connecting to cluster...") -> None:
+    def show_loading(self, message: str = "Loading...") -> None:
         """Show loading overlay with custom message"""
         self.message.setText(message)
         self.spinner_timer.start(50)
@@ -912,15 +912,14 @@ class ClusterView(QWidget):
     def _on_connection_started(self, cluster_name: str) -> None:
         """Handle connection start"""
         if cluster_name == self.active_cluster:
-            self.loading_overlay.show_loading(f"Connecting to cluster: {cluster_name}")
-            self.loading_overlay.resize(self.size())
+            # Don't show loading message during connection
+            pass
 
     def _on_connection_complete(self, cluster_name: str, success: bool) -> None:
         """Handle connection completion"""
         if cluster_name == self.active_cluster:
             if success:
-                self.loading_overlay.show_loading(f"Loading data from: {cluster_name}")
-                # Try to load cached data
+                # Don't show loading message, just load data silently
                 self._update_cached_cluster_data(cluster_name)
             else:
                 self.loading_overlay.hide_loading()

@@ -295,6 +295,7 @@ class ClusterConnection(QObject):
         self.loading_complete = {}
         self.cache_timestamps = {}
         self.cache_ttl = 300  # 5 minutes
+        self.max_cache_entries = 20  # Limit cache entries per cluster
         
         # Connect signals
         self._connect_signals()
@@ -905,6 +906,7 @@ class ClusterConnection(QObject):
             current_time = time.time()
             expired_keys = []
             
+            # Time-based cleanup
             for cluster_name, timestamp in self.cache_timestamps.items():
                 if current_time - timestamp > self.cache_ttl:
                     expired_keys.append(cluster_name)
@@ -914,6 +916,18 @@ class ClusterConnection(QObject):
                 self.cache_timestamps.pop(key, None)
                 self.loading_complete.pop(key, None)
                 logging.debug(f"Cleaned up expired cache for cluster: {key}")
+            
+            # Size-based cleanup - if too many clusters cached
+            if len(self.data_cache) > self.max_cache_entries:
+                # Sort by timestamp and remove oldest
+                sorted_items = sorted(self.cache_timestamps.items(), key=lambda x: x[1])
+                oldest_keys = [item[0] for item in sorted_items[:len(sorted_items)//2]]
+                
+                for key in oldest_keys:
+                    self.data_cache.pop(key, None)
+                    self.cache_timestamps.pop(key, None)
+                    self.loading_complete.pop(key, None)
+                    logging.debug(f"Cleaned up cache for cluster (size limit): {key}")
                 
         except Exception as e:
             logging.error(f"Error cleaning up expired cache: {e}")

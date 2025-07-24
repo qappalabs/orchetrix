@@ -61,12 +61,18 @@ class BarChart(QWidget):
         super().leaveEvent(event)
     
     def update_data(self, data, times=None):
-        """Update chart with real data"""
+        """Update chart with real data and proper cleanup"""
         try:
             if data and isinstance(data, list) and len(data) > 0:
-                # Validate data
+                # Clear previous data first to prevent memory buildup
+                self.data.clear()
+                self.times.clear()
+                self.bar_positions.clear()
+                
+                # Validate and limit data to max 8 points
                 validated_data = []
-                for value in data:
+                data_to_use = data[-8:] if len(data) > 8 else data  # Only take last 8 points
+                for value in data_to_use:
                     try:
                         val = float(value)
                         validated_data.append(max(0, min(100, val)))  # Clamp between 0-100
@@ -76,26 +82,29 @@ class BarChart(QWidget):
                 self.data = validated_data
                 
                 # Generate times if not provided
-                if times and len(times) == len(self.data):
-                    self.times = times
+                if times and len(times) >= len(self.data):
+                    self.times = times[-len(self.data):]  # Take matching number of times
                 else:
                     self.times = self._generate_time_labels(len(self.data))
                 
                 self.has_data = True
-                logging.debug(f"Chart updated with {len(self.data)} data points: {self.data}")
+                logging.debug(f"Chart updated with {len(self.data)} data points (max 8): {self.data}")
                 self.update()
             else:
                 logging.warning(f"Invalid data provided to chart: {data}")
-                self.has_data = False
-                self.data = []
-                self.times = []
-                self.update()
+                self._clear_chart_data()
         except Exception as e:
             logging.error(f"Error updating chart data: {e}")
-            self.has_data = False
-            self.data = []
-            self.times = []
-            self.update()
+            self._clear_chart_data()
+    
+    def _clear_chart_data(self):
+        """Clear all chart data and reset state"""
+        self.has_data = False
+        self.data.clear()
+        self.times.clear()
+        self.bar_positions.clear()
+        self.hovered_bar = -1
+        self.update()
     
     def _generate_time_labels(self, count):
         """Generate time labels for the chart"""
@@ -658,10 +667,14 @@ class ClusterPage(QWidget):
         # Store historical data for charts
         self.cpu_history = []
         self.memory_history = []
-        self.max_history_points = 20
+        self.max_history_points = 8
+        self.last_metrics_hash = None
         
         # UI setup
         self.setup_ui()
+        
+        # Ensure worker is selected by default and master remains disabled
+        QTimer.singleShot(100, self.show_worker_data)
 
     def _connect_cluster_signals(self):
         """Connect cluster connector signals with improved error handling"""
@@ -767,11 +780,30 @@ class ClusterPage(QWidget):
         tabs_layout.setSpacing(4)
         
         self.master_btn = QPushButton("Master")
-        self.master_btn.setStyleSheet(AppStyles.CLUSTER_ACTIVE_BTN_STYLE)
-        self.master_btn.clicked.connect(self.show_master_data)
+        # Custom disabled style that clearly shows it's inactive and disabled
+        disabled_style = """
+            QPushButton {
+                background-color: #2a2a2a;
+                color: #666666;
+                border: 1px solid #444444;
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-weight: normal;
+                opacity: 0.6;
+            }
+            QPushButton:disabled {
+                background-color: #2a2a2a;
+                color: #555555;
+                border: 1px solid #333333;
+                opacity: 0.5;
+            }
+        """
+        self.master_btn.setStyleSheet(disabled_style)
+        self.master_btn.setEnabled(False)  # Disable the Master button
+        # self.master_btn.clicked.connect(self.show_master_data)  # Removed click handler
         
         self.worker_btn = QPushButton("Worker")
-        self.worker_btn.setStyleSheet(AppStyles.CLUSTER_INACTIVE_BTN_STYLE)
+        self.worker_btn.setStyleSheet(AppStyles.CLUSTER_ACTIVE_BTN_STYLE)
         self.worker_btn.clicked.connect(self.show_worker_data)
         
         tabs_layout.addWidget(self.master_btn)
@@ -819,7 +851,25 @@ class ClusterPage(QWidget):
         
     def show_worker_data(self):
         self.worker_btn.setStyleSheet(AppStyles.CLUSTER_ACTIVE_BTN_STYLE)
-        self.master_btn.setStyleSheet(AppStyles.CLUSTER_INACTIVE_BTN_STYLE)
+        # Keep Master button disabled style
+        disabled_style = """
+            QPushButton {
+                background-color: #2a2a2a;
+                color: #666666;
+                border: 1px solid #444444;
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-weight: normal;
+                opacity: 0.6;
+            }
+            QPushButton:disabled {
+                background-color: #2a2a2a;
+                color: #555555;
+                border: 1px solid #333333;
+                opacity: 0.5;
+            }
+        """
+        self.master_btn.setStyleSheet(disabled_style)
 
     def show_cpu_chart(self):
         self.cpu_btn.setStyleSheet(AppStyles.CLUSTER_ACTIVE_BTN_STYLE)
@@ -924,6 +974,22 @@ class ClusterPage(QWidget):
             logging.warning("ClusterPage: No metrics data to update.")
             return
 
+        # Create hash to prevent excessive duplicate updates (allow some updates for chart progression)
+        metrics_hash = hash(str(sorted(metrics.items()))) if metrics else None
+        if hasattr(self, 'duplicate_count'):
+            if self.last_metrics_hash == metrics_hash:
+                self.duplicate_count += 1
+                if self.duplicate_count < 3:  # Allow first 3 updates even if duplicate
+                    logging.debug(f"ClusterPage: Allowing duplicate metrics update #{self.duplicate_count}")
+                else:
+                    logging.debug("ClusterPage: Skipping excessive duplicate metrics update")
+                    return
+            else:
+                self.duplicate_count = 0
+        else:
+            self.duplicate_count = 0
+        self.last_metrics_hash = metrics_hash
+
         logging.info(f"ClusterPage: Processing metrics with keys: {list(metrics.keys())}")
         
         try:
@@ -944,15 +1010,17 @@ class ClusterPage(QWidget):
                 else:
                     logging.error("ClusterPage: cpu_status widget not found")
                 
-                # Update CPU chart
+                # Update CPU chart with proper cleanup
                 if hasattr(self, 'cpu_chart'):
+                    # Add usage data (allow duplicate values to build up chart)
                     self.cpu_history.append(usage)
+                    # Limit to max 8 points
                     if len(self.cpu_history) > self.max_history_points:
                         self.cpu_history = self.cpu_history[-self.max_history_points:]
                     
                     timestamps = cpu.get("timestamps", self._generate_time_points(len(self.cpu_history)))
                     self.cpu_chart.update_data(self.cpu_history.copy(), timestamps)
-                    logging.info(f"ClusterPage: CPU chart updated successfully")
+                    logging.info(f"ClusterPage: CPU chart updated successfully with {len(self.cpu_history)} points")
                 else:
                     logging.error("ClusterPage: cpu_chart widget not found")
             
@@ -973,15 +1041,17 @@ class ClusterPage(QWidget):
                 else:
                     logging.error("ClusterPage: memory_status widget not found")
                     
-                # Update Memory chart
+                # Update Memory chart with proper cleanup
                 if hasattr(self, 'memory_chart'):
+                    # Add usage data (allow duplicate values to build up chart)
                     self.memory_history.append(usage)
+                    # Limit to max 8 points
                     if len(self.memory_history) > self.max_history_points:
                         self.memory_history = self.memory_history[-self.max_history_points:]
                     
                     timestamps = memory.get("timestamps", self._generate_time_points(len(self.memory_history)))
                     self.memory_chart.update_data(self.memory_history.copy(), timestamps)
-                    logging.info(f"ClusterPage: Memory chart updated successfully")
+                    logging.info(f"ClusterPage: Memory chart updated successfully with {len(self.memory_history)} points")
                 else:
                     logging.error("ClusterPage: memory_chart widget not found")
 
@@ -1044,6 +1114,21 @@ class ClusterPage(QWidget):
         logging.info("ClusterPage: force_load_data called - requesting fresh metrics and issues")
         self._loading = True
         try:
+            # Reset duplicate counter and clear excessive historical data
+            self.duplicate_count = 0
+            self.last_metrics_hash = None
+            # Don't clear all history, just limit it
+            if len(self.cpu_history) > 2:
+                self.cpu_history = self.cpu_history[-2:]
+            if len(self.memory_history) > 2:
+                self.memory_history = self.memory_history[-2:]
+            
+            # Clear chart data
+            if hasattr(self, 'cpu_chart'):
+                self.cpu_chart._clear_chart_data()
+            if hasattr(self, 'memory_chart'):
+                self.memory_chart._clear_chart_data()
+                
             # Ensure signals are connected
             self._connect_cluster_signals()
             
@@ -1103,12 +1188,18 @@ class ClusterPage(QWidget):
         """Start refresh timer when page becomes visible"""
         super().showEvent(event)
         if not self.refresh_timer.isActive():
-            self.refresh_timer.start(30000)  # Refresh every 30 seconds
+            self.refresh_timer.start(60000)  # Refresh every 60 seconds (reduced frequency)
             # Also refresh immediately when shown
-            QTimer.singleShot(1000, self.refresh_data)
+            QTimer.singleShot(2000, self.refresh_data)  # Slight delay to prevent immediate overload
 
     def hideEvent(self, event):
-        """Stop refresh timer when page is hidden"""
+        """Stop refresh timer when page is hidden and cleanup data"""
         super().hideEvent(event)
         if self.refresh_timer.isActive():
             self.refresh_timer.stop()
+        
+        # Clear historical data when page is hidden to save memory
+        if len(self.cpu_history) > 4:
+            self.cpu_history = self.cpu_history[-4:]  # Keep only last 4 points
+        if len(self.memory_history) > 4:
+            self.memory_history = self.memory_history[-4:]  # Keep only last 4 points

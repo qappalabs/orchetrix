@@ -190,7 +190,7 @@ class KubernetesLogStreamer(QObject):
         super().__init__()
         self.kube_client = kube_client
         self.active_streams = {}
-        self.log_buffers = defaultdict(deque)
+        self.log_buffers = defaultdict(lambda: deque(maxlen=1000))
         self._shutdown = False
         
         # Buffer flush timer
@@ -731,11 +731,12 @@ class KubernetesClient(QObject):
         # Optimized log streamer
         self.log_streamer = KubernetesLogStreamer(self)
         
-        # Caching
+        # Caching with size limits
         self._metrics_cache = {}
         self._metrics_cache_time = {}
         self._issues_cache = {}
         self._issues_cache_time = {}
+        self.MAX_CACHE_ENTRIES = 50  # Limit cache size
         
         # Thread management
         self.thread_manager = get_thread_manager()
@@ -2278,19 +2279,37 @@ class KubernetesClient(QObject):
         """Clean up old cache entries"""
         current_time = time.time()
         
-        # Clean metrics cache
+        # Clean metrics cache - time-based cleanup
         old_metrics = [k for k, t in self._metrics_cache_time.items() 
                       if current_time - t > 300]
         for k in old_metrics:
             self._metrics_cache.pop(k, None)
             self._metrics_cache_time.pop(k, None)
         
-        # Clean issues cache
+        # Clean metrics cache - size-based cleanup
+        if len(self._metrics_cache) > self.MAX_CACHE_ENTRIES:
+            # Remove oldest half of entries
+            sorted_items = sorted(self._metrics_cache_time.items(), key=lambda x: x[1])
+            entries_to_remove = len(sorted_items) // 2
+            for key, _ in sorted_items[:entries_to_remove]:
+                self._metrics_cache.pop(key, None)
+                self._metrics_cache_time.pop(key, None)
+        
+        # Clean issues cache - time-based cleanup
         old_issues = [k for k, t in self._issues_cache_time.items() 
                      if current_time - t > 300]
         for k in old_issues:
             self._issues_cache.pop(k, None)
             self._issues_cache_time.pop(k, None)
+        
+        # Clean issues cache - size-based cleanup
+        if len(self._issues_cache) > self.MAX_CACHE_ENTRIES:
+            # Remove oldest half of entries
+            sorted_items = sorted(self._issues_cache_time.items(), key=lambda x: x[1])
+            entries_to_remove = len(sorted_items) // 2
+            for key, _ in sorted_items[:entries_to_remove]:
+                self._issues_cache.pop(key, None)
+                self._issues_cache_time.pop(key, None)
     
     def cleanup(self):
         """Cleanup resources"""

@@ -30,7 +30,7 @@ class ClusterConnectionWorker(EnhancedBaseWorker):
                 raise Exception("Kubernetes client not available")
             
             # FIXED: Add progress updates and better error handling
-            self.signals.progress.emit("Switching cluster context...")
+            # Progress messages removed - silent operation
             
             # Check if we're already connected to this cluster
             if (hasattr(kube_client, 'current_cluster') and 
@@ -52,7 +52,7 @@ class ClusterConnectionWorker(EnhancedBaseWorker):
                 return None
                 
             # FIXED: Better connectivity test with timeout
-            self.signals.progress.emit("Testing cluster connectivity...")
+            # Progress messages removed - silent operation
             remaining_time = self._timeout - (time.time() - start_time)
             if remaining_time <= 0:
                 raise Exception("Connection timeout during context switch")
@@ -63,7 +63,7 @@ class ClusterConnectionWorker(EnhancedBaseWorker):
                 return None
                 
             # FIXED: Load initial data with timeout
-            self.signals.progress.emit("Loading initial cluster data...")
+            # Progress messages removed - silent operation
             remaining_time = self._timeout - (time.time() - start_time)
             if remaining_time <= 5:  # Need at least 5 seconds for data loading
                 logging.warning(f"Insufficient time remaining for data loading: {remaining_time}s")
@@ -194,7 +194,7 @@ class ClusterStateManager(QObject):
             worker = ClusterConnectionWorker(cluster_name)
             worker.signals.finished.connect(lambda result: self._handle_connection_result(cluster_name, result))
             worker.signals.error.connect(lambda error: self._handle_connection_error(cluster_name, error))
-            worker.signals.progress.connect(lambda msg: logging.info(f"Connection progress for {cluster_name}: {msg}"))
+            # worker.signals.progress.connect(lambda msg: logging.info(f"Connection progress for {cluster_name}: {msg}"))  # Removed progress logging
             
             thread_manager = get_thread_manager()
             thread_manager.submit_worker(f"cluster_connect_{cluster_name}", worker)

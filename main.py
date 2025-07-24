@@ -118,7 +118,7 @@ def initialize_resources():
         logging.info("Running in normal Python environment")
 
 
-class OptimizedMainWindow(QMainWindow):
+class MainWindow(QMainWindow):
     """Optimized main window with improved resource management and performance"""
     
     def __init__(self):
@@ -183,19 +183,6 @@ class OptimizedMainWindow(QMainWindow):
         except Exception as e:
             logging.error(f"Error during periodic cleanup: {e}")
 
-        # def _post_switch_operations(self, cluster_name):
-        #     """Post-switch operations"""
-        #     try:
-        #         self.cluster_view.set_active_cluster(cluster_name)
-        #         if (hasattr(self.cluster_view, 'terminal_panel') and
-        #                 self.cluster_view.terminal_panel.is_visible and
-        #                 hasattr(self.cluster_view.terminal_panel, 'reposition')):
-        #             self.cluster_view.terminal_panel.reposition()
-        #         if hasattr(self.cluster_view, 'handle_page_change'):
-        #             self.cluster_view.handle_page_change(self.cluster_view.stacked_widget.currentWidget())
-        #     except Exception as e:
-        #         logging.error(f"Error in post-switch operations: {e}")
-
     def _setup_cluster_state_manager(self):
         """Setup cluster state manager"""
         try:
@@ -205,53 +192,6 @@ class OptimizedMainWindow(QMainWindow):
         except Exception as e:
             logging.error(f"Failed to setup cluster state manager: {e}")
             self.cluster_state_manager = None
-
-    # def _on_cluster_state_changed(self, cluster_name: str, state: ClusterState):
-    #     """Handle cluster state changes"""
-    #     if state == ClusterState.CONNECTING:
-    #         self.loading_overlay.show_loading(f"Connecting to {cluster_name}...")
-    #         self.loading_overlay.resize(self.size())
-    #         self.loading_overlay.raise_()
-    #     elif state == ClusterState.CONNECTED:
-    #         self.loading_overlay.hide_loading()
-    #     elif state == ClusterState.ERROR:
-    #         self.loading_overlay.hide_loading()
-
-    # def _on_cluster_switch_completed(self, cluster_name: str, success: bool):
-    #     """Handle cluster switch completion"""
-    #     if success:
-    #         # Always switch to cluster view when switch is completed successfully
-    #         # This ensures that even if we were "already connected", we still navigate to cluster view
-    #         current_widget = self.stacked_widget.currentWidget()
-    #         if current_widget != self.cluster_view:
-    #             logging.info(f"Switching to cluster view for {cluster_name}")
-    #             self.stacked_widget.setCurrentWidget(self.cluster_view)
-            
-    #         self.cluster_view.set_active_cluster(cluster_name)
-    #         QTimer.singleShot(50, lambda: self._post_switch_operations(cluster_name))
-    #     else:
-    #         self.show_error_message(f"Failed to switch to cluster: {cluster_name}")
-
-    # def switch_to_cluster_view(self, cluster_name="docker-desktop"):
-    #     """Optimized cluster switching using state manager"""
-    #     if not self.cluster_state_manager:
-    #         self.show_error_message("Cluster state manager not initialized.")
-    #         return
-
-    #     self.previous_page = self.stacked_widget.currentWidget()
-        
-    #     # Check if we're already on cluster view with the same cluster
-    #     current_widget = self.stacked_widget.currentWidget()
-    #     if (current_widget == self.cluster_view and 
-    #         hasattr(self.cluster_view, 'active_cluster') and 
-    #         self.cluster_view.active_cluster == cluster_name):
-    #         logging.info(f"Already viewing cluster: {cluster_name}")
-    #         return
-        
-    #     # Request cluster switch through state manager
-    #     if not self.cluster_state_manager.request_cluster_switch(cluster_name):
-    #         logging.warning(f"Could not initiate switch to {cluster_name}")
-    #         return
 
     def resizeEvent(self, event):
         """Handle resize event"""
@@ -540,16 +480,15 @@ class OptimizedMainWindow(QMainWindow):
         """Handle cluster state changes with better error handling"""
         try:
             if state == ClusterState.CONNECTING:
-                self.loading_overlay.show_loading(f"Connecting to {cluster_name}...")
-                self.loading_overlay.resize(self.size())
-                self.loading_overlay.raise_()
-                logging.info(f"Started connecting to cluster: {cluster_name}")
+                # Don't show loading overlay during connection
+                pass
                 
             elif state == ClusterState.CONNECTED:
-                self.loading_overlay.show_loading(f"Loading data from {cluster_name}...")
+                # Don't show loading message, connect silently
                 logging.info(f"Successfully connected to cluster: {cluster_name}")
                 
             elif state == ClusterState.ERROR:
+                # Hide any existing loading overlay on error
                 self.loading_overlay.hide_loading()
                 logging.error(f"Failed to connect to cluster: {cluster_name}")
                 
@@ -691,25 +630,7 @@ class OptimizedMainWindow(QMainWindow):
             self._error_shown = False
         except:
             pass
-    # def show_error_message(self, error_message):
-    #     """Display error messages"""
-    #     if self._shutting_down:
-    #         return
-
-    #     if not hasattr(self, '_error_shown'):
-    #         self._error_shown = False
-
-    #     if self._error_shown and not self._is_switching_to_cluster:
-    #         logging.error(f"Suppressed duplicate error dialog: {error_message}")
-    #         return
-
-    #     self._error_shown = True
-    #     QMessageBox.critical(self, "Error", error_message)
-    #     QTimer.singleShot(1000, self._reset_error_flag)
-
-    # def _reset_error_flag(self):
-    #     """Reset the error dialog flag"""
-    #     self._error_shown = False
+  
 
     def handle_page_change(self, index):
         """Handle page changes in the stacked widget"""
@@ -869,10 +790,6 @@ class OptimizedMainWindow(QMainWindow):
 
         logging.info(f"Stopped {timers_stopped} active QTimers.")
         QThread.msleep(100)
-
-
-# Use optimized main window
-MainWindow = OptimizedMainWindow
 
 def main():
     """Application entry point with platform-consistent styling"""
