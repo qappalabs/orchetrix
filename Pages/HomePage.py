@@ -166,6 +166,12 @@ class OrchestrixGUI(QMainWindow):
             from utils.cluster_state_manager import get_cluster_state_manager
             self.cluster_state_manager = get_cluster_state_manager()
             logging.info("Cluster state manager initialized in HomePage")
+            
+            # FIXED: Connect to cluster state manager signals for better status tracking
+            if self.cluster_state_manager:
+                self.cluster_state_manager.state_changed.connect(self._on_cluster_state_changed)
+                self.cluster_state_manager.switch_completed.connect(self._on_cluster_switch_completed)
+                
         except Exception as e:
             logging.error(f"Failed to initialize cluster state manager in HomePage: {e}")
             self.cluster_state_manager = None
@@ -429,13 +435,27 @@ class OrchestrixGUI(QMainWindow):
         updates = []
         
         for cluster in clusters:
-            status = "available" if cluster.status == "active" else "disconnect"
+            # FIXED: Check actual cluster state instead of just cluster.status
+            actual_status = "available"
+            if self.cluster_state_manager:
+                from utils.cluster_state_manager import ClusterState
+                cluster_state = self.cluster_state_manager.get_cluster_state(cluster.name)
+                
+                if cluster_state == ClusterState.CONNECTED:
+                    actual_status = "connected"
+                elif cluster_state == ClusterState.CONNECTING:
+                    actual_status = "connecting"
+                else:
+                    actual_status = "available" if cluster.status == "active" else "disconnect"
+            else:
+                actual_status = "available" if cluster.status == "active" else "disconnect"
+            
             cluster_data = {
                 "name": cluster.name,
                 "kind": cluster.kind,
                 "source": cluster.source,
                 "label": cluster.label,
-                "status": status,
+                "status": actual_status,
                 "badge_color": None,
                 "action": self.navigate_to_cluster,
                 "cluster_data": cluster
@@ -456,6 +476,58 @@ class OrchestrixGUI(QMainWindow):
         self.update_filtered_views()
         self.update_content_view(self.current_view)
         self.update_pinned_items_signal.emit(list(self.pinned_items))
+
+    def _on_cluster_state_changed(self, cluster_name, state):
+        """Handle cluster state changes from cluster state manager"""
+        try:
+            from utils.cluster_state_manager import ClusterState
+            
+            # Update status in all data views
+            status_mapping = {
+                ClusterState.DISCONNECTED: "available",
+                ClusterState.CONNECTING: "connecting", 
+                ClusterState.CONNECTED: "connected",
+                ClusterState.ERROR: "available"
+            }
+            
+            new_status = status_mapping.get(state, "available")
+            
+            for view_type in self.all_data:
+                for item in self.all_data[view_type]:
+                    if item.get("name") == cluster_name:
+                        item["status"] = new_status
+                        logging.info(f"Updated HomePage status for {cluster_name}: {new_status}")
+                        break
+            
+            self.update_content_view(self.current_view)
+            
+        except Exception as e:
+            logging.error(f"Error handling cluster state change in HomePage: {e}")
+    
+    def _on_cluster_switch_completed(self, cluster_name, success):
+        """Handle cluster switch completion"""
+        try:
+            if success:
+                # Update status to connected
+                for view_type in self.all_data:
+                    for item in self.all_data[view_type]:
+                        if item.get("name") == cluster_name:
+                            item["status"] = "connected"
+                            logging.info(f"Cluster {cluster_name} successfully connected")
+                            break
+            else:
+                # Update status back to available on failure
+                for view_type in self.all_data:
+                    for item in self.all_data[view_type]:
+                        if item.get("name") == cluster_name:
+                            item["status"] = "available" 
+                            logging.info(f"Cluster {cluster_name} connection failed, status reset to available")
+                            break
+            
+            self.update_content_view(self.current_view)
+            
+        except Exception as e:
+            logging.error(f"Error handling cluster switch completion in HomePage: {e}")
 
     def check_cluster_data_loaded(self, data):
         if self.waiting_for_cluster_load:
@@ -952,7 +1024,18 @@ class OrchestrixGUI(QMainWindow):
         if cluster_status in ["connecting", "loading"]: 
             return
         
-        # Update UI to show connecting state immediately
+        # FIXED: Check actual cluster state before proceeding
+        if self.cluster_state_manager:
+            from utils.cluster_state_manager import ClusterState
+            actual_state = self.cluster_state_manager.get_cluster_state(cluster_name)
+            
+            # If already connected, go directly to cluster view
+            if actual_state == ClusterState.CONNECTED:
+                logging.info(f"Cluster {cluster_name} already connected, opening cluster view")
+                self.open_cluster_signal.emit(cluster_name)
+                return
+        
+        # Update UI to show connecting state immediately only if not already connected
         for view_type in self.all_data:
             for data_item in self.all_data[view_type]:
                 if data_item["name"] == cluster_name: 

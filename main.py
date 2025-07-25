@@ -514,17 +514,15 @@ class MainWindow(QMainWindow):
                 QTimer.singleShot(50, lambda: self._post_switch_operations(cluster_name))
                 
             else:
-                # FIXED: Better error message
+                # FIXED: Better error handling - don't switch to cluster view on failure
                 error_msg = f"Failed to connect to cluster: {cluster_name}"
+                logging.error(error_msg)
                 self.show_error_message(error_msg)
                 
-                # FIXED: Update homepage status back to available
-                if hasattr(self.home_page, 'all_data'):
-                    for view_type in self.home_page.all_data:
-                        for data_item in self.home_page.all_data[view_type]:
-                            if data_item.get("name") == cluster_name:
-                                data_item["status"] = "available"
-                    self.home_page.update_content_view(self.home_page.current_view)
+                # FIXED: Stay on home page when connection fails
+                if self.stacked_widget.currentWidget() != self.home_page:
+                    logging.info(f"Connection failed for {cluster_name}, staying on home page")
+                    self.stacked_widget.setCurrentWidget(self.home_page)
                     
         except Exception as e:
             logging.error(f"Error handling cluster switch completion: {e}")
@@ -561,26 +559,29 @@ class MainWindow(QMainWindow):
 
             self.previous_page = self.stacked_widget.currentWidget()
             
-            # FIXED: Check if we're already connected and on cluster view
-            current_widget = self.stacked_widget.currentWidget()
-            if (current_widget == self.cluster_view and 
-                hasattr(self.cluster_view, 'active_cluster') and 
-                self.cluster_view.active_cluster == cluster_name):
-                
-                # Check actual connection state
-                cluster_state = self.cluster_state_manager.get_cluster_state(cluster_name)
-                if cluster_state == ClusterState.CONNECTED:
-                    logging.info(f"Already viewing connected cluster: {cluster_name}")
-                    return
+            # FIXED: Check actual connection state first
+            cluster_state = self.cluster_state_manager.get_cluster_state(cluster_name)
             
-            # FIXED: Request cluster switch with better error handling
-            logging.info(f"Requesting cluster switch to: {cluster_name}")
-            
-            if not self.cluster_state_manager.request_cluster_switch(cluster_name):
-                error_msg = f"Could not initiate switch to {cluster_name}"
-                logging.warning(error_msg)
-                self.show_error_message(error_msg)
+            # If already connected, switch to cluster view immediately
+            if cluster_state == ClusterState.CONNECTED:
+                logging.info(f"Cluster {cluster_name} already connected, switching to cluster view")
+                if self.stacked_widget.currentWidget() != self.cluster_view:
+                    self.stacked_widget.setCurrentWidget(self.cluster_view)
+                self.cluster_view.set_active_cluster(cluster_name)
                 return
+            
+            # FIXED: Only show loading overlay if we need to connect
+            if cluster_state in [ClusterState.DISCONNECTED, ClusterState.ERROR]:
+                logging.info(f"Requesting cluster switch to: {cluster_name}")
+                
+                if not self.cluster_state_manager.request_cluster_switch(cluster_name):
+                    error_msg = f"Could not initiate switch to {cluster_name}"
+                    logging.warning(error_msg)
+                    self.show_error_message(error_msg)
+                    return
+            else:
+                # Already connecting, just wait
+                logging.info(f"Cluster {cluster_name} already connecting, waiting...")
                 
         except Exception as e:
             logging.error(f"Error in switch_to_cluster_view for {cluster_name}: {e}")
