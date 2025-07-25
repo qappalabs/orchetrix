@@ -32,15 +32,21 @@ class ClusterConnectionWorker(EnhancedBaseWorker):
             # FIXED: Add progress updates and better error handling
             # Progress messages removed - silent operation
             
-            # Check if we're already connected to this cluster
+            # Check if we're already connected to this cluster and verify connectivity
             if (hasattr(kube_client, 'current_cluster') and 
                 kube_client.current_cluster == self.cluster_name):
-                logging.info(f"Already connected to {self.cluster_name}")
-                return {
-                    'cluster_info': {'name': self.cluster_name, 'already_connected': True},
-                    'initial_data': {},
-                    'timestamp': time.time()
-                }
+                try:
+                    # Verify the connection is actually working
+                    kube_client.version_api.get_code()
+                    logging.info(f"Already connected to {self.cluster_name}")
+                    return {
+                        'cluster_info': {'name': self.cluster_name, 'already_connected': True},
+                        'initial_data': {},
+                        'timestamp': time.time()
+                    }
+                except Exception as e:
+                    logging.warning(f"Connection verification failed for {self.cluster_name}, proceeding with fresh connection: {e}")
+                    # Continue with fresh connection attempt
             
             # Switch context with timeout check
             success = kube_client.switch_context(self.cluster_name)
@@ -159,12 +165,25 @@ class ClusterStateManager(QObject):
                     logging.info(f"Resetting current_cluster for {cluster_name} due to state mismatch")
                     self.current_cluster = None
                 
-                # If we're truly connected and it's the current cluster, allow reconnection
+                # If we're truly connected and it's the current cluster, verify connectivity first
                 if self.current_cluster == cluster_name and cluster_state == ClusterState.CONNECTED:
-                    logging.info(f"Already connected to {cluster_name}, switching to cluster view")
-                    # Emit the switch completed signal to ensure UI switches to cluster view
-                    self.switch_completed.emit(cluster_name, True)
-                    return True
+                    # Verify the connection is actually working before allowing switch
+                    try:
+                        from utils.kubernetes_client import get_kubernetes_client
+                        kube_client = get_kubernetes_client()
+                        if kube_client:
+                            # Quick connectivity test
+                            kube_client.version_api.get_code()
+                            logging.info(f"Already connected to {cluster_name}, switching to cluster view")
+                            self.switch_completed.emit(cluster_name, True)
+                            return True
+                        else:
+                            logging.warning(f"No kubernetes client available for {cluster_name}")
+                    except Exception as e:
+                        logging.warning(f"Connection verification failed for {cluster_name}: {e}")
+                        # Reset state and proceed with fresh connection
+                        self.current_cluster = None
+                        self.cluster_states[cluster_name] = ClusterState.DISCONNECTED
                     
                 self.pending_switch = cluster_name
                 self._initiate_cluster_switch(cluster_name)
@@ -236,7 +255,16 @@ class ClusterStateManager(QObject):
                 if self.pending_switch != cluster_name:
                     return
                     
+                # Reset cluster state completely on error
                 self.cluster_states[cluster_name] = ClusterState.ERROR
+                if self.current_cluster == cluster_name:
+                    self.current_cluster = None
+                    logging.info(f"Reset current_cluster due to connection error for {cluster_name}")
+                
+                # Clear any cached data
+                if cluster_name in self.cluster_data:
+                    del self.cluster_data[cluster_name]
+                    
                 self.pending_switch = None
                 
                 self.state_changed.emit(cluster_name, ClusterState.ERROR)
@@ -254,6 +282,28 @@ class ClusterStateManager(QObject):
     def is_switching(self) -> bool:
         """Check if currently switching"""
         return self.pending_switch is not None
+        
+    def reset_cluster_state(self, cluster_name: str):
+        """Reset cluster state to disconnected - useful for cleanup"""
+        try:
+            with self.switching_lock:
+                if cluster_name in self.cluster_states:
+                    old_state = self.cluster_states[cluster_name]
+                    self.cluster_states[cluster_name] = ClusterState.DISCONNECTED
+                    
+                    if self.current_cluster == cluster_name:
+                        self.current_cluster = None
+                        
+                    if cluster_name in self.cluster_data:
+                        del self.cluster_data[cluster_name]
+                        
+                    if old_state != ClusterState.DISCONNECTED:
+                        self.state_changed.emit(cluster_name, ClusterState.DISCONNECTED)
+                        
+                    logging.info(f"Reset cluster state for {cluster_name}")
+                    
+        except Exception as e:
+            logging.error(f"Error resetting cluster state for {cluster_name}: {e}")
 
 _cluster_state_manager_instance = None
 
