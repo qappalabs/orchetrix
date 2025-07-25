@@ -571,7 +571,7 @@ class MainWindow(QMainWindow):
                 return
             
             # FIXED: Only show loading overlay if we need to connect
-            if cluster_state in [ClusterState.DISCONNECTED, ClusterState.ERROR]:
+            if cluster_state in [ClusterState.DISCONNECTED, ClusterState.ERROR, ClusterState.MANUALLY_DISCONNECTED]:
                 logging.info(f"Requesting cluster switch to: {cluster_name}")
                 
                 if not self.cluster_state_manager.request_cluster_switch(cluster_name):

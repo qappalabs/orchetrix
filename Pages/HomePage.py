@@ -487,7 +487,8 @@ class OrchestrixGUI(QMainWindow):
                 ClusterState.DISCONNECTED: "available",
                 ClusterState.CONNECTING: "connecting", 
                 ClusterState.CONNECTED: "connected",
-                ClusterState.ERROR: "available"
+                ClusterState.ERROR: "available",
+                ClusterState.MANUALLY_DISCONNECTED: "disconnect"
             }
             
             new_status = status_mapping.get(state, "available")
@@ -532,6 +533,7 @@ class OrchestrixGUI(QMainWindow):
     def check_cluster_data_loaded(self, data):
         if self.waiting_for_cluster_load:
             cluster_name = self.waiting_for_cluster_load
+            logging.info(f"HomePage: Checking data loaded for {cluster_name}")
 
             if hasattr(self.cluster_connector, 'is_data_loaded') and self.cluster_connector.is_data_loaded(cluster_name):
                 self.waiting_for_cluster_load = None
@@ -539,18 +541,28 @@ class OrchestrixGUI(QMainWindow):
                     for item in self.all_data[view_type]:
                         if item.get("name") == cluster_name:
                             item["status"] = "connected"
+                            logging.info(f"HomePage: Set {cluster_name} status to connected - data is loaded")
                 self.update_content_view(self.current_view)
                 QTimer.singleShot(100, lambda: self.open_cluster_signal.emit(cluster_name))
+            else:
+                logging.info(f"HomePage: Data not yet loaded for {cluster_name}")
+        else:
+            logging.debug("HomePage: No cluster waiting for data load")
 
     def on_cluster_connection_started(self, cluster_name):
+        logging.info(f"HomePage: Connection started for {cluster_name}")
         self.connecting_clusters.add(cluster_name)
         for view_type in self.all_data:
             for item in self.all_data[view_type]:
                 if item.get("name") == cluster_name:
                     item["status"] = "connecting"
         self.update_content_view(self.current_view)
+        
+        # Add a timeout to check if connection completes within reasonable time
+        QTimer.singleShot(10000, lambda: self._check_connection_timeout(cluster_name))
 
     def on_cluster_connection_complete(self, cluster_name, success):
+        logging.info(f"HomePage: on_cluster_connection_complete called for {cluster_name}, success={success}")
         self.connecting_clusters.discard(cluster_name)
         for view_type in self.all_data:
             for item in self.all_data[view_type]:
@@ -558,9 +570,58 @@ class OrchestrixGUI(QMainWindow):
                     if success:
                         item["status"] = "loading"
                         self.waiting_for_cluster_load = cluster_name
+                        logging.info(f"HomePage: Set {cluster_name} to loading, waiting for data")
                     else:
-                        item["status"] = "disconnect"
+                        item["status"] = "available"
+                        # Clear waiting state on failure
+                        if self.waiting_for_cluster_load == cluster_name:
+                            self.waiting_for_cluster_load = None
+                        logging.info(f"HomePage: Set {cluster_name} status to available on failure")
         self.update_content_view(self.current_view)
+        
+    def _check_connection_timeout(self, cluster_name):
+        """Check if connection is stuck and try to recover"""
+        try:
+            # If cluster is still in connecting state after timeout, check actual state
+            if cluster_name in self.connecting_clusters or self.waiting_for_cluster_load == cluster_name:
+                logging.warning(f"HomePage: Connection timeout for {cluster_name}, checking actual state")
+                
+                # Check if cluster is actually connected via state manager
+                if self.cluster_state_manager:
+                    from utils.cluster_state_manager import ClusterState
+                    actual_state = self.cluster_state_manager.get_cluster_state(cluster_name)
+                    
+                    if actual_state == ClusterState.CONNECTED:
+                        logging.info(f"HomePage: {cluster_name} is actually connected, updating UI")
+                        # Force update to connected state
+                        self.connecting_clusters.discard(cluster_name)
+                        self.waiting_for_cluster_load = None
+                        
+                        for view_type in self.all_data:
+                            for item in self.all_data[view_type]:
+                                if item.get("name") == cluster_name:
+                                    item["status"] = "connected"
+                                    logging.info(f"HomePage: Forced {cluster_name} status to connected")
+                        
+                        self.update_content_view(self.current_view)
+                        # Emit signal to switch to cluster view
+                        QTimer.singleShot(100, lambda: self.open_cluster_signal.emit(cluster_name))
+                    else:
+                        logging.info(f"HomePage: {cluster_name} is in state {actual_state}, resetting to available")
+                        # Reset to available if not actually connected
+                        self.connecting_clusters.discard(cluster_name)
+                        if self.waiting_for_cluster_load == cluster_name:
+                            self.waiting_for_cluster_load = None
+                            
+                        for view_type in self.all_data:
+                            for item in self.all_data[view_type]:
+                                if item.get("name") == cluster_name:
+                                    item["status"] = "available"
+                        
+                        self.update_content_view(self.current_view)
+                        
+        except Exception as e:
+            logging.error(f"Error in connection timeout check for {cluster_name}: {e}")
 
     def show_error_message(self, error_message):
         """Display error messages with better formatting"""
@@ -959,12 +1020,16 @@ class OrchestrixGUI(QMainWindow):
         original_name = item.data(0, Qt.ItemDataRole.UserRole)
         original_data = item.data(0, Qt.ItemDataRole.UserRole + 1)
         if original_data and "Cluster" in original_data["kind"]:
+            # Update UI to show connecting state
             for view_type in self.all_data:
                 for d_item in self.all_data[view_type]: # renamed item to d_item to avoid conflict
                     if d_item["name"] == original_name: d_item["status"] = "connecting"
             self.connecting_clusters.add(original_name)
             self.update_content_view(self.current_view)
-            QTimer.singleShot(100, lambda: self.cluster_connector.connect_to_cluster(original_name))
+            
+            # FIXED: Use the same connection flow as direct click to ensure consistent error handling
+            # Let the main window handle the connection through cluster state manager
+            QTimer.singleShot(100, lambda: self.open_cluster_signal.emit(original_name))
 
     def disconnect_cluster(self, cluster_name):
         """Disconnect from a specific cluster"""
@@ -1035,7 +1100,7 @@ class OrchestrixGUI(QMainWindow):
                 self.open_cluster_signal.emit(cluster_name)
                 return
         
-        # Update UI to show connecting state immediately only if not already connected
+        # Update UI to show connecting state for any non-connected cluster
         for view_type in self.all_data:
             for data_item in self.all_data[view_type]:
                 if data_item["name"] == cluster_name: 

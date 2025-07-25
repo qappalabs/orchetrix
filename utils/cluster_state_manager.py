@@ -10,6 +10,7 @@ class ClusterState(Enum):
     CONNECTING = "connecting"
     CONNECTED = "connected"
     ERROR = "error"
+    MANUALLY_DISCONNECTED = "manually_disconnected"
 
 # Fixed ClusterStateManager - Improved error handling and connection logic
 
@@ -161,7 +162,7 @@ class ClusterStateManager(QObject):
                 cluster_state = self.cluster_states.get(cluster_name, ClusterState.DISCONNECTED)
                 
                 # If we think we're connected but the state shows disconnected, reset current_cluster
-                if self.current_cluster == cluster_name and cluster_state != ClusterState.CONNECTED:
+                if self.current_cluster == cluster_name and cluster_state not in [ClusterState.CONNECTED, ClusterState.CONNECTING]:
                     logging.info(f"Resetting current_cluster for {cluster_name} due to state mismatch")
                     self.current_cluster = None
                 
@@ -304,6 +305,50 @@ class ClusterStateManager(QObject):
                     
         except Exception as e:
             logging.error(f"Error resetting cluster state for {cluster_name}: {e}")
+            
+    def disconnect_cluster(self, cluster_name: str):
+        """Disconnect from cluster and reset all states"""
+        try:
+            with self.switching_lock:
+                logging.info(f"Disconnecting cluster: {cluster_name}")
+                
+                # Set to manually disconnected state (will show as "disconnect" in UI)
+                old_state = self.cluster_states.get(cluster_name, ClusterState.DISCONNECTED)
+                self.cluster_states[cluster_name] = ClusterState.MANUALLY_DISCONNECTED
+                
+                # Clear current cluster
+                if self.current_cluster == cluster_name:
+                    self.current_cluster = None
+                    logging.info(f"Cleared current_cluster for {cluster_name}")
+                    
+                # Clear cached data
+                if cluster_name in self.cluster_data:
+                    del self.cluster_data[cluster_name]
+                    logging.info(f"Cleared cached data for {cluster_name}")
+                    
+                # Cancel any pending switch
+                if self.pending_switch == cluster_name:
+                    self.pending_switch = None
+                    logging.info(f"Cancelled pending switch for {cluster_name}")
+                    
+                # Emit state change if needed
+                if old_state != ClusterState.MANUALLY_DISCONNECTED:
+                    self.state_changed.emit(cluster_name, ClusterState.MANUALLY_DISCONNECTED)
+                    
+                # Reset kubernetes client
+                try:
+                    from utils.kubernetes_client import get_kubernetes_client
+                    kube_client = get_kubernetes_client()
+                    if kube_client and hasattr(kube_client, 'current_cluster') and kube_client.current_cluster == cluster_name:
+                        kube_client.current_cluster = None
+                        logging.info(f"Reset kubernetes client current_cluster for {cluster_name}")
+                except Exception as e:
+                    logging.warning(f"Failed to reset kubernetes client for {cluster_name}: {e}")
+                    
+                logging.info(f"Successfully disconnected cluster: {cluster_name}")
+                
+        except Exception as e:
+            logging.error(f"Error disconnecting cluster {cluster_name}: {e}")
 
 _cluster_state_manager_instance = None
 
