@@ -28,6 +28,7 @@ from kubernetes.stream import stream
 
 from utils.enhanced_worker import EnhancedBaseWorker
 from utils.thread_manager import get_thread_manager
+from log_handler import method_logger, class_logger
 
 # Performance constants
 API_TIMEOUT = 10
@@ -700,6 +701,7 @@ class ResourceUpdateWorker(EnhancedBaseWorker):
             self.yaml_data
         )
 
+@class_logger(log_level=logging.INFO, exclude_methods=['__init__', 'emit_signal', '_cleanup_worker', 'clusters_loaded', 'cluster_info_loaded', 'node_metrics_loaded', 'issues_loaded', 'resource_deleted'])
 class KubernetesClient(QObject):
     """Client for interacting with Kubernetes clusters using Python kubernetes library"""
     # Signals

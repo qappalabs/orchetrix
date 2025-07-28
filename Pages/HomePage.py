@@ -10,6 +10,7 @@ from utils.kubernetes_client import get_kubernetes_client
 from utils.cluster_connector import get_cluster_connector
 import logging
 from collections import defaultdict
+from log_handler import method_logger, class_logger
 import webbrowser  # Added for opening URLs
 
 from math import sin, cos
@@ -151,6 +152,7 @@ class SidebarButton(QPushButton):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setStyleSheet(AppStyles.SIDEBAR_BUTTON_STYLE)
 
+@class_logger(log_level=logging.INFO, exclude_methods=['__init__', 'set_cluster_icon', 'context_menu_requested', 'open_cluster_signal', 'open_preferences_signal', 'update_pinned_items_signal'])
 class OrchestrixGUI(QMainWindow):
     def __init__(self):
         super().__init__()

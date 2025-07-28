@@ -26,6 +26,7 @@ from kubernetes.client.rest import ApiException
 
 from utils.enhanced_worker import EnhancedBaseWorker
 from utils.thread_manager import get_thread_manager
+from log_handler import method_logger, class_logger
 
 # Constants for performance tuning
 BATCH_SIZE = 50  # Number of items to render in each batch
@@ -1040,6 +1041,7 @@ class VirtualScrollTable(QWidget):
         pass
 
 
+@class_logger(log_level=logging.INFO, exclude_methods=['__init__', 'clear_table', 'update_table_row', 'load_more_complete', 'all_items_loaded_signal'])
 class BaseResourcePage(BaseTablePage):
     load_more_complete = pyqtSignal()
     all_items_loaded_signal = pyqtSignal()

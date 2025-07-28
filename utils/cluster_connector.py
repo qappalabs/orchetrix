@@ -11,6 +11,7 @@ from collections import deque
 from datetime import datetime, timedelta
 from utils.enhanced_worker import EnhancedBaseWorker
 from utils.thread_manager import get_thread_manager
+from log_handler import method_logger, class_logger
 
 # Performance tuning constants
 INITIAL_POLL_INTERVAL = 5000  # 5 seconds
@@ -21,6 +22,7 @@ MAX_CACHE_SIZE_MB = 50        # Maximum cache size in MB
 CONNECTION_POOL_SIZE = 5      # Number of pooled connections
 BATCH_REQUEST_DELAY = 100     # Delay for batching requests in ms
 
+@class_logger(log_level=logging.DEBUG, exclude_methods=['__init__'])
 class AdaptivePoller:
     """Manages adaptive polling intervals based on data change frequency"""
     
@@ -243,6 +245,7 @@ class NodesWorker(EnhancedBaseWorker):
             return []
         return self.client._get_nodes()
     
+@class_logger(log_level=logging.INFO, exclude_methods=['__init__', '_start_workers', '_stop_workers', 'connection_started', 'connection_finished', 'connection_error', 'cluster_info_loaded', 'nodes_loaded'])
 class ClusterConnection(QObject):
     """
     Enhanced cluster connection manager with better error handling and user feedback
