@@ -1222,6 +1222,7 @@ class AppsPage(QWidget):
                 border: 1px solid {AppColors.BORDER_LIGHT};
                 border-radius: 4px;
             }}
+            {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
         """)
         self.diagram_view.setMinimumHeight(400)
         diagram_layout.addWidget(self.diagram_view)
@@ -1239,6 +1240,7 @@ class AppsPage(QWidget):
                 font-size: 12px;
                 padding: 8px;
             }}
+            {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
         """)
         self.status_text.setPlainText("Select a namespace and click Refresh to view apps")
         diagram_layout.addWidget(self.status_text)
