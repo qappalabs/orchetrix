@@ -808,10 +808,10 @@ class AppsPage(QWidget):
     
     def setup_ui(self):
         """Setup the UI mimicking BaseResourcePage header layout"""
-        # Main layout with standard margins and spacing (like BaseResourcePage)
+        # Main layout with reduced margins and spacing
         page_main_layout = QVBoxLayout(self)
-        page_main_layout.setContentsMargins(16, 16, 16, 16)
-        page_main_layout.setSpacing(16)
+        page_main_layout.setContentsMargins(12, 8, 12, 12)
+        page_main_layout.setSpacing(8)
         
         # Create header layout (single line) exactly like BaseResourcePage
         header_controls_layout = QHBoxLayout()
@@ -1197,17 +1197,22 @@ class AppsPage(QWidget):
         """)
         
         diagram_layout = QVBoxLayout(diagram_frame)
-        diagram_layout.setContentsMargins(15, 15, 15, 15)
-        diagram_layout.setSpacing(10)
+        diagram_layout.setContentsMargins(8, 2, 8, 8)
+        diagram_layout.setSpacing(2)
         
-        # Diagram title
+        # Diagram title - minimal height
         self.diagram_title = QLabel("App Diagram")
+        self.diagram_title.setMaximumHeight(18)
+        self.diagram_title.setMinimumHeight(16)
+        self.diagram_title.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.diagram_title.setStyleSheet(f"""
             QLabel {{
                 color: {AppColors.TEXT_LIGHT};
-                font-size: 16px;
+                font-size: 11px;
                 font-weight: bold;
-                margin-bottom: 5px;
+                margin: 0px;
+                padding: 0px;
+                max-height: 16px;
             }}
         """)
         diagram_layout.addWidget(self.diagram_title)
@@ -1224,12 +1229,12 @@ class AppsPage(QWidget):
             }}
             {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
         """)
-        self.diagram_view.setMinimumHeight(400)
+        self.diagram_view.setMinimumHeight(350)
         diagram_layout.addWidget(self.diagram_view)
         
         # Status text area
         self.status_text = QTextEdit()
-        self.status_text.setMaximumHeight(100)
+        self.status_text.setMaximumHeight(50)
         self.status_text.setReadOnly(True)
         self.status_text.setStyleSheet(f"""
             QTextEdit {{
