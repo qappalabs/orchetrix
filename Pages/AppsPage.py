@@ -6,16 +6,21 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QLineEdit, 
     QPushButton, QFrame, QSizePolicy, QTextEdit, QScrollArea, QGraphicsView,
     QGraphicsScene, QGraphicsRectItem, QGraphicsTextItem, QGraphicsLineItem,
-    QMessageBox, QProgressDialog
+    QMessageBox, QProgressDialog, QGraphicsPixmapItem, QFileDialog, QMenu, QToolButton
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTimer, QRectF, QPointF
-from PyQt6.QtGui import QFont, QPen, QBrush, QColor, QPainter
+from PyQt6.QtGui import QFont, QPen, QBrush, QColor, QPainter, QPixmap, QIcon, QAction
 
 from UI.Styles import AppStyles, AppColors
 from utils.kubernetes_client import get_kubernetes_client
 from kubernetes.client.rest import ApiException
+from business_logic.app_flow_business import (
+    AppFlowBusinessLogic, ResourceType, GraphLayout, ResourceInfo, ConnectionInfo
+)
 import logging
 import json
+import os
+from datetime import datetime
 
 
 class DeploymentAnalyzer(QThread):
@@ -797,7 +802,12 @@ class AppsPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.parent_window = parent
+        self.business_logic = AppFlowBusinessLogic()
+        self.current_app_flow_data = None
         self.setup_ui()
+        
+        # Set horizontal layout by default
+        self.business_logic.set_graph_layout(GraphLayout.HORIZONTAL)
         
         # Load namespaces after UI is set up
         QTimer.singleShot(100, self.load_namespaces)
@@ -826,6 +836,7 @@ class AppsPage(QWidget):
         header_controls_layout.addStretch(1)
         
         # Remove labels controls - keeping only namespace dropdown
+        
         
         # Refresh button (far right) - optional, matching other pages
         refresh_btn = QPushButton("Refresh")
@@ -1166,6 +1177,9 @@ class AppsPage(QWidget):
     
     def on_app_flow_completed(self, app_flow):
         """Handle completed app flow analysis"""
+        # Store current app flow data for export
+        self.current_app_flow_data = app_flow
+        
         # Update status
         total_resources = (len(app_flow["ingresses"]) + len(app_flow["services"]) + 
                           len(app_flow["deployments"]) + len(app_flow["pods"]) + 
@@ -1174,8 +1188,11 @@ class AppsPage(QWidget):
         self.status_text.append(f"\nApp flow analysis complete!")
         self.status_text.append(f"Found {total_resources} related resources")
         
-        # Create visual app flow diagram
-        self.create_app_flow_diagram(app_flow)
+        # Process app flow data through business logic
+        processed_data = self.business_logic.process_app_flow_data(app_flow)
+        
+        # Create visual app flow diagram with horizontal layout
+        self.create_horizontal_app_flow_diagram(processed_data)
     
     def on_app_flow_error(self, error_message):
         """Handle app flow analysis error"""
@@ -1200,6 +1217,10 @@ class AppsPage(QWidget):
         diagram_layout.setContentsMargins(8, 2, 8, 8)
         diagram_layout.setSpacing(2)
         
+        # Header with title and export button
+        header_layout = QHBoxLayout()
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        
         # Diagram title - minimal height
         self.diagram_title = QLabel("App Diagram")
         self.diagram_title.setMaximumHeight(18)
@@ -1215,7 +1236,72 @@ class AppsPage(QWidget):
                 max-height: 16px;
             }}
         """)
-        diagram_layout.addWidget(self.diagram_title)
+        header_layout.addWidget(self.diagram_title)
+        
+        # Add stretch to push export button to right
+        header_layout.addStretch(1)
+        
+        # Export button with dropdown menu
+        self.export_btn = QToolButton()
+        self.export_btn.setText("⬇")
+        self.export_btn.setToolTip("Export Graph")
+        self.export_btn.setStyleSheet("""
+            QToolButton {
+                background-color: #3d3d3d;
+                color: #ffffff;
+                border: 1px solid #5d5d5d;
+                border-radius: 3px;
+                padding: 2px 6px;
+                font-size: 12px;
+                min-width: 20px;
+                max-height: 16px;
+            }
+            QToolButton:hover {
+                background-color: #4d4d4d;
+            }
+            QToolButton:pressed {
+                background-color: #2d2d2d;
+            }
+            QToolButton::menu-indicator {
+                image: none;
+            }
+        """)
+        
+        # Create export menu
+        export_menu = QMenu(self.export_btn)
+        export_menu.setStyleSheet(f"""
+            QMenu {{
+                background-color: {AppColors.BG_MEDIUM};
+                border: 1px solid {AppColors.BORDER_COLOR};
+                border-radius: 4px;
+                padding: 2px;
+            }}
+            QMenu::item {{
+                background-color: transparent;
+                color: {AppColors.TEXT_LIGHT};
+                padding: 4px 12px;
+                border-radius: 2px;
+            }}
+            QMenu::item:selected {{
+                background-color: {AppColors.BG_LIGHT};
+            }}
+        """)
+        
+        # Add export actions
+        export_image_action = QAction("📷 Export as Image", self)
+        export_image_action.triggered.connect(self.export_as_image_dialog)
+        export_menu.addAction(export_image_action)
+        
+        export_pdf_action = QAction("📄 Export as PDF", self)
+        export_pdf_action.triggered.connect(self.export_as_pdf_dialog)
+        export_menu.addAction(export_pdf_action)
+        
+        self.export_btn.setMenu(export_menu)
+        self.export_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        
+        header_layout.addWidget(self.export_btn)
+        
+        diagram_layout.addLayout(header_layout)
         
         # Create graphics view for diagram
         self.diagram_view = QGraphicsView()
@@ -1255,300 +1341,166 @@ class AppsPage(QWidget):
     
     
     def create_app_flow_diagram(self, app_flow):
-        """Create visual representation of the app flow diagram"""
+        """Create visual representation of the app flow diagram (deprecated - use horizontal layout)"""
+        # Redirect to horizontal layout method
+        processed_data = self.business_logic.process_app_flow_data(app_flow)
+        self.create_horizontal_app_flow_diagram(processed_data)
+    
+    
+    def create_horizontal_app_flow_diagram(self, processed_data):
+        """Create horizontal app flow diagram with Kubernetes icons"""
         self.diagram_scene.clear()
         
-        # Check if we have any resources to display
-        has_resources = any([
-            app_flow["ingresses"], 
-            app_flow["services"], 
-            app_flow["deployments"], 
-            app_flow["pods"],
-            app_flow["configmaps"],
-            app_flow["secrets"],
-            app_flow["pvcs"]
-        ])
-        
-        if not has_resources:
+        resources = processed_data.get("resources", [])
+        if not resources:
             self.add_text_to_scene("No resources found in app flow", 10, 10, QColor(AppColors.TEXT_SECONDARY))
             return
         
-        # Layout constants
-        LAYER_HEIGHT = 120
-        ITEM_WIDTH = 180
-        ITEM_SPACING = 20
-        START_X = 50
-        START_Y = 30
+        # Calculate positions using business logic
+        positions = self.business_logic.calculate_horizontal_layout(resources)
         
-        positions = {}
-        current_y = START_Y
-        
-        # Layer 1: Ingresses
-        if app_flow["ingresses"]:
-            for i, ingress in enumerate(app_flow["ingresses"]):
-                x = START_X + i * (ITEM_WIDTH + ITEM_SPACING)
-                self.draw_ingress_box(ingress, x, current_y)
-                # Store box dimensions for edge calculations
-                positions[f"ingress:{ingress['name']}"] = {
-                    "x": x, "y": current_y, "width": ITEM_WIDTH, "height": 80
-                }
-            current_y += LAYER_HEIGHT
-        
-        # Layer 2: Services
-        if app_flow["services"]:
-            for i, service in enumerate(app_flow["services"]):
-                x = START_X + i * (ITEM_WIDTH + ITEM_SPACING)
-                self.draw_service_box(service, x, current_y)
-                positions[f"service:{service['name']}"] = {
-                    "x": x, "y": current_y, "width": ITEM_WIDTH, "height": 70
-                }
-            current_y += LAYER_HEIGHT
-        
-        # Layer 3: Deployments/Workloads
-        if app_flow["deployments"]:
-            for i, deployment in enumerate(app_flow["deployments"]):
-                x = START_X + i * (ITEM_WIDTH + ITEM_SPACING)
-                self.draw_deployment_box(deployment, x, current_y)
-                positions[f"deployment:{deployment['name']}"] = {
-                    "x": x, "y": current_y, "width": ITEM_WIDTH, "height": 100
-                }
-            current_y += LAYER_HEIGHT
-        
-        # Layer 4: Pods
-        if app_flow["pods"]:
-            for i, pod in enumerate(app_flow["pods"]):
-                x = START_X + i * (ITEM_WIDTH + ITEM_SPACING)
-                self.draw_pod_box(pod, x, current_y)
-                positions[f"pod:{pod['name']}"] = {
-                    "x": x, "y": current_y, "width": ITEM_WIDTH, "height": 70
-                }
-            current_y += LAYER_HEIGHT
-        
-        # Layer 5: Configs (ConfigMaps, Secrets, PVCs)
-        config_x = START_X
-        if app_flow["configmaps"]:
-            for i, config in enumerate(app_flow["configmaps"]):
-                x = config_x + i * (ITEM_WIDTH + ITEM_SPACING)
-                self.draw_config_box(config, x, current_y, "#4CAF50")  # Green for ConfigMaps
-                positions[f"configmap:{config['name']}"] = {
-                    "x": x, "y": current_y, "width": ITEM_WIDTH, "height": 50
-                }
-            config_x += len(app_flow["configmaps"]) * (ITEM_WIDTH + ITEM_SPACING)
-        
-        if app_flow["secrets"]:
-            for i, secret in enumerate(app_flow["secrets"]):
-                x = config_x + i * (ITEM_WIDTH + ITEM_SPACING)
-                self.draw_config_box(secret, x, current_y, "#FF9800")  # Orange for Secrets
-                positions[f"secret:{secret['name']}"] = {
-                    "x": x, "y": current_y, "width": ITEM_WIDTH, "height": 50
-                }
-            config_x += len(app_flow["secrets"]) * (ITEM_WIDTH + ITEM_SPACING)
-        
-        if app_flow["pvcs"]:
-            for i, pvc in enumerate(app_flow["pvcs"]):
-                x = config_x + i * (ITEM_WIDTH + ITEM_SPACING)
-                self.draw_config_box(pvc, x, current_y, "#9C27B0")  # Purple for PVCs
-                positions[f"pvc:{pvc['name']}"] = {
-                    "x": x, "y": current_y, "width": ITEM_WIDTH, "height": 50
-                }
+        # Draw resources with K8s icons
+        for resource in resources:
+            key = f"{resource.resource_type.value}:{resource.name}"
+            if key in positions:
+                x, y = positions[key]
+                self.draw_resource_with_icon(resource, x, y)
         
         # Draw connections
-        for connection in app_flow["connections"]:
-            from_key = connection["from"]
-            to_key = connection["to"]
+        for connection in processed_data.get("connections", []):
+            from_key = connection.from_resource
+            to_key = connection.to_resource
             if from_key in positions and to_key in positions:
-                from_box = positions[from_key]
-                to_box = positions[to_key]
-                self.draw_flow_connection(from_box, to_box, connection["type"])
+                from_pos = positions[from_key]
+                to_pos = positions[to_key]
+                self.draw_horizontal_connection(from_pos, to_pos, connection.connection_type)
     
-    def draw_ingress_box(self, ingress, x, y):
-        """Draw an ingress box"""
-        # Main box
-        rect = self.diagram_scene.addRect(x, y, 180, 80, 
-                                        QPen(QColor("#E91E63")), 
-                                        QBrush(QColor("#4A1628")))
+    def draw_resource_with_icon(self, resource: ResourceInfo, x: float, y: float):
+        """Draw enhanced resource box with Kubernetes icon and visual improvements"""
+        icon_info = self.business_logic.get_resource_icon_info(resource.resource_type)
         
-        # Ingress name
-        name_text = self.diagram_scene.addText(ingress["name"], QFont("Arial", 9, QFont.Weight.Bold))
-        name_text.setDefaultTextColor(QColor("white"))
-        name_text.setPos(x + 8, y + 5)
+        # Resource box dimensions
+        box_width = 200
+        box_height = 90
+        corner_radius = 8
         
-        # Host info
-        host_info = f"Host: {ingress.get('host', 'N/A')}"
-        if len(host_info) > 25:
-            host_info = host_info[:22] + "..."
-        host_text = self.diagram_scene.addText(host_info, QFont("Arial", 7))
-        host_text.setDefaultTextColor(QColor("#cccccc"))
-        host_text.setPos(x + 8, y + 25)
+        # Create main box with rounded corners and gradient effect
+        main_rect = self.diagram_scene.addRect(
+            x, y, box_width, box_height,
+            QPen(QColor(icon_info.color), 2), 
+            QBrush(QColor(icon_info.bg_color))
+        )
         
-        # Path info
-        path_info = f"Path: {ingress.get('path', '/')}"
-        if len(path_info) > 25:
-            path_info = path_info[:22] + "..."
-        path_text = self.diagram_scene.addText(path_info, QFont("Arial", 7))
-        path_text.setDefaultTextColor(QColor("#cccccc"))
-        path_text.setPos(x + 8, y + 45)
+        # Add subtle inner border for depth
+        inner_rect = self.diagram_scene.addRect(
+            x + 2, y + 2, box_width - 4, box_height - 4,
+            QPen(QColor(icon_info.color).lighter(120), 1), 
+            QBrush(Qt.BrushStyle.NoBrush)
+        )
+        
+        # Header section with darker background
+        header_rect = self.diagram_scene.addRect(
+            x, y, box_width, 25,
+            QPen(QColor(icon_info.color)), 
+            QBrush(QColor(icon_info.color).darker(150))
+        )
+        
+        # Try to load and display K8s icon with better positioning
+        icon_path = self.get_resource_icon_path(resource.resource_type)
+        if icon_path and os.path.exists(icon_path):
+            pixmap = QPixmap(icon_path)
+            if not pixmap.isNull():
+                # Scale icon to fit with better quality
+                scaled_pixmap = pixmap.scaled(20, 20, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                icon_item = self.diagram_scene.addPixmap(scaled_pixmap)
+                icon_item.setPos(x + 6, y + 3)
+        
+        # Resource name with better font
+        name_font = QFont("Segoe UI", 9, QFont.Weight.Bold)
+        name_text = self.diagram_scene.addText(resource.name[:20] + "..." if len(resource.name) > 20 else resource.name, name_font)
+        name_text.setDefaultTextColor(QColor("#ffffff"))
+        name_text.setPos(x + 32, y + 4)
+        
+        # Resource type badge
+        type_font = QFont("Segoe UI", 7, QFont.Weight.Normal)
+        type_text = self.diagram_scene.addText(resource.resource_type.value.upper(), type_font)
+        type_text.setDefaultTextColor(QColor("#e0e0e0"))
+        type_text.setPos(x + 8, y + 32)
+        
+        # Status with color coding
+        status_color = self.get_status_color(resource.status)
+        status_font = QFont("Segoe UI", 7, QFont.Weight.Bold)
+        status_text = self.diagram_scene.addText(f"● {resource.status}", status_font)
+        status_text.setDefaultTextColor(QColor(status_color))
+        status_text.setPos(x + 8, y + 50)
+        
+        # Additional metadata if available
+        if hasattr(resource, 'metadata') and resource.metadata:
+            namespace = resource.metadata.get('namespace', resource.namespace)
+            if namespace and namespace != 'default':
+                ns_font = QFont("Segoe UI", 6, QFont.Weight.Normal)
+                ns_text = self.diagram_scene.addText(f"ns: {namespace}", ns_font)
+                ns_text.setDefaultTextColor(QColor("#999999"))
+                ns_text.setPos(x + 8, y + 68)
     
-    def draw_service_box(self, service, x, y):
-        """Draw a service box"""
-        # Main box
-        rect = self.diagram_scene.addRect(x, y, 180, 70, 
-                                        QPen(QColor("#28a745")), 
-                                        QBrush(QColor("#1e4d2b")))
+    def get_status_color(self, status: str) -> str:
+        """Get color based on resource status"""
+        status_colors = {
+            "Running": "#4CAF50",
+            "Ready": "#4CAF50", 
+            "Active": "#4CAF50",
+            "Bound": "#4CAF50",
+            "Pending": "#FF9800",
+            "Failed": "#F44336",
+            "Error": "#F44336",
+            "Unknown": "#9E9E9E"
+        }
         
-        # Service name
-        name_text = self.diagram_scene.addText(service["name"], QFont("Arial", 9, QFont.Weight.Bold))
-        name_text.setDefaultTextColor(QColor("white"))
-        name_text.setPos(x + 8, y + 5)
+        # Check for fraction status like "2/3"
+        if "/" in status:
+            parts = status.split("/")
+            if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+                ready = int(parts[0])
+                total = int(parts[1])
+                if ready == total:
+                    return "#4CAF50"  # All ready
+                elif ready > 0:
+                    return "#FF9800"  # Partially ready
+                else:
+                    return "#F44336"  # None ready
         
-        # Service type
-        type_info = f"Type: {service.get('type', 'ClusterIP')}"
-        type_text = self.diagram_scene.addText(type_info, QFont("Arial", 7))
-        type_text.setDefaultTextColor(QColor("#cccccc"))
-        type_text.setPos(x + 8, y + 25)
-        
-        # Ports info
-        ports = service.get('ports', [])
-        if ports:
-            port_info = f"Ports: {', '.join([str(p.get('port', '?')) for p in ports[:2]])}"
-            if len(ports) > 2:
-                port_info += "..."
-            port_text = self.diagram_scene.addText(port_info, QFont("Arial", 7))
-            port_text.setDefaultTextColor(QColor("#cccccc"))
-            port_text.setPos(x + 8, y + 45)
+        return status_colors.get(status, "#9E9E9E")
     
-    def draw_deployment_box(self, deployment, x, y):
-        """Draw a deployment box"""
-        # Main box
-        rect = self.diagram_scene.addRect(x, y, 180, 100, 
-                                        QPen(QColor("#007acc")), 
-                                        QBrush(QColor("#1e3a5f")))
+    def get_resource_icon_path(self, resource_type: ResourceType) -> str:
+        """Get icon path for resource type"""
+        icon_mapping = {
+            ResourceType.INGRESS: "network.png",
+            ResourceType.SERVICE: "network.png", 
+            ResourceType.DEPLOYMENT: "workloads.png",
+            ResourceType.POD: "workloads.png",
+            ResourceType.CONFIGMAP: "config.png",
+            ResourceType.SECRET: "config.png",
+            ResourceType.PVC: "storage.png"
+        }
         
-        # Deployment name
-        name_text = self.diagram_scene.addText(deployment["name"], QFont("Arial", 9, QFont.Weight.Bold))
-        name_text.setDefaultTextColor(QColor("white"))
-        name_text.setPos(x + 8, y + 5)
-        
-        # Type info
-        type_info = f"Type: {deployment.get('type', 'deployment').title()}"
-        type_text = self.diagram_scene.addText(type_info, QFont("Arial", 7))
-        type_text.setDefaultTextColor(QColor("#cccccc"))
-        type_text.setPos(x + 8, y + 25)
-        
-        # Replica info
-        replicas = deployment.get('replicas', 1)
-        ready_replicas = deployment.get('ready_replicas', 0)
-        replica_info = f"Replicas: {ready_replicas}/{replicas}"
-        replica_text = self.diagram_scene.addText(replica_info, QFont("Arial", 7))
-        replica_text.setDefaultTextColor(QColor("#cccccc"))
-        replica_text.setPos(x + 8, y + 45)
-        
-        # Container info
-        containers = deployment.get("containers", [])
-        if containers:
-            container_text = f"Containers: {len(containers)}"
-            cont_text = self.diagram_scene.addText(container_text, QFont("Arial", 7))
-            cont_text.setDefaultTextColor(QColor("#cccccc"))
-            cont_text.setPos(x + 8, y + 65)
+        icon_name = icon_mapping.get(resource_type, "workloads.png")
+        return os.path.join("icons", icon_name)
     
-    def draw_pod_box(self, pod, x, y):
-        """Draw a pod box"""
-        # Main box - different color based on phase
-        phase = pod.get('phase', 'Unknown')
-        if phase == 'Running':
-            color = "#4CAF50"
-            bg_color = "#2E7D32"
-        elif phase == 'Pending':
-            color = "#FF9800"
-            bg_color = "#F57C00"
-        elif phase == 'Failed':
-            color = "#F44336"
-            bg_color = "#C62828"
-        else:
-            color = "#9E9E9E"
-            bg_color = "#424242"
-            
-        rect = self.diagram_scene.addRect(x, y, 180, 70, 
-                                        QPen(QColor(color)), 
-                                        QBrush(QColor(bg_color)))
+    def draw_horizontal_connection(self, from_pos: tuple, to_pos: tuple, connection_type: str):
+        """Draw enhanced horizontal connection between resources"""
+        from_x, from_y = from_pos
+        to_x, to_y = to_pos
         
-        # Pod name
-        name_text = self.diagram_scene.addText(pod["name"], QFont("Arial", 9, QFont.Weight.Bold))
-        name_text.setDefaultTextColor(QColor("white"))
-        name_text.setPos(x + 8, y + 5)
+        # Calculate connection points with better positioning
+        from_point_x = from_x + 200  # Right edge of from box
+        from_point_y = from_y + 45   # Middle of from box (adjusted for new height)
+        to_point_x = to_x            # Left edge of to box  
+        to_point_y = to_y + 45       # Middle of to box (adjusted for new height)
         
-        # Phase info
-        phase_text = self.diagram_scene.addText(f"Phase: {phase}", QFont("Arial", 7))
-        phase_text.setDefaultTextColor(QColor("#cccccc"))
-        phase_text.setPos(x + 8, y + 25)
-        
-        # Container count
-        containers = pod.get("containers", [])
-        if containers:
-            container_text = f"Containers: {len(containers)}"
-            cont_text = self.diagram_scene.addText(container_text, QFont("Arial", 7))
-            cont_text.setDefaultTextColor(QColor("#cccccc"))
-            cont_text.setPos(x + 8, y + 45)
-    
-    def draw_config_box(self, config, x, y, color):
-        """Draw a config box (ConfigMap, Secret, or PVC)"""
-        # Main box
-        rect = self.diagram_scene.addRect(x, y, 180, 50, 
-                                        QPen(QColor(color)), 
-                                        QBrush(QColor(color).darker(200)))
-        
-        # Config name
-        name_text = self.diagram_scene.addText(config["name"], QFont("Arial", 8, QFont.Weight.Bold))
-        name_text.setDefaultTextColor(QColor("white"))
-        name_text.setPos(x + 8, y + 5)
-        
-        # Type info
-        type_info = f"Type: {config.get('type', 'config').upper()}"
-        type_text = self.diagram_scene.addText(type_info, QFont("Arial", 7))
-        type_text.setDefaultTextColor(QColor("#cccccc"))
-        type_text.setPos(x + 8, y + 25)
-    
-    def draw_flow_connection(self, from_box, to_box, connection_type):
-        """Draw connection line between components with arrow at box edges"""
-        import math
-        
-        # Get box properties
-        from_x, from_y = from_box["x"], from_box["y"]
-        from_width, from_height = from_box["width"], from_box["height"]
-        from_center_x = from_x + from_width / 2
-        from_center_y = from_y + from_height / 2
-        
-        to_x, to_y = to_box["x"], to_box["y"]
-        to_width, to_height = to_box["width"], to_box["height"]
-        to_center_x = to_x + to_width / 2
-        to_center_y = to_y + to_height / 2
-        
-        # Calculate connection points at box edges
-        # From box - find exit point (bottom edge for downward flow)
-        from_point_x = from_center_x
-        from_point_y = from_y + from_height  # Bottom edge
-        
-        # To box - find entry point (top edge for downward flow)
-        to_point_x = to_center_x
-        to_point_y = to_y  # Top edge
-        
-        # Handle horizontal connections (side-by-side boxes)
-        if abs(from_center_y - to_center_y) < 20:  # Same level
-            if from_center_x < to_center_x:  # Left to right
-                from_point_x = from_x + from_width  # Right edge
-                from_point_y = from_center_y
-                to_point_x = to_x  # Left edge
-                to_point_y = to_center_y
-            else:  # Right to left
-                from_point_x = from_x  # Left edge
-                from_point_y = from_center_y
-                to_point_x = to_x + to_width  # Right edge
-                to_point_y = to_center_y
-        
-        # Different colors for different connection types
+        # Color mapping for connection types with improved colors
         color_map = {
             "ingress_to_service": "#E91E63",
-            "service_to_deployment": "#28a745",
+            "service_to_deployment": "#28a745", 
             "deployment_to_pod": "#007acc",
             "pod_to_config": "#4CAF50",
             "pod_to_secret": "#FF9800",
@@ -1557,30 +1509,207 @@ class AppsPage(QWidget):
         
         color = color_map.get(connection_type, "#666666")
         
-        # Draw main line
-        line = self.diagram_scene.addLine(from_point_x, from_point_y, 
-                                        to_point_x, to_point_y, 
-                                        QPen(QColor(color), 2))
+        # Draw connection with curved line for better visuals
+        if abs(from_point_y - to_point_y) < 10:  # Same level - straight line
+            # Main line with gradient effect
+            main_line = self.diagram_scene.addLine(
+                from_point_x, from_point_y,
+                to_point_x, to_point_y,
+                QPen(QColor(color), 3)
+            )
+            
+            # Add subtle shadow line
+            shadow_line = self.diagram_scene.addLine(
+                from_point_x, from_point_y + 1,
+                to_point_x, to_point_y + 1,
+                QPen(QColor(color).darker(200), 1)
+            )
+        else:
+            # Curved connection for different levels
+            control_x = from_point_x + (to_point_x - from_point_x) / 2
+            
+            # Draw bezier-like curve using multiple line segments
+            segments = 20
+            for i in range(segments):
+                t1 = i / segments
+                t2 = (i + 1) / segments
+                
+                # Simple bezier curve calculation
+                x1 = from_point_x + t1 * (control_x - from_point_x) + t1 * t1 * (to_point_x - control_x)
+                y1 = from_point_y + t1 * (to_point_y - from_point_y)
+                x2 = from_point_x + t2 * (control_x - from_point_x) + t2 * t2 * (to_point_x - control_x)
+                y2 = from_point_y + t2 * (to_point_y - from_point_y)
+                
+                segment = self.diagram_scene.addLine(x1, y1, x2, y2, QPen(QColor(color), 2))
         
-        # Draw arrow head at the target point
-        dx = to_point_x - from_point_x
-        dy = to_point_y - from_point_y
+        # Draw enhanced arrow head
+        self.draw_enhanced_arrow_head(to_point_x, to_point_y, from_point_x, from_point_y, color)
         
-        if dx != 0 or dy != 0:  # Avoid division by zero
+        # Add connection label for better understanding
+        mid_x = from_point_x + (to_point_x - from_point_x) / 2
+        mid_y = from_point_y + (to_point_y - from_point_y) / 2 - 10
+        
+        # Connection type label
+        connection_label = connection_type.replace("_", " ").replace("to", "→")
+        label_font = QFont("Segoe UI", 6, QFont.Weight.Normal)
+        label_text = self.diagram_scene.addText(connection_label, label_font)
+        label_text.setDefaultTextColor(QColor(color).lighter(150))
+        label_text.setPos(mid_x - 20, mid_y)
+    
+    def draw_enhanced_arrow_head(self, to_x: float, to_y: float, from_x: float, from_y: float, color: str):
+        """Draw enhanced arrow head at target point"""
+        import math
+        
+        dx = to_x - from_x
+        dy = to_y - from_y
+        
+        if dx != 0 or dy != 0:
             angle = math.atan2(dy, dx)
-            arrow_length = 12
-            arrow_angle = math.pi / 6
+            arrow_length = 15
+            arrow_angle = math.pi / 5
             
             # Calculate arrow head points
-            arrow_x1 = to_point_x - arrow_length * math.cos(angle - arrow_angle)
-            arrow_y1 = to_point_y - arrow_length * math.sin(angle - arrow_angle)
-            arrow_x2 = to_point_x - arrow_length * math.cos(angle + arrow_angle)
-            arrow_y2 = to_point_y - arrow_length * math.sin(angle + arrow_angle)
+            arrow_x1 = to_x - arrow_length * math.cos(angle - arrow_angle)
+            arrow_y1 = to_y - arrow_length * math.sin(angle - arrow_angle)
+            arrow_x2 = to_x - arrow_length * math.cos(angle + arrow_angle)
+            arrow_y2 = to_y - arrow_length * math.sin(angle + arrow_angle)
             
-            # Draw arrow head lines
-            self.diagram_scene.addLine(to_point_x, to_point_y, arrow_x1, arrow_y1, QPen(QColor(color), 2))
-            self.diagram_scene.addLine(to_point_x, to_point_y, arrow_x2, arrow_y2, QPen(QColor(color), 2))
+            # Draw filled arrow head using polygon
+            from PyQt6.QtGui import QPolygonF
+            from PyQt6.QtCore import QPointF
+            
+            arrow_polygon = QPolygonF([
+                QPointF(to_x, to_y),
+                QPointF(arrow_x1, arrow_y1),
+                QPointF(arrow_x2, arrow_y2)
+            ])
+            
+            arrow_item = self.diagram_scene.addPolygon(
+                arrow_polygon,
+                QPen(QColor(color), 1),
+                QBrush(QColor(color))
+            )
     
+    def export_as_image_dialog(self):
+        """Show dialog to export graph as image"""
+        if not self.current_app_flow_data:
+            QMessageBox.warning(self, "Export Error", "No graph data available to export. Please generate a graph first.")
+            return
+        
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Graph as Image",
+            f"app_flow_graph_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
+            "PNG Image (*.png);;JPEG Image (*.jpg)"
+        )
+        
+        if file_path:
+            try:
+                format_type = "JPEG" if file_path.endswith('.jpg') else "PNG"
+                self.export_as_image(file_path, format_type)
+                QMessageBox.information(self, "Export Success", f"Graph exported successfully to:\n{file_path}")
+            except Exception as e:
+                QMessageBox.critical(self, "Export Error", f"Failed to export graph:\n{str(e)}")
+    
+    def export_as_pdf_dialog(self):
+        """Show dialog to export graph as PDF"""
+        if not self.current_app_flow_data:
+            QMessageBox.warning(self, "Export Error", "No graph data available to export. Please generate a graph first.")
+            return
+        
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Graph as PDF",
+            f"app_flow_graph_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+            "PDF Document (*.pdf)"
+        )
+        
+        if file_path:
+            try:
+                self.export_as_pdf(file_path)
+                QMessageBox.information(self, "Export Success", f"Graph exported successfully to:\n{file_path}")
+            except Exception as e:
+                QMessageBox.critical(self, "Export Error", f"Failed to export graph:\n{str(e)}")
+    
+    def export_as_image(self, file_path: str, format_type: str):
+        """Export graph as image (PNG/JPEG)"""
+        try:
+            # Get scene bounding rect
+            scene_rect = self.diagram_scene.itemsBoundingRect()
+            
+            # Ensure scene has content
+            if scene_rect.isEmpty():
+                raise Exception("No content to export")
+            
+            # Create pixmap with scene size
+            pixmap = QPixmap(int(scene_rect.width() + 40), int(scene_rect.height() + 40))
+            pixmap.fill(QColor(AppColors.BG_DARK))
+            
+            # Render scene to pixmap with proper painter management
+            painter = QPainter()
+            if painter.begin(pixmap):
+                try:
+                    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                    # Convert QRect to QRectF for proper rendering
+                    target_rect = QRectF(pixmap.rect())
+                    self.diagram_scene.render(painter, target_rect, scene_rect)
+                finally:
+                    painter.end()
+            else:
+                raise Exception("Failed to initialize painter")
+            
+            # Save pixmap
+            if not pixmap.save(file_path, format_type):
+                raise Exception(f"Failed to save image as {format_type}")
+                
+        except Exception as e:
+            raise Exception(f"Export failed: {str(e)}")
+    
+    def export_as_pdf(self, file_path: str):
+        """Export graph as PDF"""
+        try:
+            from PyQt6.QtPrintSupport import QPrinter
+            from PyQt6.QtGui import QPageSize, QPageLayout
+            
+            # Get scene bounding rect
+            scene_rect = self.diagram_scene.itemsBoundingRect()
+            
+            # Ensure scene has content
+            if scene_rect.isEmpty():
+                raise Exception("No content to export")
+            
+            # Create printer with PyQt6 API
+            printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+            printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
+            printer.setOutputFileName(file_path)
+            
+            # Use QPageSize and QPageLayout for PyQt6 compatibility
+            page_size = QPageSize(QPageSize.PageSizeId.A4)
+            
+            # Create margins using QMarginsF
+            from PyQt6.QtCore import QMarginsF
+            margins = QMarginsF(10, 10, 10, 10)  # 10mm margins on all sides
+            
+            page_layout = QPageLayout(page_size, QPageLayout.Orientation.Landscape, 
+                                    margins, QPageLayout.Unit.Millimeter)
+            printer.setPageLayout(page_layout)
+            
+            # Proper painter management for PDF
+            painter = QPainter()
+            if painter.begin(printer):
+                try:
+                    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                    # Convert page rect to QRectF for proper rendering
+                    page_rect = QRectF(printer.pageRect(QPrinter.Unit.DevicePixel))
+                    self.diagram_scene.render(painter, page_rect, scene_rect)
+                finally:
+                    painter.end()
+            else:
+                raise Exception("Failed to initialize PDF painter")
+                
+        except Exception as e:
+            raise Exception(f"PDF export failed: {str(e)}")
+
     def add_text_to_scene(self, text, x, y, color):
         """Add text to the scene"""
         text_item = self.diagram_scene.addText(text, QFont("Arial", 12))
