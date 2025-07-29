@@ -6,7 +6,8 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QLineEdit, 
     QPushButton, QFrame, QSizePolicy, QTextEdit, QScrollArea, QGraphicsView,
     QGraphicsScene, QGraphicsRectItem, QGraphicsTextItem, QGraphicsLineItem,
-    QMessageBox, QProgressDialog, QGraphicsPixmapItem, QFileDialog, QMenu, QToolButton
+    QMessageBox, QProgressDialog, QGraphicsPixmapItem, QFileDialog, QMenu, QToolButton,
+    QSplitter
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTimer, QRectF, QPointF
 from PyQt6.QtGui import QFont, QPen, QBrush, QColor, QPainter, QPixmap, QIcon, QAction
@@ -1296,6 +1297,12 @@ class AppsPage(QWidget):
         export_pdf_action.triggered.connect(self.export_as_pdf_dialog)
         export_menu.addAction(export_pdf_action)
         
+        export_menu.addSeparator()
+        
+        export_d3_action = QAction("🌐 Export as Interactive HTML (D3)", self)
+        export_d3_action.triggered.connect(self.export_as_d3_dialog)
+        export_menu.addAction(export_d3_action)
+        
         self.export_btn.setMenu(export_menu)
         self.export_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         
@@ -1303,10 +1310,21 @@ class AppsPage(QWidget):
         
         diagram_layout.addLayout(header_layout)
         
-        # Create graphics view for diagram
+        # Create enhanced graphics view for diagram
         self.diagram_view = QGraphicsView()
         self.diagram_scene = QGraphicsScene()
         self.diagram_view.setScene(self.diagram_scene)
+        
+        # Enhanced view settings for better interaction
+        self.diagram_view.setRenderHint(QPainter.RenderHint.Antialiasing)
+        self.diagram_view.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+        self.diagram_view.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        self.diagram_view.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
+        self.diagram_view.setInteractive(True)
+        
+        # Enable mouse wheel zooming
+        self.diagram_view.wheelEvent = self.enhanced_wheel_event
+        
         self.diagram_view.setStyleSheet(f"""
             QGraphicsView {{
                 background-color: {AppColors.BG_DARK};
@@ -1316,11 +1334,57 @@ class AppsPage(QWidget):
             {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
         """)
         self.diagram_view.setMinimumHeight(350)
-        diagram_layout.addWidget(self.diagram_view)
+        # Create splitter for diagram and status text
+        diagram_splitter = QSplitter(Qt.Orientation.Vertical)
+        diagram_splitter.setStyleSheet(f"""
+            QSplitter {{
+                background-color: {AppColors.BG_MEDIUM};
+            }}
+            QSplitter::handle {{
+                background-color: {AppColors.BORDER_LIGHT};
+                height: 3px;
+                border-radius: 1px;
+                margin: 2px 0px;
+            }}
+            QSplitter::handle:hover {{
+                background-color: {AppColors.ACCENT_BLUE};
+            }}
+            QSplitter::handle:pressed {{
+                background-color: {AppColors.ACCENT_BLUE};
+            }}
+        """)
         
-        # Status text area
+        # Add diagram view to splitter
+        diagram_splitter.addWidget(self.diagram_view)
+        
+        # Create status text area with resizable container
+        status_container = QFrame()
+        status_container.setStyleSheet(f"""
+            QFrame {{
+                background-color: {AppColors.BG_MEDIUM};
+                border: none;
+                margin: 0px;
+            }}
+        """)
+        status_layout = QVBoxLayout(status_container)
+        status_layout.setContentsMargins(0, 5, 0, 0)
+        status_layout.setSpacing(2)
+        
+        # Status area header
+        status_header = QLabel("Analysis Log")
+        status_header.setStyleSheet(f"""
+            QLabel {{
+                color: {AppColors.TEXT_LIGHT};
+                font-size: 10px;
+                font-weight: bold;
+                margin: 2px 8px;
+                padding: 0px;
+            }}
+        """)
+        status_layout.addWidget(status_header)
+        
+        # Status text area (resizable)
         self.status_text = QTextEdit()
-        self.status_text.setMaximumHeight(50)
         self.status_text.setReadOnly(True)
         self.status_text.setStyleSheet(f"""
             QTextEdit {{
@@ -1330,11 +1394,29 @@ class AppsPage(QWidget):
                 color: {AppColors.TEXT_SECONDARY};
                 font-size: 12px;
                 padding: 8px;
+                margin: 0px 2px 2px 2px;
             }}
             {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
         """)
         self.status_text.setPlainText("Select a namespace and click Refresh to view apps")
-        diagram_layout.addWidget(self.status_text)
+        status_layout.addWidget(self.status_text)
+        
+        # Add status container to splitter
+        diagram_splitter.addWidget(status_container)
+        
+        # Set splitter properties and constraints
+        diagram_splitter.setCollapsible(0, False)  # Diagram view cannot be collapsed
+        diagram_splitter.setCollapsible(1, False)  # Status text cannot be collapsed
+        
+        # Set initial sizes: diagram view takes most space, status text gets smaller portion
+        diagram_splitter.setSizes([300, 80])  # Initial sizes
+        
+        # Set size constraints for the status area
+        status_container.setMinimumHeight(50)   # Minimum height
+        status_container.setMaximumHeight(200)  # Maximum height
+        
+        # Add splitter to main layout
+        diagram_layout.addWidget(diagram_splitter)
         
         main_layout.addWidget(diagram_frame)
     
@@ -1376,72 +1458,87 @@ class AppsPage(QWidget):
                 self.draw_horizontal_connection(from_pos, to_pos, connection.connection_type)
     
     def draw_resource_with_icon(self, resource: ResourceInfo, x: float, y: float):
-        """Draw enhanced resource box with Kubernetes icon and visual improvements"""
+        """Draw enhanced resource box with icon inside, text outside, and hover tooltips"""
         icon_info = self.business_logic.get_resource_icon_info(resource.resource_type)
         
-        # Resource box dimensions
-        box_width = 200
-        box_height = 90
-        corner_radius = 8
+        # Enhanced box dimensions
+        box_width = 70
+        box_height = 70
         
-        # Create main box with rounded corners and gradient effect
+        # Create main box with enhanced gradient effect
         main_rect = self.diagram_scene.addRect(
             x, y, box_width, box_height,
-            QPen(QColor(icon_info.color), 2), 
+            QPen(QColor(icon_info.color), 3), 
             QBrush(QColor(icon_info.bg_color))
         )
         
-        # Add subtle inner border for depth
-        inner_rect = self.diagram_scene.addRect(
-            x + 2, y + 2, box_width - 4, box_height - 4,
-            QPen(QColor(icon_info.color).lighter(120), 1), 
-            QBrush(Qt.BrushStyle.NoBrush)
-        )
+        # Add gradient-like effect with multiple layers
+        for i in range(3):
+            inner_rect = self.diagram_scene.addRect(
+                x + i + 1, y + i + 1, box_width - 2*(i+1), box_height - 2*(i+1),
+                QPen(QColor(icon_info.color).lighter(120 + i*10), 1), 
+                QBrush(Qt.BrushStyle.NoBrush)
+            )
         
-        # Header section with darker background
-        header_rect = self.diagram_scene.addRect(
-            x, y, box_width, 25,
-            QPen(QColor(icon_info.color)), 
-            QBrush(QColor(icon_info.color).darker(150))
+        # Add subtle shadow effect
+        shadow_color = QColor("#000000")
+        shadow_color.setAlpha(30)  # Set transparency
+        shadow_rect = self.diagram_scene.addRect(
+            x + 2, y + 2, box_width, box_height,
+            QPen(QColor("#000000"), 1), 
+            QBrush(shadow_color)
         )
+        shadow_rect.setZValue(-1)  # Put shadow behind main box
         
-        # Try to load and display K8s icon with better positioning
+        # Try to load and display K8s icon centered in the box
         icon_path = self.get_resource_icon_path(resource.resource_type)
+        icon_item = None
         if icon_path and os.path.exists(icon_path):
             pixmap = QPixmap(icon_path)
             if not pixmap.isNull():
-                # Scale icon to fit with better quality
-                scaled_pixmap = pixmap.scaled(20, 20, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                # Scale icon to fit nicely in the enhanced box
+                scaled_pixmap = pixmap.scaled(35, 35, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
                 icon_item = self.diagram_scene.addPixmap(scaled_pixmap)
-                icon_item.setPos(x + 6, y + 3)
+                # Center the icon in the box
+                icon_item.setPos(x + (box_width - 35) // 2, y + (box_height - 35) // 2)
         
-        # Resource name with better font
-        name_font = QFont("Segoe UI", 9, QFont.Weight.Bold)
-        name_text = self.diagram_scene.addText(resource.name[:20] + "..." if len(resource.name) > 20 else resource.name, name_font)
+        # Create interactive group for hover effects
+        resource_group = self.create_interactive_resource_group(
+            main_rect, icon_item, resource, x, y, box_width, box_height
+        )
+        
+        # Resource name positioned outside and below the box - show full name for exports
+        name_font = QFont("Segoe UI", 8, QFont.Weight.Bold)
+        display_name = resource.name[:12] + "..." if len(resource.name) > 12 else resource.name
+        name_text = self.diagram_scene.addText(display_name, name_font)
         name_text.setDefaultTextColor(QColor("#ffffff"))
-        name_text.setPos(x + 32, y + 4)
+        # Center text below the box
+        text_width = name_text.boundingRect().width()
+        name_text.setPos(x + (box_width - text_width) // 2, y + box_height + 8)
         
-        # Resource type badge
-        type_font = QFont("Segoe UI", 7, QFont.Weight.Normal)
+        # Resource type positioned outside and below the name with better styling
+        type_font = QFont("Segoe UI", 6, QFont.Weight.Normal)
         type_text = self.diagram_scene.addText(resource.resource_type.value.upper(), type_font)
-        type_text.setDefaultTextColor(QColor("#e0e0e0"))
-        type_text.setPos(x + 8, y + 32)
+        type_text.setDefaultTextColor(QColor(icon_info.color).lighter(150))
+        # Center type text below the name
+        type_text_width = type_text.boundingRect().width()
+        type_text.setPos(x + (box_width - type_text_width) // 2, y + box_height + 25)
         
-        # Status with color coding
+        # Status positioned outside and below the type with enhanced styling
         status_color = self.get_status_color(resource.status)
-        status_font = QFont("Segoe UI", 7, QFont.Weight.Bold)
+        status_font = QFont("Segoe UI", 6, QFont.Weight.Bold)
         status_text = self.diagram_scene.addText(f"● {resource.status}", status_font)
         status_text.setDefaultTextColor(QColor(status_color))
-        status_text.setPos(x + 8, y + 50)
+        # Center status text below the type
+        status_text_width = status_text.boundingRect().width()
+        status_text.setPos(x + (box_width - status_text_width) // 2, y + box_height + 40)
         
-        # Additional metadata if available
-        if hasattr(resource, 'metadata') and resource.metadata:
-            namespace = resource.metadata.get('namespace', resource.namespace)
-            if namespace and namespace != 'default':
-                ns_font = QFont("Segoe UI", 6, QFont.Weight.Normal)
-                ns_text = self.diagram_scene.addText(f"ns: {namespace}", ns_font)
-                ns_text.setDefaultTextColor(QColor("#999999"))
-                ns_text.setPos(x + 8, y + 68)
+        # Store full resource info for export purposes
+        main_rect.setData(0, {
+            'resource': resource,
+            'full_name': resource.name,
+            'export_data': self.create_export_resource_data(resource)
+        })
     
     def get_status_color(self, status: str) -> str:
         """Get color based on resource status"""
@@ -1471,6 +1568,84 @@ class AppsPage(QWidget):
         
         return status_colors.get(status, "#9E9E9E")
     
+    def create_interactive_resource_group(self, main_rect, icon_item, resource: ResourceInfo, x: float, y: float, width: float, height: float):
+        """Create interactive group with hover tooltips"""
+        from PyQt6.QtWidgets import QGraphicsItemGroup, QGraphicsProxyWidget, QLabel
+        
+        # Enable hover events on the main rectangle
+        main_rect.setAcceptHoverEvents(True)
+        
+        # Create detailed tooltip content
+        tooltip_text = self.create_detailed_tooltip(resource)
+        main_rect.setToolTip(tooltip_text)
+        
+        return main_rect
+    
+    def create_detailed_tooltip(self, resource: ResourceInfo) -> str:
+        """Create detailed tooltip with all resource information"""
+        tooltip_lines = [
+            f"<b>{resource.name}</b>",
+            f"<b>Type:</b> {resource.resource_type.value.title()}",
+            f"<b>Namespace:</b> {resource.namespace}",
+            f"<b>Status:</b> {resource.status}"
+        ]
+        
+        # Add metadata information if available
+        if hasattr(resource, 'metadata') and resource.metadata:
+            metadata = resource.metadata
+            
+            # Add specific information based on resource type
+            if resource.resource_type.value == 'deployment':
+                if 'replicas' in metadata:
+                    tooltip_lines.append(f"<b>Replicas:</b> {metadata.get('ready_replicas', 0)}/{metadata.get('replicas', 1)}")
+                if 'containers' in metadata:
+                    container_names = [c.get('name', 'unknown') for c in metadata['containers']]
+                    tooltip_lines.append(f"<b>Containers:</b> {', '.join(container_names)}")
+            
+            elif resource.resource_type.value == 'service':
+                if 'type' in metadata:
+                    tooltip_lines.append(f"<b>Service Type:</b> {metadata['type']}")
+                if 'ports' in metadata:
+                    ports = [str(p.get('port', '?')) for p in metadata['ports']]
+                    tooltip_lines.append(f"<b>Ports:</b> {', '.join(ports)}")
+            
+            elif resource.resource_type.value == 'pod':
+                if 'phase' in metadata:
+                    tooltip_lines.append(f"<b>Phase:</b> {metadata['phase']}")
+                if 'containers' in metadata:
+                    container_names = [c.get('name', 'unknown') for c in metadata['containers']]
+                    tooltip_lines.append(f"<b>Containers:</b> {', '.join(container_names)}")
+            
+            elif resource.resource_type.value == 'ingress':
+                if 'host' in metadata:
+                    tooltip_lines.append(f"<b>Host:</b> {metadata['host']}")
+                if 'path' in metadata:
+                    tooltip_lines.append(f"<b>Path:</b> {metadata['path']}")
+            
+            # Add labels if available
+            if 'labels' in metadata and metadata['labels']:
+                labels_str = ', '.join([f"{k}={v}" for k, v in list(metadata['labels'].items())[:3]])
+                if len(metadata['labels']) > 3:
+                    labels_str += "..."
+                tooltip_lines.append(f"<b>Labels:</b> {labels_str}")
+        
+        return "<br>".join(tooltip_lines)
+    
+    def create_export_resource_data(self, resource: ResourceInfo) -> dict:
+        """Create comprehensive resource data for export"""
+        export_data = {
+            'name': resource.name,  # Full name, not truncated
+            'type': resource.resource_type.value,
+            'namespace': resource.namespace,
+            'status': resource.status
+        }
+        
+        # Add detailed metadata for export
+        if hasattr(resource, 'metadata') and resource.metadata:
+            export_data['metadata'] = resource.metadata
+        
+        return export_data
+    
     def get_resource_icon_path(self, resource_type: ResourceType) -> str:
         """Get icon path for resource type"""
         icon_mapping = {
@@ -1491,11 +1666,14 @@ class AppsPage(QWidget):
         from_x, from_y = from_pos
         to_x, to_y = to_pos
         
-        # Calculate connection points with better positioning
-        from_point_x = from_x + 200  # Right edge of from box
-        from_point_y = from_y + 45   # Middle of from box (adjusted for new height)
-        to_point_x = to_x            # Left edge of to box  
-        to_point_y = to_y + 45       # Middle of to box (adjusted for new height)
+        # Calculate connection points - adjust dynamically based on context
+        box_width = 70 if hasattr(self, 'original_scene_items') else 70  # Default for normal view
+        box_height = 70 if hasattr(self, 'original_scene_items') else 70
+        
+        from_point_x = from_x + box_width   # Right edge of from box
+        from_point_y = from_y + box_height // 2   # Middle of from box
+        to_point_x = to_x                   # Left edge of to box  
+        to_point_y = to_y + box_height // 2 # Middle of to box
         
         # Color mapping for connection types with improved colors
         color_map = {
@@ -1631,9 +1809,32 @@ class AppsPage(QWidget):
             except Exception as e:
                 QMessageBox.critical(self, "Export Error", f"Failed to export graph:\n{str(e)}")
     
+    def export_as_d3_dialog(self):
+        """Show dialog to export graph as interactive D3 HTML"""
+        if not self.current_app_flow_data:
+            QMessageBox.warning(self, "Export Error", "No graph data available to export. Please generate a graph first.")
+            return
+        
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Graph as Interactive HTML",
+            f"app_flow_graph_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html",
+            "HTML Document (*.html)"
+        )
+        
+        if file_path:
+            try:
+                self.export_as_d3_html(file_path)
+                QMessageBox.information(self, "Export Success", f"Interactive graph exported successfully to:\n{file_path}")
+            except Exception as e:
+                QMessageBox.critical(self, "Export Error", f"Failed to export graph:\n{str(e)}")
+    
     def export_as_image(self, file_path: str, format_type: str):
-        """Export graph as image (PNG/JPEG)"""
+        """Export enhanced graph as image with full details (PNG/JPEG)"""
         try:
+            # Create enhanced export version with full names
+            self.create_export_version_of_graph()
+            
             # Get scene bounding rect
             scene_rect = self.diagram_scene.itemsBoundingRect()
             
@@ -1641,35 +1842,49 @@ class AppsPage(QWidget):
             if scene_rect.isEmpty():
                 raise Exception("No content to export")
             
-            # Create pixmap with scene size
-            pixmap = QPixmap(int(scene_rect.width() + 40), int(scene_rect.height() + 40))
+            # Create high-quality pixmap with extra margins
+            margin = 60
+            pixmap = QPixmap(int(scene_rect.width() + margin*2), int(scene_rect.height() + margin*2))
             pixmap.fill(QColor(AppColors.BG_DARK))
             
-            # Render scene to pixmap with proper painter management
+            # Render scene to pixmap with enhanced quality
             painter = QPainter()
             if painter.begin(pixmap):
                 try:
                     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-                    # Convert QRect to QRectF for proper rendering
-                    target_rect = QRectF(pixmap.rect())
+                    painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+                    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+                    
+                    # Create target rect with margins
+                    target_rect = QRectF(margin, margin, scene_rect.width(), scene_rect.height())
                     self.diagram_scene.render(painter, target_rect, scene_rect)
+                    
+                    # Add export metadata
+                    self.add_export_metadata_to_image(painter, pixmap.width(), pixmap.height())
+                    
                 finally:
                     painter.end()
             else:
                 raise Exception("Failed to initialize painter")
             
-            # Save pixmap
-            if not pixmap.save(file_path, format_type):
+            # Save high-quality pixmap
+            if not pixmap.save(file_path, format_type, 95):  # High quality
                 raise Exception(f"Failed to save image as {format_type}")
                 
         except Exception as e:
             raise Exception(f"Export failed: {str(e)}")
+        finally:
+            # Restore original view after export
+            self.restore_original_graph()
     
     def export_as_pdf(self, file_path: str):
-        """Export graph as PDF"""
+        """Export enhanced graph as PDF with proper background and visibility"""
         try:
             from PyQt6.QtPrintSupport import QPrinter
             from PyQt6.QtGui import QPageSize, QPageLayout
+            
+            # Create enhanced export version with full names
+            self.create_export_version_of_graph()
             
             # Get scene bounding rect
             scene_rect = self.diagram_scene.itemsBoundingRect()
@@ -1682,13 +1897,14 @@ class AppsPage(QWidget):
             printer = QPrinter(QPrinter.PrinterMode.HighResolution)
             printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
             printer.setOutputFileName(file_path)
+            printer.setResolution(300)  # High resolution for better quality
             
             # Use QPageSize and QPageLayout for PyQt6 compatibility
             page_size = QPageSize(QPageSize.PageSizeId.A4)
             
             # Create margins using QMarginsF
             from PyQt6.QtCore import QMarginsF
-            margins = QMarginsF(10, 10, 10, 10)  # 10mm margins on all sides
+            margins = QMarginsF(15, 15, 15, 15)  # 15mm margins on all sides
             
             page_layout = QPageLayout(page_size, QPageLayout.Orientation.Landscape, 
                                     margins, QPageLayout.Unit.Millimeter)
@@ -1698,10 +1914,45 @@ class AppsPage(QWidget):
             painter = QPainter()
             if painter.begin(printer):
                 try:
+                    # Set high-quality rendering hints
                     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-                    # Convert page rect to QRectF for proper rendering
+                    painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+                    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+                    
+                    # Get page rect and add margins
                     page_rect = QRectF(printer.pageRect(QPrinter.Unit.DevicePixel))
-                    self.diagram_scene.render(painter, page_rect, scene_rect)
+                    margin_pixels = 40  # Internal margin in pixels
+                    
+                    # Fill background with dark color for better visibility
+                    painter.fillRect(page_rect, QColor(AppColors.BG_DARK))
+                    
+                    # Calculate target rect with margins
+                    target_rect = QRectF(
+                        page_rect.x() + margin_pixels,
+                        page_rect.y() + margin_pixels,
+                        page_rect.width() - 2 * margin_pixels,
+                        page_rect.height() - 2 * margin_pixels
+                    )
+                    
+                    # Scale scene to fit in target rect while maintaining aspect ratio
+                    scale_x = target_rect.width() / scene_rect.width()
+                    scale_y = target_rect.height() / scene_rect.height()
+                    scale = min(scale_x, scale_y, 1.0)  # Don't scale up
+                    
+                    # Calculate centered position
+                    scaled_width = scene_rect.width() * scale
+                    scaled_height = scene_rect.height() * scale
+                    center_x = target_rect.x() + (target_rect.width() - scaled_width) / 2
+                    center_y = target_rect.y() + (target_rect.height() - scaled_height) / 2
+                    
+                    final_target_rect = QRectF(center_x, center_y, scaled_width, scaled_height)
+                    
+                    # Render scene to PDF
+                    self.diagram_scene.render(painter, final_target_rect, scene_rect)
+                    
+                    # Add PDF-specific metadata
+                    self.add_pdf_metadata(painter, page_rect)
+                    
                 finally:
                     painter.end()
             else:
@@ -1709,7 +1960,225 @@ class AppsPage(QWidget):
                 
         except Exception as e:
             raise Exception(f"PDF export failed: {str(e)}")
+        finally:
+            # Restore original view after export
+            self.restore_original_graph()
+    
+    def create_export_version_of_graph(self):
+        """Create export version with full names and enhanced details"""
+        # Store original state
+        self.original_scene_items = []
+        for item in self.diagram_scene.items():
+            if hasattr(item, 'data') and item.data(0):
+                self.original_scene_items.append((item, item.data(0)))
+        
+        # Clear and redraw with full details for export
+        if self.current_app_flow_data:
+            processed_data = self.business_logic.process_app_flow_data(self.current_app_flow_data)
+            self.create_export_horizontal_diagram(processed_data)
+    
+    def create_export_horizontal_diagram(self, processed_data):
+        """Create horizontal diagram optimized for export with full names"""
+        self.diagram_scene.clear()
+        
+        resources = processed_data.get("resources", [])
+        if not resources:
+            return
+        
+        # Calculate positions using business logic
+        positions = self.business_logic.calculate_horizontal_layout(resources)
+        
+        # Draw resources with full names for export
+        for resource in resources:
+            key = f"{resource.resource_type.value}:{resource.name}"
+            if key in positions:
+                x, y = positions[key]
+                self.draw_export_resource_with_icon(resource, x, y)
+        
+        # Draw connections
+        for connection in processed_data.get("connections", []):
+            from_key = connection.from_resource
+            to_key = connection.to_resource
+            if from_key in positions and to_key in positions:
+                from_pos = positions[from_key]
+                to_pos = positions[to_key]
+                self.draw_horizontal_connection(from_pos, to_pos, connection.connection_type)
+    
+    def draw_export_resource_with_icon(self, resource: ResourceInfo, x: float, y: float):
+        """Draw resource with full name for export purposes"""
+        icon_info = self.business_logic.get_resource_icon_info(resource.resource_type)
+        
+        # Enhanced box dimensions for export
+        box_width = 80
+        box_height = 80
+        
+        # Create main box with enhanced gradient effect
+        main_rect = self.diagram_scene.addRect(
+            x, y, box_width, box_height,
+            QPen(QColor(icon_info.color), 3), 
+            QBrush(QColor(icon_info.bg_color))
+        )
+        
+        # Add gradient layers
+        for i in range(3):
+            inner_rect = self.diagram_scene.addRect(
+                x + i + 1, y + i + 1, box_width - 2*(i+1), box_height - 2*(i+1),
+                QPen(QColor(icon_info.color).lighter(120 + i*10), 1), 
+                QBrush(Qt.BrushStyle.NoBrush)
+            )
+        
+        # Add shadow
+        shadow_color = QColor("#000000")
+        shadow_color.setAlpha(30)  # Set transparency
+        shadow_rect = self.diagram_scene.addRect(
+            x + 2, y + 2, box_width, box_height,
+            QPen(QColor("#000000"), 1), 
+            QBrush(shadow_color)
+        )
+        shadow_rect.setZValue(-1)
+        
+        # Icon
+        icon_path = self.get_resource_icon_path(resource.resource_type)
+        if icon_path and os.path.exists(icon_path):
+            pixmap = QPixmap(icon_path)
+            if not pixmap.isNull():
+                scaled_pixmap = pixmap.scaled(40, 40, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                icon_item = self.diagram_scene.addPixmap(scaled_pixmap)
+                icon_item.setPos(x + (box_width - 40) // 2, y + (box_height - 40) // 2)
+        
+        # Full resource name for export (no truncation)
+        name_font = QFont("Segoe UI", 9, QFont.Weight.Bold)
+        name_text = self.diagram_scene.addText(resource.name, name_font)  # Full name
+        name_text.setDefaultTextColor(QColor("#ffffff"))
+        text_width = name_text.boundingRect().width()
+        name_text.setPos(x + (box_width - text_width) // 2, y + box_height + 10)
+        
+        # Resource type with better font
+        type_font = QFont("Segoe UI", 7, QFont.Weight.Normal)
+        type_text = self.diagram_scene.addText(resource.resource_type.value.upper(), type_font)
+        type_text.setDefaultTextColor(QColor(icon_info.color).lighter(150))
+        type_text_width = type_text.boundingRect().width()
+        type_text.setPos(x + (box_width - type_text_width) // 2, y + box_height + 28)
+        
+        # Enhanced status display
+        status_color = self.get_status_color(resource.status)
+        status_font = QFont("Segoe UI", 7, QFont.Weight.Bold)
+        status_text = self.diagram_scene.addText(f"● {resource.status}", status_font)
+        status_text.setDefaultTextColor(QColor(status_color))
+        status_text_width = status_text.boundingRect().width()
+        status_text.setPos(x + (box_width - status_text_width) // 2, y + box_height + 45)
+        
+        # Add namespace for clarity in export
+        if resource.namespace and resource.namespace != 'default':
+            ns_font = QFont("Segoe UI", 6, QFont.Weight.Normal)
+            ns_text = self.diagram_scene.addText(f"ns: {resource.namespace}", ns_font)
+            ns_text.setDefaultTextColor(QColor("#cccccc"))
+            ns_text_width = ns_text.boundingRect().width()
+            ns_text.setPos(x + (box_width - ns_text_width) // 2, y + box_height + 60)
+    
+    def add_export_metadata_to_image(self, painter: QPainter, width: int, height: int):
+        """Add metadata information to exported image"""
+        # Add title and timestamp
+        painter.setPen(QColor("#ffffff"))
+        painter.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        
+        title = f"Kubernetes App Flow - {self.namespace_combo.currentText()}"
+        painter.drawText(20, 30, title)
+        
+        # Add timestamp
+        painter.setFont(QFont("Segoe UI", 8))
+        timestamp = f"Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        painter.drawText(20, height - 20, timestamp)
+        
+        # Add resource count
+        if self.current_app_flow_data:
+            total_resources = (len(self.current_app_flow_data.get("ingresses", [])) + 
+                             len(self.current_app_flow_data.get("services", [])) + 
+                             len(self.current_app_flow_data.get("deployments", [])) + 
+                             len(self.current_app_flow_data.get("pods", [])) + 
+                             len(self.current_app_flow_data.get("configmaps", [])) + 
+                             len(self.current_app_flow_data.get("secrets", [])) + 
+                             len(self.current_app_flow_data.get("pvcs", [])))
+            
+            resource_info = f"Total Resources: {total_resources}"
+            painter.drawText(width - 200, height - 20, resource_info)
+    
+    def add_pdf_metadata(self, painter: QPainter, page_rect: QRectF):
+        """Add metadata information specifically for PDF export"""
+        # Set text color for PDF (white on dark background)
+        painter.setPen(QColor("#ffffff"))
+        
+        # Title
+        painter.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
+        title = f"Kubernetes App Flow - {self.namespace_combo.currentText()}"
+        title_rect = painter.fontMetrics().boundingRect(title)
+        painter.drawText(20, 30, title)
+        
+        # Subtitle with workload info
+        painter.setFont(QFont("Segoe UI", 10))
+        workload_info = f"Workload: {self.workload_combo.currentText()} | Resource: {self.resource_combo.currentText()}"
+        painter.drawText(20, 50, workload_info)
+        
+        # Timestamp at bottom left
+        painter.setFont(QFont("Segoe UI", 9))
+        timestamp = f"Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        painter.drawText(20, page_rect.height() - 30, timestamp)
+        
+        # Resource count at bottom right
+        if self.current_app_flow_data:
+            total_resources = (len(self.current_app_flow_data.get("ingresses", [])) + 
+                             len(self.current_app_flow_data.get("services", [])) + 
+                             len(self.current_app_flow_data.get("deployments", [])) + 
+                             len(self.current_app_flow_data.get("pods", [])) + 
+                             len(self.current_app_flow_data.get("configmaps", [])) + 
+                             len(self.current_app_flow_data.get("secrets", [])) + 
+                             len(self.current_app_flow_data.get("pvcs", [])))
+            
+            resource_info = f"Total Resources: {total_resources}"
+            resource_rect = painter.fontMetrics().boundingRect(resource_info)
+            painter.drawText(page_rect.width() - resource_rect.width() - 20, page_rect.height() - 30, resource_info)
+    
+    def restore_original_graph(self):
+        """Restore the original graph after export"""
+        if self.current_app_flow_data:
+            processed_data = self.business_logic.process_app_flow_data(self.current_app_flow_data)
+            self.create_horizontal_app_flow_diagram(processed_data)
 
+    def enhanced_wheel_event(self, event):
+        """Enhanced wheel event for smooth zooming"""
+        try:
+            # Check if Ctrl is pressed for zooming
+            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                # Zoom in/out
+                zoom_in_factor = 1.25
+                zoom_out_factor = 1 / zoom_in_factor
+                
+                # Save the scene pos
+                old_pos = self.diagram_view.mapToScene(event.position().toPoint())
+                
+                # Zoom
+                if event.angleDelta().y() > 0:
+                    zoom_factor = zoom_in_factor
+                else:
+                    zoom_factor = zoom_out_factor
+                
+                self.diagram_view.scale(zoom_factor, zoom_factor)
+                
+                # Get the new position
+                new_pos = self.diagram_view.mapToScene(event.position().toPoint())
+                
+                # Move scene to old position
+                delta = new_pos - old_pos
+                self.diagram_view.translate(delta.x(), delta.y())
+                
+                event.accept()
+            else:
+                # Default scroll behavior
+                super(QGraphicsView, self.diagram_view).wheelEvent(event)
+        except Exception as e:
+            logging.warning(f"Wheel event error: {e}")
+            super(QGraphicsView, self.diagram_view).wheelEvent(event)
+    
     def add_text_to_scene(self, text, x, y, color):
         """Add text to the scene"""
         text_item = self.diagram_scene.addText(text, QFont("Arial", 12))

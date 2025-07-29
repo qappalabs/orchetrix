@@ -223,9 +223,9 @@ class AppFlowBusinessLogic:
         if config_resources:
             layers[ResourceType.CONFIGMAP] = config_resources
         
-        # Layout constants for horizontal arrangement
-        LAYER_SPACING_X = 250  # Horizontal spacing between layers
-        ITEM_SPACING_Y = 110   # Vertical spacing between items in same layer (adjusted for new box height)
+        # Layout constants for horizontal arrangement - optimized for enhanced boxes with external text
+        LAYER_SPACING_X = 220  # Horizontal spacing between layers (adjusted for enhanced boxes)
+        ITEM_SPACING_Y = 140   # Vertical spacing between items (increased for text and namespace info)
         START_X = 50
         START_Y = 50
         
@@ -323,8 +323,8 @@ class AppFlowBusinessLogic:
             num_layers = len(resource_counts_by_type)
             max_items_per_layer = max(resource_counts_by_type.values()) if resource_counts_by_type else 1
             
-            width = num_layers * 250 + 100  # Layer spacing + margins
-            height = max_items_per_layer * 120 + 100  # Item spacing + margins
+            width = num_layers * 220 + 100  # Layer spacing + margins (adjusted for enhanced boxes)
+            height = max_items_per_layer * 140 + 100  # Item spacing + margins (adjusted for enhanced text layout)
             
         else:  # Vertical layout
             # For vertical layout: height = layers * spacing, width = max items per layer * spacing
