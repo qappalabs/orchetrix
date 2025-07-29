@@ -1297,12 +1297,6 @@ class AppsPage(QWidget):
         export_pdf_action.triggered.connect(self.export_as_pdf_dialog)
         export_menu.addAction(export_pdf_action)
         
-        export_menu.addSeparator()
-        
-        export_d3_action = QAction("🌐 Export as Interactive HTML (D3)", self)
-        export_d3_action.triggered.connect(self.export_as_d3_dialog)
-        export_menu.addAction(export_d3_action)
-        
         self.export_btn.setMenu(export_menu)
         self.export_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         
@@ -1809,26 +1803,6 @@ class AppsPage(QWidget):
             except Exception as e:
                 QMessageBox.critical(self, "Export Error", f"Failed to export graph:\n{str(e)}")
     
-    def export_as_d3_dialog(self):
-        """Show dialog to export graph as interactive D3 HTML"""
-        if not self.current_app_flow_data:
-            QMessageBox.warning(self, "Export Error", "No graph data available to export. Please generate a graph first.")
-            return
-        
-        file_path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Export Graph as Interactive HTML",
-            f"app_flow_graph_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html",
-            "HTML Document (*.html)"
-        )
-        
-        if file_path:
-            try:
-                self.export_as_d3_html(file_path)
-                QMessageBox.information(self, "Export Success", f"Interactive graph exported successfully to:\n{file_path}")
-            except Exception as e:
-                QMessageBox.critical(self, "Export Error", f"Failed to export graph:\n{str(e)}")
-    
     def export_as_image(self, file_path: str, format_type: str):
         """Export enhanced graph as image with full details (PNG/JPEG)"""
         try:
@@ -1878,13 +1852,10 @@ class AppsPage(QWidget):
             self.restore_original_graph()
     
     def export_as_pdf(self, file_path: str):
-        """Export enhanced graph as PDF with proper background and visibility"""
+        """Export graph as PDF"""
         try:
             from PyQt6.QtPrintSupport import QPrinter
             from PyQt6.QtGui import QPageSize, QPageLayout
-            
-            # Create enhanced export version with full names
-            self.create_export_version_of_graph()
             
             # Get scene bounding rect
             scene_rect = self.diagram_scene.itemsBoundingRect()
@@ -1897,14 +1868,13 @@ class AppsPage(QWidget):
             printer = QPrinter(QPrinter.PrinterMode.HighResolution)
             printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
             printer.setOutputFileName(file_path)
-            printer.setResolution(300)  # High resolution for better quality
             
             # Use QPageSize and QPageLayout for PyQt6 compatibility
             page_size = QPageSize(QPageSize.PageSizeId.A4)
             
             # Create margins using QMarginsF
             from PyQt6.QtCore import QMarginsF
-            margins = QMarginsF(15, 15, 15, 15)  # 15mm margins on all sides
+            margins = QMarginsF(10, 10, 10, 10)  # 10mm margins on all sides
             
             page_layout = QPageLayout(page_size, QPageLayout.Orientation.Landscape, 
                                     margins, QPageLayout.Unit.Millimeter)
@@ -1914,45 +1884,10 @@ class AppsPage(QWidget):
             painter = QPainter()
             if painter.begin(printer):
                 try:
-                    # Set high-quality rendering hints
                     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-                    painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
-                    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-                    
-                    # Get page rect and add margins
+                    # Convert page rect to QRectF for proper rendering
                     page_rect = QRectF(printer.pageRect(QPrinter.Unit.DevicePixel))
-                    margin_pixels = 40  # Internal margin in pixels
-                    
-                    # Fill background with dark color for better visibility
-                    painter.fillRect(page_rect, QColor(AppColors.BG_DARK))
-                    
-                    # Calculate target rect with margins
-                    target_rect = QRectF(
-                        page_rect.x() + margin_pixels,
-                        page_rect.y() + margin_pixels,
-                        page_rect.width() - 2 * margin_pixels,
-                        page_rect.height() - 2 * margin_pixels
-                    )
-                    
-                    # Scale scene to fit in target rect while maintaining aspect ratio
-                    scale_x = target_rect.width() / scene_rect.width()
-                    scale_y = target_rect.height() / scene_rect.height()
-                    scale = min(scale_x, scale_y, 1.0)  # Don't scale up
-                    
-                    # Calculate centered position
-                    scaled_width = scene_rect.width() * scale
-                    scaled_height = scene_rect.height() * scale
-                    center_x = target_rect.x() + (target_rect.width() - scaled_width) / 2
-                    center_y = target_rect.y() + (target_rect.height() - scaled_height) / 2
-                    
-                    final_target_rect = QRectF(center_x, center_y, scaled_width, scaled_height)
-                    
-                    # Render scene to PDF
-                    self.diagram_scene.render(painter, final_target_rect, scene_rect)
-                    
-                    # Add PDF-specific metadata
-                    self.add_pdf_metadata(painter, page_rect)
-                    
+                    self.diagram_scene.render(painter, page_rect, scene_rect)
                 finally:
                     painter.end()
             else:
@@ -1960,9 +1895,6 @@ class AppsPage(QWidget):
                 
         except Exception as e:
             raise Exception(f"PDF export failed: {str(e)}")
-        finally:
-            # Restore original view after export
-            self.restore_original_graph()
     
     def create_export_version_of_graph(self):
         """Create export version with full names and enhanced details"""
@@ -2102,41 +2034,6 @@ class AppsPage(QWidget):
             
             resource_info = f"Total Resources: {total_resources}"
             painter.drawText(width - 200, height - 20, resource_info)
-    
-    def add_pdf_metadata(self, painter: QPainter, page_rect: QRectF):
-        """Add metadata information specifically for PDF export"""
-        # Set text color for PDF (white on dark background)
-        painter.setPen(QColor("#ffffff"))
-        
-        # Title
-        painter.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
-        title = f"Kubernetes App Flow - {self.namespace_combo.currentText()}"
-        title_rect = painter.fontMetrics().boundingRect(title)
-        painter.drawText(20, 30, title)
-        
-        # Subtitle with workload info
-        painter.setFont(QFont("Segoe UI", 10))
-        workload_info = f"Workload: {self.workload_combo.currentText()} | Resource: {self.resource_combo.currentText()}"
-        painter.drawText(20, 50, workload_info)
-        
-        # Timestamp at bottom left
-        painter.setFont(QFont("Segoe UI", 9))
-        timestamp = f"Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-        painter.drawText(20, page_rect.height() - 30, timestamp)
-        
-        # Resource count at bottom right
-        if self.current_app_flow_data:
-            total_resources = (len(self.current_app_flow_data.get("ingresses", [])) + 
-                             len(self.current_app_flow_data.get("services", [])) + 
-                             len(self.current_app_flow_data.get("deployments", [])) + 
-                             len(self.current_app_flow_data.get("pods", [])) + 
-                             len(self.current_app_flow_data.get("configmaps", [])) + 
-                             len(self.current_app_flow_data.get("secrets", [])) + 
-                             len(self.current_app_flow_data.get("pvcs", [])))
-            
-            resource_info = f"Total Resources: {total_resources}"
-            resource_rect = painter.fontMetrics().boundingRect(resource_info)
-            painter.drawText(page_rect.width() - resource_rect.width() - 20, page_rect.height() - 30, resource_info)
     
     def restore_original_graph(self):
         """Restore the original graph after export"""
