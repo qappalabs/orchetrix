@@ -2257,7 +2257,7 @@ class AppsPage(QWidget):
             # Create high-quality pixmap with extra margins
             margin = 60
             pixmap = QPixmap(int(scene_rect.width() + margin*2), int(scene_rect.height() + margin*2))
-            pixmap.fill(QColor(AppColors.BG_DARK))
+            pixmap.fill(QColor("#ffffff"))  # Use white background for export
             
             # Render scene to pixmap with enhanced quality
             painter = QPainter()
@@ -2368,6 +2368,11 @@ class AppsPage(QWidget):
         # Calculate positions using business logic
         positions = self.business_logic.calculate_horizontal_layout(resources)
         
+        # Draw simple box around pods first (same as normal diagram)
+        pod_resources = [r for r in resources if r.resource_type.value.lower() == 'pod']
+        if pod_resources:
+            self.draw_export_pod_box(pod_resources, positions)
+        
         # Draw resources with full names for export
         for resource in resources:
             key = f"{resource.resource_type.value}:{resource.name}"
@@ -2383,6 +2388,40 @@ class AppsPage(QWidget):
                 from_pos = positions[from_key]
                 to_pos = positions[to_key]
                 self.draw_horizontal_connection(from_pos, to_pos, connection.connection_type)
+    
+    def draw_export_pod_box(self, pod_resources, positions):
+        """Draw pod container box optimized for export with darker border"""
+        if not pod_resources:
+            return
+        
+        # Calculate bounding box for all pods
+        pod_positions = []
+        for pod in pod_resources:
+            key = f"{pod.resource_type.value}:{pod.name}"
+            if key in positions:
+                x, y = positions[key]
+                # Account for pod circle (25x25) only - no text in export
+                pod_positions.extend([(x, y), (x + 25, y + 25)])  # Just the pod circle
+        
+        if not pod_positions:
+            return
+        
+        # Calculate box dimensions with padding for export visibility
+        min_x = min(pos[0] for pos in pod_positions) - 15   # More padding for export
+        max_x = max(pos[0] for pos in pod_positions) + 15   # Padding on right
+        min_y = min(pos[1] for pos in pod_positions) - 30   # More padding above
+        max_y = max(pos[1] for pos in pod_positions) + 30   # More padding below
+        
+        box_width = max_x - min_x
+        box_height = max_y - min_y
+        
+        # Draw container box with darker border for export visibility
+        container_box = self.diagram_scene.addRect(
+            min_x, min_y, box_width, box_height,
+            QPen(QColor("#333333"), 2),  # Darker, thicker border for export visibility
+            QBrush(Qt.BrushStyle.NoBrush)  # No fill
+        )
+        container_box.setZValue(-1)  # Put behind everything
     
     def draw_export_resource_with_icon(self, resource: ResourceInfo, x: float, y: float):
         """Draw resource for export - pods without box, others with box"""
@@ -2453,35 +2492,36 @@ class AppsPage(QWidget):
             width_for_text = box_width
             height_for_text = box_height
         
-        # Full resource name for export (no truncation) - Use dark color for PDF visibility
-        name_font = QFont("Segoe UI", 9, QFont.Weight.Bold)
-        name_text = self.diagram_scene.addText(resource.name, name_font)  # Full name
-        name_text.setDefaultTextColor(QColor("#000000"))  # Changed to black for PDF visibility
-        text_width = name_text.boundingRect().width()
-        name_text.setPos(x + (width_for_text - text_width) // 2, y + height_for_text + 10)
-        
-        # Resource type with better font - Use darker color for PDF visibility
-        type_font = QFont("Segoe UI", 7, QFont.Weight.Normal)
-        type_text = self.diagram_scene.addText(resource.resource_type.value.upper(), type_font)
-        type_text.setDefaultTextColor(QColor("#333333"))  # Changed to dark gray for PDF visibility
-        type_text_width = type_text.boundingRect().width()
-        type_text.setPos(x + (width_for_text - type_text_width) // 2, y + height_for_text + 28)
-        
-        # Enhanced status display
-        status_color = self.get_status_color(resource.status)
-        status_font = QFont("Segoe UI", 7, QFont.Weight.Bold)
-        status_text = self.diagram_scene.addText(f"● {resource.status}", status_font)
-        status_text.setDefaultTextColor(QColor(status_color))
-        status_text_width = status_text.boundingRect().width()
-        status_text.setPos(x + (width_for_text - status_text_width) // 2, y + height_for_text + 45)
-        
-        # Add namespace for clarity in export
-        if resource.namespace and resource.namespace != 'default':
-            ns_font = QFont("Segoe UI", 6, QFont.Weight.Normal)
-            ns_text = self.diagram_scene.addText(f"ns: {resource.namespace}", ns_font)
-            ns_text.setDefaultTextColor(QColor("#555555"))  # Changed to darker gray for PDF visibility
-            ns_text_width = ns_text.boundingRect().width()
-            ns_text.setPos(x + (width_for_text - ns_text_width) // 2, y + height_for_text + 60)
+        # Skip all text for pods in export - only show text for non-pod resources
+        if not is_pod:
+            # Resource name for non-pod resources only
+            name_font = QFont("Segoe UI", 9, QFont.Weight.Bold)
+            name_text = self.diagram_scene.addText(resource.name, name_font)
+            name_text.setDefaultTextColor(QColor("#000000"))  # Dark color for PDF visibility
+            text_width = name_text.boundingRect().width()
+            name_text.setPos(x + (width_for_text - text_width) // 2, y + height_for_text + 10)
+            # Resource type with better font - Use darker color for PDF visibility
+            type_font = QFont("Segoe UI", 7, QFont.Weight.Normal)
+            type_text = self.diagram_scene.addText(resource.resource_type.value.upper(), type_font)
+            type_text.setDefaultTextColor(QColor("#333333"))  # Changed to dark gray for PDF visibility
+            type_text_width = type_text.boundingRect().width()
+            type_text.setPos(x + (width_for_text - type_text_width) // 2, y + height_for_text + 28)
+            
+            # Enhanced status display
+            status_color = self.get_status_color(resource.status)
+            status_font = QFont("Segoe UI", 7, QFont.Weight.Bold)
+            status_text = self.diagram_scene.addText(f"● {resource.status}", status_font)
+            status_text.setDefaultTextColor(QColor(status_color))
+            status_text_width = status_text.boundingRect().width()
+            status_text.setPos(x + (width_for_text - status_text_width) // 2, y + height_for_text + 45)
+            
+            # Add namespace for clarity in export
+            if resource.namespace and resource.namespace != 'default':
+                ns_font = QFont("Segoe UI", 6, QFont.Weight.Normal)
+                ns_text = self.diagram_scene.addText(f"ns: {resource.namespace}", ns_font)
+                ns_text.setDefaultTextColor(QColor("#555555"))  # Changed to darker gray for PDF visibility
+                ns_text_width = ns_text.boundingRect().width()
+                ns_text.setPos(x + (width_for_text - ns_text_width) // 2, y + height_for_text + 60)
     
     def add_export_metadata_to_image(self, painter: QPainter, width: int, height: int):
         """Add metadata information to exported image"""
