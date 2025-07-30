@@ -1707,6 +1707,7 @@ class AppsPage(QWidget):
     def draw_simple_pod_box(self, pod_resources, positions):
         """Draw a simple box around all pods"""
         if not pod_resources:
+            self.pod_container_bounds = None
             return
         
         # Calculate bounding box for all pods
@@ -1719,6 +1720,7 @@ class AppsPage(QWidget):
                 pod_positions.extend([(x, y), (x + 25, y + 45)])
         
         if not pod_positions:
+            self.pod_container_bounds = None
             return
         
         # Calculate box dimensions with small padding (text is now on right)
@@ -1729,6 +1731,16 @@ class AppsPage(QWidget):
         
         box_width = max_x - min_x
         box_height = max_y - min_y
+        
+        # Store pod container bounds for connection drawing
+        self.pod_container_bounds = {
+            'min_x': min_x,
+            'max_x': max_x,
+            'min_y': min_y,
+            'max_y': max_y,
+            'width': box_width,
+            'height': box_height
+        }
         
         # Draw simple box border only
         container_box = self.diagram_scene.addRect(
@@ -2015,16 +2027,48 @@ class AppsPage(QWidget):
         # Default dimensions for boxes
         box_width = 70
         box_height = 70
-        # Pod dimensions (no box)
-        icon_width = 20
-        icon_height = 20
+        # Pod dimensions (circle)
+        pod_width = 25
+        pod_height = 25
         
-        # Determine if we're connecting to/from pods based on connection type
-        # For now, assume standard box dimensions - could be enhanced to detect actual resource types
-        from_point_x = from_x + box_width   # Right edge of from resource
-        from_point_y = from_y + box_height // 2   # Middle of from resource
-        to_point_x = to_x                   # Left edge of to resource  
-        to_point_y = to_y + box_height // 2 # Middle of to resource
+        # Determine connection points based on resource types
+        if connection_type == "deployment_to_pod":
+            # From deployment (box) to pod container box - use same Y for straight line
+            from_point_x = from_x + box_width   # Right edge of deployment box
+            
+            # Connect to left edge of pod container box
+            if hasattr(self, 'pod_container_bounds') and self.pod_container_bounds:
+                to_point_x = self.pod_container_bounds['min_x']  # Left edge of pod container
+                pod_middle_y = self.pod_container_bounds['min_y'] + self.pod_container_bounds['height'] // 2
+                # Use pod container middle Y for both points to make straight line
+                from_point_y = pod_middle_y
+                to_point_y = pod_middle_y
+            else:
+                to_point_x = to_x   # Fallback to individual pod position
+                to_point_y = to_y + pod_height // 2
+                from_point_y = to_point_y  # Same Y for straight line
+                
+        elif connection_type in ["pod_to_config", "pod_to_secret", "pod_to_pvc"]:
+            # From pod container box to config (box) - use same Y for straight line
+            to_point_x = to_x                   # Left edge of config box
+            
+            if hasattr(self, 'pod_container_bounds') and self.pod_container_bounds:
+                from_point_x = self.pod_container_bounds['max_x']  # Right edge of pod container
+                pod_middle_y = self.pod_container_bounds['min_y'] + self.pod_container_bounds['height'] // 2
+                # Use pod container middle Y for both points to make straight line
+                from_point_y = pod_middle_y
+                to_point_y = pod_middle_y
+            else:
+                from_point_x = from_x + pod_width   # Fallback to individual pod position
+                from_point_y = from_y + pod_height // 2
+                to_point_y = from_point_y  # Same Y for straight line
+            
+        else:
+            # Default: box to box connections
+            from_point_x = from_x + box_width   # Right edge of from resource
+            from_point_y = from_y + box_height // 2   # Middle of from resource
+            to_point_x = to_x                   # Left edge of to resource  
+            to_point_y = to_y + box_height // 2 # Middle of to resource
         
         # Color mapping for connection types with improved colors
         color_map = {
