@@ -805,10 +805,17 @@ class AppsPage(QWidget):
         self.parent_window = parent
         self.business_logic = AppFlowBusinessLogic()
         self.current_app_flow_data = None
+        self.current_resource_positions = {}  # Store current positions for live updates
+        self.live_monitoring_enabled = False
         self.setup_ui()
         
         # Set horizontal layout by default
         self.business_logic.set_graph_layout(GraphLayout.HORIZONTAL)
+        
+        # Setup live monitoring timer
+        self.live_monitor_timer = QTimer()
+        self.live_monitor_timer.timeout.connect(self.update_live_monitoring)
+        self.live_monitor_timer.setInterval(5000)  # Update every 5 seconds
         
         # Load namespaces after UI is set up
         QTimer.singleShot(100, self.load_namespaces)
@@ -838,6 +845,34 @@ class AppsPage(QWidget):
         
         # Remove labels controls - keeping only namespace dropdown
         
+        # Live monitoring button
+        self.live_monitor_btn = QPushButton("▶ Start Live")
+        self.live_monitor_btn.setStyleSheet("""
+            QPushButton { 
+                background-color: #28a745; 
+                color: #ffffff; 
+                border: 1px solid #34ce57;
+                border-radius: 4px; 
+                padding: 5px 10px; 
+                font-weight: bold;
+            }
+            QPushButton:hover { 
+                background-color: #34ce57; 
+            }
+            QPushButton:pressed { 
+                background-color: #1e7e34; 
+            }
+            QPushButton:disabled {
+                background-color: #6c757d;
+                border-color: #6c757d;
+                color: #adb5bd;
+            }
+        """)
+        self.live_monitor_btn.clicked.connect(self.toggle_live_monitoring)
+        header_controls_layout.addWidget(self.live_monitor_btn)
+        
+        # Add some spacing
+        header_controls_layout.addSpacing(10)
         
         # Refresh button (far right) - optional, matching other pages
         refresh_btn = QPushButton("Refresh")
@@ -1017,6 +1052,10 @@ class AppsPage(QWidget):
         if not namespace or namespace == "Loading..." or not workload_type:
             return
         
+        # Stop live monitoring if active when selection changes
+        if self.live_monitoring_enabled:
+            self.toggle_live_monitoring()
+        
         # Clear the diagram when selection changes
         self.diagram_scene.clear()
         
@@ -1026,10 +1065,17 @@ class AppsPage(QWidget):
         # Reset status text
         self.status_text.setPlainText("Loading resources...")
         
+        # Disable live monitoring button
+        self.live_monitor_btn.setEnabled(False)
+        
         # Stop any running analyzer
         if hasattr(self, 'app_flow_analyzer') and self.app_flow_analyzer.isRunning():
             self.app_flow_analyzer.terminate()
             self.app_flow_analyzer.wait()
+        
+        if hasattr(self, 'live_app_flow_analyzer') and self.live_app_flow_analyzer.isRunning():
+            self.live_app_flow_analyzer.terminate()
+            self.live_app_flow_analyzer.wait()
         
         # Reset resource dropdown
         self.resource_combo.blockSignals(True)
@@ -1099,6 +1145,10 @@ class AppsPage(QWidget):
         """Refresh the page - clear everything and reload namespaces"""
         logging.info("Refreshing Apps page...")
         
+        # Stop live monitoring if active
+        if self.live_monitoring_enabled:
+            self.toggle_live_monitoring()
+        
         # Clear the diagram
         self.diagram_scene.clear()
         
@@ -1115,10 +1165,17 @@ class AppsPage(QWidget):
         self.resource_combo.setEnabled(False)
         self.resource_combo.blockSignals(False)
         
+        # Disable live monitoring button
+        self.live_monitor_btn.setEnabled(False)
+        
         # Stop any running analyzers
         if hasattr(self, 'app_flow_analyzer') and self.app_flow_analyzer.isRunning():
             self.app_flow_analyzer.terminate()
             self.app_flow_analyzer.wait()
+        
+        if hasattr(self, 'live_app_flow_analyzer') and self.live_app_flow_analyzer.isRunning():
+            self.live_app_flow_analyzer.terminate()
+            self.live_app_flow_analyzer.wait()
         
         if hasattr(self, 'resource_loader') and self.resource_loader.isRunning():
             self.resource_loader.terminate()
@@ -1200,6 +1257,185 @@ class AppsPage(QWidget):
         self.status_text.append(f"\nError: {error_message}")
         self.diagram_scene.clear()
         self.add_text_to_scene("App flow analysis failed", 10, 10, QColor("#ff4444"))
+    
+    def toggle_live_monitoring(self):
+        """Toggle live monitoring on/off"""
+        if self.live_monitoring_enabled:
+            # Stop live monitoring
+            self.live_monitor_timer.stop()
+            self.live_monitoring_enabled = False
+            self.live_monitor_btn.setText("▶ Start Live")
+            self.live_monitor_btn.setStyleSheet("""
+                QPushButton { 
+                    background-color: #28a745; 
+                    color: #ffffff; 
+                    border: 1px solid #34ce57;
+                    border-radius: 4px; 
+                    padding: 5px 10px; 
+                    font-weight: bold;
+                }
+                QPushButton:hover { 
+                    background-color: #34ce57; 
+                }
+                QPushButton:pressed { 
+                    background-color: #1e7e34; 
+                }
+            """)
+            # Remove live indicator from diagram title
+            current_title = self.diagram_title.text()
+            if "🔴 LIVE - " in current_title:
+                self.diagram_title.setText(current_title.replace("🔴 LIVE - ", ""))
+            self.status_text.append("Live monitoring stopped")
+        else:
+            # Start live monitoring
+            if hasattr(self, 'current_resources') and self.current_resources:
+                self.live_monitor_timer.start()
+                self.live_monitoring_enabled = True
+                self.live_monitor_btn.setText("⏸ Stop Live")
+                self.live_monitor_btn.setStyleSheet("""
+                    QPushButton { 
+                        background-color: #dc3545; 
+                        color: #ffffff; 
+                        border: 1px solid #dc3545;
+                        border-radius: 4px; 
+                        padding: 5px 10px; 
+                        font-weight: bold;
+                    }
+                    QPushButton:hover { 
+                        background-color: #c82333; 
+                    }
+                    QPushButton:pressed { 
+                        background-color: #bd2130; 
+                    }
+                """)
+                # Update diagram title to show live monitoring status
+                current_title = self.diagram_title.text()
+                if "🔴 LIVE" not in current_title:
+                    self.diagram_title.setText(f"🔴 LIVE - {current_title}")
+                self.status_text.append("Live monitoring started - updating every 5 seconds")
+    
+    def update_live_monitoring(self):
+        """Update the graph with live data"""
+        if not self.live_monitoring_enabled or not hasattr(self, 'current_resources'):
+            return
+            
+        try:
+            # Get current namespace, workload type, and resource name
+            namespace = self.namespace_combo.currentText()
+            workload_type = self.workload_combo.currentText()
+            resource_name = self.resource_combo.currentText()
+            
+            if not all([namespace, workload_type, resource_name]) or resource_name in ["Loading...", "Select namespace and workload first", "No resources found", "Error loading resources"]:
+                return
+            
+            # Start background analysis for live update
+            self.start_live_app_flow_analysis(namespace, workload_type, resource_name)
+            
+        except Exception as e:
+            logging.error(f"Live monitoring update failed: {e}")
+            self.status_text.append(f"Live monitoring error: {str(e)}")
+    
+    def start_live_app_flow_analysis(self, namespace, workload_type, resource_name):
+        """Start app flow analysis for live monitoring (non-blocking)"""
+        try:
+            # Stop any existing live analyzer
+            if hasattr(self, 'live_app_flow_analyzer') and self.live_app_flow_analyzer.isRunning():
+                self.live_app_flow_analyzer.terminate()
+                self.live_app_flow_analyzer.wait()
+            
+            # Start new live analyzer
+            self.live_app_flow_analyzer = AppFlowAnalyzer(namespace, workload_type, resource_name, self)
+            self.live_app_flow_analyzer.analysis_completed.connect(self.on_live_app_flow_completed)
+            self.live_app_flow_analyzer.error_occurred.connect(self.on_live_app_flow_error)
+            self.live_app_flow_analyzer.start()
+            
+        except Exception as e:
+            logging.error(f"Error starting live app flow analyzer: {e}")
+    
+    def on_live_app_flow_completed(self, app_flow):
+        """Handle completed live app flow analysis - update existing elements"""
+        if not self.live_monitoring_enabled:
+            return
+            
+        try:
+            # Store updated app flow data
+            self.current_app_flow_data = app_flow
+            
+            # Process app flow data through business logic
+            processed_data = self.business_logic.process_app_flow_data(app_flow)
+            
+            # Update existing graph elements instead of full redraw
+            self.update_existing_graph_elements(processed_data)
+            
+            # Add timestamp to status
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            self.status_text.append(f"[{timestamp}] Live update completed")
+            
+        except Exception as e:
+            logging.error(f"Live app flow update failed: {e}")
+            self.status_text.append(f"Live update error: {str(e)}")
+    
+    def on_live_app_flow_error(self, error_message):
+        """Handle live app flow analysis error"""
+        if self.live_monitoring_enabled:
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            self.status_text.append(f"[{timestamp}] Live update error: {error_message}")
+    
+    def update_existing_graph_elements(self, processed_data):
+        """Update existing graph elements without full redraw"""
+        if not hasattr(self, 'current_resource_positions'):
+            return
+            
+        resources = processed_data.get("resources", [])
+        
+        # Find and update each resource element in the scene
+        for item in self.diagram_scene.items():
+            # Check if this item has resource data
+            if hasattr(item, 'data') and item.data(0):
+                item_data = item.data(0)
+                if isinstance(item_data, dict) and 'resource' in item_data:
+                    stored_resource = item_data['resource']
+                    
+                    # Find matching resource in new data
+                    for new_resource in resources:
+                        if (new_resource.name == stored_resource.name and 
+                            new_resource.resource_type == stored_resource.resource_type and
+                            new_resource.namespace == stored_resource.namespace):
+                            
+                            # Update pod colors if status changed
+                            if (new_resource.resource_type.value.lower() == 'pod' and 
+                                new_resource.status != stored_resource.status):
+                                self.update_pod_color(item, new_resource.status)
+                                
+                                # Update stored resource data
+                                item_data['resource'] = new_resource
+                                item.setData(0, item_data)
+                            break
+    
+    def update_pod_color(self, pod_item, new_status):
+        """Update pod circle color based on new status"""
+        try:
+            # Get new color based on status
+            new_color = self.get_pod_status_color(new_status)
+            
+            # Update the pod circle brush and pen
+            if hasattr(pod_item, 'setBrush') and hasattr(pod_item, 'setPen'):
+                pod_item.setBrush(QBrush(QColor(new_color)))
+                pod_item.setPen(QPen(QColor(new_color).darker(150), 2))
+                
+                # Update tooltip with new status
+                if hasattr(pod_item, 'data') and pod_item.data(0):
+                    item_data = pod_item.data(0)
+                    if 'resource' in item_data:
+                        resource = item_data['resource']
+                        resource.status = new_status  # Update status
+                        tooltip_text = self.create_detailed_tooltip(resource)
+                        pod_item.setToolTip(tooltip_text)
+                        
+        except Exception as e:
+            logging.warning(f"Failed to update pod color: {e}")
     
     def create_diagram_area(self, main_layout):
         """Create the diagram visualization area"""
@@ -1435,6 +1671,10 @@ class AppsPage(QWidget):
         # Calculate positions using business logic
         positions = self.business_logic.calculate_horizontal_layout(resources)
         
+        # Store positions and resources for live monitoring
+        self.current_resource_positions = positions
+        self.current_resources = resources
+        
         # Draw resources with K8s icons
         for resource in resources:
             key = f"{resource.resource_type.value}:{resource.name}"
@@ -1450,65 +1690,103 @@ class AppsPage(QWidget):
                 from_pos = positions[from_key]
                 to_pos = positions[to_key]
                 self.draw_horizontal_connection(from_pos, to_pos, connection.connection_type)
+        
+        # Enable live monitoring button if we have a valid graph
+        if resources:
+            self.live_monitor_btn.setEnabled(True)
     
     def draw_resource_with_icon(self, resource: ResourceInfo, x: float, y: float):
-        """Draw enhanced resource box with icon inside, text outside, and hover tooltips"""
+        """Draw resource with icon - pods without box, others with box"""
         icon_info = self.business_logic.get_resource_icon_info(resource.resource_type)
         
-        # Enhanced box dimensions
-        box_width = 70
-        box_height = 70
+        # Check if this is a pod resource
+        is_pod = resource.resource_type.value.lower() == 'pod'
         
-        # Create main box with enhanced gradient effect
-        main_rect = self.diagram_scene.addRect(
-            x, y, box_width, box_height,
-            QPen(QColor(icon_info.color), 3), 
-            QBrush(QColor(icon_info.bg_color))
-        )
-        
-        # Add gradient-like effect with multiple layers
-        for i in range(3):
-            inner_rect = self.diagram_scene.addRect(
-                x + i + 1, y + i + 1, box_width - 2*(i+1), box_height - 2*(i+1),
-                QPen(QColor(icon_info.color).lighter(120 + i*10), 1), 
-                QBrush(Qt.BrushStyle.NoBrush)
+        if is_pod:
+            # Pod: Draw colored circle based on status
+            icon_width = 50
+            icon_height = 50
+            
+            # Determine pod color based on status
+            pod_color = self.get_pod_status_color(resource.status)
+            
+            # Create colored circle for pod
+            pod_circle = self.diagram_scene.addEllipse(
+                x, y, icon_width, icon_height,
+                QPen(QColor(pod_color).darker(150), 2), 
+                QBrush(QColor(pod_color))
             )
+            
+            # Enable hover events and tooltip on the circle
+            pod_circle.setAcceptHoverEvents(True)
+            tooltip_text = self.create_detailed_tooltip(resource)
+            pod_circle.setToolTip(tooltip_text)
+            icon_item = pod_circle
+            
+            # Text positioning for pod (icon only)
+            width_for_text = icon_width
+            height_for_text = icon_height
+            
+        else:
+            # Other resources: Draw with enhanced box
+            box_width = 70
+            box_height = 70
+            
+            # Create main box with enhanced gradient effect
+            main_rect = self.diagram_scene.addRect(
+                x, y, box_width, box_height,
+                QPen(QColor(icon_info.color), 3), 
+                QBrush(QColor(icon_info.bg_color))
+            )
+            
+            # Add gradient-like effect with multiple layers
+            for i in range(3):
+                inner_rect = self.diagram_scene.addRect(
+                    x + i + 1, y + i + 1, box_width - 2*(i+1), box_height - 2*(i+1),
+                    QPen(QColor(icon_info.color).lighter(120 + i*10), 1), 
+                    QBrush(Qt.BrushStyle.NoBrush)
+                )
+            
+            # Add subtle shadow effect
+            shadow_color = QColor("#000000")
+            shadow_color.setAlpha(30)  # Set transparency
+            shadow_rect = self.diagram_scene.addRect(
+                x + 2, y + 2, box_width, box_height,
+                QPen(QColor("#000000"), 1), 
+                QBrush(shadow_color)
+            )
+            shadow_rect.setZValue(-1)  # Put shadow behind main box
+            
+            # Try to load and display K8s icon centered in the box
+            icon_path = self.get_resource_icon_path(resource.resource_type)
+            icon_item = None
+            if icon_path and os.path.exists(icon_path):
+                pixmap = QPixmap(icon_path)
+                if not pixmap.isNull():
+                    # Scale icon to fit nicely in the enhanced box
+                    scaled_pixmap = pixmap.scaled(35, 35, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                    icon_item = self.diagram_scene.addPixmap(scaled_pixmap)
+                    # Center the icon in the box
+                    icon_item.setPos(x + (box_width - 35) // 2, y + (box_height - 35) // 2)
+            
+            # Create interactive group for hover effects
+            main_rect.setAcceptHoverEvents(True)
+            tooltip_text = self.create_detailed_tooltip(resource)
+            main_rect.setToolTip(tooltip_text)
+            icon_item = main_rect
+            
+            # Text positioning for other resources (with box)
+            width_for_text = box_width
+            height_for_text = box_height
         
-        # Add subtle shadow effect
-        shadow_color = QColor("#000000")
-        shadow_color.setAlpha(30)  # Set transparency
-        shadow_rect = self.diagram_scene.addRect(
-            x + 2, y + 2, box_width, box_height,
-            QPen(QColor("#000000"), 1), 
-            QBrush(shadow_color)
-        )
-        shadow_rect.setZValue(-1)  # Put shadow behind main box
-        
-        # Try to load and display K8s icon centered in the box
-        icon_path = self.get_resource_icon_path(resource.resource_type)
-        icon_item = None
-        if icon_path and os.path.exists(icon_path):
-            pixmap = QPixmap(icon_path)
-            if not pixmap.isNull():
-                # Scale icon to fit nicely in the enhanced box
-                scaled_pixmap = pixmap.scaled(35, 35, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-                icon_item = self.diagram_scene.addPixmap(scaled_pixmap)
-                # Center the icon in the box
-                icon_item.setPos(x + (box_width - 35) // 2, y + (box_height - 35) // 2)
-        
-        # Create interactive group for hover effects
-        resource_group = self.create_interactive_resource_group(
-            main_rect, icon_item, resource, x, y, box_width, box_height
-        )
-        
-        # Resource name positioned outside and below the box - show full name for exports
+        # Resource name positioned outside and below
         name_font = QFont("Segoe UI", 8, QFont.Weight.Bold)
         display_name = resource.name[:12] + "..." if len(resource.name) > 12 else resource.name
         name_text = self.diagram_scene.addText(display_name, name_font)
         name_text.setDefaultTextColor(QColor("#ffffff"))
-        # Center text below the box
+        # Center text below
         text_width = name_text.boundingRect().width()
-        name_text.setPos(x + (box_width - text_width) // 2, y + box_height + 8)
+        name_text.setPos(x + (width_for_text - text_width) // 2, y + height_for_text + 8)
         
         # Resource type positioned outside and below the name with better styling
         type_font = QFont("Segoe UI", 6, QFont.Weight.Normal)
@@ -1516,7 +1794,7 @@ class AppsPage(QWidget):
         type_text.setDefaultTextColor(QColor(icon_info.color).lighter(150))
         # Center type text below the name
         type_text_width = type_text.boundingRect().width()
-        type_text.setPos(x + (box_width - type_text_width) // 2, y + box_height + 25)
+        type_text.setPos(x + (width_for_text - type_text_width) // 2, y + height_for_text + 25)
         
         # Status positioned outside and below the type with enhanced styling
         status_color = self.get_status_color(resource.status)
@@ -1525,10 +1803,10 @@ class AppsPage(QWidget):
         status_text.setDefaultTextColor(QColor(status_color))
         # Center status text below the type
         status_text_width = status_text.boundingRect().width()
-        status_text.setPos(x + (box_width - status_text_width) // 2, y + box_height + 40)
+        status_text.setPos(x + (width_for_text - status_text_width) // 2, y + height_for_text + 40)
         
         # Store full resource info for export purposes
-        main_rect.setData(0, {
+        icon_item.setData(0, {
             'resource': resource,
             'full_name': resource.name,
             'export_data': self.create_export_resource_data(resource)
@@ -1561,6 +1839,30 @@ class AppsPage(QWidget):
                     return "#F44336"  # None ready
         
         return status_colors.get(status, "#9E9E9E")
+    
+    def get_pod_status_color(self, status: str) -> str:
+        """Get color for pod circles - green for running, red for problems"""
+        # Green for running/healthy pods
+        healthy_statuses = ["Running", "Succeeded", "Ready"]
+        
+        # Red for problematic pods
+        problem_statuses = ["Failed", "Error", "CrashLoopBackOff", "ImagePullBackOff", 
+                           "ErrImagePull", "InvalidImageName", "CreateContainerConfigError",
+                           "CreateContainerError", "RunContainerError", "KillContainerError",
+                           "VerifyNonRootError", "RunInitContainerError", "CreatePodSandboxError",
+                           "ConfigPodSandboxError", "KillPodSandboxError", "SetupNetworkError",
+                           "TeardownNetworkError"]
+        
+        # Check if status indicates healthy pod
+        if status in healthy_statuses:
+            return "#4CAF50"  # Green
+        
+        # Check if status indicates problematic pod
+        if status in problem_statuses:
+            return "#F44336"  # Red
+        
+        # For other statuses like "Pending", "ContainerCreating", etc. use yellow/orange
+        return "#FF9800"  # Orange/Yellow for unknown or transitional states
     
     def create_interactive_resource_group(self, main_rect, icon_item, resource: ResourceInfo, x: float, y: float, width: float, height: float):
         """Create interactive group with hover tooltips"""
@@ -1660,14 +1962,19 @@ class AppsPage(QWidget):
         from_x, from_y = from_pos
         to_x, to_y = to_pos
         
-        # Calculate connection points - adjust dynamically based on context
-        box_width = 70 if hasattr(self, 'original_scene_items') else 70  # Default for normal view
-        box_height = 70 if hasattr(self, 'original_scene_items') else 70
+        # Default dimensions for boxes
+        box_width = 70
+        box_height = 70
+        # Pod dimensions (no box)
+        icon_width = 50
+        icon_height = 50
         
-        from_point_x = from_x + box_width   # Right edge of from box
-        from_point_y = from_y + box_height // 2   # Middle of from box
-        to_point_x = to_x                   # Left edge of to box  
-        to_point_y = to_y + box_height // 2 # Middle of to box
+        # Determine if we're connecting to/from pods based on connection type
+        # For now, assume standard box dimensions - could be enhanced to detect actual resource types
+        from_point_x = from_x + box_width   # Right edge of from resource
+        from_point_y = from_y + box_height // 2   # Middle of from resource
+        to_point_x = to_x                   # Left edge of to resource  
+        to_point_y = to_y + box_height // 2 # Middle of to resource
         
         # Color mapping for connection types with improved colors
         color_map = {
@@ -1937,60 +2244,87 @@ class AppsPage(QWidget):
                 self.draw_horizontal_connection(from_pos, to_pos, connection.connection_type)
     
     def draw_export_resource_with_icon(self, resource: ResourceInfo, x: float, y: float):
-        """Draw resource with full name for export purposes"""
+        """Draw resource for export - pods without box, others with box"""
         icon_info = self.business_logic.get_resource_icon_info(resource.resource_type)
         
-        # Enhanced box dimensions for export
-        box_width = 80
-        box_height = 80
+        # Check if this is a pod resource
+        is_pod = resource.resource_type.value.lower() == 'pod'
         
-        # Create main box with enhanced gradient effect
-        main_rect = self.diagram_scene.addRect(
-            x, y, box_width, box_height,
-            QPen(QColor(icon_info.color), 3), 
-            QBrush(QColor(icon_info.bg_color))
-        )
-        
-        # Add gradient layers
-        for i in range(3):
-            inner_rect = self.diagram_scene.addRect(
-                x + i + 1, y + i + 1, box_width - 2*(i+1), box_height - 2*(i+1),
-                QPen(QColor(icon_info.color).lighter(120 + i*10), 1), 
-                QBrush(Qt.BrushStyle.NoBrush)
+        if is_pod:
+            # Pod: Draw colored circle based on status for export
+            icon_width = 60
+            icon_height = 60
+            
+            # Determine pod color based on status
+            pod_color = self.get_pod_status_color(resource.status)
+            
+            # Create colored circle for pod in export
+            pod_circle = self.diagram_scene.addEllipse(
+                x, y, icon_width, icon_height,
+                QPen(QColor(pod_color).darker(150), 2), 
+                QBrush(QColor(pod_color))
             )
-        
-        # Add shadow
-        shadow_color = QColor("#000000")
-        shadow_color.setAlpha(30)  # Set transparency
-        shadow_rect = self.diagram_scene.addRect(
-            x + 2, y + 2, box_width, box_height,
-            QPen(QColor("#000000"), 1), 
-            QBrush(shadow_color)
-        )
-        shadow_rect.setZValue(-1)
-        
-        # Icon
-        icon_path = self.get_resource_icon_path(resource.resource_type)
-        if icon_path and os.path.exists(icon_path):
-            pixmap = QPixmap(icon_path)
-            if not pixmap.isNull():
-                scaled_pixmap = pixmap.scaled(40, 40, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-                icon_item = self.diagram_scene.addPixmap(scaled_pixmap)
-                icon_item.setPos(x + (box_width - 40) // 2, y + (box_height - 40) // 2)
+            
+            # Text positioning for pod
+            width_for_text = icon_width
+            height_for_text = icon_height
+            
+        else:
+            # Other resources: Draw with enhanced box for export
+            box_width = 80
+            box_height = 80
+            
+            # Create main box with enhanced gradient effect
+            main_rect = self.diagram_scene.addRect(
+                x, y, box_width, box_height,
+                QPen(QColor(icon_info.color), 3), 
+                QBrush(QColor(icon_info.bg_color))
+            )
+            
+            # Add gradient layers
+            for i in range(3):
+                inner_rect = self.diagram_scene.addRect(
+                    x + i + 1, y + i + 1, box_width - 2*(i+1), box_height - 2*(i+1),
+                    QPen(QColor(icon_info.color).lighter(120 + i*10), 1), 
+                    QBrush(Qt.BrushStyle.NoBrush)
+                )
+            
+            # Add shadow
+            shadow_color = QColor("#000000")
+            shadow_color.setAlpha(30)
+            shadow_rect = self.diagram_scene.addRect(
+                x + 2, y + 2, box_width, box_height,
+                QPen(QColor("#000000"), 1), 
+                QBrush(shadow_color)
+            )
+            shadow_rect.setZValue(-1)
+            
+            # Icon in box
+            icon_path = self.get_resource_icon_path(resource.resource_type)
+            if icon_path and os.path.exists(icon_path):
+                pixmap = QPixmap(icon_path)
+                if not pixmap.isNull():
+                    scaled_pixmap = pixmap.scaled(40, 40, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                    icon_item = self.diagram_scene.addPixmap(scaled_pixmap)
+                    icon_item.setPos(x + (box_width - 40) // 2, y + (box_height - 40) // 2)
+            
+            # Text positioning for other resources
+            width_for_text = box_width
+            height_for_text = box_height
         
         # Full resource name for export (no truncation)
         name_font = QFont("Segoe UI", 9, QFont.Weight.Bold)
         name_text = self.diagram_scene.addText(resource.name, name_font)  # Full name
         name_text.setDefaultTextColor(QColor("#ffffff"))
         text_width = name_text.boundingRect().width()
-        name_text.setPos(x + (box_width - text_width) // 2, y + box_height + 10)
+        name_text.setPos(x + (width_for_text - text_width) // 2, y + height_for_text + 10)
         
         # Resource type with better font
         type_font = QFont("Segoe UI", 7, QFont.Weight.Normal)
         type_text = self.diagram_scene.addText(resource.resource_type.value.upper(), type_font)
         type_text.setDefaultTextColor(QColor(icon_info.color).lighter(150))
         type_text_width = type_text.boundingRect().width()
-        type_text.setPos(x + (box_width - type_text_width) // 2, y + box_height + 28)
+        type_text.setPos(x + (width_for_text - type_text_width) // 2, y + height_for_text + 28)
         
         # Enhanced status display
         status_color = self.get_status_color(resource.status)
@@ -1998,7 +2332,7 @@ class AppsPage(QWidget):
         status_text = self.diagram_scene.addText(f"● {resource.status}", status_font)
         status_text.setDefaultTextColor(QColor(status_color))
         status_text_width = status_text.boundingRect().width()
-        status_text.setPos(x + (box_width - status_text_width) // 2, y + box_height + 45)
+        status_text.setPos(x + (width_for_text - status_text_width) // 2, y + height_for_text + 45)
         
         # Add namespace for clarity in export
         if resource.namespace and resource.namespace != 'default':
@@ -2006,7 +2340,7 @@ class AppsPage(QWidget):
             ns_text = self.diagram_scene.addText(f"ns: {resource.namespace}", ns_font)
             ns_text.setDefaultTextColor(QColor("#cccccc"))
             ns_text_width = ns_text.boundingRect().width()
-            ns_text.setPos(x + (box_width - ns_text_width) // 2, y + box_height + 60)
+            ns_text.setPos(x + (width_for_text - ns_text_width) // 2, y + height_for_text + 60)
     
     def add_export_metadata_to_image(self, painter: QPainter, width: int, height: int):
         """Add metadata information to exported image"""
