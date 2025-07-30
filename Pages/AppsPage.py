@@ -2330,9 +2330,28 @@ class AppsPage(QWidget):
             if painter.begin(printer):
                 try:
                     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                    
                     # Convert page rect to QRectF for proper rendering
                     page_rect = QRectF(printer.pageRect(QPrinter.Unit.DevicePixel))
-                    self.diagram_scene.render(painter, page_rect, scene_rect)
+                    
+                    # Add title heading to PDF
+                    painter.setPen(QColor("#000000"))
+                    painter.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
+                    deployment_name = self.resource_combo.currentText() if self.resource_combo.currentText() != "Select namespace and workload first" else "Unknown"
+                    title = f"Kubernetes App Flow - {deployment_name}"
+                    painter.drawText(20, 40, title)
+                    
+                    # Adjust page rect to account for title space
+                    adjusted_page_rect = QRectF(page_rect.x(), page_rect.y() + 60, page_rect.width(), page_rect.height() - 60)
+                    
+                    # Render the diagram
+                    self.diagram_scene.render(painter, adjusted_page_rect, scene_rect)
+                    
+                    # Add timestamp at bottom
+                    painter.setFont(QFont("Segoe UI", 10))
+                    timestamp = f"Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                    painter.drawText(20, int(page_rect.height() - 20), timestamp)
+                    
                 finally:
                     painter.end()
             else:
@@ -2543,7 +2562,9 @@ class AppsPage(QWidget):
         painter.setPen(QColor("#000000"))  # Changed to black for PDF visibility
         painter.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
         
-        title = f"Kubernetes App Flow - {self.namespace_combo.currentText()}"
+        # Use deployment name instead of namespace in title
+        deployment_name = self.resource_combo.currentText() if self.resource_combo.currentText() != "Select namespace and workload first" else "Unknown"
+        title = f"Kubernetes App Flow - {deployment_name}"
         painter.drawText(20, 30, title)
         
         # Add timestamp
