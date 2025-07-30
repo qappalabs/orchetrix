@@ -1704,8 +1704,8 @@ class AppsPage(QWidget):
         
         if is_pod:
             # Pod: Draw colored circle based on status
-            icon_width = 50
-            icon_height = 50
+            icon_width = 25
+            icon_height = 25
             
             # Determine pod color based on status
             pod_color = self.get_pod_status_color(resource.status)
@@ -1966,8 +1966,8 @@ class AppsPage(QWidget):
         box_width = 70
         box_height = 70
         # Pod dimensions (no box)
-        icon_width = 50
-        icon_height = 50
+        icon_width = 20
+        icon_height = 20
         
         # Determine if we're connecting to/from pods based on connection type
         # For now, assume standard box dimensions - could be enhanced to detect actual resource types
@@ -2252,8 +2252,8 @@ class AppsPage(QWidget):
         
         if is_pod:
             # Pod: Draw colored circle based on status for export
-            icon_width = 60
-            icon_height = 60
+            icon_width = 25
+            icon_height = 25
             
             # Determine pod color based on status
             pod_color = self.get_pod_status_color(resource.status)
