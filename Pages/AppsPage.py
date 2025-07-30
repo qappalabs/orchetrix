@@ -764,33 +764,37 @@ class AppFlowAnalyzer(QThread):
                     "type": "service_to_deployment"
                 })
         
-        # Deployment -> Pod connections
-        for deployment in app_flow["deployments"]:
-            for pod in app_flow["pods"]:
-                connections.append({
-                    "from": f"deployment:{deployment['name']}",
-                    "to": f"pod:{pod['name']}",
-                    "type": "deployment_to_pod"
-                })
+        # Deployment -> Pod connections (single arrow)
+        if app_flow["deployments"] and app_flow["pods"]:
+            # Use first deployment and first pod as representatives
+            connections.append({
+                "from": f"deployment:{app_flow['deployments'][0]['name']}",
+                "to": f"pod:{app_flow['pods'][0]['name']}",
+                "type": "deployment_to_pod"
+            })
         
-        # Pod -> Config connections
-        for pod in app_flow["pods"]:
-            for config in app_flow["configmaps"]:
+        # Pod -> Config connections (single arrow per config type)
+        if app_flow["pods"]:
+            first_pod = app_flow["pods"][0]["name"]
+            
+            if app_flow["configmaps"]:
                 connections.append({
-                    "from": f"pod:{pod['name']}",
-                    "to": f"configmap:{config['name']}",
+                    "from": f"pod:{first_pod}",
+                    "to": f"configmap:{app_flow['configmaps'][0]['name']}",
                     "type": "pod_to_config"
                 })
-            for secret in app_flow["secrets"]:
+            
+            if app_flow["secrets"]:
                 connections.append({
-                    "from": f"pod:{pod['name']}",
-                    "to": f"secret:{secret['name']}",
+                    "from": f"pod:{first_pod}",
+                    "to": f"secret:{app_flow['secrets'][0]['name']}",
                     "type": "pod_to_secret"
                 })
-            for pvc in app_flow["pvcs"]:
+            
+            if app_flow["pvcs"]:
                 connections.append({
-                    "from": f"pod:{pod['name']}",
-                    "to": f"pvc:{pvc['name']}",
+                    "from": f"pod:{first_pod}",
+                    "to": f"pvc:{app_flow['pvcs'][0]['name']}",
                     "type": "pod_to_pvc"
                 })
         
@@ -2034,38 +2038,20 @@ class AppsPage(QWidget):
         
         color = color_map.get(connection_type, "#666666")
         
-        # Draw connection with curved line for better visuals
-        if abs(from_point_y - to_point_y) < 10:  # Same level - straight line
-            # Main line with gradient effect
-            main_line = self.diagram_scene.addLine(
-                from_point_x, from_point_y,
-                to_point_x, to_point_y,
-                QPen(QColor(color), 3)
-            )
-            
-            # Add subtle shadow line
-            shadow_line = self.diagram_scene.addLine(
-                from_point_x, from_point_y + 1,
-                to_point_x, to_point_y + 1,
-                QPen(QColor(color).darker(200), 1)
-            )
-        else:
-            # Curved connection for different levels
-            control_x = from_point_x + (to_point_x - from_point_x) / 2
-            
-            # Draw bezier-like curve using multiple line segments
-            segments = 20
-            for i in range(segments):
-                t1 = i / segments
-                t2 = (i + 1) / segments
-                
-                # Simple bezier curve calculation
-                x1 = from_point_x + t1 * (control_x - from_point_x) + t1 * t1 * (to_point_x - control_x)
-                y1 = from_point_y + t1 * (to_point_y - from_point_y)
-                x2 = from_point_x + t2 * (control_x - from_point_x) + t2 * t2 * (to_point_x - control_x)
-                y2 = from_point_y + t2 * (to_point_y - from_point_y)
-                
-                segment = self.diagram_scene.addLine(x1, y1, x2, y2, QPen(QColor(color), 2))
+        # Draw straight line connection
+        # Main line
+        main_line = self.diagram_scene.addLine(
+            from_point_x, from_point_y,
+            to_point_x, to_point_y,
+            QPen(QColor(color), 3)
+        )
+        
+        # Add subtle shadow line
+        shadow_line = self.diagram_scene.addLine(
+            from_point_x, from_point_y + 1,
+            to_point_x, to_point_y + 1,
+            QPen(QColor(color).darker(200), 1)
+        )
         
         # Draw enhanced arrow head
         self.draw_enhanced_arrow_head(to_point_x, to_point_y, from_point_x, from_point_y, color)
