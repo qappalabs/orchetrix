@@ -1388,22 +1388,73 @@ class AppsPage(QWidget):
             self.status_text.append(f"[{timestamp}] Live update error: {error_message}")
     
     def update_existing_graph_elements(self, processed_data):
-        """Update existing graph elements without full redraw"""
+        """Update existing graph elements with comprehensive live changes"""
         if not hasattr(self, 'current_resource_positions'):
+            # No previous graph exists, create fresh diagram
+            self.create_horizontal_app_flow_diagram(processed_data)
             return
             
-        resources = processed_data.get("resources", [])
+        current_resources = processed_data.get("resources", [])
         
-        # Find and update each resource element in the scene
+        # Check if significant changes require full redraw
+        if self.requires_full_redraw(current_resources):
+            self.create_horizontal_app_flow_diagram(processed_data)
+            return
+        
+        # Perform incremental updates for minor changes
+        self.perform_incremental_updates(current_resources)
+    
+    def requires_full_redraw(self, current_resources):
+        """Check if changes require full diagram redraw"""
+        if not hasattr(self, 'current_resources') or not self.current_resources:
+            return True
+            
+        # Get previous resource identifiers
+        previous_resource_ids = {
+            (r.resource_type.value, r.name, r.namespace) for r in self.current_resources
+        }
+        
+        # Get current resource identifiers  
+        current_resource_ids = {
+            (r.resource_type.value, r.name, r.namespace) for r in current_resources
+        }
+        
+        # Check for added or removed resources
+        added_resources = current_resource_ids - previous_resource_ids
+        removed_resources = previous_resource_ids - current_resource_ids
+        
+        # Redraw if resources were added or removed
+        if added_resources or removed_resources:
+            return True
+            
+        # Check for significant status changes that affect layout
+        # (e.g., deployment replica count changes)
+        for current_resource in current_resources:
+            # Find matching previous resource
+            for prev_resource in self.current_resources:
+                if (current_resource.resource_type == prev_resource.resource_type and
+                    current_resource.name == prev_resource.name and
+                    current_resource.namespace == prev_resource.namespace):
+                    
+                    # Check for replica count changes in deployments/statefulsets
+                    if current_resource.resource_type.value.lower() in ['deployment', 'statefulset', 'daemonset']:
+                        if getattr(current_resource, 'replicas', 0) != getattr(prev_resource, 'replicas', 0):
+                            return True
+                    break
+        
+        return False
+    
+    def perform_incremental_updates(self, current_resources):
+        """Perform incremental updates to existing graph elements"""
+        # Update existing resources with status/color changes
         for item in self.diagram_scene.items():
-            # Check if this item has resource data
             if hasattr(item, 'data') and item.data(0):
                 item_data = item.data(0)
                 if isinstance(item_data, dict) and 'resource' in item_data:
                     stored_resource = item_data['resource']
                     
                     # Find matching resource in new data
-                    for new_resource in resources:
+                    for new_resource in current_resources:
                         if (new_resource.name == stored_resource.name and 
                             new_resource.resource_type == stored_resource.resource_type and
                             new_resource.namespace == stored_resource.namespace):
@@ -1413,10 +1464,18 @@ class AppsPage(QWidget):
                                 new_resource.status != stored_resource.status):
                                 self.update_pod_color(item, new_resource.status)
                                 
-                                # Update stored resource data
-                                item_data['resource'] = new_resource
-                                item.setData(0, item_data)
+                            # Update all resource tooltips with latest information
+                            if hasattr(item, 'setToolTip'):
+                                tooltip_text = self.create_detailed_tooltip(new_resource)
+                                item.setToolTip(tooltip_text)
+                                
+                            # Update stored resource data
+                            item_data['resource'] = new_resource
+                            item.setData(0, item_data)
                             break
+        
+        # Update stored current resources for next comparison
+        self.current_resources = current_resources
     
     def update_pod_color(self, pod_item, new_status):
         """Update pod circle color based on new status"""
