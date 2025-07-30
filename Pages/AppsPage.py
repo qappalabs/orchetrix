@@ -2400,8 +2400,8 @@ class AppsPage(QWidget):
             key = f"{pod.resource_type.value}:{pod.name}"
             if key in positions:
                 x, y = positions[key]
-                # Account for pod circle (25x25) only - no text in export
-                pod_positions.extend([(x, y), (x + 25, y + 25)])  # Just the pod circle
+                # Account for pod circle (25x25) and status/type text on right (about 80px width)
+                pod_positions.extend([(x, y), (x + 25 + 80, y + 25)])  # Include text space on right
         
         if not pod_positions:
             return
@@ -2492,9 +2492,23 @@ class AppsPage(QWidget):
             width_for_text = box_width
             height_for_text = box_height
         
-        # Skip all text for pods in export - only show text for non-pod resources
-        if not is_pod:
-            # Resource name for non-pod resources only
+        if is_pod:
+            # For pods: show info (status and type) to the right, but NO pod name
+            # Pod status
+            status_font = QFont("Segoe UI", 8, QFont.Weight.Bold)
+            status_text = self.diagram_scene.addText(f"● {resource.status}", status_font)
+            status_color = self.get_status_color(resource.status)
+            status_text.setDefaultTextColor(QColor(status_color))
+            status_text.setPos(x + width_for_text + 5, y + (height_for_text - status_text.boundingRect().height()) // 2 - 8)
+            
+            # Pod type
+            type_font = QFont("Segoe UI", 7, QFont.Weight.Normal)
+            type_text = self.diagram_scene.addText("POD", type_font)
+            type_text.setDefaultTextColor(QColor("#333333"))
+            type_text.setPos(x + width_for_text + 5, y + (height_for_text - type_text.boundingRect().height()) // 2 + 8)
+            
+        else:
+            # For non-pod resources: show full information including name
             name_font = QFont("Segoe UI", 9, QFont.Weight.Bold)
             name_text = self.diagram_scene.addText(resource.name, name_font)
             name_text.setDefaultTextColor(QColor("#000000"))  # Dark color for PDF visibility
