@@ -521,11 +521,10 @@ class ClusterView(QWidget):
             from utils.thread_manager import get_thread_manager
             from utils.enhanced_worker import EnhancedBaseWorker
             
-            # Create a worker for the refresh operation
+            # Create a worker for the refresh operation (only for delay, not Qt operations)
             class PageRefreshWorker(EnhancedBaseWorker):
-                def __init__(self, page_instance, delay_ms):
+                def __init__(self, delay_ms):
                     super().__init__(f"page_refresh_{page_name}")
-                    self.page_instance = page_instance
                     self.delay_ms = delay_ms
                     self._timeout = 30  # 30 second timeout for refresh operations
                 
@@ -534,39 +533,52 @@ class ClusterView(QWidget):
                     import time
                     time.sleep(self.delay_ms / 1000.0)
                     
-                    # Refresh the page data
-                    if hasattr(self.page_instance, 'force_load_data'):
-                        self.page_instance.force_load_data()
-                    elif hasattr(self.page_instance, 'load_data'):
-                        self.page_instance.load_data()
-                    
-                    return f"Refreshed {page_name}"
+                    # Don't call Qt methods from worker thread - just return success
+                    return f"Delay completed for {page_name}"
             
             # Submit the worker to thread manager
             thread_manager = get_thread_manager()
-            worker = PageRefreshWorker(page, delay_ms)
+            worker = PageRefreshWorker(delay_ms)
             
             def on_refresh_complete(result):
-                logging.debug(f"Page refresh completed: {result}")
+                # Now perform the actual Qt refresh operations on the main thread
+                try:
+                    logging.debug(f"Page refresh delay completed: {result}")
+                    if hasattr(page, 'force_load_data'):
+                        page.force_load_data()
+                    elif hasattr(page, 'load_data'):
+                        page.load_data()
+                    logging.debug(f"Page {page_name} refreshed successfully")
+                except Exception as e:
+                    logging.error(f"Error refreshing page {page_name} on main thread: {e}")
             
             def on_refresh_error(error):
                 logging.error(f"Page refresh error for {page_name}: {error}")
             
-            worker.signals.finished.connect(on_refresh_complete)
-            worker.signals.error.connect(on_refresh_error)
+            # Use queued connection to ensure the completion handler runs on main thread
+            worker.signals.finished.connect(on_refresh_complete, Qt.ConnectionType.QueuedConnection)
+            worker.signals.error.connect(on_refresh_error, Qt.ConnectionType.QueuedConnection)
             
             thread_manager.submit_worker(f"page_refresh_{page_name}_{id(page)}", worker)
             
         except Exception as e:
             logging.error(f"Error starting async page refresh for {page_name}: {e}")
-            # Fallback to sync refresh if async fails
+            # Fallback to sync refresh if async fails - use QTimer to ensure main thread execution
             try:
-                if hasattr(page, 'force_load_data'):
-                    page.force_load_data()
-                elif hasattr(page, 'load_data'):
-                    page.load_data()
+                def perform_sync_refresh():
+                    try:
+                        if hasattr(page, 'force_load_data'):
+                            page.force_load_data()
+                        elif hasattr(page, 'load_data'):
+                            page.load_data()
+                        logging.debug(f"Sync fallback refresh completed for {page_name}")
+                    except Exception as sync_error:
+                        logging.error(f"Sync fallback refresh failed for {page_name}: {sync_error}")
+                
+                # Use QTimer to ensure execution on main thread
+                QTimer.singleShot(500, perform_sync_refresh)
             except Exception as fallback_error:
-                logging.error(f"Fallback sync refresh also failed for {page_name}: {fallback_error}")
+                logging.error(f"Fallback sync refresh setup failed for {page_name}: {fallback_error}")
 
     def _initialize_terminal(self) -> None:
         """Initialize the terminal panel"""
@@ -936,23 +948,32 @@ class ClusterView(QWidget):
         logging.warning(f"ClusterView received error: {error_message}")
 
     def _handle_resource_updated(self, resource_type: str, resource_name: str, namespace: Optional[str]) -> None:
-        """Handle resource updates"""
-        page_name = resource_type + "s"
+        """Handle resource updates - use QTimer to ensure main thread execution"""
+        def perform_resource_update():
+            try:
+                page_name = resource_type + "s"
 
-        if page_name in self.pages:
-            page = self.pages[page_name]
-            if hasattr(page, 'force_load_data'):
-                page.force_load_data()
-            elif hasattr(page, 'load_data'):
-                page.load_data()
+                if page_name in self.pages:
+                    page = self.pages[page_name]
+                    if hasattr(page, 'force_load_data'):
+                        page.force_load_data()
+                    elif hasattr(page, 'load_data'):
+                        page.load_data()
 
-        # Always refresh Events page
-        if "Events" in self.pages:
-            events_page = self.pages["Events"]
-            if hasattr(events_page, 'force_load_data'):
-                events_page.force_load_data()
-            elif hasattr(events_page, 'load_data'):
-                events_page.load_data()
+                # Always refresh Events page
+                if "Events" in self.pages:
+                    events_page = self.pages["Events"]
+                    if hasattr(events_page, 'force_load_data'):
+                        events_page.force_load_data()
+                    elif hasattr(events_page, 'load_data'):
+                        events_page.load_data()
+                        
+                logging.debug(f"Resource update completed for {resource_type}/{resource_name}")
+            except Exception as e:
+                logging.error(f"Error in resource update for {resource_type}/{resource_name}: {e}")
+        
+        # Use QTimer to ensure execution on main thread
+        QTimer.singleShot(0, perform_resource_update)
 
     def _update_terminal_on_sidebar_toggle(self) -> None:
         """Update terminal position when sidebar toggles"""

@@ -273,7 +273,7 @@ class OverviewPage(QWidget):
                                    QPushButton:pressed { background-color: #1e1e1e; }"""
                                 )
         refresh_btn.setStyleSheet(refresh_style)
-        refresh_btn.clicked.connect(self.force_load_data)
+        refresh_btn.clicked.connect(lambda: self.force_load_data())
 
         header_layout.addWidget(title_label)
         header_layout.addStretch()

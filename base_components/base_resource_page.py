@@ -1041,7 +1041,7 @@ class VirtualScrollTable(QWidget):
         pass
 
 
-@class_logger(log_level=logging.INFO, exclude_methods=['__init__', 'clear_table', 'update_table_row', 'load_more_complete', 'all_items_loaded_signal'])
+@class_logger(log_level=logging.INFO, exclude_methods=['__init__', 'clear_table', 'update_table_row', 'load_more_complete', 'all_items_loaded_signal', 'force_load_data'])
 class BaseResourcePage(BaseTablePage):
     load_more_complete = pyqtSignal()
     all_items_loaded_signal = pyqtSignal()
@@ -1236,7 +1236,7 @@ class BaseResourcePage(BaseTablePage):
                                    QPushButton:pressed { background-color: #1e1e1e; }"""
                                 )
         refresh_btn.setStyleSheet(refresh_style)
-        refresh_btn.clicked.connect(self.force_load_data)
+        refresh_btn.clicked.connect(lambda: self.force_load_data())
         header_layout.addWidget(refresh_btn)
 
     def _add_filter_controls(self, header_layout):
