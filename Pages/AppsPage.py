@@ -1726,8 +1726,8 @@ class AppsPage(QWidget):
         # Calculate box dimensions with small padding (text is now on right)
         min_x = min(pos[0] for pos in pod_positions) - 10   # Small padding on left
         max_x = max(pos[0] for pos in pod_positions) + 120  # Extra space for text on right
-        min_y = min(pos[1] for pos in pod_positions) - 10
-        max_y = max(pos[1] for pos in pod_positions) + 10
+        min_y = min(pos[1] for pos in pod_positions) - 25   # More padding above to center with other boxes
+        max_y = max(pos[1] for pos in pod_positions) + 25   # More padding below to center with other boxes
         
         box_width = max_x - min_x
         box_height = max_y - min_y
@@ -2033,20 +2033,18 @@ class AppsPage(QWidget):
         
         # Determine connection points based on resource types
         if connection_type == "deployment_to_pod":
-            # From deployment (box) to pod container box - use same Y for straight line
+            # From deployment (box) to pod container box - use deployment center Y for straight line
             from_point_x = from_x + box_width   # Right edge of deployment box
+            from_point_y = from_y + box_height // 2   # Center of deployment box
             
             # Connect to left edge of pod container box
             if hasattr(self, 'pod_container_bounds') and self.pod_container_bounds:
                 to_point_x = self.pod_container_bounds['min_x']  # Left edge of pod container
-                pod_middle_y = self.pod_container_bounds['min_y'] + self.pod_container_bounds['height'] // 2
-                # Use pod container middle Y for both points to make straight line
-                from_point_y = pod_middle_y
-                to_point_y = pod_middle_y
+                # Use deployment center Y for both points to make straight line
+                to_point_y = from_point_y
             else:
                 to_point_x = to_x   # Fallback to individual pod position
-                to_point_y = to_y + pod_height // 2
-                from_point_y = to_point_y  # Same Y for straight line
+                to_point_y = from_point_y  # Same Y for straight line
                 
         elif connection_type in ["pod_to_config", "pod_to_secret", "pod_to_pvc"]:
             # From pod container box to config (box) - use same Y for straight line
