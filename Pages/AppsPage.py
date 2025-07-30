@@ -2166,8 +2166,15 @@ class AppsPage(QWidget):
             from PyQt6.QtPrintSupport import QPrinter
             from PyQt6.QtGui import QPageSize, QPageLayout
             
-            # Get scene bounding rect
+            # Create enhanced export version with full names
+            self.create_export_version_of_graph()
+            
+            # Get scene bounding rect with padding to prevent clipping
             scene_rect = self.diagram_scene.itemsBoundingRect()
+            
+            # Add padding to ensure all content is visible (especially right side)
+            padding = 50
+            scene_rect = scene_rect.adjusted(-padding, -padding, padding, padding)
             
             # Ensure scene has content
             if scene_rect.isEmpty():
@@ -2204,6 +2211,9 @@ class AppsPage(QWidget):
                 
         except Exception as e:
             raise Exception(f"PDF export failed: {str(e)}")
+        finally:
+            # Restore original view after export
+            self.restore_original_graph()
     
     def create_export_version_of_graph(self):
         """Create export version with full names and enhanced details"""
@@ -2314,42 +2324,40 @@ class AppsPage(QWidget):
             width_for_text = box_width
             height_for_text = box_height
         
-        # Full resource name for export (no truncation)
+        # Full resource name for export (no truncation) - Use dark color for PDF visibility
         name_font = QFont("Segoe UI", 9, QFont.Weight.Bold)
         name_text = self.diagram_scene.addText(resource.name, name_font)  # Full name
-        name_text.setDefaultTextColor(QColor("#ffffff"))
+        name_text.setDefaultTextColor(QColor("#000000"))  # Changed to black for PDF visibility
         text_width = name_text.boundingRect().width()
         name_text.setPos(x + (width_for_text - text_width) // 2, y + height_for_text + 10)
         
-        # For non-pod resources, show additional information in export
-        if not is_pod:
-            # Resource type with better font
-            type_font = QFont("Segoe UI", 7, QFont.Weight.Normal)
-            type_text = self.diagram_scene.addText(resource.resource_type.value.upper(), type_font)
-            type_text.setDefaultTextColor(QColor(icon_info.color).lighter(150))
-            type_text_width = type_text.boundingRect().width()
-            type_text.setPos(x + (width_for_text - type_text_width) // 2, y + height_for_text + 28)
-            
-            # Enhanced status display
-            status_color = self.get_status_color(resource.status)
-            status_font = QFont("Segoe UI", 7, QFont.Weight.Bold)
-            status_text = self.diagram_scene.addText(f"● {resource.status}", status_font)
-            status_text.setDefaultTextColor(QColor(status_color))
-            status_text_width = status_text.boundingRect().width()
-            status_text.setPos(x + (width_for_text - status_text_width) // 2, y + height_for_text + 45)
-            
-            # Add namespace for clarity in export
-            if resource.namespace and resource.namespace != 'default':
-                ns_font = QFont("Segoe UI", 6, QFont.Weight.Normal)
-                ns_text = self.diagram_scene.addText(f"ns: {resource.namespace}", ns_font)
-                ns_text.setDefaultTextColor(QColor("#cccccc"))
-                ns_text_width = ns_text.boundingRect().width()
-                ns_text.setPos(x + (width_for_text - ns_text_width) // 2, y + height_for_text + 60)
+        # Resource type with better font - Use darker color for PDF visibility
+        type_font = QFont("Segoe UI", 7, QFont.Weight.Normal)
+        type_text = self.diagram_scene.addText(resource.resource_type.value.upper(), type_font)
+        type_text.setDefaultTextColor(QColor("#333333"))  # Changed to dark gray for PDF visibility
+        type_text_width = type_text.boundingRect().width()
+        type_text.setPos(x + (width_for_text - type_text_width) // 2, y + height_for_text + 28)
+        
+        # Enhanced status display
+        status_color = self.get_status_color(resource.status)
+        status_font = QFont("Segoe UI", 7, QFont.Weight.Bold)
+        status_text = self.diagram_scene.addText(f"● {resource.status}", status_font)
+        status_text.setDefaultTextColor(QColor(status_color))
+        status_text_width = status_text.boundingRect().width()
+        status_text.setPos(x + (width_for_text - status_text_width) // 2, y + height_for_text + 45)
+        
+        # Add namespace for clarity in export
+        if resource.namespace and resource.namespace != 'default':
+            ns_font = QFont("Segoe UI", 6, QFont.Weight.Normal)
+            ns_text = self.diagram_scene.addText(f"ns: {resource.namespace}", ns_font)
+            ns_text.setDefaultTextColor(QColor("#555555"))  # Changed to darker gray for PDF visibility
+            ns_text_width = ns_text.boundingRect().width()
+            ns_text.setPos(x + (width_for_text - ns_text_width) // 2, y + height_for_text + 60)
     
     def add_export_metadata_to_image(self, painter: QPainter, width: int, height: int):
         """Add metadata information to exported image"""
-        # Add title and timestamp
-        painter.setPen(QColor("#ffffff"))
+        # Add title and timestamp - Use dark color for PDF visibility
+        painter.setPen(QColor("#000000"))  # Changed to black for PDF visibility
         painter.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
         
         title = f"Kubernetes App Flow - {self.namespace_combo.currentText()}"
