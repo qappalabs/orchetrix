@@ -225,7 +225,7 @@ class AppFlowBusinessLogic:
         
         # Layout constants for horizontal arrangement - optimized for enhanced boxes with external text
         LAYER_SPACING_X = 220  # Horizontal spacing between layers (adjusted for enhanced boxes)
-        ITEM_SPACING_Y = 140   # Vertical spacing between items (increased for text and namespace info)
+        ITEM_SPACING_Y = 60    # Reduced vertical spacing between items for pods
         START_X = 50
         START_Y = 50
         

@@ -1675,6 +1675,11 @@ class AppsPage(QWidget):
         self.current_resource_positions = positions
         self.current_resources = resources
         
+        # Draw simple box around pods first
+        pod_resources = [r for r in resources if r.resource_type.value.lower() == 'pod']
+        if pod_resources:
+            self.draw_simple_pod_box(pod_resources, positions)
+        
         # Draw resources with K8s icons
         for resource in resources:
             key = f"{resource.resource_type.value}:{resource.name}"
@@ -1694,6 +1699,40 @@ class AppsPage(QWidget):
         # Enable live monitoring button if we have a valid graph
         if resources:
             self.live_monitor_btn.setEnabled(True)
+    
+    def draw_simple_pod_box(self, pod_resources, positions):
+        """Draw a simple box around all pods"""
+        if not pod_resources:
+            return
+        
+        # Calculate bounding box for all pods
+        pod_positions = []
+        for pod in pod_resources:
+            key = f"{pod.resource_type.value}:{pod.name}"
+            if key in positions:
+                x, y = positions[key]
+                # Account for pod circle (25x25) and text below (about 20px height)
+                pod_positions.extend([(x, y), (x + 25, y + 45)])
+        
+        if not pod_positions:
+            return
+        
+        # Calculate box dimensions with small padding (text is now on right)
+        min_x = min(pos[0] for pos in pod_positions) - 10   # Small padding on left
+        max_x = max(pos[0] for pos in pod_positions) + 120  # Extra space for text on right
+        min_y = min(pos[1] for pos in pod_positions) - 10
+        max_y = max(pos[1] for pos in pod_positions) + 10
+        
+        box_width = max_x - min_x
+        box_height = max_y - min_y
+        
+        # Draw simple box border only
+        container_box = self.diagram_scene.addRect(
+            min_x, min_y, box_width, box_height,
+            QPen(QColor("#666666"), 1),  # Simple gray border
+            QBrush(Qt.BrushStyle.NoBrush)  # No fill
+        )
+        container_box.setZValue(-1)  # Put behind everything
     
     def draw_resource_with_icon(self, resource: ResourceInfo, x: float, y: float):
         """Draw resource with icon - pods without box, others with box"""
@@ -1779,14 +1818,19 @@ class AppsPage(QWidget):
             width_for_text = box_width
             height_for_text = box_height
         
-        # Resource name positioned outside and below
+        # Resource name positioning - left side for pods, below for others
         name_font = QFont("Segoe UI", 8, QFont.Weight.Bold)
         display_name = resource.name[:12] + "..." if len(resource.name) > 12 else resource.name
         name_text = self.diagram_scene.addText(display_name, name_font)
         name_text.setDefaultTextColor(QColor("#ffffff"))
-        # Center text below
-        text_width = name_text.boundingRect().width()
-        name_text.setPos(x + (width_for_text - text_width) // 2, y + height_for_text + 8)
+        
+        if is_pod:
+            # For pods: position text on the right side of the circle
+            name_text.setPos(x + width_for_text + 5, y + (height_for_text - name_text.boundingRect().height()) // 2)
+        else:
+            # For other resources: center text below
+            text_width = name_text.boundingRect().width()
+            name_text.setPos(x + (width_for_text - text_width) // 2, y + height_for_text + 8)
         
         # For non-pod resources, show additional information
         if not is_pod:
