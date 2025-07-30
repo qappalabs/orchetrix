@@ -1788,22 +1788,24 @@ class AppsPage(QWidget):
         text_width = name_text.boundingRect().width()
         name_text.setPos(x + (width_for_text - text_width) // 2, y + height_for_text + 8)
         
-        # Resource type positioned outside and below the name with better styling
-        type_font = QFont("Segoe UI", 6, QFont.Weight.Normal)
-        type_text = self.diagram_scene.addText(resource.resource_type.value.upper(), type_font)
-        type_text.setDefaultTextColor(QColor(icon_info.color).lighter(150))
-        # Center type text below the name
-        type_text_width = type_text.boundingRect().width()
-        type_text.setPos(x + (width_for_text - type_text_width) // 2, y + height_for_text + 25)
-        
-        # Status positioned outside and below the type with enhanced styling
-        status_color = self.get_status_color(resource.status)
-        status_font = QFont("Segoe UI", 6, QFont.Weight.Bold)
-        status_text = self.diagram_scene.addText(f"● {resource.status}", status_font)
-        status_text.setDefaultTextColor(QColor(status_color))
-        # Center status text below the type
-        status_text_width = status_text.boundingRect().width()
-        status_text.setPos(x + (width_for_text - status_text_width) // 2, y + height_for_text + 40)
+        # For non-pod resources, show additional information
+        if not is_pod:
+            # Resource type positioned outside and below the name with better styling
+            type_font = QFont("Segoe UI", 6, QFont.Weight.Normal)
+            type_text = self.diagram_scene.addText(resource.resource_type.value.upper(), type_font)
+            type_text.setDefaultTextColor(QColor(icon_info.color).lighter(150))
+            # Center type text below the name
+            type_text_width = type_text.boundingRect().width()
+            type_text.setPos(x + (width_for_text - type_text_width) // 2, y + height_for_text + 25)
+            
+            # Status positioned outside and below the type with enhanced styling
+            status_color = self.get_status_color(resource.status)
+            status_font = QFont("Segoe UI", 6, QFont.Weight.Bold)
+            status_text = self.diagram_scene.addText(f"● {resource.status}", status_font)
+            status_text.setDefaultTextColor(QColor(status_color))
+            # Center status text below the type
+            status_text_width = status_text.boundingRect().width()
+            status_text.setPos(x + (width_for_text - status_text_width) // 2, y + height_for_text + 40)
         
         # Store full resource info for export purposes
         icon_item.setData(0, {
@@ -2319,28 +2321,30 @@ class AppsPage(QWidget):
         text_width = name_text.boundingRect().width()
         name_text.setPos(x + (width_for_text - text_width) // 2, y + height_for_text + 10)
         
-        # Resource type with better font
-        type_font = QFont("Segoe UI", 7, QFont.Weight.Normal)
-        type_text = self.diagram_scene.addText(resource.resource_type.value.upper(), type_font)
-        type_text.setDefaultTextColor(QColor(icon_info.color).lighter(150))
-        type_text_width = type_text.boundingRect().width()
-        type_text.setPos(x + (width_for_text - type_text_width) // 2, y + height_for_text + 28)
-        
-        # Enhanced status display
-        status_color = self.get_status_color(resource.status)
-        status_font = QFont("Segoe UI", 7, QFont.Weight.Bold)
-        status_text = self.diagram_scene.addText(f"● {resource.status}", status_font)
-        status_text.setDefaultTextColor(QColor(status_color))
-        status_text_width = status_text.boundingRect().width()
-        status_text.setPos(x + (width_for_text - status_text_width) // 2, y + height_for_text + 45)
-        
-        # Add namespace for clarity in export
-        if resource.namespace and resource.namespace != 'default':
-            ns_font = QFont("Segoe UI", 6, QFont.Weight.Normal)
-            ns_text = self.diagram_scene.addText(f"ns: {resource.namespace}", ns_font)
-            ns_text.setDefaultTextColor(QColor("#cccccc"))
-            ns_text_width = ns_text.boundingRect().width()
-            ns_text.setPos(x + (width_for_text - ns_text_width) // 2, y + height_for_text + 60)
+        # For non-pod resources, show additional information in export
+        if not is_pod:
+            # Resource type with better font
+            type_font = QFont("Segoe UI", 7, QFont.Weight.Normal)
+            type_text = self.diagram_scene.addText(resource.resource_type.value.upper(), type_font)
+            type_text.setDefaultTextColor(QColor(icon_info.color).lighter(150))
+            type_text_width = type_text.boundingRect().width()
+            type_text.setPos(x + (width_for_text - type_text_width) // 2, y + height_for_text + 28)
+            
+            # Enhanced status display
+            status_color = self.get_status_color(resource.status)
+            status_font = QFont("Segoe UI", 7, QFont.Weight.Bold)
+            status_text = self.diagram_scene.addText(f"● {resource.status}", status_font)
+            status_text.setDefaultTextColor(QColor(status_color))
+            status_text_width = status_text.boundingRect().width()
+            status_text.setPos(x + (width_for_text - status_text_width) // 2, y + height_for_text + 45)
+            
+            # Add namespace for clarity in export
+            if resource.namespace and resource.namespace != 'default':
+                ns_font = QFont("Segoe UI", 6, QFont.Weight.Normal)
+                ns_text = self.diagram_scene.addText(f"ns: {resource.namespace}", ns_font)
+                ns_text.setDefaultTextColor(QColor("#cccccc"))
+                ns_text_width = ns_text.boundingRect().width()
+                ns_text.setPos(x + (width_for_text - ns_text_width) // 2, y + height_for_text + 60)
     
     def add_export_metadata_to_image(self, painter: QPainter, width: int, height: int):
         """Add metadata information to exported image"""
