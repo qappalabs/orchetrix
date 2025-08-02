@@ -1478,24 +1478,32 @@ class AppsPage(QWidget):
         self.current_resources = current_resources
     
     def update_pod_color(self, pod_item, new_status):
-        """Update pod circle color based on new status"""
+        """Update pod icon based on new status"""
         try:
-            # Get new color based on status
-            new_color = self.get_pod_status_color(new_status)
+            # Get appropriate icon path for the new status
+            new_icon_path = self.get_pod_icon_path(new_status)
             
-            # Update the pod circle brush and pen
-            if hasattr(pod_item, 'setBrush') and hasattr(pod_item, 'setPen'):
+            # Update the pod icon if it's a pixmap item
+            if hasattr(pod_item, 'setPixmap') and os.path.exists(new_icon_path):
+                pixmap = QPixmap(new_icon_path)
+                if not pixmap.isNull():
+                    # Scale to standard icon size
+                    scaled_pixmap = pixmap.scaled(40, 40, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                    pod_item.setPixmap(scaled_pixmap)
+            elif hasattr(pod_item, 'setBrush') and hasattr(pod_item, 'setPen'):
+                # Fallback: update circle color if it's still a circle (for compatibility)
+                new_color = self.get_pod_status_color(new_status)
                 pod_item.setBrush(QBrush(QColor(new_color)))
                 pod_item.setPen(QPen(QColor(new_color).darker(150), 2))
                 
-                # Update tooltip with new status
-                if hasattr(pod_item, 'data') and pod_item.data(0):
-                    item_data = pod_item.data(0)
-                    if 'resource' in item_data:
-                        resource = item_data['resource']
-                        resource.status = new_status  # Update status
-                        tooltip_text = self.create_detailed_tooltip(resource)
-                        pod_item.setToolTip(tooltip_text)
+            # Update tooltip with new status
+            if hasattr(pod_item, 'data') and pod_item.data(0):
+                item_data = pod_item.data(0)
+                if 'resource' in item_data:
+                    resource = item_data['resource']
+                    resource.status = new_status  # Update status
+                    tooltip_text = self.create_detailed_tooltip(resource)
+                    pod_item.setToolTip(tooltip_text)
                         
         except Exception as e:
             logging.warning(f"Failed to update pod color: {e}")
@@ -1764,7 +1772,7 @@ class AppsPage(QWidget):
             self.live_monitor_btn.setEnabled(True)
     
     def draw_simple_pod_box(self, pod_resources, positions):
-        """Draw a simple box around all pods"""
+        """Draw a simple box around all pods, centered vertically"""
         if not pod_resources:
             self.pod_container_bounds = None
             return
@@ -1775,163 +1783,133 @@ class AppsPage(QWidget):
             key = f"{pod.resource_type.value}:{pod.name}"
             if key in positions:
                 x, y = positions[key]
-                # Account for pod circle (25x25) and text below (about 20px height)
-                pod_positions.extend([(x, y), (x + 25, y + 45)])
+                # Account for icon (40x40) and text on right side
+                pod_positions.extend([(x, y), (x + 40, y + 40)])
         
         if not pod_positions:
             self.pod_container_bounds = None
             return
         
-        # Calculate box dimensions with small padding (text is now on right)
-        min_x = min(pos[0] for pos in pod_positions) - 10   # Small padding on left
+        # Calculate the current bounding box
+        min_x = min(pos[0] for pos in pod_positions) - 15   # Small padding on left
         max_x = max(pos[0] for pos in pod_positions) + 120  # Extra space for text on right
-        min_y = min(pos[1] for pos in pod_positions) - 25   # More padding above to center with other boxes
-        max_y = max(pos[1] for pos in pod_positions) + 25   # More padding below to center with other boxes
+        min_y = min(pos[1] for pos in pod_positions)
+        max_y = max(pos[1] for pos in pod_positions)
+        
+        # Calculate the center Y of the pods
+        pods_center_y = (min_y + max_y) / 2
+        
+        # Define a fixed height for the pods box to keep it centered
+        fixed_box_height = 120
+        
+        # Center the box around the pods center Y
+        centered_min_y = pods_center_y - fixed_box_height / 2
+        centered_max_y = pods_center_y + fixed_box_height / 2
+        
+        # If pods extend beyond the fixed height, expand the box symmetrically
+        if min_y < centered_min_y:
+            extra_space = centered_min_y - min_y + 15  # 15px padding
+            centered_min_y -= extra_space
+            centered_max_y += extra_space
+        
+        if max_y > centered_max_y:
+            extra_space = max_y - centered_max_y + 15  # 15px padding
+            centered_min_y -= extra_space
+            centered_max_y += extra_space
         
         box_width = max_x - min_x
-        box_height = max_y - min_y
+        box_height = centered_max_y - centered_min_y
         
         # Store pod container bounds for connection drawing
         self.pod_container_bounds = {
             'min_x': min_x,
             'max_x': max_x,
-            'min_y': min_y,
-            'max_y': max_y,
+            'min_y': centered_min_y,
+            'max_y': centered_max_y,
             'width': box_width,
             'height': box_height
         }
         
         # Draw simple box border only
         container_box = self.diagram_scene.addRect(
-            min_x, min_y, box_width, box_height,
+            min_x, centered_min_y, box_width, box_height,
             QPen(QColor("#666666"), 1),  # Simple gray border
             QBrush(Qt.BrushStyle.NoBrush)  # No fill
         )
         container_box.setZValue(-1)  # Put behind everything
     
     def draw_resource_with_icon(self, resource: ResourceInfo, x: float, y: float):
-        """Draw resource with icon - pods without box, others with box"""
-        icon_info = self.business_logic.get_resource_icon_info(resource.resource_type)
+        """Draw resource with icon only (no boxes)"""
+        # Standard icon size for all resources
+        icon_width = 40
+        icon_height = 40
         
-        # Check if this is a pod resource
-        is_pod = resource.resource_type.value.lower() == 'pod'
+        # Get appropriate icon path (with dynamic pod icons based on status)
+        icon_path = self.get_resource_icon_path(resource.resource_type, resource.status)
+        icon_item = None
         
-        if is_pod:
-            # Pod: Draw colored circle based on status
-            icon_width = 25
-            icon_height = 25
-            
-            # Determine pod color based on status
-            pod_color = self.get_pod_status_color(resource.status)
-            
-            # Create colored circle for pod
-            pod_circle = self.diagram_scene.addEllipse(
-                x, y, icon_width, icon_height,
-                QPen(QColor(pod_color).darker(150), 2), 
-                QBrush(QColor(pod_color))
-            )
-            
-            # Enable hover events and tooltip on the circle
-            pod_circle.setAcceptHoverEvents(True)
-            tooltip_text = self.create_detailed_tooltip(resource)
-            pod_circle.setToolTip(tooltip_text)
-            icon_item = pod_circle
-            
-            # Text positioning for pod (icon only)
-            width_for_text = icon_width
-            height_for_text = icon_height
-            
+        if icon_path and os.path.exists(icon_path):
+            pixmap = QPixmap(icon_path)
+            if not pixmap.isNull():
+                # Scale icon consistently
+                scaled_pixmap = pixmap.scaled(icon_width, icon_height, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                icon_item = self.diagram_scene.addPixmap(scaled_pixmap)
+                icon_item.setPos(x, y)
+                
+                # Enable hover events and tooltip on the icon
+                icon_item.setAcceptHoverEvents(True)
+                tooltip_text = self.create_detailed_tooltip(resource)
+                icon_item.setToolTip(tooltip_text)
         else:
-            # Other resources: Draw with enhanced box
-            box_width = 70
-            box_height = 70
-            
-            # Create main box with enhanced gradient effect
-            main_rect = self.diagram_scene.addRect(
-                x, y, box_width, box_height,
-                QPen(QColor(icon_info.color), 3), 
-                QBrush(QColor(icon_info.bg_color))
+            # Fallback: create a simple colored circle if icon not found
+            fallback_color = self.get_pod_status_color(resource.status) if resource.resource_type.value.lower() == 'pod' else "#2196F3"
+            icon_item = self.diagram_scene.addEllipse(
+                x, y, icon_width, icon_height,
+                QPen(QColor(fallback_color).darker(150), 2), 
+                QBrush(QColor(fallback_color))
             )
-            
-            # Add gradient-like effect with multiple layers
-            for i in range(3):
-                inner_rect = self.diagram_scene.addRect(
-                    x + i + 1, y + i + 1, box_width - 2*(i+1), box_height - 2*(i+1),
-                    QPen(QColor(icon_info.color).lighter(120 + i*10), 1), 
-                    QBrush(Qt.BrushStyle.NoBrush)
-                )
-            
-            # Add subtle shadow effect
-            shadow_color = QColor("#000000")
-            shadow_color.setAlpha(30)  # Set transparency
-            shadow_rect = self.diagram_scene.addRect(
-                x + 2, y + 2, box_width, box_height,
-                QPen(QColor("#000000"), 1), 
-                QBrush(shadow_color)
-            )
-            shadow_rect.setZValue(-1)  # Put shadow behind main box
-            
-            # Try to load and display K8s icon centered in the box
-            icon_path = self.get_resource_icon_path(resource.resource_type)
-            icon_item = None
-            if icon_path and os.path.exists(icon_path):
-                pixmap = QPixmap(icon_path)
-                if not pixmap.isNull():
-                    # Scale icon to fit nicely in the enhanced box
-                    scaled_pixmap = pixmap.scaled(35, 35, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-                    icon_item = self.diagram_scene.addPixmap(scaled_pixmap)
-                    # Center the icon in the box
-                    icon_item.setPos(x + (box_width - 35) // 2, y + (box_height - 35) // 2)
-            
-            # Create interactive group for hover effects
-            main_rect.setAcceptHoverEvents(True)
+            icon_item.setAcceptHoverEvents(True)
             tooltip_text = self.create_detailed_tooltip(resource)
-            main_rect.setToolTip(tooltip_text)
-            icon_item = main_rect
-            
-            # Text positioning for other resources (with box)
-            width_for_text = box_width
-            height_for_text = box_height
+            icon_item.setToolTip(tooltip_text)
         
-        # Resource name positioning - left side for pods, below for others
+        # Resource name positioning - right side for pods, below for others
         name_font = QFont("Segoe UI", 8, QFont.Weight.Bold)
         display_name = resource.name[:12] + "..." if len(resource.name) > 12 else resource.name
         name_text = self.diagram_scene.addText(display_name, name_font)
         name_text.setDefaultTextColor(QColor("#ffffff"))
         
+        # Position text based on resource type
+        is_pod = resource.resource_type.value.lower() == 'pod'
         if is_pod:
-            # For pods: position text on the right side of the circle
-            name_text.setPos(x + width_for_text + 5, y + (height_for_text - name_text.boundingRect().height()) // 2)
+            # For pods: position text on the right side of the icon
+            name_text.setPos(x + icon_width + 8, y + (icon_height - name_text.boundingRect().height()) // 2)
         else:
-            # For other resources: center text below
+            # For other resources: center text below icon
             text_width = name_text.boundingRect().width()
-            name_text.setPos(x + (width_for_text - text_width) // 2, y + height_for_text + 8)
+            name_text.setPos(x + (icon_width - text_width) // 2, y + icon_height + 5)
         
-        # For non-pod resources, show additional information
-        if not is_pod:
-            # Resource type positioned outside and below the name with better styling
-            type_font = QFont("Segoe UI", 6, QFont.Weight.Normal)
-            type_text = self.diagram_scene.addText(resource.resource_type.value.upper(), type_font)
-            type_text.setDefaultTextColor(QColor(icon_info.color).lighter(150))
-            # Center type text below the name
-            type_text_width = type_text.boundingRect().width()
-            type_text.setPos(x + (width_for_text - type_text_width) // 2, y + height_for_text + 25)
-            
-            # Status positioned outside and below the type with enhanced styling
-            status_color = self.get_status_color(resource.status)
-            status_font = QFont("Segoe UI", 6, QFont.Weight.Bold)
-            status_text = self.diagram_scene.addText(f"● {resource.status}", status_font)
-            status_text.setDefaultTextColor(QColor(status_color))
-            # Center status text below the type
+        # Show status information for all resources
+        status_color = self.get_status_color(resource.status)
+        status_font = QFont("Segoe UI", 6, QFont.Weight.Bold)
+        status_text = self.diagram_scene.addText(f"● {resource.status}", status_font)
+        status_text.setDefaultTextColor(QColor(status_color))
+        
+        # Position status based on resource type
+        if is_pod:
+            # For pods: position status below the name on the right side
+            status_text.setPos(x + icon_width + 8, y + (icon_height - name_text.boundingRect().height()) // 2 + 15)
+        else:
+            # For other resources: center status text below the name
             status_text_width = status_text.boundingRect().width()
-            status_text.setPos(x + (width_for_text - status_text_width) // 2, y + height_for_text + 40)
+            status_text.setPos(x + (icon_width - status_text_width) // 2, y + icon_height + 25)
         
         # Store full resource info for export purposes
-        icon_item.setData(0, {
-            'resource': resource,
-            'full_name': resource.name,
-            'export_data': self.create_export_resource_data(resource)
-        })
+        if icon_item:
+            icon_item.setData(0, {
+                'resource': resource,
+                'full_name': resource.name,
+                'export_data': self.create_export_resource_data(resource)
+            })
     
     def get_status_color(self, status: str) -> str:
         """Get color based on resource status"""
@@ -2063,14 +2041,18 @@ class AppsPage(QWidget):
         
         return export_data
     
-    def get_resource_icon_path(self, resource_type: ResourceType) -> str:
-        """Get icon path for resource type"""
+    def get_resource_icon_path(self, resource_type: ResourceType, status: str = None) -> str:
+        """Get icon path for resource type, with dynamic pod icons based on status"""
+        if resource_type == ResourceType.POD and status:
+            # Dynamic pod icon selection based on status
+            return self.get_pod_icon_path(status)
+        
         icon_mapping = {
             ResourceType.INGRESS: "network.png",
-            ResourceType.SERVICE: "network.png", 
-            ResourceType.DEPLOYMENT: "workloads.png",
-            ResourceType.POD: "workloads.png",
-            ResourceType.CONFIGMAP: "config.png",
+            ResourceType.SERVICE: os.path.join("k8s_chart_icon", "svc.svg"), 
+            ResourceType.DEPLOYMENT: os.path.join("k8s_chart_icon", "deploy.svg"),
+            ResourceType.POD: os.path.join("k8s_chart_icon", "pod_running.svg"),
+            ResourceType.CONFIGMAP: os.path.join("k8s_chart_icon", "cm.svg"),
             ResourceType.SECRET: "config.png",
             ResourceType.PVC: "storage.png"
         }
@@ -2078,52 +2060,76 @@ class AppsPage(QWidget):
         icon_name = icon_mapping.get(resource_type, "workloads.png")
         return os.path.join("icons", icon_name)
     
+    def get_pod_icon_path(self, status: str) -> str:
+        """Get appropriate pod icon based on status"""
+        # Running/healthy pods
+        healthy_statuses = ["Running", "Succeeded", "Ready"]
+        
+        # Failed/problematic pods
+        problem_statuses = ["Failed", "Error", "CrashLoopBackOff", "ImagePullBackOff", 
+                           "ErrImagePull", "InvalidImageName", "CreateContainerConfigError",
+                           "CreateContainerError", "RunContainerError", "KillContainerError",
+                           "VerifyNonRootError", "RunInitContainerError", "CreatePodSandboxError",
+                           "ConfigPodSandboxError", "KillPodSandboxError", "SetupNetworkError",
+                           "TeardownNetworkError"]
+        
+        if status in healthy_statuses:
+            icon_name = os.path.join("k8s_chart_icon", "pod_running.svg")
+        elif status in problem_statuses:
+            icon_name = os.path.join("k8s_chart_icon", "pod_failed.svg")
+        else:
+            # Pending, ContainerCreating, etc.
+            icon_name = os.path.join("k8s_chart_icon", "pod_pending.svg")
+        
+        return os.path.join("icons", icon_name)
+    
     def draw_horizontal_connection(self, from_pos: tuple, to_pos: tuple, connection_type: str):
         """Draw enhanced horizontal connection between resources"""
         from_x, from_y = from_pos
         to_x, to_y = to_pos
         
-        # Default dimensions for boxes
-        box_width = 70
-        box_height = 70
-        # Pod dimensions (circle)
-        pod_width = 25
-        pod_height = 25
+        # All resources now use 40x40 pixel icons
+        icon_width = 40
+        icon_height = 40
         
-        # Determine connection points based on resource types
+        # Calculate center points for icon-based connections
+        from_center_x = from_x + icon_width // 2
+        from_center_y = from_y + icon_height // 2
+        to_center_x = to_x + icon_width // 2
+        to_center_y = to_y + icon_height // 2
+        
+        # Determine connection points - all connections now go from center to center
         if connection_type == "deployment_to_pod":
-            # From deployment (box) to pod container box - use deployment center Y for straight line
-            from_point_x = from_x + box_width   # Right edge of deployment box
-            from_point_y = from_y + box_height // 2   # Center of deployment box
+            # From deployment center to pod center
+            from_point_x = from_x + icon_width    # Right edge of deployment icon
+            from_point_y = from_center_y          # Center Y of deployment icon
             
-            # Connect to left edge of pod container box
+            # Always connect to pod center for consistent alignment
             if hasattr(self, 'pod_container_bounds') and self.pod_container_bounds:
                 to_point_x = self.pod_container_bounds['min_x']  # Left edge of pod container
-                # Use deployment center Y for both points to make straight line
-                to_point_y = from_point_y
+                to_point_y = from_point_y  # Same Y as deployment center for straight line
             else:
-                to_point_x = to_x   # Fallback to individual pod position
-                to_point_y = from_point_y  # Same Y for straight line
+                to_point_x = to_x         # Left edge of pod icon
+                to_point_y = from_point_y  # Use deployment center Y to keep pods aligned
                 
         elif connection_type in ["pod_to_config", "pod_to_secret", "pod_to_pvc"]:
-            # From pod container box to config (box) - use config center Y for straight line
-            to_point_x = to_x                   # Left edge of config box
-            to_point_y = to_y + box_height // 2 # Center of config box
+            # From pod center to config resource center
+            to_point_x = to_x           # Left edge of target icon
+            to_point_y = to_center_y    # Center Y of target icon
             
             if hasattr(self, 'pod_container_bounds') and self.pod_container_bounds:
                 from_point_x = self.pod_container_bounds['max_x']  # Right edge of pod container
-                # Use config center Y for both points to make straight line
-                from_point_y = to_point_y
+                from_point_y = to_point_y  # Same Y as target center for straight line
             else:
-                from_point_x = from_x + pod_width   # Fallback to individual pod position
-                from_point_y = to_point_y  # Same Y for straight line
+                from_point_x = from_x + icon_width  # Right edge of pod icon
+                from_point_y = to_point_y           # Use target center Y to keep alignment
             
         else:
-            # Default: box to box connections
-            from_point_x = from_x + box_width   # Right edge of from resource
-            from_point_y = from_y + box_height // 2   # Middle of from resource
-            to_point_x = to_x                   # Left edge of to resource  
-            to_point_y = to_y + box_height // 2 # Middle of to resource
+            # Default: icon center to icon center connections
+            from_point_x = from_x + icon_width  # Right edge of from icon
+            from_point_y = from_center_y        # Center Y of from icon
+            to_point_x = to_x                   # Left edge of to icon
+            to_point_y = to_center_y            # Center Y of to icon
         
         # Color mapping for connection types with improved colors
         color_map = {
@@ -2161,10 +2167,14 @@ class AppsPage(QWidget):
         
         # Connection type label
         connection_label = connection_type.replace("_", " ").replace("to", "→")
-        label_font = QFont("Segoe UI", 6, QFont.Weight.Normal)
+        label_font = QFont("Segoe UI", 8, QFont.Weight.Bold)  # Larger and bold
         label_text = self.diagram_scene.addText(connection_label, label_font)
-        label_text.setDefaultTextColor(QColor(color).lighter(150))
-        label_text.setPos(mid_x - 20, mid_y)
+        label_text.setDefaultTextColor(QColor("#ffffff"))  # White color
+        
+        # Center the text properly on the connection line
+        text_width = label_text.boundingRect().width()
+        text_height = label_text.boundingRect().height()
+        label_text.setPos(mid_x - text_width / 2, mid_y - text_height / 2)
     
     def draw_enhanced_arrow_head(self, to_x: float, to_y: float, from_x: float, from_y: float, color: str):
         """Draw enhanced arrow head at target point"""
@@ -2409,7 +2419,7 @@ class AppsPage(QWidget):
                 self.draw_horizontal_connection(from_pos, to_pos, connection.connection_type)
     
     def draw_export_pod_box(self, pod_resources, positions):
-        """Draw pod container box optimized for export with darker border"""
+        """Draw pod container box optimized for export with darker border, centered vertically"""
         if not pod_resources:
             return
         
@@ -2419,142 +2429,91 @@ class AppsPage(QWidget):
             key = f"{pod.resource_type.value}:{pod.name}"
             if key in positions:
                 x, y = positions[key]
-                # Account for pod circle (25x25) and status/type text on right (about 80px width)
-                pod_positions.extend([(x, y), (x + 25 + 80, y + 25)])  # Include text space on right
+                # Account for icon (45x45) and text on right side for export
+                pod_positions.extend([(x, y), (x + 45, y + 45)])
         
         if not pod_positions:
             return
         
-        # Calculate box dimensions with padding for export visibility
-        min_x = min(pos[0] for pos in pod_positions) - 15   # More padding for export
-        max_x = max(pos[0] for pos in pod_positions) + 15   # Padding on right
-        min_y = min(pos[1] for pos in pod_positions) - 30   # More padding above
-        max_y = max(pos[1] for pos in pod_positions) + 30   # More padding below
+        # Calculate the current bounding box
+        min_x = min(pos[0] for pos in pod_positions) - 20   # More padding for export
+        max_x = max(pos[0] for pos in pod_positions) + 120  # Extra space for text on right
+        min_y = min(pos[1] for pos in pod_positions)
+        max_y = max(pos[1] for pos in pod_positions)
+        
+        # Calculate the center Y of the pods
+        pods_center_y = (min_y + max_y) / 2
+        
+        # Define a fixed height for the pods box to keep it centered
+        fixed_box_height = 140  # Slightly larger for export
+        
+        # Center the box around the pods center Y
+        centered_min_y = pods_center_y - fixed_box_height / 2
+        centered_max_y = pods_center_y + fixed_box_height / 2
+        
+        # If pods extend beyond the fixed height, expand the box symmetrically
+        if min_y < centered_min_y:
+            extra_space = centered_min_y - min_y + 20  # 20px padding for export
+            centered_min_y -= extra_space
+            centered_max_y += extra_space
+        
+        if max_y > centered_max_y:
+            extra_space = max_y - centered_max_y + 20  # 20px padding for export
+            centered_min_y -= extra_space
+            centered_max_y += extra_space
         
         box_width = max_x - min_x
-        box_height = max_y - min_y
+        box_height = centered_max_y - centered_min_y
         
         # Draw container box with darker border for export visibility
         container_box = self.diagram_scene.addRect(
-            min_x, min_y, box_width, box_height,
+            min_x, centered_min_y, box_width, box_height,
             QPen(QColor("#333333"), 2),  # Darker, thicker border for export visibility
             QBrush(Qt.BrushStyle.NoBrush)  # No fill
         )
         container_box.setZValue(-1)  # Put behind everything
     
     def draw_export_resource_with_icon(self, resource: ResourceInfo, x: float, y: float):
-        """Draw resource for export - pods without box, others with box"""
-        icon_info = self.business_logic.get_resource_icon_info(resource.resource_type)
+        """Draw resource for export with icon only (no boxes)"""
+        # Standard icon size for export
+        icon_width = 45
+        icon_height = 45
         
-        # Check if this is a pod resource
-        is_pod = resource.resource_type.value.lower() == 'pod'
+        # Get appropriate icon path (with dynamic pod icons based on status)
+        icon_path = self.get_resource_icon_path(resource.resource_type, resource.status)
+        icon_item = None
         
-        if is_pod:
-            # Pod: Draw colored circle based on status for export
-            icon_width = 25
-            icon_height = 25
-            
-            # Determine pod color based on status
-            pod_color = self.get_pod_status_color(resource.status)
-            
-            # Create colored circle for pod in export
-            pod_circle = self.diagram_scene.addEllipse(
+        if icon_path and os.path.exists(icon_path):
+            pixmap = QPixmap(icon_path)
+            if not pixmap.isNull():
+                # Scale icon for export
+                scaled_pixmap = pixmap.scaled(icon_width, icon_height, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                icon_item = self.diagram_scene.addPixmap(scaled_pixmap)
+                icon_item.setPos(x, y)
+        else:
+            # Fallback: create a simple colored circle if icon not found
+            fallback_color = self.get_pod_status_color(resource.status) if resource.resource_type.value.lower() == 'pod' else "#2196F3"
+            icon_item = self.diagram_scene.addEllipse(
                 x, y, icon_width, icon_height,
-                QPen(QColor(pod_color).darker(150), 2), 
-                QBrush(QColor(pod_color))
+                QPen(QColor(fallback_color).darker(150), 2), 
+                QBrush(QColor(fallback_color))
             )
-            
-            # Text positioning for pod
-            width_for_text = icon_width
-            height_for_text = icon_height
-            
-        else:
-            # Other resources: Draw with enhanced box for export
-            box_width = 80
-            box_height = 80
-            
-            # Create main box with enhanced gradient effect
-            main_rect = self.diagram_scene.addRect(
-                x, y, box_width, box_height,
-                QPen(QColor(icon_info.color), 3), 
-                QBrush(QColor(icon_info.bg_color))
-            )
-            
-            # Add gradient layers
-            for i in range(3):
-                inner_rect = self.diagram_scene.addRect(
-                    x + i + 1, y + i + 1, box_width - 2*(i+1), box_height - 2*(i+1),
-                    QPen(QColor(icon_info.color).lighter(120 + i*10), 1), 
-                    QBrush(Qt.BrushStyle.NoBrush)
-                )
-            
-            # Add shadow
-            shadow_color = QColor("#000000")
-            shadow_color.setAlpha(30)
-            shadow_rect = self.diagram_scene.addRect(
-                x + 2, y + 2, box_width, box_height,
-                QPen(QColor("#000000"), 1), 
-                QBrush(shadow_color)
-            )
-            shadow_rect.setZValue(-1)
-            
-            # Icon in box
-            icon_path = self.get_resource_icon_path(resource.resource_type)
-            if icon_path and os.path.exists(icon_path):
-                pixmap = QPixmap(icon_path)
-                if not pixmap.isNull():
-                    scaled_pixmap = pixmap.scaled(40, 40, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-                    icon_item = self.diagram_scene.addPixmap(scaled_pixmap)
-                    icon_item.setPos(x + (box_width - 40) // 2, y + (box_height - 40) // 2)
-            
-            # Text positioning for other resources
-            width_for_text = box_width
-            height_for_text = box_height
         
-        if is_pod:
-            # For pods: show info (status and type) to the right, but NO pod name
-            # Pod status
-            status_font = QFont("Segoe UI", 8, QFont.Weight.Bold)
-            status_text = self.diagram_scene.addText(f"● {resource.status}", status_font)
-            status_color = self.get_status_color(resource.status)
-            status_text.setDefaultTextColor(QColor(status_color))
-            status_text.setPos(x + width_for_text + 5, y + (height_for_text - status_text.boundingRect().height()) // 2 - 8)
-            
-            # Pod type
-            type_font = QFont("Segoe UI", 7, QFont.Weight.Normal)
-            type_text = self.diagram_scene.addText("POD", type_font)
-            type_text.setDefaultTextColor(QColor("#333333"))
-            type_text.setPos(x + width_for_text + 5, y + (height_for_text - type_text.boundingRect().height()) // 2 + 8)
-            
-        else:
-            # For non-pod resources: show full information including name
-            name_font = QFont("Segoe UI", 9, QFont.Weight.Bold)
-            name_text = self.diagram_scene.addText(resource.name, name_font)
-            name_text.setDefaultTextColor(QColor("#000000"))  # Dark color for PDF visibility
-            text_width = name_text.boundingRect().width()
-            name_text.setPos(x + (width_for_text - text_width) // 2, y + height_for_text + 10)
-            # Resource type with better font - Use darker color for PDF visibility
-            type_font = QFont("Segoe UI", 7, QFont.Weight.Normal)
-            type_text = self.diagram_scene.addText(resource.resource_type.value.upper(), type_font)
-            type_text.setDefaultTextColor(QColor("#333333"))  # Changed to dark gray for PDF visibility
-            type_text_width = type_text.boundingRect().width()
-            type_text.setPos(x + (width_for_text - type_text_width) // 2, y + height_for_text + 28)
-            
-            # Enhanced status display
-            status_color = self.get_status_color(resource.status)
-            status_font = QFont("Segoe UI", 7, QFont.Weight.Bold)
-            status_text = self.diagram_scene.addText(f"● {resource.status}", status_font)
-            status_text.setDefaultTextColor(QColor(status_color))
-            status_text_width = status_text.boundingRect().width()
-            status_text.setPos(x + (width_for_text - status_text_width) // 2, y + height_for_text + 45)
-            
-            # Add namespace for clarity in export
-            if resource.namespace and resource.namespace != 'default':
-                ns_font = QFont("Segoe UI", 6, QFont.Weight.Normal)
-                ns_text = self.diagram_scene.addText(f"ns: {resource.namespace}", ns_font)
-                ns_text.setDefaultTextColor(QColor("#555555"))  # Changed to darker gray for PDF visibility
-                ns_text_width = ns_text.boundingRect().width()
-                ns_text.setPos(x + (width_for_text - ns_text_width) // 2, y + height_for_text + 60)
+        # Resource name positioned below the icon
+        name_font = QFont("Segoe UI", 9, QFont.Weight.Bold)
+        display_name = resource.name[:12] + "..." if len(resource.name) > 12 else resource.name
+        name_text = self.diagram_scene.addText(display_name, name_font)
+        name_text.setDefaultTextColor(QColor("#000000"))  # Dark color for PDF visibility
+        text_width = name_text.boundingRect().width()
+        name_text.setPos(x + (icon_width - text_width) // 2, y + icon_height + 5)
+        
+        # Status information below name
+        status_color = self.get_status_color(resource.status)
+        status_font = QFont("Segoe UI", 7, QFont.Weight.Bold)
+        status_text = self.diagram_scene.addText(f"● {resource.status}", status_font)
+        status_text.setDefaultTextColor(QColor(status_color))
+        status_text_width = status_text.boundingRect().width()
+        status_text.setPos(x + (icon_width - status_text_width) // 2, y + icon_height + 25)
     
     def add_export_metadata_to_image(self, painter: QPainter, width: int, height: int):
         """Add metadata information to exported image"""
