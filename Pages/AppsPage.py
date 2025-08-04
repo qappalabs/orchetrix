@@ -1772,12 +1772,20 @@ class AppsPage(QWidget):
             self.live_monitor_btn.setEnabled(True)
     
     def draw_simple_pod_box(self, pod_resources, positions):
-        """Draw a simple box around all pods, centered vertically"""
+        """Draw a simple box around all pods, aligned with deployment center"""
         if not pod_resources:
             self.pod_container_bounds = None
             return
         
-        # Calculate bounding box for all pods
+        # Find deployment center Y to align pod box with it
+        deployment_center_y = None
+        for key, (x, y) in positions.items():
+            if key.startswith("deployment:"):
+                icon_height = 40
+                deployment_center_y = y + icon_height // 2
+                break
+        
+        # Calculate bounding box for all pods in their original positions
         pod_positions = []
         for pod in pod_resources:
             key = f"{pod.resource_type.value}:{pod.name}"
@@ -1793,29 +1801,53 @@ class AppsPage(QWidget):
         # Calculate the current bounding box
         min_x = min(pos[0] for pos in pod_positions) - 15   # Small padding on left
         max_x = max(pos[0] for pos in pod_positions) + 120  # Extra space for text on right
-        min_y = min(pos[1] for pos in pod_positions)
-        max_y = max(pos[1] for pos in pod_positions)
+        original_min_y = min(pos[1] for pos in pod_positions)
+        original_max_y = max(pos[1] for pos in pod_positions)
         
-        # Calculate the center Y of the pods
-        pods_center_y = (min_y + max_y) / 2
-        
-        # Define a fixed height for the pods box to keep it centered
-        fixed_box_height = 120
-        
-        # Center the box around the pods center Y
-        centered_min_y = pods_center_y - fixed_box_height / 2
-        centered_max_y = pods_center_y + fixed_box_height / 2
-        
-        # If pods extend beyond the fixed height, expand the box symmetrically
-        if min_y < centered_min_y:
-            extra_space = centered_min_y - min_y + 15  # 15px padding
-            centered_min_y -= extra_space
-            centered_max_y += extra_space
-        
-        if max_y > centered_max_y:
-            extra_space = max_y - centered_max_y + 15  # 15px padding
-            centered_min_y -= extra_space
-            centered_max_y += extra_space
+        # Calculate the offset needed to align with deployment
+        if deployment_center_y is not None:
+            # Calculate current pod center and desired center
+            current_pod_center_y = (original_min_y + original_max_y) / 2
+            y_offset = deployment_center_y - current_pod_center_y
+            
+            # Apply the offset to pod positions
+            for pod in pod_resources:
+                key = f"{pod.resource_type.value}:{pod.name}"
+                if key in positions:
+                    x, y = positions[key]
+                    positions[key] = (x, y + y_offset)  # Adjust pod position
+            
+            # Recalculate bounding box with adjusted positions
+            pod_positions = []
+            for pod in pod_resources:
+                key = f"{pod.resource_type.value}:{pod.name}"
+                if key in positions:
+                    x, y = positions[key]
+                    pod_positions.extend([(x, y), (x + 40, y + 40)])
+            
+            min_y = min(pos[1] for pos in pod_positions)
+            max_y = max(pos[1] for pos in pod_positions)
+            
+            # Add padding around the adjusted pod positions
+            centered_min_y = min_y - 30  # 30px padding
+            centered_max_y = max_y + 30  # 30px padding
+        else:
+            # Fallback: use the original centering method
+            pods_center_y = (original_min_y + original_max_y) / 2
+            fixed_box_height = 120
+            centered_min_y = pods_center_y - fixed_box_height / 2
+            centered_max_y = pods_center_y + fixed_box_height / 2
+            
+            # If pods extend beyond the fixed height, expand the box symmetrically
+            if original_min_y < centered_min_y:
+                extra_space = centered_min_y - original_min_y + 15
+                centered_min_y -= extra_space
+                centered_max_y += extra_space
+            
+            if original_max_y > centered_max_y:
+                extra_space = original_max_y - centered_max_y + 15
+                centered_min_y -= extra_space
+                centered_max_y += extra_space
         
         box_width = max_x - min_x
         box_height = centered_max_y - centered_min_y
@@ -2098,31 +2130,32 @@ class AppsPage(QWidget):
         to_center_x = to_x + icon_width // 2
         to_center_y = to_y + icon_height // 2
         
-        # Determine connection points - all connections now go from center to center
+        # Determine connection points - keep horizontal straight lines
         if connection_type == "deployment_to_pod":
-            # From deployment center to pod center
+            # From deployment center to pod box - horizontal line
             from_point_x = from_x + icon_width    # Right edge of deployment icon
             from_point_y = from_center_y          # Center Y of deployment icon
             
-            # Always connect to pod center for consistent alignment
+            # Connect horizontally to pod container
             if hasattr(self, 'pod_container_bounds') and self.pod_container_bounds:
                 to_point_x = self.pod_container_bounds['min_x']  # Left edge of pod container
-                to_point_y = from_point_y  # Same Y as deployment center for straight line
+                to_point_y = from_point_y  # Same Y as deployment center for horizontal line
             else:
                 to_point_x = to_x         # Left edge of pod icon
-                to_point_y = from_point_y  # Use deployment center Y to keep pods aligned
+                to_point_y = from_point_y  # Same Y as deployment center for horizontal line
                 
         elif connection_type in ["pod_to_config", "pod_to_secret", "pod_to_pvc"]:
-            # From pod center to config resource center
+            # From pod box to config resource - horizontal line
             to_point_x = to_x           # Left edge of target icon
             to_point_y = to_center_y    # Center Y of target icon
             
             if hasattr(self, 'pod_container_bounds') and self.pod_container_bounds:
                 from_point_x = self.pod_container_bounds['max_x']  # Right edge of pod container
-                from_point_y = to_point_y  # Same Y as target center for straight line
+                to_point_y = to_center_y  # Use target center Y for horizontal line
+                from_point_y = to_point_y  # Same Y as target for horizontal line
             else:
                 from_point_x = from_x + icon_width  # Right edge of pod icon
-                from_point_y = to_point_y           # Use target center Y to keep alignment
+                from_point_y = to_point_y           # Same Y as target for horizontal line
             
         else:
             # Default: icon center to icon center connections
@@ -2419,11 +2452,19 @@ class AppsPage(QWidget):
                 self.draw_horizontal_connection(from_pos, to_pos, connection.connection_type)
     
     def draw_export_pod_box(self, pod_resources, positions):
-        """Draw pod container box optimized for export with darker border, centered vertically"""
+        """Draw pod container box optimized for export with darker border, aligned with deployment center"""
         if not pod_resources:
             return
         
-        # Calculate bounding box for all pods
+        # Find deployment center Y to align pod box with it
+        deployment_center_y = None
+        for key, (x, y) in positions.items():
+            if key.startswith("deployment:"):
+                icon_height = 45  # Export icon size
+                deployment_center_y = y + icon_height // 2
+                break
+        
+        # Calculate bounding box for all pods in their original positions
         pod_positions = []
         for pod in pod_resources:
             key = f"{pod.resource_type.value}:{pod.name}"
@@ -2438,29 +2479,53 @@ class AppsPage(QWidget):
         # Calculate the current bounding box
         min_x = min(pos[0] for pos in pod_positions) - 20   # More padding for export
         max_x = max(pos[0] for pos in pod_positions) + 120  # Extra space for text on right
-        min_y = min(pos[1] for pos in pod_positions)
-        max_y = max(pos[1] for pos in pod_positions)
+        original_min_y = min(pos[1] for pos in pod_positions)
+        original_max_y = max(pos[1] for pos in pod_positions)
         
-        # Calculate the center Y of the pods
-        pods_center_y = (min_y + max_y) / 2
-        
-        # Define a fixed height for the pods box to keep it centered
-        fixed_box_height = 140  # Slightly larger for export
-        
-        # Center the box around the pods center Y
-        centered_min_y = pods_center_y - fixed_box_height / 2
-        centered_max_y = pods_center_y + fixed_box_height / 2
-        
-        # If pods extend beyond the fixed height, expand the box symmetrically
-        if min_y < centered_min_y:
-            extra_space = centered_min_y - min_y + 20  # 20px padding for export
-            centered_min_y -= extra_space
-            centered_max_y += extra_space
-        
-        if max_y > centered_max_y:
-            extra_space = max_y - centered_max_y + 20  # 20px padding for export
-            centered_min_y -= extra_space
-            centered_max_y += extra_space
+        # Calculate the offset needed to align with deployment
+        if deployment_center_y is not None:
+            # Calculate current pod center and desired center
+            current_pod_center_y = (original_min_y + original_max_y) / 2
+            y_offset = deployment_center_y - current_pod_center_y
+            
+            # Apply the offset to pod positions
+            for pod in pod_resources:
+                key = f"{pod.resource_type.value}:{pod.name}"
+                if key in positions:
+                    x, y = positions[key]
+                    positions[key] = (x, y + y_offset)  # Adjust pod position
+            
+            # Recalculate bounding box with adjusted positions
+            pod_positions = []
+            for pod in pod_resources:
+                key = f"{pod.resource_type.value}:{pod.name}"
+                if key in positions:
+                    x, y = positions[key]
+                    pod_positions.extend([(x, y), (x + 45, y + 45)])
+            
+            min_y = min(pos[1] for pos in pod_positions)
+            max_y = max(pos[1] for pos in pod_positions)
+            
+            # Add padding around the adjusted pod positions
+            centered_min_y = min_y - 35  # 35px padding for export
+            centered_max_y = max_y + 35  # 35px padding for export
+        else:
+            # Fallback: use the original centering method
+            pods_center_y = (original_min_y + original_max_y) / 2
+            fixed_box_height = 140
+            centered_min_y = pods_center_y - fixed_box_height / 2
+            centered_max_y = pods_center_y + fixed_box_height / 2
+            
+            # If pods extend beyond the fixed height, expand the box symmetrically
+            if original_min_y < centered_min_y:
+                extra_space = centered_min_y - original_min_y + 20
+                centered_min_y -= extra_space
+                centered_max_y += extra_space
+            
+            if original_max_y > centered_max_y:
+                extra_space = original_max_y - centered_max_y + 20
+                centered_min_y -= extra_space
+                centered_max_y += extra_space
         
         box_width = max_x - min_x
         box_height = centered_max_y - centered_min_y
