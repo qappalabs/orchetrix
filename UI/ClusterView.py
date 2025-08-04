@@ -70,7 +70,7 @@ from Pages.AccessControl.RoleBinidingsPage import RoleBindingsPage
 from Pages.CustomResources.DefinitionsPage import DefinitionsPage
 
 # Apps page
-from Pages.AppsPage import AppsPage
+from Pages.AppsChartPage import AppsPage
 
 # Page configuration with direct class references (PyInstaller compatible)
 PAGE_CONFIG = {
@@ -132,7 +132,7 @@ PAGE_CONFIG = {
     'Definitions': DefinitionsPage,
     
     # Apps page
-    'Apps': AppsPage,
+    'AppsChart': AppsPage,
 }
 
 # Dropdown menu configuration

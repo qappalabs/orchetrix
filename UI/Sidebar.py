@@ -592,7 +592,7 @@ class Sidebar(QWidget):
             ("custom_resources", "Custom Resources", False, True),
             ("namespaces", "Namespaces", False),
             ("events", "Events", False),
-            ("apps", "Apps", False)
+            ("apps", "AppsChart", False)
         ]
 
         for item in nav_items:

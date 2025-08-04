@@ -13,6 +13,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTimer, QRectF, QPointF
 from PyQt6.QtGui import QFont, QPen, QBrush, QColor, QPainter, QPixmap, QIcon, QAction
 
 from UI.Styles import AppStyles, AppColors
+from UI.Icons import resource_path
 from utils.kubernetes_client import get_kubernetes_client
 from kubernetes.client.rest import ApiException
 from business_logic.app_flow_business import (
@@ -906,7 +907,7 @@ class AppsPage(QWidget):
     
     def _create_title_and_count(self, layout):
         """Create title label only"""
-        title_label = QLabel("Apps")
+        title_label = QLabel("AppsChart")
         title_label.setStyleSheet("font-size: 20px; font-weight: bold; color: #ffffff;")
         
         layout.addWidget(title_label)
@@ -1551,7 +1552,11 @@ class AppsPage(QWidget):
         
         # Export button with dropdown menu
         self.export_btn = QToolButton()
-        self.export_btn.setText("⬇")
+        export_icon_path = resource_path("icons/terminal_download.svg")
+        if os.path.exists(export_icon_path):
+            self.export_btn.setIcon(QIcon(export_icon_path))
+        else:
+            self.export_btn.setText("⬇")
         self.export_btn.setToolTip("Export Graph")
         self.export_btn.setStyleSheet("""
             QToolButton {
@@ -1596,11 +1601,17 @@ class AppsPage(QWidget):
         """)
         
         # Add export actions
-        export_image_action = QAction("📷 Export as Image", self)
+        export_image_action = QAction("Export as Image", self)
+        image_icon_path = resource_path("icons/export_to_image.svg")
+        if os.path.exists(image_icon_path):
+            export_image_action.setIcon(QIcon(image_icon_path))
         export_image_action.triggered.connect(self.export_as_image_dialog)
         export_menu.addAction(export_image_action)
         
-        export_pdf_action = QAction("📄 Export as PDF", self)
+        export_pdf_action = QAction("Export as PDF", self)
+        pdf_icon_path = resource_path("icons/export_to_pdf.svg")
+        if os.path.exists(pdf_icon_path):
+            export_pdf_action.setIcon(QIcon(pdf_icon_path))
         export_pdf_action.triggered.connect(self.export_as_pdf_dialog)
         export_menu.addAction(export_pdf_action)
         
