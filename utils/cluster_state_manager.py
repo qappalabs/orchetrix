@@ -49,11 +49,11 @@ class ClusterConnectionWorker(EnhancedBaseWorker):
                     logging.warning(f"Connection verification failed for {self.cluster_name}, proceeding with fresh connection: {e}")
                     # Continue with fresh connection attempt
             
-            # Switch context with timeout check
-            success = kube_client.switch_context(self.cluster_name)
+            # Connect to cluster with timeout check
+            success = kube_client.connect_to_cluster(self.cluster_name, self.cluster_name)
             
             if not success:
-                raise Exception(f"Failed to switch to cluster context: {self.cluster_name}")
+                raise Exception(f"Failed to connect to cluster: {self.cluster_name}")
                 
             if self.is_cancelled():
                 return None

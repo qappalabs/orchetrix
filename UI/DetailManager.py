@@ -77,17 +77,20 @@ class DetailManager(QObject):
     def show_detail(self, resource_type: str, resource_name: str,
                     namespace: Optional[str] = None, raw_data: Optional[Dict[str, Any]] = None) -> None:
         """Show detail view for the specified resource with optimized performance"""
+        # Convert plural resource type to singular for API compatibility
+        resource_type_singular = resource_type.rstrip('s') if resource_type.endswith('s') else resource_type
+        
         # Ensure detail page is created
         detail_page = self._ensure_detail_page()
 
         # Check if we're already viewing the same resource
-        if self._is_same_resource(resource_type, resource_name, namespace) and detail_page.isVisible():
+        if self._is_same_resource(resource_type_singular, resource_name, namespace) and detail_page.isVisible():
             self.update_detail_position()
             return
 
         # Update current resource tracking
         self._current_resource.update({
-            'type': resource_type,
+            'type': resource_type_singular,
             'name': resource_name,
             'namespace': namespace
         })
@@ -99,8 +102,8 @@ class DetailManager(QObject):
         # Update height before showing
         self._update_cached_height()
 
-        # Show the detail page
-        detail_page.show_detail(resource_type, resource_name, namespace)
+        # Show the detail page with singular resource type
+        detail_page.show_detail(resource_type_singular, resource_name, namespace)
 
         # Position correctly with minimal delay
         QTimer.singleShot(25, self.update_detail_position)  # Reduced from 50ms

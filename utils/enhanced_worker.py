@@ -31,6 +31,15 @@ class EnhancedBaseWorker(QRunnable):
     
     def is_timed_out(self):
         return (time.time() - self._start_time) > self._timeout
+    
+    def isRunning(self):
+        """Check if worker is currently running - backward compatibility method"""
+        return self._started.is_set() and not self._completed.is_set() and not self.is_cancelled()
+    
+    def wait(self, timeout_ms=30000):
+        """Wait for worker to complete - backward compatibility method"""
+        timeout_seconds = timeout_ms / 1000.0
+        return self._completed.wait(timeout_seconds)
         
     def safe_emit_finished(self, result):
         if not self.is_cancelled() and not self.is_timed_out():

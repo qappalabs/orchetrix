@@ -169,16 +169,35 @@ class MainWindow(QMainWindow):
             self.home_page.initialize_cluster_connector()
 
     def _periodic_cleanup(self):
-        """Periodic cleanup to prevent memory leaks"""
+        """Enhanced periodic cleanup to prevent memory leaks"""
         try:
             # Force garbage collection
-            gc.collect()
+            collected = gc.collect()
+            if collected > 0:
+                logging.debug(f"Periodic cleanup: {collected} objects collected")
             
             # Cleanup chart page caches if needed
             if hasattr(self, 'cluster_view') and hasattr(self.cluster_view, 'pages'):
                 charts_page = self.cluster_view.pages.get('Charts')
                 if charts_page and hasattr(charts_page, 'cleanup_cache'):
                     charts_page.cleanup_cache()
+            
+            # Cleanup age caches from base resource pages
+            try:
+                from base_components.base_resource_page import BaseResourcePage
+                if len(BaseResourcePage._age_cache) > 1000:
+                    BaseResourcePage._clean_age_cache()
+            except Exception as cache_error:
+                logging.debug(f"Could not cleanup age cache: {cache_error}")
+            
+            # Cleanup service caches
+            try:
+                from services.kubernetes.cache_service import get_kubernetes_cache_service
+                cache_service = get_kubernetes_cache_service()
+                if hasattr(cache_service, 'cleanup_cache'):
+                    cache_service.cleanup_cache()
+            except Exception as service_error:
+                logging.debug(f"Could not cleanup service caches: {service_error}")
                     
         except Exception as e:
             logging.error(f"Error during periodic cleanup: {e}")
@@ -763,9 +782,66 @@ class MainWindow(QMainWindow):
             logging.error(f"Error in cleanup_ui_components: {e}")
 
     def cleanup_timers_and_threads(self):
-        """Clean up all QTimer objects and threads"""
-        logging.debug("Stopping active QTimers and threads.")
+        """Enhanced cleanup for all QTimer objects and threads"""
+        logging.debug("Starting comprehensive cleanup of timers and threads.")
 
+        try:
+            # Use new performance optimizer for cleanup
+            from utils.performance_optimizer import ResourceCleaner
+            
+            # Collect all timer parents
+            potential_timer_parents = [self, self.main_widget, self.title_bar, self.stacked_widget,
+                                       self.home_page, self.cluster_view, self.preferences_page,
+                                       self.loading_overlay]
+            
+            if hasattr(self, 'cluster_view') and hasattr(self.cluster_view, 'terminal_panel'):
+                potential_timer_parents.append(self.cluster_view.terminal_panel)
+
+            # Collect all timers
+            all_timers = []
+            for parent_obj in potential_timer_parents:
+                if parent_obj is None:
+                    continue
+                try:
+                    child_timers = parent_obj.findChildren(QTimer)
+                    all_timers.extend(child_timers)
+                except RuntimeError:
+                    logging.warning(f"RuntimeError while finding timers for {type(parent_obj).__name__}")
+                except Exception as e:
+                    logging.error(f"Error finding timers for {type(parent_obj).__name__}: {e}")
+
+            # Cleanup timers using the utility
+            ResourceCleaner.cleanup_timers(all_timers)
+            
+            # Collect and cleanup threads
+            all_threads = []
+            for parent_obj in potential_timer_parents:
+                if parent_obj is None:
+                    continue
+                try:
+                    child_threads = parent_obj.findChildren(QThread)
+                    all_threads.extend(child_threads)
+                except RuntimeError:
+                    logging.warning(f"RuntimeError while finding threads for {type(parent_obj).__name__}")
+                except Exception as e:
+                    logging.error(f"Error finding threads for {type(parent_obj).__name__}: {e}")
+            
+            # Cleanup threads using the utility
+            ResourceCleaner.cleanup_threads(all_threads)
+            
+            # Force garbage collection
+            ResourceCleaner.force_garbage_collection()
+            
+            QThread.msleep(100)
+            logging.info("Comprehensive cleanup completed successfully.")
+            
+        except ImportError:
+            # Fall back to original cleanup if performance_optimizer not available
+            logging.warning("Performance optimizer not available, using fallback cleanup")
+            self._fallback_cleanup()
+    
+    def _fallback_cleanup(self):
+        """Fallback cleanup method if performance optimizer is not available"""
         potential_timer_parents = [self, self.main_widget, self.title_bar, self.stacked_widget,
                                    self.home_page, self.cluster_view, self.preferences_page,
                                    self.loading_overlay]
@@ -789,8 +865,30 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 logging.error(f"Error finding/stopping timers for {type(parent_obj).__name__}: {e}")
 
-        logging.info(f"Stopped {timers_stopped} active QTimers.")
-        QThread.msleep(100)
+        logging.info(f"Fallback cleanup: Stopped {timers_stopped} active QTimers.")
+    
+    def _disconnect_cluster_signals(self):
+        """Disconnect cluster-related signals to prevent issues during shutdown"""
+        try:
+            if hasattr(self, 'cluster_connector'):
+                # Disconnect any signals from cluster connector
+                if hasattr(self.cluster_connector, 'disconnect'):
+                    self.cluster_connector.disconnect()
+        except Exception as e:
+            logging.error(f"Error disconnecting cluster signals: {e}")
+    
+    def __del__(self):
+        """Destructor to ensure cleanup when MainWindow is destroyed"""
+        try:
+            if hasattr(self, '_shutting_down') and not self._shutting_down:
+                logging.debug("MainWindow destructor called, performing cleanup")
+                # Force cleanup if not already done
+                self._shutting_down = True
+                if hasattr(self, '_cleanup_timer'):
+                    self._cleanup_timer.stop()
+                self.cleanup_timers_and_threads()
+        except Exception as e:
+            logging.error(f"Error in MainWindow destructor: {e}")
 
 def main():
     """Application entry point with platform-consistent styling"""

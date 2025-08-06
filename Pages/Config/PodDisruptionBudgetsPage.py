@@ -63,7 +63,7 @@ class PodDisruptionBudgetsPage(BaseResourcePage):
                 color: #888888;
             }
         """)
-        delete_btn.clicked.connect(self.delete_selected_resources)
+        delete_btn.clicked.connect(lambda: self.delete_selected_resources())
         
         # Find the header layout
         for i in range(self.layout().count()):

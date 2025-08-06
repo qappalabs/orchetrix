@@ -2,6 +2,7 @@
 Enhanced PodsPage with integrated port forwarding functionality
 """
 
+import logging
 from PyQt6.QtWidgets import QHeaderView, QPushButton, QLabel, QWidget, QHBoxLayout, QMessageBox
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QColor
@@ -105,7 +106,7 @@ class PodsPage(BaseResourcePage):
                 color: #888888;
             }
         """)
-        delete_btn.clicked.connect(self.delete_selected_resources)
+        delete_btn.clicked.connect(lambda: self.delete_selected_resources())
         
         # Find the header layout
         for i in range(self.layout().count()):
@@ -332,70 +333,7 @@ class PodsPage(BaseResourcePage):
         action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
         self.table.setCellWidget(row, status_col + 1, action_container)
 
-    def _create_action_button(self, row, resource_name=None, resource_namespace=None):
-        """Create an action button with menu - Enhanced with port forwarding"""
-        from PyQt6.QtWidgets import QToolButton, QMenu
-        from PyQt6.QtGui import QIcon
-        from PyQt6.QtCore import QSize
-        from functools import partial
-        
-        button = QToolButton()
-
-        # Use custom SVG icon instead of text
-        icon = resource_path("icons/Moreaction_Button.svg")
-        button.setIcon(QIcon(icon))
-        button.setIconSize(QSize(16, 16))
-
-        # Remove text and change to icon-only style
-        button.setText("")
-        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-
-        button.setFixedWidth(30)
-        button.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE)
-        button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        button.setCursor(Qt.CursorShape.PointingHandCursor)
-
-        # Create menu
-        menu = QMenu(button)
-        menu.setStyleSheet(AppStyles.MENU_STYLE)
-
-        # Connect signals to change row appearance when menu opens/closes
-        menu.aboutToShow.connect(lambda: self._highlight_active_row(row, True))
-        menu.aboutToHide.connect(lambda: self._highlight_active_row(row, False))
-
-        # Get pod details for port detection
-        pod_resource = self.resources[row] if row < len(self.resources) else None
-        exposed_ports = self._get_pod_exposed_ports(pod_resource)
-
-        actions = []
-        
-        # Pod-specific actions
-        actions.append({"text": "View Logs", "icon": "icons/logs.png", "dangerous": False})
-        actions.append({"text": "SSH", "icon": "icons/terminal.png", "dangerous": False})
-        
-        # Port forwarding actions - only show if pod has exposed ports
-        if exposed_ports:
-            actions.append({"text": "Port Forward", "icon": "icons/network.png", "dangerous": False})
-        
-        # Standard actions
-        actions.extend([
-            {"text": "Edit", "icon": "icons/edit.png", "dangerous": False},
-            {"text": "Delete", "icon": "icons/delete.png", "dangerous": True}
-        ])
-
-        # Add actions to menu
-        for action_info in actions:
-            action = menu.addAction(action_info["text"])
-            if "icon" in action_info:
-                action.setIcon(QIcon(action_info["icon"]))
-            if action_info.get("dangerous", False):
-                action.setProperty("dangerous", True)
-            action.triggered.connect(
-                partial(self._handle_action, action_info["text"], row)
-            )
-
-        button.setMenu(menu)
-        return button
+    # Removed duplicate _create_action_button - now uses base class implementation
 
     def _get_pod_exposed_ports(self, pod_resource):
         """Extract exposed ports from pod resource"""
@@ -419,31 +357,9 @@ class PodsPage(BaseResourcePage):
         
         return exposed_ports
 
-    def _handle_action(self, action, row):
-        """Handle action button clicks with enhanced port forwarding support."""
-        if row >= len(self.resources):
-            return
+    # Removed duplicate _handle_action_with_data - now uses base class _handle_action
 
-        resource = self.resources[row]
-        resource_name = resource.get("name", "")
-        resource_namespace = resource.get("namespace", "")
-
-        if action == "Port Forward":
-            self._handle_port_forward(resource_name, resource_namespace, resource)
-        elif action == "View Logs":
-            if self.resource_type == "pods":
-                self._handle_view_logs(resource_name, resource_namespace, resource)
-            else:
-                self._show_logs_error("Logs are only available for pod resources.")
-        elif action == "SSH":
-            if self.resource_type == "pods":
-                self._handle_ssh_into_pod(resource_name, resource_namespace, resource)
-            else:
-                self._show_ssh_error("SSH is only available for pod resources.")
-        elif action == "Edit":
-            self._handle_edit_resource(resource_name, resource_namespace, resource)
-        elif action == "Delete":
-            self.delete_resource(resource_name, resource_namespace)
+    # Removed duplicate _handle_action method - now using base class implementation with enhanced pod support
 
     def _handle_port_forward(self, pod_name, namespace, resource):
         """Handle port forwarding for a pod"""
@@ -557,3 +473,154 @@ class PodsPage(BaseResourcePage):
                 if parent and hasattr(parent, 'detail_manager'):
                     # Show pod details using the detail manager
                     parent.detail_manager.show_detail("pod", resource_name, namespace)
+    
+    def _handle_view_logs(self, pod_name, namespace, resource):
+        """Handle viewing logs for a pod"""
+        try:
+            # Find the ClusterView that contains the terminal panel
+            parent = self.parent()
+            cluster_view = None
+            
+            # Walk up the parent tree to find ClusterView
+            while parent:
+                if parent.__class__.__name__ == 'ClusterView' or hasattr(parent, 'terminal_panel'):
+                    cluster_view = parent
+                    break
+                parent = parent.parent()
+            
+            if cluster_view and hasattr(cluster_view, 'terminal_panel'):
+                # Create a logs tab in the terminal panel
+                cluster_view.terminal_panel.create_enhanced_logs_tab(pod_name, namespace)
+                
+                # Show the terminal panel if it's hidden
+                if not cluster_view.terminal_panel.is_visible:
+                    if hasattr(cluster_view, 'toggle_terminal'):
+                        cluster_view.toggle_terminal()
+                    elif hasattr(cluster_view.terminal_panel, 'show_terminal'):
+                        cluster_view.terminal_panel.show_terminal()
+                    
+                logging.info(f"Created logs tab for pod: {pod_name} in namespace: {namespace}")
+            else:
+                # Fallback: show error if terminal panel not found
+                QMessageBox.information(
+                    self, "Logs",
+                    f"Opening logs for pod: {pod_name} in namespace: {namespace}\n\n"
+                    f"Terminal panel will show logs. Use kubectl logs {pod_name} -n {namespace} if needed."
+                )
+                logging.warning(f"Terminal panel not found for logs tab creation")
+                
+        except Exception as e:
+            logging.error(f"Failed to create logs tab for pod {pod_name}: {e}")
+            QMessageBox.critical(
+                self, "Error", 
+                f"Failed to open logs for pod {pod_name}: {str(e)}"
+            )
+    
+    def _handle_ssh_into_pod(self, pod_name, namespace, resource):
+        """Handle SSH into a pod"""
+        try:
+            # Find the ClusterView that contains the terminal panel
+            parent = self.parent()
+            cluster_view = None
+            
+            # Walk up the parent tree to find ClusterView
+            while parent:
+                if parent.__class__.__name__ == 'ClusterView' or hasattr(parent, 'terminal_panel'):
+                    cluster_view = parent
+                    break
+                parent = parent.parent()
+            
+            if cluster_view and hasattr(cluster_view, 'terminal_panel'):
+                # Create an SSH tab in the terminal panel
+                cluster_view.terminal_panel.create_ssh_tab(pod_name, namespace)
+                
+                # Show the terminal panel if it's hidden
+                if not cluster_view.terminal_panel.is_visible:
+                    if hasattr(cluster_view, 'toggle_terminal'):
+                        cluster_view.toggle_terminal()
+                    elif hasattr(cluster_view.terminal_panel, 'show_terminal'):
+                        cluster_view.terminal_panel.show_terminal()
+                    
+                logging.info(f"Created SSH tab for pod: {pod_name} in namespace: {namespace}")
+            else:
+                # Fallback: show error if terminal panel not found
+                QMessageBox.information(
+                    self, "SSH",
+                    f"Opening SSH for pod: {pod_name} in namespace: {namespace}\n\n"
+                    f"Terminal panel will show SSH session. Use kubectl exec -it {pod_name} -n {namespace} -- /bin/bash if needed."
+                )
+                logging.warning(f"Terminal panel not found for SSH tab creation")
+                
+        except Exception as e:
+            logging.error(f"Failed to create SSH tab for pod {pod_name}: {e}")
+            QMessageBox.critical(
+                self, "Error", 
+                f"Failed to open SSH for pod {pod_name}: {str(e)}"
+            )
+    
+    def _show_logs_error(self, message):
+        """Show logs error message"""
+        QMessageBox.warning(self, "Logs Error", message)
+    
+    def _show_ssh_error(self, message):
+        """Show SSH error message"""
+        QMessageBox.warning(self, "SSH Error", message)
+    
+    def _handle_edit_resource(self, resource_name, resource_namespace, resource):
+        """Handle editing a resource by opening it in detail page edit mode"""
+        try:
+            # Find the ClusterView that contains the detail manager
+            parent = self.parent()
+            cluster_view = None
+            
+            # Walk up the parent tree to find ClusterView
+            while parent:
+                if parent.__class__.__name__ == 'ClusterView' or hasattr(parent, 'detail_manager'):
+                    cluster_view = parent
+                    break
+                parent = parent.parent()
+            
+            if cluster_view and hasattr(cluster_view, 'detail_manager'):
+                # Show the detail page first
+                cluster_view.detail_manager.show_detail(self.resource_type, resource_name, resource_namespace)
+                
+                # After showing detail page, trigger edit mode
+                # We need to wait a bit for the detail page to load completely
+                QTimer.singleShot(500, lambda: self._trigger_edit_mode(cluster_view))
+                
+                logging.info(f"Opening {self.resource_type}/{resource_name} in edit mode")
+            else:
+                # Fallback: show error if detail manager not found
+                QMessageBox.information(
+                    self, "Edit Resource",
+                    f"Cannot edit {self.resource_type}/{resource_name}: Detail panel not available"
+                )
+                logging.warning(f"Detail manager not found for editing {resource_name}")
+                
+        except Exception as e:
+            logging.error(f"Failed to open {resource_name} for editing: {e}")
+            QMessageBox.critical(
+                self, "Error", 
+                f"Failed to open {resource_name} for editing: {str(e)}"
+            )
+    
+    def _trigger_edit_mode(self, cluster_view):
+        """Trigger edit mode in the detail page YAML section"""
+        try:
+            if hasattr(cluster_view, 'detail_manager') and cluster_view.detail_manager._detail_page:
+                detail_page = cluster_view.detail_manager._detail_page
+                
+                # Find the YAML section and trigger edit mode
+                if hasattr(detail_page, 'yaml_section'):
+                    yaml_section = detail_page.yaml_section
+                    if hasattr(yaml_section, 'toggle_yaml_edit_mode') and yaml_section.yaml_editor.isReadOnly():
+                        yaml_section.toggle_yaml_edit_mode()
+                        logging.info("Successfully activated edit mode in YAML section")
+                    else:
+                        logging.warning("YAML section is not in read-only mode or toggle method not found")
+                else:
+                    logging.warning("YAML section not found in detail page")
+            else:
+                logging.warning("Detail page not found or not properly initialized")
+        except Exception as e:
+            logging.error(f"Error triggering edit mode: {e}")

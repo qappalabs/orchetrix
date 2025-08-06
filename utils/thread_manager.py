@@ -62,6 +62,12 @@ class EnhancedThreadPoolManager(QObject):
             
             return True
     
+    def start_worker(self, worker, priority=0):
+        """Start a worker - backward compatibility method"""
+        # Generate a unique worker ID if not provided
+        worker_id = getattr(worker, 'worker_id', f"worker_{id(worker)}")
+        return self.submit_worker(worker_id, worker, priority)
+    
     def cancel_worker(self, worker_id):
         with self.lock:
             worker = self.active_workers.get(worker_id)

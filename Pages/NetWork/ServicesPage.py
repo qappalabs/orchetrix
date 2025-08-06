@@ -2,6 +2,7 @@
 Enhanced ServicesPage with integrated port forwarding functionality
 """
 
+import logging
 from PyQt6.QtWidgets import (QHeaderView, QPushButton, QLabel, QVBoxLayout, 
                             QWidget, QHBoxLayout, QMessageBox)
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
@@ -93,7 +94,7 @@ class ServicesPage(BaseResourcePage):
                 color: #888888;
             }
         """)
-        delete_btn.clicked.connect(self.delete_selected_resources)
+        delete_btn.clicked.connect(lambda: self.delete_selected_resources())
         
         for i in range(self.layout().count()):
             item = self.layout().itemAt(i)
@@ -262,65 +263,7 @@ class ServicesPage(BaseResourcePage):
         action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
         self.table.setCellWidget(row, len(columns) + 2, action_container)
 
-    def _create_action_button(self, row, resource_name=None, resource_namespace=None):
-        """Create an action button with menu - Enhanced with port forwarding"""
-        from PyQt6.QtWidgets import QToolButton, QMenu
-        from PyQt6.QtGui import QIcon
-        from PyQt6.QtCore import QSize
-        from functools import partial
-        
-        button = QToolButton()
-
-        # Use custom SVG icon instead of text
-        icon = resource_path("icons/Moreaction_Button.svg")
-        button.setIcon(QIcon(icon))
-        button.setIconSize(QSize(16, 16))
-
-        button.setText("")
-        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-
-        button.setFixedWidth(30)
-        button.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE)
-        button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        button.setCursor(Qt.CursorShape.PointingHandCursor)
-
-        # Create menu
-        menu = QMenu(button)
-        menu.setStyleSheet(AppStyles.MENU_STYLE)
-
-        # Connect signals to change row appearance when menu opens/closes
-        menu.aboutToShow.connect(lambda: self._highlight_active_row(row, True))
-        menu.aboutToHide.connect(lambda: self._highlight_active_row(row, False))
-
-        # Get service details for port detection
-        service_resource = self.resources[row] if row < len(self.resources) else None
-        service_ports = self._get_service_ports(service_resource)
-
-        actions = []
-        
-        # Port forwarding actions - only show if service has ports
-        if service_ports:
-            actions.append({"text": "Port Forward", "icon": "icons/network.png", "dangerous": False})
-        
-        # Standard actions
-        actions.extend([
-            {"text": "Edit", "icon": "icons/edit.png", "dangerous": False},
-            {"text": "Delete", "icon": "icons/delete.png", "dangerous": True}
-        ])
-
-        # Add actions to menu
-        for action_info in actions:
-            action = menu.addAction(action_info["text"])
-            if "icon" in action_info:
-                action.setIcon(QIcon(action_info["icon"]))
-            if action_info.get("dangerous", False):
-                action.setProperty("dangerous", True)
-            action.triggered.connect(
-                partial(self._handle_action, action_info["text"], row)
-            )
-
-        button.setMenu(menu)
-        return button
+    # Removed duplicate _create_action_button - now uses base class implementation
 
     def _get_service_ports(self, service_resource):
         """Extract ports from service resource"""
@@ -381,21 +324,9 @@ class ServicesPage(BaseResourcePage):
         except Exception as e:
             return "Unknown"
 
-    def _handle_action(self, action, row):
-        """Handle action button clicks with enhanced port forwarding support."""
-        if row >= len(self.resources):
-            return
+    # Removed duplicate _handle_action_with_data - now uses base class _handle_action
 
-        resource = self.resources[row]
-        resource_name = resource.get("name", "")
-        resource_namespace = resource.get("namespace", "")
-
-        if action == "Port Forward":
-            self._handle_port_forward(resource_name, resource_namespace, resource)
-        elif action == "Edit":
-            self._handle_edit_resource(resource_name, resource_namespace, resource)
-        elif action == "Delete":
-            self.delete_resource(resource_name, resource_namespace)
+    # Removed duplicate _handle_action method - now using base class implementation
 
     def _handle_port_forward(self, service_name, namespace, resource):
         """Handle port forwarding for a service"""

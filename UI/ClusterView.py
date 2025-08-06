@@ -1092,4 +1092,55 @@ class ClusterView(QWidget):
         self._set_active_navigation(page_name)
 
         # Load data with delay to allow UI update
-        QTimer.singleShot(50, lambda: self._load_page_data(page_widget))
+        QTimer.singleShot(50, lambda: self._load_page_data(page_widget))    
+    def cleanup_on_destroy(self):
+        """Cleanup method called when ClusterView is being destroyed"""
+        try:
+            logging.debug("ClusterView cleanup_on_destroy called")
+            
+            # Close any open detail panels
+            if hasattr(self, 'detail_manager') and self.detail_manager:
+                if self.detail_manager.is_detail_visible():
+                    self.detail_manager.hide_detail()
+            
+            # Stop and cleanup terminal
+            if hasattr(self, 'terminal_panel') and self.terminal_panel:
+                if hasattr(self.terminal_panel, 'cleanup'):
+                    self.terminal_panel.cleanup()
+            
+            # Disconnect cluster connector signals
+            if hasattr(self, 'cluster_connector') and self.cluster_connector:
+                try:
+                    # Disconnect all signals
+                    self.cluster_connector.connection_started.disconnect()
+                    self.cluster_connector.connection_complete.disconnect()
+                    self.cluster_connector.cluster_data_loaded.disconnect()
+                    self.cluster_connector.error_occurred.disconnect()
+                except Exception as e:
+                    logging.error(f"Error disconnecting cluster connector signals: {e}")
+            
+            # Cleanup individual pages
+            for page_name, page_widget in self.pages.items():
+                if hasattr(page_widget, 'cleanup_on_destroy'):
+                    try:
+                        page_widget.cleanup_on_destroy()
+                    except Exception as e:
+                        logging.error(f"Error cleaning up page {page_name}: {e}")
+            
+            # Clear pages dictionary
+            self.pages.clear()
+            self._loaded_pages.clear()
+            
+            logging.debug("ClusterView cleanup completed")
+            
+        except Exception as e:
+            logging.error(f"Error in ClusterView cleanup_on_destroy: {e}")
+    
+    def __del__(self):
+        """Destructor to ensure cleanup when ClusterView is destroyed"""
+        try:
+            if hasattr(self, 'pages'):
+                logging.debug("ClusterView destructor called, performing cleanup")
+                self.cleanup_on_destroy()
+        except Exception as e:
+            logging.error(f"Error in ClusterView destructor: {e}")

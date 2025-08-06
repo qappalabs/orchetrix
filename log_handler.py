@@ -38,7 +38,12 @@ def setup_logging():
     try:
         file_handler = logging.FileHandler(log_file, encoding='utf-8')
         file_handler.setLevel(logging.INFO)
-        file_formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
+        
+        # Clean, readable format
+        file_formatter = logging.Formatter(
+            '%(asctime)s | %(levelname)-8s | %(name)-20s | %(message)s',
+            datefmt='%H:%M:%S'
+        )
         file_handler.setFormatter(file_formatter)
         root_logger.addHandler(file_handler)
         
@@ -46,7 +51,11 @@ def setup_logging():
         if not getattr(sys, 'frozen', False):
             console_handler = logging.StreamHandler()
             console_handler.setLevel(logging.INFO)
-            console_formatter = logging.Formatter('%(levelname)s: %(message)s')
+            
+            # Even cleaner console format
+            console_formatter = logging.Formatter(
+                '%(levelname)-8s | %(name)-15s | %(message)s'
+            )
             console_handler.setFormatter(console_formatter)
             root_logger.addHandler(console_handler)
         
@@ -99,13 +108,13 @@ def serialize_for_logging(obj: Any, max_length: int = 500) -> str:
         return f"<{type(obj).__name__}:unprintable>"
 
 def method_logger(
-    log_level: int = logging.INFO,
-    log_inputs: bool = True,
-    log_outputs: bool = True,
-    log_timing: bool = True,
-    log_exceptions: bool = True,
-    max_input_length: int = 500,
-    max_output_length: int = 500,
+    log_level: int = logging.DEBUG,  # Changed to DEBUG to reduce noise
+    log_inputs: bool = False,        # Disabled by default
+    log_outputs: bool = False,       # Disabled by default  
+    log_timing: bool = False,        # Disabled by default
+    log_exceptions: bool = True,     # Keep exception logging
+    max_input_length: int = 100,     # Reduced length
+    max_output_length: int = 100,    # Reduced length
     exclude_params: Optional[list] = None
 ) -> Callable:
     """
@@ -162,8 +171,9 @@ def method_logger(
                 except Exception as e:
                     input_info = f" | INPUTS: <serialization_error: {str(e)}>"
             
-            # Log method entry
-            logger.log(log_level, f"[{call_id}] ENTER {func_name} | TIME_IN: {start_datetime}{input_info}")
+            # Log method entry (only if DEBUG level)
+            if log_level <= logging.DEBUG:
+                logger.log(log_level, f"{func_name}() called{input_info}")
             
             try:
                 # Execute the function
@@ -172,24 +182,24 @@ def method_logger(
                 # Calculate execution time
                 end_time = time.time()
                 execution_time = (end_time - start_time) * 1000  # Convert to milliseconds
-                end_datetime = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
                 
                 # Prepare output logging
                 output_info = ""
-                if log_outputs and result is not None:
+                if log_outputs and result is not None and log_level <= logging.DEBUG:
                     try:
                         serialized_result = serialize_for_logging(result, max_output_length)
-                        output_info = f" | OUTPUT: {serialized_result}"
+                        output_info = f" -> {serialized_result}"
                     except Exception as e:
-                        output_info = f" | OUTPUT: <serialization_error: {str(e)}>"
+                        output_info = f" -> <error: {str(e)}>"
                 
-                # Prepare timing info
+                # Prepare timing info  
                 timing_info = ""
-                if log_timing:
-                    timing_info = f" | TIME_OUT: {end_datetime} | DURATION: {execution_time:.2f}ms"
+                if log_timing and execution_time > 100:  # Only log slow operations
+                    timing_info = f" ({execution_time:.1f}ms)"
                 
-                # Log method exit
-                logger.log(log_level, f"[{call_id}] EXIT  {func_name}{timing_info}{output_info}")
+                # Log method exit (only if DEBUG level or slow)
+                if log_level <= logging.DEBUG or execution_time > 100:
+                    logger.log(log_level, f"{func_name}() completed{timing_info}{output_info}")
                 
                 return result
                 
@@ -199,11 +209,13 @@ def method_logger(
                 execution_time = (end_time - start_time) * 1000
                 end_datetime = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
                 
-                # Log exception
+                # Log exception (always log exceptions)
                 if log_exceptions:
-                    timing_info = f" | TIME_OUT: {end_datetime} | DURATION: {execution_time:.2f}ms" if log_timing else ""
-                    logger.error(f"[{call_id}] ERROR {func_name}{timing_info} | EXCEPTION: {type(e).__name__}: {str(e)}")
-                    logger.error(f"[{call_id}] TRACE {func_name} | {traceback.format_exc()}")
+                    timing_info = f" ({execution_time:.1f}ms)" if log_timing else ""
+                    logger.error(f"{func_name}() failed{timing_info}: {type(e).__name__}: {str(e)}")
+                    # Only show traceback for non-expected errors
+                    if not isinstance(e, (ValueError, KeyError, AttributeError)):
+                        logger.error(f"Traceback: {traceback.format_exc()}")
                 
                 raise
         
@@ -211,7 +223,7 @@ def method_logger(
     return decorator
 
 def class_logger(
-    log_level: int = logging.INFO,
+    log_level: int = logging.DEBUG,  # Changed to DEBUG to reduce noise
     exclude_methods: Optional[list] = None,
     exclude_private: bool = True,
     exclude_dunder: bool = True,

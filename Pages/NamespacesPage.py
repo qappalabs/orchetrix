@@ -178,6 +178,9 @@ class NamespacesPage(BaseResourcePage):
         self.table.setStyleSheet(AppStyles.TABLE_STYLE)
         self.table.horizontalHeader().setStyleSheet(AppStyles.CUSTOM_HEADER_STYLE)
         self.configure_columns()
+        
+        # Add delete selected button
+        self._add_delete_selected_button()
 
     def configure_columns(self):
         """Configure column widths for full screen utilization"""
@@ -212,6 +215,40 @@ class NamespacesPage(BaseResourcePage):
         # Ensure full width utilization after configuration
         QTimer.singleShot(100, self._ensure_full_width_utilization)
 
+    def _add_delete_selected_button(self):
+        """Add a button to delete selected resources."""
+        delete_btn = QPushButton("Delete Selected")
+        delete_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #d32f2f;
+                color: #ffffff;
+                border: none;
+                border-radius: 4px;
+                padding: 5px 10px;
+            }
+            QPushButton:hover {
+                background-color: #b71c1c;
+            }
+            QPushButton:pressed {
+                background-color: #d32f2f;
+            }
+            QPushButton:disabled {
+                background-color: #555555;
+                color: #888888;
+            }
+        """)
+        delete_btn.clicked.connect(lambda: self.delete_selected_resources())
+        
+        # Find the header layout
+        for i in range(self.layout().count()):
+            item = self.layout().itemAt(i)
+            if item.layout():
+                for j in range(item.layout().count()):
+                    widget = item.layout().itemAt(j).widget()
+                    if isinstance(widget, QPushButton) and widget.text() == "Refresh":
+                        # Insert before the refresh button
+                        item.layout().insertWidget(item.layout().count() - 1, delete_btn)
+                        break
 
     def populate_resource_row(self, row, resource):
         self.table.setRowHeight(row, 40)
@@ -282,10 +319,10 @@ class NamespacesPage(BaseResourcePage):
             # Get namespaces using API
             namespaces_list = self.kube_client.v1.list_namespace()
 
-            self.table.setRowCount(0)
-            for row, namespace_item in enumerate(namespaces_list.items):
-                self.table.insertRow(row)
-
+            self.clear_table()
+            resources = []
+            
+            for namespace_item in namespaces_list.items:
                 # Convert API object to dict for consistency
                 namespace_dict = self.kube_client.v1.api_client.sanitize_for_serialization(namespace_item)
 
@@ -294,7 +331,12 @@ class NamespacesPage(BaseResourcePage):
                     "age": self._calculate_age(namespace_item.metadata.creation_timestamp),
                     "raw_data": namespace_dict
                 }
-                self.populate_resource_row(row, resource)
+                resources.append(resource)
+            
+            # Use the base class method to display resources
+            self.resources = resources
+            self._display_resources(resources)
+            self._update_items_count()
 
         except ApiException as e:
             QMessageBox.critical(self, "API Error", f"Failed to refresh namespaces: {e.reason}")
@@ -517,3 +559,11 @@ class NamespacesPage(BaseResourcePage):
                 logging.error(f"Error stopping operation thread: {e}")
 
         super().closeEvent(event)
+    
+    def load_data(self):
+        """Override base class load_data to use refresh_table method"""
+        self.refresh_table()
+    
+    def force_load_data(self):
+        """Override base class force_load_data to use refresh_table method"""
+        self.refresh_table()

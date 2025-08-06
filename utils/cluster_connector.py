@@ -507,9 +507,11 @@ class ClusterConnection(QObject):
             poller = self.adaptive_pollers[cluster_name]['metrics']
             new_interval = poller.record_poll_result(data_hash)
             
-            # Update timer interval
-            if self.metrics_timer.isActive():
-                self.metrics_timer.setInterval(new_interval)
+            # FIXED: Update timer interval safely
+            if hasattr(self, 'metrics_timer') and self.metrics_timer and self.metrics_timer.isActive():
+                # Stop and restart with new interval to avoid race conditions
+                self.metrics_timer.stop()
+                self.metrics_timer.start(new_interval)
         
         # Emit signal to ClusterPage
         try:
@@ -556,9 +558,11 @@ class ClusterConnection(QObject):
             poller = self.adaptive_pollers[cluster_name]['issues']
             new_interval = poller.record_poll_result(data_hash)
             
-            # Update timer interval
-            if self.issues_timer.isActive():
-                self.issues_timer.setInterval(new_interval)
+            # FIXED: Update timer interval safely
+            if hasattr(self, 'issues_timer') and self.issues_timer and self.issues_timer.isActive():
+                # Stop and restart with new interval to avoid race conditions
+                self.issues_timer.stop()
+                self.issues_timer.start(new_interval)
         
         # Emit signal to ClusterPage
         try:
@@ -710,8 +714,9 @@ class ClusterConnection(QObject):
     
     def stop_polling(self):
         """Stop all polling timers"""
+        # FIXED: Stop timers safely
         for timer in [self.metrics_timer, self.issues_timer]:
-            if timer.isActive():
+            if timer and hasattr(timer, 'isActive') and timer.isActive():
                 timer.stop()
 
     def handle_connection_error(self, cluster_name, error_message):
@@ -959,9 +964,24 @@ class ClusterConnection(QObject):
         """Cleanup resources"""
         self._shutting_down = True
         self.stop_polling()
-        self._batch_timer.stop()
-        self.smart_cache.cache.clear()
-        self.connection_pool.connections.clear()
+        
+        # FIXED: Stop batch timer safely
+        if hasattr(self, '_batch_timer') and self._batch_timer and hasattr(self._batch_timer, 'stop'):
+            self._batch_timer.stop()
+            
+        if hasattr(self, 'smart_cache') and self.smart_cache:
+            self.smart_cache.cache.clear()
+        if hasattr(self, 'connection_pool') and self.connection_pool:
+            self.connection_pool.connections.clear()
+    
+    def __del__(self):
+        """Destructor to ensure cleanup when ClusterConnector is destroyed"""
+        try:
+            if hasattr(self, '_shutting_down') and not self._shutting_down:
+                logging.debug("ClusterConnector destructor called, performing cleanup")
+                self.cleanup()
+        except Exception as e:
+            logging.error(f"Error in ClusterConnector destructor: {e}")
 
 # Singleton instance management
 _connector_instance = None
