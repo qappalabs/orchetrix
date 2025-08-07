@@ -152,6 +152,31 @@ class TerminalPanel(QWidget):
                 except Exception as e:
                     print(f"Error terminating process for terminal {terminal_data.get('tab_button').text()}: {e}")
 
+    def reset_all_tabs(self):
+        """Reset terminal panel to fresh state with only one terminal tab"""
+        try:
+            # First terminate all processes
+            self.terminate_all_processes()
+            
+            # Clear all widgets from stack layout
+            while self.stack_layout.count():
+                child = self.stack_layout.takeAt(0)
+                if child.widget():
+                    child.widget().deleteLater()
+            
+            # Clear all tabs from header
+            self.unified_header.clear_all_tabs()
+            
+            # Reset tab data
+            self.terminal_tabs.clear()
+            self.active_terminal_index = 0
+            
+            # Add a fresh terminal tab
+            self.add_terminal_tab()
+            
+        except Exception as e:
+            logging.error(f"Error resetting terminal tabs: {e}")
+
     def add_terminal_tab(self, shell=None):
         tab_index = len(self.terminal_tabs)
         selected_shell = shell or self.unified_header.selected_shell
@@ -525,7 +550,7 @@ class TerminalPanel(QWidget):
         if self.is_visible:
             self.hide()
             self.is_visible = False
-            self.terminate_all_processes()
+            self.reset_all_tabs()
 
     def toggle_maximize(self):
         self.is_maximized = not self.is_maximized

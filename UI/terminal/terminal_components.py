@@ -549,6 +549,14 @@ class UnifiedTerminalHeader(QWidget):
                 widget.deleteLater()
                 break
 
+    def clear_all_tabs(self):
+        """Remove all tab containers from the tabs layout."""
+        # Keep the add button (last item) and remove everything else
+        while self.tabs_layout.count() > 1:
+            item = self.tabs_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
     def _active_terminal_widget(self):
         """Get the currently active terminal widget."""
         if self.parent_terminal and self.parent_terminal.active_terminal_index < len(self.parent_terminal.terminal_tabs):
