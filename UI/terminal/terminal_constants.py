@@ -91,10 +91,9 @@ class StyleConstants:
             width: 20px;
         }}
         QComboBox::down-arrow {{
-            image: none;
-            border-left: 4px solid transparent;
-            border-right: 4px solid transparent;
-            border-top: 4px solid {AppColors.TEXT_SECONDARY};
+            image: url(icons/down_btn.svg);
+            width: 12px;
+            height: 12px;
             margin-right: 8px;
         }}
     """

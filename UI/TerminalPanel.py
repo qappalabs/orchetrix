@@ -359,10 +359,17 @@ class TerminalPanel(QWidget):
         else:
             self.unified_header.update_header_for_tab_type(False)
 
+        # Hide all tabs first, then show the selected one
         for i, tab_data in enumerate(self.terminal_tabs):
-            tab_data['content_widget'].setVisible(i == tab_index)
-            tab_data['tab_button'].setChecked(i == tab_index)
-            tab_data['active'] = i == tab_index
+            is_selected = (i == tab_index)
+            content_widget = tab_data.get('content_widget')
+            tab_button = tab_data.get('tab_button')
+            
+            if content_widget:
+                content_widget.setVisible(is_selected)
+            if tab_button:
+                tab_button.setChecked(is_selected)
+            tab_data['active'] = is_selected
 
         if terminal_widget := terminal_data.get('terminal_widget'):
             terminal_widget.setFocus()
@@ -648,7 +655,7 @@ class TerminalPanel(QWidget):
             close_btn = QPushButton("✕")
             close_btn.setFixedSize(16, 16)
             close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            close_btn.setStyleSheet(StyleConstants.TAB_CLOSE_BUTTON)
+            close_btn.setStyleSheet(AppStyles.TERMINAL_TAB_CLOSE_BUTTON)
 
             tab_layout.addWidget(label)
             tab_layout.addWidget(close_btn)
@@ -753,7 +760,7 @@ class TerminalPanel(QWidget):
             close_btn = QPushButton("✕")
             close_btn.setFixedSize(16, 16)
             close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            close_btn.setStyleSheet(StyleConstants.TAB_CLOSE_BUTTON)
+            close_btn.setStyleSheet(AppStyles.TERMINAL_TAB_CLOSE_BUTTON)
 
             tab_layout.addWidget(label)
             tab_layout.addWidget(close_btn)
@@ -818,6 +825,9 @@ class TerminalPanel(QWidget):
                 'namespace': namespace
             }
             self.terminal_tabs.append(terminal_data)
+
+            # Switch to the new SSH tab
+            self.switch_to_terminal_tab(tab_index)
 
             return tab_index
 
