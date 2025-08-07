@@ -517,31 +517,28 @@ class BaseResourcePage(BaseTablePage):
         self.items_count.setText(f"{count} items")
 
     def _show_empty_message(self):
-        """Show empty state message while keeping table headers visible"""
-        # Clear table data but keep headers visible
+        """Show empty state message in center of table section"""
+        # Clear the table data
         self.clear_table()
         
-        # Show the table (not the message container) so headers remain visible
-        self._table_stack.setCurrentWidget(self.table)
+        # Clear and setup the message container
+        self._clear_message_container()
         
-        # Insert a single row with the empty message spanning all columns
-        if self.table.columnCount() > 0:
-            self.table.insertRow(0)
-            
-            # Create merged cell for empty message
-            empty_item = QTableWidgetItem("No resources found")
-            empty_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            empty_item.setFlags(empty_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            empty_item.setForeground(QColor("#9ca3af"))
-            
-            self.table.setItem(0, 0, empty_item)
-            
-            # Span across all columns for better visibility
-            if self.table.columnCount() > 1:
-                self.table.setSpan(0, 0, 1, self.table.columnCount())
-            
-            # Set row height for better appearance
-            self.table.setRowHeight(0, 60)
+        # Create centered empty message with app theme styling
+        empty_title = QLabel("No resources found")
+        empty_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_title.setStyleSheet("color: #ffffff; font-size: 20px; font-weight: bold; background-color: transparent; margin: 8px;")
+        
+        empty_subtitle = QLabel("Connect to a cluster or check your filters")
+        empty_subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)  
+        empty_subtitle.setStyleSheet("color: #9ca3af; font-size: 14px; background-color: transparent; margin: 4px;")
+        
+        # Add widgets to message container
+        self._message_widget_container.layout().addWidget(empty_title)
+        self._message_widget_container.layout().addWidget(empty_subtitle)
+        
+        # Switch to message container view
+        self._table_stack.setCurrentWidget(self._message_widget_container)
 
     def _show_error_message(self, message):
         """Show error message"""
@@ -1048,6 +1045,9 @@ class BaseResourcePage(BaseTablePage):
                 service_resource = self.resources[row]
                 if self._has_service_ports(service_resource):
                     actions.append({"text": "Port Forward", "icon": "icons/network.png", "dangerous": False})
+        elif hasattr(self, 'resource_type') and self.resource_type == "nodes":
+            # Node-specific actions
+            actions.append({"text": "View Metrics", "icon": "icons/chart.png", "dangerous": False})
         
         # Standard actions for all resources
         actions.extend([
@@ -1176,6 +1176,12 @@ class BaseResourcePage(BaseTablePage):
                 logging.error(f"Error in delete action: {e}")
                 from PyQt6.QtWidgets import QMessageBox
                 QMessageBox.critical(self, "Error", f"Failed to delete {resource_name}: {str(e)}")
+        elif action == "View Metrics":
+            # Handle node-specific View Metrics action
+            if hasattr(self, 'select_node_for_graphs'):
+                self.select_node_for_graphs(row)
+            else:
+                logging.warning(f"View Metrics action not supported for resource type: {self.resource_type}")
         else:
             logging.warning(f"BaseResourcePage: Unknown action: {action}")
     

@@ -16,7 +16,6 @@ from base_components.base_components import SortableTableWidgetItem
 from base_components.base_resource_page import BaseResourcePage
 from utils.cluster_connector import get_cluster_connector
 from UI.Icons import resource_path
-import random
 import datetime
 import re
 import logging
@@ -137,23 +136,26 @@ class GraphWidget(QFrame):
                 node_name = node.get("name", "unknown")
                 
                 if self.title == "CPU Usage":
-                    if "cpu_usage" in node:
-                        utilization = float(node.get("cpu_usage", 0))
+                    cpu_usage = node.get("cpu_usage")
+                    if cpu_usage is not None:
+                        utilization = float(cpu_usage)
                     else:
-                        prev_value = old_data.get(node_name, random.uniform(15, 50))
-                        utilization = max(5, min(80, prev_value + random.uniform(-3, 3)))
+                        # No real data available, skip this node
+                        continue
                 elif self.title == "Memory Usage":
-                    if "memory_usage" in node:
-                        utilization = float(node.get("memory_usage", 0))
+                    memory_usage = node.get("memory_usage")
+                    if memory_usage is not None:
+                        utilization = float(memory_usage)
                     else:
-                        prev_value = old_data.get(node_name, random.uniform(25, 60))
-                        utilization = max(10, min(85, prev_value + random.uniform(-3, 3)))
+                        # No real data available, skip this node
+                        continue
                 else:  # Disk Usage
-                    if "disk_usage" in node:
-                        utilization = float(node.get("disk_usage", 0))
+                    disk_usage = node.get("disk_usage")
+                    if disk_usage is not None:
+                        utilization = float(disk_usage)
                     else:
-                        prev_value = old_data.get(node_name, random.uniform(30, 70))
-                        utilization = max(15, min(90, prev_value + random.uniform(-2, 2)))
+                        # No real data available, skip this node
+                        continue
                 
                 self.utilization_data[node_name] = utilization
         finally:
@@ -176,22 +178,22 @@ class GraphWidget(QFrame):
             self.value_label.setText(f"{self.current_value}{self.unit}")
 
     def update_data(self):
-        """Update the chart data"""
+        """Update the chart data - only use real cluster data"""
         if not self.selected_node or self.node_name not in self.utilization_data:
             return
             
+        # Use the actual utilization value from real cluster data
         current_utilization = self.utilization_data[self.node_name]
-        variation = random.uniform(-1, 1)
-        new_value = max(0, min(100, current_utilization + variation))
-            
-        self.utilization_data[self.node_name] = new_value
-        self.data.append(new_value)
-        self.data.pop(0)
-        self.current_value = round(new_value, 1)
-        self.value_label.setText(f"{self.current_value}{self.unit}")
         
-        if self.isVisible():
-            self.update()
+        # Only update if we have valid real data
+        if current_utilization is not None and current_utilization >= 0:
+            self.data.append(current_utilization)
+            self.data.pop(0)
+            self.current_value = round(current_utilization, 1)
+            self.value_label.setText(f"{self.current_value}{self.unit}")
+            
+            if self.isVisible():
+                self.update()
 
     def paintEvent(self, event):
         """Simplified paint event for better performance"""
@@ -253,24 +255,7 @@ class GraphWidget(QFrame):
         if hasattr(self, 'timer') and self.timer:
             self.timer.stop()
 
-# No Data Available Widget
-class NoDataWidget(QWidget):
-    """Widget shown when no data is available"""
-    def __init__(self, message="No data available", parent=None):
-        super().__init__(parent)
-        layout = QVBoxLayout(self)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        icon_label = QLabel("📊")
-        icon_label.setStyleSheet("font-size: 48px; color: #666;")
-        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        message_label = QLabel(message)
-        message_label.setStyleSheet("font-size: 18px; color: #666;")
-        message_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        layout.addWidget(icon_label)
-        layout.addWidget(message_label)
+# No Data Available Widget - removed, now using base class implementation
 
 #------------------------------------------------------------------
 # NodesPage - Now extending BaseResourcePage for consistency
@@ -345,10 +330,7 @@ class NodesPage(BaseResourcePage):
         # Configure column widths
         self.configure_columns()
         
-        # Create no-data widget
-        self.no_data_widget = NoDataWidget("No node data available. Please connect to a cluster.")
-        self.no_data_widget.hide()
-        self.layout().addWidget(self.no_data_widget)
+        # No need for custom no-data widget - use base class implementation
 
     def configure_columns(self):
         """Configure column widths for full screen utilization"""
@@ -386,17 +368,18 @@ class NodesPage(BaseResourcePage):
         QTimer.singleShot(100, self._ensure_full_width_utilization)
 
     def show_no_data_message(self):
-        """Show no data message instead of table"""
-        self.table.hide()
-        self.no_data_widget.show()
+        """Show no data message using base class implementation"""
+        self._show_empty_message()
         
     def show_table(self):
-        """Show the table and hide no data message"""
-        self.no_data_widget.hide()
-        self.table.show()
+        """Show the table using base class implementation"""
+        if hasattr(self, '_table_stack') and self._table_stack:
+            self._table_stack.setCurrentWidget(self.table)
 
     def update_nodes(self, nodes_data):
         """Update with real node data from the cluster"""
+        logging.info(f"NodesPage: update_nodes() called with {len(nodes_data) if nodes_data else 0} nodes")
+        
         self.is_loading = False
         self.is_showing_skeleton = False
         
@@ -404,11 +387,16 @@ class NodesPage(BaseResourcePage):
             self.skeleton_timer.stop()
         
         if not nodes_data:
+            logging.warning("NodesPage: No nodes data received")
             self.nodes_data = []
             self.resources = []
             self.show_no_data_message()
             self.items_count.setText("0 items")
             return
+        
+        logging.info(f"NodesPage: Processing {len(nodes_data)} nodes")
+        if nodes_data:
+            logging.info(f"NodesPage: First node data keys: {list(nodes_data[0].keys()) if nodes_data[0] else 'No keys'}")
         
         # Store the data
         self.nodes_data = nodes_data
@@ -429,6 +417,16 @@ class NodesPage(BaseResourcePage):
         
         self.items_count.setText(f"{len(nodes_data)} items")
 
+    def populate_table(self, resources_to_populate):
+        """Populate table with resource data - uses base class rendering logic"""
+        if not self.table or not resources_to_populate: 
+            return
+            
+        logging.info(f"NodesPage: populate_table() called with {len(resources_to_populate)} resources")
+        
+        # Use base class batch rendering which calls populate_resource_row for each resource
+        self._render_resources_batch(resources_to_populate)
+
     def populate_resource_row(self, row, resource):
         """Populate a single row with Node data"""
         self.table.setRowHeight(row, 40)
@@ -440,18 +438,43 @@ class NodesPage(BaseResourcePage):
         checkbox_container.setStyleSheet("background-color: transparent;")
         self.table.setCellWidget(row, 0, checkbox_container)
         
-        # Get utilization data
-        cpu_util = self.cpu_graph.get_node_utilization(node_name)
+        # Get real utilization data (no dummy data)
+        cpu_usage = resource.get("cpu_usage")
         cpu_capacity = resource.get("cpu_capacity", "")
-        display_cpu = f"{cpu_capacity} ({cpu_util:.1f}%)" if cpu_capacity else f"{cpu_util:.1f}%"
+        if cpu_usage is not None and cpu_capacity:
+            display_cpu = f"{cpu_capacity} ({cpu_usage:.1f}%)"
+            cpu_util = cpu_usage
+        elif cpu_capacity:
+            display_cpu = f"{cpu_capacity}"
+            cpu_util = 0
+        else:
+            display_cpu = "N/A"
+            cpu_util = 0
         
-        mem_util = self.mem_graph.get_node_utilization(node_name)
+        memory_usage = resource.get("memory_usage") 
         mem_capacity = resource.get("memory_capacity", "")
-        display_mem = f"{mem_capacity} ({mem_util:.1f}%)" if mem_capacity else f"{mem_util:.1f}%"
+        if memory_usage is not None and mem_capacity:
+            display_mem = f"{mem_capacity} ({memory_usage:.1f}%)"
+            mem_util = memory_usage
+        elif mem_capacity:
+            display_mem = f"{mem_capacity}"
+            mem_util = 0
+        else:
+            display_mem = "N/A"
+            mem_util = 0
         
-        disk_util = self.disk_graph.get_node_utilization(node_name)
+        disk_usage = resource.get("disk_usage")
         disk_capacity = resource.get("disk_capacity", "")
-        display_disk = f"{disk_capacity} ({disk_util:.1f}%)" if disk_capacity else f"{disk_util:.1f}%"
+        if disk_usage is not None:
+            # Show cluster-wide disk usage percentage
+            display_disk = f"Cluster ({disk_usage:.1f}%)"
+            disk_util = disk_usage
+        elif disk_capacity:
+            display_disk = f"{disk_capacity}"
+            disk_util = 0
+        else:
+            display_disk = "N/A"
+            disk_util = 0
         
         taints = resource.get("taints", "0")
         
@@ -541,8 +564,8 @@ class NodesPage(BaseResourcePage):
         status_widget.clicked.connect(lambda: self.table.selectRow(row))
         self.table.setCellWidget(row, status_col, status_widget)
         
-        # Create and add action button with proper styling
-        action_button = self._create_node_action_button(row, node_name)
+        # Use base class action button implementation
+        action_button = self._create_action_button(row, node_name)
         action_button.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE +
     """
     QToolButton::menu-indicator { image: none; width: 0px; }
@@ -570,73 +593,11 @@ class NodesPage(BaseResourcePage):
                 else:
                     item.setBackground(QColor("transparent"))
 
-    def _create_node_action_button(self, row, node_name):
-        """Create an action button with node-specific options"""
-        button = QToolButton()
-
-        # Use custom SVG icon instead of text
-        icon = resource_path("icons/Moreaction_Button.svg")
-        button.setIcon(QIcon(icon))
-        button.setIconSize(QSize(AppConstants.SIZES["ICON_SIZE"], AppConstants.SIZES["ICON_SIZE"]))
-
-        # Remove text and change to icon-only style
-        button.setText("")
-        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-
-        button.setFixedWidth(30)
-        button.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE)
-        button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        button.setCursor(Qt.CursorShape.PointingHandCursor)
-
-        # Create menu
-        menu = QMenu(button)
-        menu.setStyleSheet(AppStyles.MENU_STYLE)
-
-        # Connect signals to change row appearance when menu opens/closes
-        menu.aboutToShow.connect(lambda: self._highlight_active_row(row, True))
-        menu.aboutToHide.connect(lambda: self._highlight_active_row(row, False))
-
-        # Add actions to menu
-        detail_action = menu.addAction("Detail")
-        detail_action.setIcon(QIcon(resource_path("icons/edit.png")))
-        detail_action.triggered.connect(lambda: self._handle_node_action("Detail", row, node_name))
-        
-        delete_action = menu.addAction("Delete")
-        delete_action.setIcon(QIcon(resource_path("icons/delete.png")))
-        delete_action.setProperty("dangerous", True)
-        delete_action.triggered.connect(lambda: self._handle_node_action("Delete", row, node_name))
-        
-        view_metrics = menu.addAction("View Metrics")
-        view_metrics.setIcon(QIcon(resource_path("icons/chart.png")))
-        view_metrics.triggered.connect(lambda: self._handle_node_action("View Metrics", row, node_name))
-
-        button.setMenu(menu)
-        self._item_widgets[f"action_button_{row}"] = button
-        return button
+    # Removed _create_node_action_button - now uses base class _create_action_button
     
-    def _handle_node_action(self, action, row, node_name):
-        """Handle node-specific actions"""
-        if row >= len(self.nodes_data):
-            return
-        
-        resource = self.nodes_data[row]
-        
-        if action == "Detail":
-            # Show the detail view for the selected node
-            parent = self.parent()
-            while parent and not hasattr(parent, 'detail_manager'):
-                parent = parent.parent()
-            
-            if parent and hasattr(parent, 'detail_manager'):
-                resource_type = self.resource_type
-                if resource_type.endswith('s'):
-                    resource_type = resource_type[:-1]
-                
-                parent.detail_manager.show_detail(resource_type, node_name, None)
-        elif action == "Delete":
-            self.delete_resource(node_name, "")
-        elif action == "View Metrics":
-            self.select_node_for_graphs(row)
+    # Removed custom _handle_action - now uses base class implementation with nodes support
+    
+    # Removed _handle_node_action - now uses base class _handle_action
     
     def select_node_for_graphs(self, row):
         """Select a node to show in the graphs"""
@@ -684,16 +645,71 @@ class NodesPage(BaseResourcePage):
             
     def load_data(self, load_more=False):
         """Override to fetch node data from cluster connector"""
+        logging.info(f"NodesPage: load_data() called, is_loading={self.is_loading}")
+        
         if self.is_loading:
             return
             
         self.is_loading = True
         
         if hasattr(self, 'cluster_connector') and self.cluster_connector:
+            logging.info("NodesPage: Calling cluster_connector.load_nodes()")
             self.cluster_connector.load_nodes()
         else:
+            logging.warning("NodesPage: No cluster_connector available")
             self.is_loading = False
             self.show_no_data_message()
+    
+    def force_load_data(self):
+        """Override base class force_load_data to use cluster connector"""
+        logging.info("NodesPage: force_load_data() called")
+        self.load_data()
+    
+    def _add_filter_controls(self, header_layout):
+        """Override to remove namespace dropdown for nodes (cluster-scoped resources)"""
+        from PyQt6.QtWidgets import QLineEdit, QLabel
+        from UI.Styles import AppStyles
+        
+        # Create a separate layout for filters with proper spacing
+        filters_layout = QHBoxLayout()
+        filters_layout.setSpacing(12)  # Add space between elements
+        
+        # Search bar with label - only search, no namespace dropdown for nodes
+        search_label = QLabel("Search:")
+        search_label.setStyleSheet("color: #ffffff; font-size: 12px; font-weight: normal;")
+        search_label.setMinimumWidth(50)
+        
+        self.search_bar = QLineEdit()
+        self.search_bar.setPlaceholderText("Search nodes...")
+        self.search_bar.textChanged.connect(self._on_search_text_changed)
+        self.search_bar.setFixedWidth(200)
+        self.search_bar.setFixedHeight(32)
+        
+        # Apply consistent styling
+        search_style = getattr(AppStyles, 'SEARCH_INPUT', 
+            """QLineEdit {
+                background-color: #2d2d2d;
+                color: #ffffff;
+                border: 1px solid #3d3d3d;
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-size: 12px;
+            }
+            QLineEdit:focus {
+                border-color: #0078d4;
+                background-color: #353535;
+            }""")
+        self.search_bar.setStyleSheet(search_style)
+        
+        # Add widgets to layout - no namespace dropdown
+        filters_layout.addWidget(search_label)
+        filters_layout.addWidget(self.search_bar)
+        
+        # Add the filters layout directly to header layout
+        header_layout.addLayout(filters_layout)
+        
+        # Set namespace_combo to None since nodes don't use namespaces
+        self.namespace_combo = None
         
     # Disable inherited methods that aren't needed for nodes
     def _add_delete_selected_button(self):
