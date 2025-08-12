@@ -102,12 +102,12 @@ class DeploymentsPage(BaseResourcePage):
         # Column specifications with optimized default widths
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
-            (1, 140, "interactive"), # Name
-            (2, 90, "interactive"),  # Namespace
+            (1, 220, "interactive"), # Name
+            (2, 120, "interactive"),  # Namespace
             (3, 80, "interactive"),  # pod
-            (4, 70, "interactive"),  # Replicas
-            (5, 130, "interactive"), # Age
-            (6, 110, "stretch"), # Conditions
+            (4, 100, "interactive"),  # Replicas
+            (5, 90, "interactive"), # Age
+            (6, 100, "stretch"), # Conditions
             (7, 40, "fixed"),  # Action
         ]
         

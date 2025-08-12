@@ -55,9 +55,9 @@ class ConfigMapsPage(BaseResourcePage):
         # Column specifications with optimized default widths
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
-            (1, 140, "interactive"), # Name
-            (2, 90, "interactive"),  # Namespace
-            (3, 80, "interactive"),  # Key
+            (1, 160, "interactive"), # Name
+            (2, 100, "interactive"),  # Namespace
+            (3, 180, "interactive"),  # Key
             (4, 80, "stretch"),      # Age - stretch to fill remaining space
             (5, 40, "fixed")        # Actions
         ]

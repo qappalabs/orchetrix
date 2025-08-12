@@ -114,15 +114,15 @@ class ServicesPage(BaseResourcePage):
         # Column specifications with optimized default widths
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
-            (1, 140, "interactive"), # Name
-            (2, 90, "interactive"),  # Namespace
+            (1, 160, "interactive"), # Name
+            (2, 100, "interactive"),  # Namespace
             (3, 80, "interactive"),  # Type
-            (4, 60, "interactive"),  # Cluster IP   
-            (5, 60, "interactive"),  # Port
-            (6, 60, "interactive"),  # External IP
-            (7, 60, "interactive"),  # Selector
+            (4, 90, "interactive"),  # Cluster IP   
+            (5, 100, "interactive"),  # Port
+            (6, 100, "interactive"),  # External IP
+            (7, 100, "interactive"),  # Selector
             (8, 60, "interactive"),  # Age
-            (9, 80, "stretch"),      # Status - stretch to fill remaining space
+            (9, 60, "stretch"),      # Status - stretch to fill remaining space
             (10, 40, "fixed")        # Actions
         ]
         

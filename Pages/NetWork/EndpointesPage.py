@@ -49,12 +49,11 @@ class EndpointsPage(BaseResourcePage):
         # Column specifications with optimized default widths
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
-            (1, 140, "interactive"), # Name
-            (2, 190, "interactive"),  # Namespace
-            (3, 180, "interactive"),  # Endpoints
-            (4, 60, "interactive"),  # Age
-            (5, 80, "stretch"),      # Status - stretch to fill remaining space
-            (6, 40, "fixed")        # Actions
+            (1, 160, "interactive"), # Name
+            (2, 200, "interactive"),  # Namespace
+            (3, 190, "interactive"),  # Endpoints
+            (4, 60, "stretch"),  # Age
+            (5, 40, "fixed")        # Actions
         ]
         
         # Apply column configuration

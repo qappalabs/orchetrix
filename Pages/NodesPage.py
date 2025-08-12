@@ -344,10 +344,10 @@ class NodesPage(BaseResourcePage):
             (3, 110, "interactive"), # Memory
             (4, 110, "interactive"), # Disk
             (5, 60, "interactive"),  # Taints
-            (6, 90, "interactive"),  # Roles
+            (6, 120, "interactive"),  # Roles
             (7, 90, "interactive"),  # Version
             (8, 60, "interactive"),  # Age
-            (9, 110, "stretch"),     # Conditions
+            (9, 90, "stretch"),     # Conditions
             (10, 40, "fixed")        # Actions
         ]
         

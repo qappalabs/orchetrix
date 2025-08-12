@@ -54,12 +54,12 @@ class ReplicaSetsPage(BaseResourcePage):
         # Column specifications with optimized default widths
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
-            (1, 140, "interactive"), # Name
-            (2, 90, "interactive"),  # Namespace
-            (3, 80, "interactive"),  # Desired
-            (4, 70, "interactive"),  # Current
-            (5, 70, "interactive"),  # Ready
-            (6, 80, "stretch"),      # Age - stretch to fill remaining space
+            (1, 180, "interactive"), # Name
+            (2, 100, "interactive"),  # Namespace
+            (3, 90, "interactive"),  # Desired
+            (4, 80, "interactive"),  # Current
+            (5, 80, "interactive"),  # Ready
+            (6, 70, "stretch"),      # Age - stretch to fill remaining space
             (7, 40, "fixed")        # Actions
         ]
         

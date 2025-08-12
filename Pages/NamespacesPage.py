@@ -187,8 +187,8 @@ class NamespacesPage(BaseResourcePage):
         # Column specifications with optimized default widths
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
-            (1, 140, "interactive"), # Name
-            (2, 190, "interactive"),  # Labels
+            (1, 180, "interactive"), # Name
+            (2, 260, "interactive"),  # Labels
             (3, 60, "interactive"),  # Age
             (4, 80, "stretch"),      # Status - stretch to fill remaining space
             (5, 40, "fixed")        # Actions

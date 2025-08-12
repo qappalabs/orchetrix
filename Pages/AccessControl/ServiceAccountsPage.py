@@ -48,9 +48,9 @@ class ServiceAccountsPage(BaseResourcePage):
         # Column specifications with optimized default widths
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
-            (1, 140, "interactive"), # Name
-            (2, 90, "interactive"),  # Namespace
-            (3, 80, "stretch"),  # Age
+            (1, 240, "interactive"), # Name
+            (2, 220, "interactive"),  # Namespace
+            (3, 70, "stretch"),  # Age
             (4, 40, "fixed")        # Actions
         ]
         

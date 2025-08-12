@@ -55,10 +55,10 @@ class DaemonSetsPage(BaseResourcePage):
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
             (1, 140, "interactive"), # Name
-            (2, 90, "interactive"),  # Namespace
-            (3, 80, "interactive"),  # Pods
-            (4, 70, "interactive"),  # Node Selector
-            (5, 130, "stretch"), # Age
+            (2, 100, "interactive"),  # Namespace
+            (3, 90, "interactive"),  # Pods
+            (4, 180, "interactive"),  # Node Selector
+            (5, 80, "stretch"), # Age
             (6, 40, "fixed"), # Actions
 
         ]
