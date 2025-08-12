@@ -821,10 +821,10 @@ class BaseResourcePage(BaseTablePage):
         if len(resources) > 100:
             self._update_search_index()
         
-        # Use progressive rendering only for very large datasets (increased threshold)
-        if len(resources) > 500:  # Increased from BATCH_SIZE (50) to 500
+        # Use progressive rendering for large datasets with optimized threshold
+        if len(resources) > 250:  # Optimized threshold for better performance
             self._render_queue = resources.copy()
-            self._render_timer.start(1)  # Much faster rendering (1ms instead of 16ms)
+            self._render_timer.start(5)  # Optimized timer interval for smooth rendering
         else:
             # Render directly for smaller datasets (much faster)
             self._render_resources_batch(resources)
@@ -835,12 +835,16 @@ class BaseResourcePage(BaseTablePage):
             self._render_timer.stop()
             return
         
-        # Use larger batch size for faster rendering
-        batch_size = min(200, len(self._render_queue))  # Increased from BATCH_SIZE (50) to 200
+        # Use optimized batch size for best performance/responsiveness balance
+        batch_size = min(100, len(self._render_queue))  # Balanced batch size for smooth rendering
         batch = self._render_queue[:batch_size]
         self._render_queue = self._render_queue[batch_size:]
         
         self._render_resources_batch(batch, append=True)
+        
+        # Process UI events every few batches to maintain responsiveness
+        if len(self._render_queue) % 200 == 0:
+            QApplication.processEvents()
         
         if not self._render_queue:
             self._render_timer.stop()

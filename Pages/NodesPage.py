@@ -15,6 +15,8 @@ from UI.Styles import AppStyles, AppColors, AppConstants
 from base_components.base_components import SortableTableWidgetItem
 from base_components.base_resource_page import BaseResourcePage
 from utils.cluster_connector import get_cluster_connector
+from utils.debounced_updater import get_debounced_updater
+from utils.performance_config import get_performance_config
 from UI.Icons import resource_path
 import datetime
 import re
@@ -111,53 +113,43 @@ class GraphWidget(QFrame):
         layout.addLayout(header_layout)
         layout.addStretch()
 
-        # Much longer timer interval for better performance
+        # Much longer timer interval for better performance  
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_data)
-        self.timer.start(30000)  # 30 seconds for better performance
+        self.timer.start(45000)  # 45 seconds to reduce CPU usage
 
     def generate_utilization_data(self, nodes_data):
-        """Generate utilization data for nodes"""
+        """Generate utilization data for nodes - optimized for performance"""
         if not nodes_data or self._is_updating:
             return
             
         current_time = time.time()
-        if current_time - self._last_update_time < 15.0:  # Throttle to 15 seconds
+        if current_time - self._last_update_time < 20.0:  # Increased throttle to 20 seconds
             return
         
         self._is_updating = True
         self._last_update_time = current_time
         
         try:
-            # Keep existing data and update gradually
-            old_data = self.utilization_data.copy()
+            # Batch process nodes more efficiently
+            metric_key = self.title.replace(" Usage", "").lower() + "_usage"
             
+            # Use dictionary comprehension for better performance
+            new_data = {}
             for node in nodes_data:
                 node_name = node.get("name", "unknown")
+                metric_value = node.get(metric_key)
                 
-                if self.title == "CPU Usage":
-                    cpu_usage = node.get("cpu_usage")
-                    if cpu_usage is not None:
-                        utilization = float(cpu_usage)
-                    else:
-                        # No real data available, skip this node
-                        continue
-                elif self.title == "Memory Usage":
-                    memory_usage = node.get("memory_usage")
-                    if memory_usage is not None:
-                        utilization = float(memory_usage)
-                    else:
-                        # No real data available, skip this node
-                        continue
-                else:  # Disk Usage
-                    disk_usage = node.get("disk_usage")
-                    if disk_usage is not None:
-                        utilization = float(disk_usage)
-                    else:
-                        # No real data available, skip this node
-                        continue
+                if metric_value is not None:
+                    try:
+                        new_data[node_name] = float(metric_value)
+                    except (ValueError, TypeError):
+                        continue  # Skip invalid data
+            
+            # Update utilization_data in one operation
+            if new_data:
+                self.utilization_data.update(new_data)
                 
-                self.utilization_data[node_name] = utilization
         finally:
             self._is_updating = False
 
@@ -196,59 +188,69 @@ class GraphWidget(QFrame):
                 self.update()
 
     def paintEvent(self, event):
-        """Simplified paint event for better performance"""
+        """Ultra-simplified paint event for maximum performance"""
         super().paintEvent(event)
         
+        # Skip drawing if not visible or data is empty
+        if not self.isVisible() or not self.data:
+            return
+            
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)  # Disabled for performance
         
         width = self.width() - 32
         height = 40
         bottom = self.height() - 25
-        top = bottom - height
         
-        # Simple gradient
-        base_color = QColor(self.color)
-        gradient = QLinearGradient(0, top, 0, bottom)
-        gradient.setColorAt(0, QColor(base_color.red(), base_color.green(), base_color.blue(), 60))
-        gradient.setColorAt(1, QColor(base_color.red(), base_color.green(), base_color.blue(), 10))
+        # Use cached color to avoid object creation
+        if not hasattr(self, '_cached_color'):
+            self._cached_color = QColor(self.color)
         
-        min_value = min(self.data) if self.data else 0
-        max_value = max(self.data) if self.data else 100
-        value_range = max(max_value - min_value, 10)
-        
-        # Draw simple line chart
-        if len(self.data) > 1:
-            path = QPainterPath()
+        # Simplified line drawing - no gradient for performance
+        if len(self.data) > 1 and width > 0:
+            # Pre-calculate min/max once
+            if not hasattr(self, '_data_range') or len(self.data) != getattr(self, '_last_data_length', 0):
+                self._min_value = min(self.data)
+                self._max_value = max(self.data) 
+                self._value_range = max(self._max_value - self._min_value, 10)
+                self._data_range = True
+                self._last_data_length = len(self.data)
+            
+            # Draw simple line without path objects for better performance
+            painter.setPen(QPen(self._cached_color, 2))
             x_step = width / (len(self.data) - 1)
             
-            for i, data_point in enumerate(self.data):
-                x = 16 + i * x_step
-                y = bottom - ((data_point - min_value) / value_range) * height
-                if i == 0:
-                    path.moveTo(x, y)
-                else:
-                    path.lineTo(x, y)
+            prev_x = 16
+            prev_y = bottom - ((self.data[0] - self._min_value) / self._value_range) * height
             
-            painter.setPen(QPen(base_color, 2))
-            painter.drawPath(path)
+            for i in range(1, len(self.data)):
+                x = 16 + i * x_step
+                y = bottom - ((self.data[i] - self._min_value) / self._value_range) * height
+                painter.drawLine(int(prev_x), int(prev_y), int(x), int(y))
+                prev_x, prev_y = x, y
         
-        # Simple time labels
-        painter.setPen(QPen(QColor("#FFFFFF"), 1))
-        font = painter.font()
-        font.setPointSize(9)
-        painter.setFont(font)
+        # Only draw labels if there's significant space
+        if width > 200:
+            painter.setPen(QPen(QColor("#FFFFFF"), 1))
+            font = painter.font()
+            font.setPointSize(9)
+            painter.setFont(font)
+            
+            # Cache time strings to avoid repeated formatting
+            if not hasattr(self, '_cached_times') or time.time() - getattr(self, '_last_time_update', 0) > 60:
+                now = datetime.datetime.now()
+                start_time = now - datetime.timedelta(minutes=10)
+                self._cached_times = (start_time.strftime("%H:%M"), now.strftime("%H:%M"))
+                self._last_time_update = time.time()
+            
+            painter.drawText(QRectF(1, self.height() - 16, 30, 12), Qt.AlignmentFlag.AlignCenter, self._cached_times[0])
+            painter.drawText(QRectF(width - 15, self.height() - 16, 30, 12), Qt.AlignmentFlag.AlignCenter, self._cached_times[1])
         
-        now = datetime.datetime.now()
-        start_time = now - datetime.timedelta(minutes=10)
-        
-        painter.drawText(QRectF(16 - 15, self.height() - 16, 30, 12), Qt.AlignmentFlag.AlignCenter, start_time.strftime("%H:%M"))
-        painter.drawText(QRectF(16 + width - 15, self.height() - 16, 30, 12), Qt.AlignmentFlag.AlignCenter, now.strftime("%H:%M"))
-        
-        if not self.selected_node:
+        # Only show placeholder if no node selected and space is available
+        if not self.selected_node and width > 150:
             painter.setPen(QPen(QColor(AppColors.TEXT_SUBTLE)))
-            text_rect = QRectF(0, self.rect().top(), self.rect().width(), self.rect().height() - 20)
-            painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, "Select a node to view metrics")
+            text_rect = QRectF(0, self.rect().top() + 20, self.rect().width(), 30)
+            painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, "Select a node")
 
     def cleanup(self):
         """Cleanup method"""
@@ -272,13 +274,17 @@ class NodesPage(BaseResourcePage):
         self.has_loaded_data = False
         self.is_loading = False
         
+        # Get performance configuration and debounced updater
+        self.perf_config = get_performance_config()
+        self.debounced_updater = get_debounced_updater()
+        
         # Get the cluster connector
         self.cluster_connector = get_cluster_connector()
         
         # Connect to node data signal with error handling
         if self.cluster_connector:
             try:
-                self.cluster_connector.node_data_loaded.connect(self.update_nodes)
+                self.cluster_connector.node_data_loaded.connect(self._debounced_update_nodes)
             except Exception as e:
                 logging.error(f"Error connecting to cluster connector signals: {e}")
                 self.cluster_connector = None
@@ -414,6 +420,15 @@ class NodesPage(BaseResourcePage):
         if hasattr(self, '_table_stack') and self._table_stack:
             self._table_stack.setCurrentWidget(self.table)
 
+    def _debounced_update_nodes(self, nodes_data):
+        """Debounced wrapper for update_nodes to prevent excessive updates"""
+        self.debounced_updater.schedule_update(
+            "nodes_update", 
+            self.update_nodes, 
+            300,  # 300ms delay
+            nodes_data
+        )
+
     def update_nodes(self, nodes_data):
         """Update with real node data from the cluster - optimized for speed"""
         logging.info(f"NodesPage: update_nodes() called with {len(nodes_data) if nodes_data else 0} nodes")
@@ -477,9 +492,21 @@ class NodesPage(BaseResourcePage):
         self.table.clearContents()
         self.table.setRowCount(len(resources_to_populate))
         
-        # Populate all rows without batch processing to avoid overhead
-        for i, resource in enumerate(resources_to_populate):
-            self.populate_resource_row_optimized(i, resource)
+        # Use batched rendering for better performance with large datasets
+        batch_size = self.perf_config.get('table_batch_size', 25)  # Use performance config
+        total_items = len(resources_to_populate)
+        
+        for start_idx in range(0, total_items, batch_size):
+            end_idx = min(start_idx + batch_size, total_items)
+            batch = resources_to_populate[start_idx:end_idx]
+            
+            # Populate batch
+            for i, resource in enumerate(batch):
+                actual_row = start_idx + i
+                self.populate_resource_row_optimized(actual_row, resource)
+            
+            # Process events every batch to keep UI responsive
+            QApplication.processEvents()
         
         # Re-enable updates and sorting
         self.table.setUpdatesEnabled(True)

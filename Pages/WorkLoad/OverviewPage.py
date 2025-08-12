@@ -24,10 +24,6 @@ class OverviewResourceWorker(EnhancedBaseWorker):
         self.resource_type = resource_type
         self.kube_client = kube_client
         
-        # Connect signals for data loading
-        self.signals.finished.connect(self._on_finished)
-        self.signals.error.connect(self._on_error)
-        
         # Store callbacks for results
         self._data_callback = None
         self._error_callback = None
@@ -36,21 +32,37 @@ class OverviewResourceWorker(EnhancedBaseWorker):
         """Connect callbacks for handling results"""
         self._data_callback = data_callback
         self._error_callback = error_callback
+        
+        # Connect signals AFTER callbacks are set
+        self.signals.finished.connect(self._on_finished)
+        self.signals.error.connect(self._on_error)
     
     def _on_finished(self, result):
         """Handle finished signal"""
-        if self._data_callback and result:
-            self._data_callback(result)
+        logging.info(f"OverviewResourceWorker: Finished signal received for {self.resource_type} with result: {result}")
+        if self._data_callback and result is not None:
+            logging.info(f"OverviewResourceWorker: Calling data callback for {self.resource_type}")
+            try:
+                self._data_callback(result)
+                logging.info(f"OverviewResourceWorker: Data callback completed for {self.resource_type}")
+            except Exception as e:
+                logging.error(f"OverviewResourceWorker: Error in data callback for {self.resource_type}: {e}")
+        else:
+            logging.warning(f"OverviewResourceWorker: No callback or result for {self.resource_type}")
     
     def _on_error(self, error):
         """Handle error signal"""
+        logging.error(f"OverviewResourceWorker: Error signal received for {self.resource_type}: {error}")
         if self._error_callback:
             self._error_callback(error)
         
     def execute(self):
         if self.is_cancelled():
+            logging.info(f"OverviewResourceWorker: Worker cancelled for {self.resource_type}")
             return None
             
+        logging.info(f"OverviewResourceWorker: Executing worker for {self.resource_type}")
+        
         try:
             # Add safety check for kube_client
             if not self.kube_client:
@@ -58,9 +70,13 @@ class OverviewResourceWorker(EnhancedBaseWorker):
             
             # Fetch data based on resource type with proper error handling
             items = None
+            logging.info(f"OverviewResourceWorker: Fetching {self.resource_type} data")
+            
             if self.resource_type == "pods":
                 if hasattr(self.kube_client, 'v1') and self.kube_client.v1:
+                    logging.info(f"OverviewResourceWorker: Calling list_pod_for_all_namespaces")
                     items = self.kube_client.v1.list_pod_for_all_namespaces()
+                    logging.info(f"OverviewResourceWorker: Got {len(items.items) if items and hasattr(items, 'items') else 0} pods")
                 else:
                     raise Exception("Kubernetes v1 API not available")
             elif self.resource_type == "deployments":
@@ -103,11 +119,18 @@ class OverviewResourceWorker(EnhancedBaseWorker):
                 raise Exception(f"Unknown resource type: {self.resource_type}")
             
             if not items or not hasattr(items, 'items'):
-                return (0, 0)  # Return empty results instead of crashing
+                logging.warning(f"OverviewResourceWorker: No items returned for {self.resource_type}")
+                result = (0, 0)  # Return empty results instead of crashing
+                logging.info(f"OverviewResourceWorker: Returning result {result} for {self.resource_type}")
+                return result
                 
             # Calculate status
+            logging.info(f"OverviewResourceWorker: Calculating status for {len(items.items)} {self.resource_type} items")
             running, total = self.calculate_status(items.items)
-            return (running, total)
+            result = (running, total)
+            logging.info(f"OverviewResourceWorker: Calculated status for {self.resource_type}: {running}/{total}")
+            logging.info(f"OverviewResourceWorker: Returning result {result} for {self.resource_type}")
+            return result
             
         except Exception as e:
             logging.error(f"OverviewResourceWorker error for {self.resource_type}: {e}")
@@ -261,9 +284,14 @@ class MetricCard(QWidget):
 
     def update_data(self, running, total):
         """Update the card with new data."""
+        logging.info(f"MetricCard: Updating {self.resource_type} card with data: {running}/{total}")
         self.running = running
         self.total = total
         self.metric_label.setText(f"{running} / {total}")
+        
+        # Force a repaint to ensure the update is visible
+        self.metric_label.update()
+        
         self.card.setStyleSheet(f"""
             QFrame#metricCard {{
                 background-color: {self.colors['bg_secondary']};
@@ -275,6 +303,8 @@ class MetricCard(QWidget):
                 border-color: {self.colors['accent_color']};
             }}
         """)
+        
+        logging.info(f"MetricCard: Successfully updated {self.resource_type} card display")
 
     def show_error_state(self, show_error, error_message=""):
         """Show error state on the card."""
@@ -290,7 +320,20 @@ class MetricCard(QWidget):
                 }}
             """)
         else:
-            self.update_data(self.running, self.total)
+            # Clear error state and show data
+            self.metric_label.setText(f"{self.running} / {self.total}")
+            self.subtitle_label.setText(f"Running / Total {self.resource_type.title()}")
+            self.card.setStyleSheet(f"""
+                QFrame#metricCard {{
+                    background-color: {self.colors['bg_secondary']};
+                    border: 1px solid {self.colors['border_color']};
+                    border-radius: 8px;
+                    padding: 0px;
+                }}
+                QFrame#metricCard:hover {{
+                    border-color: {self.colors['accent_color']};
+                }}
+            """)
 
 
 class OverviewPage(QWidget):
@@ -308,12 +351,12 @@ class OverviewPage(QWidget):
             
             # Initialize kubernetes client
             if self.initialize_kube_client():
-                # Set up auto-refresh with longer interval to reduce load
+                # Set up auto-refresh with much longer interval to reduce load
                 self.setup_refresh_timer()
                 
-                # Initial data load - ensure it's called from main thread
+                # Initial data load - ensure it's called from main thread with optimized delay
                 if self.thread() == QApplication.instance().thread():
-                    QTimer.singleShot(1500, self._safe_initial_load)  # Increased delay for stability
+                    QTimer.singleShot(1000, self._safe_initial_load)  # Optimized delay for faster loading
                 else:
                     # Use metaObject to invoke on main thread
                     from PyQt6.QtCore import QMetaObject
@@ -332,9 +375,14 @@ class OverviewPage(QWidget):
         """Safely perform initial data load"""
         try:
             if self._initialization_complete and self.kube_client:
+                logging.info("OverviewPage: Starting initial data load")
                 self.fetch_kubernetes_data()
             else:
                 logging.warning("OverviewPage: Skipping initial load - not properly initialized")
+                # Try to reinitialize the client
+                if self.initialize_kube_client():
+                    logging.info("OverviewPage: Reinitialized client, trying data load")
+                    self.fetch_kubernetes_data()
         except Exception as e:
             logging.error(f"OverviewPage: Error in initial data load: {e}")
             self.show_connection_error(f"Initial load failed: {str(e)}")
@@ -345,7 +393,7 @@ class OverviewPage(QWidget):
         if self.thread() == QApplication.instance().thread():
             self.refresh_timer = QTimer(self)  # Set parent to ensure proper cleanup
             self.refresh_timer.timeout.connect(self.refresh_data)
-            # Refresh every 30 seconds instead of 5 to reduce load
+            # Refresh every 30 seconds for better data freshness
             self.refresh_timer.start(30000)
         else:
             logging.warning("OverviewPage: Timer setup called from non-main thread")
@@ -454,28 +502,46 @@ class OverviewPage(QWidget):
 
     def force_load_data(self):
         """Force reload data when refresh button is clicked."""
-        self.initialize_kube_client()
-        self.fetch_kubernetes_data()
+        logging.info("OverviewPage: Force loading data requested")
+        
+        # Clear any error states first
+        for card in self.metric_cards.values():
+            card.show_error_state(False)
+        
+        # Reinitialize client and fetch data
+        if self.initialize_kube_client():
+            self.fetch_kubernetes_data()
+        else:
+            self.show_connection_error("Failed to initialize Kubernetes client")
 
     def fetch_kubernetes_data(self):
         """Fetch actual Kubernetes data using async workers."""
         try:
+            logging.info("OverviewPage: fetch_kubernetes_data called")
+            
             if not self.kube_client:
-                self.show_connection_error("Kubernetes client not initialized")
-                return
+                logging.warning("OverviewPage: Kubernetes client not initialized, trying to reinitialize")
+                if not self.initialize_kube_client():
+                    self.show_connection_error("Kubernetes client not initialized")
+                    return
 
             if not hasattr(self.kube_client, 'current_cluster') or not self.kube_client.current_cluster:
+                logging.warning("OverviewPage: No active cluster context")
                 self.show_connection_error("No active cluster context")
                 return
 
             # Check if basic API clients are available
             if not hasattr(self.kube_client, 'v1') or not self.kube_client.v1:
+                logging.warning("OverviewPage: Kubernetes API client not available")
                 self.show_connection_error("Kubernetes API client not available")
                 return
 
+            logging.info(f"OverviewPage: Loading data for {len(self.metric_cards)} resource types")
+            
             # Load data asynchronously for each resource type
             for resource_type in self.metric_cards.keys():
                 try:
+                    logging.info(f"OverviewPage: Loading {resource_type}")
                     self.load_resource_async(resource_type)
                 except Exception as e:
                     logging.error(f"Error loading {resource_type}: {e}")
@@ -488,6 +554,7 @@ class OverviewPage(QWidget):
     def load_resource_async(self, resource_type):
         """Load a specific resource type asynchronously"""
         try:
+            logging.info(f"OverviewPage: Creating worker for {resource_type}")
             worker = OverviewResourceWorker(resource_type, self.kube_client)
             
             # Set up callbacks
@@ -499,22 +566,48 @@ class OverviewPage(QWidget):
             # Submit to thread manager with proper worker_id
             thread_manager = get_thread_manager()
             worker_id = f"overview_{resource_type}_{id(self)}"
+            logging.info(f"OverviewPage: Submitting worker {worker_id} for {resource_type}")
             success = thread_manager.submit_worker(worker_id, worker)
             
             if not success:
-                logging.warning(f"Failed to submit worker for {resource_type}")
-                self.handle_resource_error(resource_type, "Failed to submit worker")
+                logging.error(f"Failed to submit worker for {resource_type}, trying direct load")
+                # Fallback: try direct synchronous loading
+                self._load_resource_direct(resource_type)
+            else:
+                logging.info(f"OverviewPage: Successfully submitted worker for {resource_type}")
                 
         except Exception as e:
-            logging.error(f"Error creating worker for {resource_type}: {e}")
+            logging.error(f"Error creating worker for {resource_type}: {e}, trying direct load")
+            # Fallback: try direct synchronous loading
+            self._load_resource_direct(resource_type)
+    
+    def _load_resource_direct(self, resource_type):
+        """Direct synchronous loading as fallback"""
+        try:
+            logging.info(f"OverviewPage: Direct loading {resource_type}")
+            worker = OverviewResourceWorker(resource_type, self.kube_client)
+            result = worker.execute()
+            if result is not None:
+                logging.info(f"OverviewPage: Direct load successful for {resource_type}: {result}")
+                self.update_card_data(resource_type, result)
+            else:
+                logging.warning(f"OverviewPage: Direct load returned None for {resource_type}")
+                self.handle_resource_error(resource_type, "No data returned")
+        except Exception as e:
+            logging.error(f"OverviewPage: Direct load failed for {resource_type}: {e}")
             self.handle_resource_error(resource_type, str(e))
         
     def update_card_data(self, resource_type, data):
         """Update card with loaded data"""
         if resource_type in self.metric_cards:
             running_count, total_count = data
+            logging.info(f"OverviewPage: Updating {resource_type} with data: {running_count}/{total_count}")
             self.metric_cards[resource_type].update_data(running_count, total_count)
-            logging.info(f"Updated {resource_type}: {running_count}/{total_count}")
+            # Clear any error state when we get real data
+            self.metric_cards[resource_type].show_error_state(False)
+            logging.info(f"OverviewPage: Successfully updated {resource_type}: {running_count}/{total_count}")
+        else:
+            logging.warning(f"OverviewPage: No metric card found for {resource_type}")
             
     def handle_resource_error(self, resource_type, error):
         """Handle error loading resource data"""
@@ -543,6 +636,22 @@ class OverviewPage(QWidget):
             logging.error(f"OverviewPage: Failed to initialize Kubernetes client: {e}")
             self.kube_client = None
             return False
+
+    def showEvent(self, event):
+        """Handle show event - trigger immediate data load if needed"""
+        super().showEvent(event)
+        
+        # If we don't have data yet and it's been a while since initialization, try loading
+        if (self._initialization_complete and 
+            not any(card.running > 0 or card.total > 0 for card in self.metric_cards.values())):
+            logging.info("OverviewPage: No data visible on show, triggering immediate load")
+            QTimer.singleShot(100, self._force_load_all_data)
+    
+    def _force_load_all_data(self):
+        """Force load all data types directly"""
+        logging.info("OverviewPage: Force loading all data types")
+        for resource_type in self.metric_cards.keys():
+            self._load_resource_direct(resource_type)
 
     def cleanup(self):
         """Cleanup when page is being destroyed."""
