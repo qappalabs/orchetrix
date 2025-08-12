@@ -118,30 +118,17 @@ class EndpointsPage(BaseResourcePage):
             # Add item to table
             self.table.setItem(row, cell_col, item)
         
-        # Create and add action button using base class method
-        action_button = self._create_action_button(row, resource["name"])
-        action_button.setStyleSheet("""
-            QToolButton {
-                background-color: #2d2d2d;
-                color: #ffffff;
-                border: 1px solid #404040;
-                border-radius: 4px;
-                padding: 4px 8px;
-                font-size: 12px;
-            }
-            QToolButton:hover {
-                background-color: #3d3d3d;
-                border-color: #0078d4;
-            }
-            QToolButton:pressed {
-                background-color: #1e1e1e;
-            }
-            QToolButton::menu-indicator { image: none; width: 0px; }
-        """)
-        
-        # Create action container with proper styling
+        # Create and add action button using base class method with proper styling
         from PyQt6.QtWidgets import QWidget, QHBoxLayout
         from UI.Styles import AppStyles, AppConstants
+        
+        action_button = self._create_action_button(row, resource["name"])
+        action_button.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE +
+    """
+    QToolButton::menu-indicator { image: none; width: 0px; }
+    """)
+        
+        # Create action container with proper styling
         action_container = QWidget()
         action_container.setFixedWidth(AppConstants.SIZES["ACTION_WIDTH"])
         action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)

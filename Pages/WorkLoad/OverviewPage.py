@@ -16,49 +16,102 @@ from utils.thread_manager import get_thread_manager
 from kubernetes.client.rest import ApiException
 import logging
 
-class OverviewResourceWorker(QObject, EnhancedBaseWorker):
+class OverviewResourceWorker(EnhancedBaseWorker):
     """Async worker for loading overview resource data"""
-    data_loaded = pyqtSignal(tuple)  # (running_count, total_count)
-    error_occurred = pyqtSignal(str)
     
     def __init__(self, resource_type, kube_client):
-        QObject.__init__(self)
-        EnhancedBaseWorker.__init__(self, f"overview_{resource_type}")
+        super().__init__(f"overview_{resource_type}")
         self.resource_type = resource_type
         self.kube_client = kube_client
         
+        # Connect signals for data loading
+        self.signals.finished.connect(self._on_finished)
+        self.signals.error.connect(self._on_error)
+        
+        # Store callbacks for results
+        self._data_callback = None
+        self._error_callback = None
+    
+    def connect_callbacks(self, data_callback, error_callback):
+        """Connect callbacks for handling results"""
+        self._data_callback = data_callback
+        self._error_callback = error_callback
+    
+    def _on_finished(self, result):
+        """Handle finished signal"""
+        if self._data_callback and result:
+            self._data_callback(result)
+    
+    def _on_error(self, error):
+        """Handle error signal"""
+        if self._error_callback:
+            self._error_callback(error)
+        
     def execute(self):
+        if self.is_cancelled():
+            return None
+            
         try:
-            # Fetch data based on resource type
+            # Add safety check for kube_client
+            if not self.kube_client:
+                raise Exception("Kubernetes client not available")
+            
+            # Fetch data based on resource type with proper error handling
+            items = None
             if self.resource_type == "pods":
-                items = self.kube_client.v1.list_pod_for_all_namespaces()
+                if hasattr(self.kube_client, 'v1') and self.kube_client.v1:
+                    items = self.kube_client.v1.list_pod_for_all_namespaces()
+                else:
+                    raise Exception("Kubernetes v1 API not available")
             elif self.resource_type == "deployments":
-                items = self.kube_client.apps_v1.list_deployment_for_all_namespaces()
+                if hasattr(self.kube_client, 'apps_v1') and self.kube_client.apps_v1:
+                    items = self.kube_client.apps_v1.list_deployment_for_all_namespaces()
+                else:
+                    raise Exception("Kubernetes apps_v1 API not available")
             elif self.resource_type == "daemonsets":
-                items = self.kube_client.apps_v1.list_daemon_set_for_all_namespaces()
+                if hasattr(self.kube_client, 'apps_v1') and self.kube_client.apps_v1:
+                    items = self.kube_client.apps_v1.list_daemon_set_for_all_namespaces()
+                else:
+                    raise Exception("Kubernetes apps_v1 API not available")
             elif self.resource_type == "statefulsets":
-                items = self.kube_client.apps_v1.list_stateful_set_for_all_namespaces()
+                if hasattr(self.kube_client, 'apps_v1') and self.kube_client.apps_v1:
+                    items = self.kube_client.apps_v1.list_stateful_set_for_all_namespaces()
+                else:
+                    raise Exception("Kubernetes apps_v1 API not available")
             elif self.resource_type == "replicasets":
-                items = self.kube_client.apps_v1.list_replica_set_for_all_namespaces()
+                if hasattr(self.kube_client, 'apps_v1') and self.kube_client.apps_v1:
+                    items = self.kube_client.apps_v1.list_replica_set_for_all_namespaces()
+                else:
+                    raise Exception("Kubernetes apps_v1 API not available")
             elif self.resource_type == "jobs":
-                items = self.kube_client.batch_v1.list_job_for_all_namespaces()
+                if hasattr(self.kube_client, 'batch_v1') and self.kube_client.batch_v1:
+                    items = self.kube_client.batch_v1.list_job_for_all_namespaces()
+                else:
+                    raise Exception("Kubernetes batch_v1 API not available")
             elif self.resource_type == "cronjobs":
-                try:
-                    items = self.kube_client.batch_v1.list_cron_job_for_all_namespaces()
-                except (AttributeError, ApiException):
-                    if hasattr(self.kube_client, 'batch_v1beta1') and self.kube_client.batch_v1beta1:
-                        items = self.kube_client.batch_v1beta1.list_cron_job_for_all_namespaces()
-                    else:
-                        raise Exception("CronJob API not available")
+                if hasattr(self.kube_client, 'batch_v1') and self.kube_client.batch_v1:
+                    try:
+                        items = self.kube_client.batch_v1.list_cron_job_for_all_namespaces()
+                    except (AttributeError, ApiException):
+                        if hasattr(self.kube_client, 'batch_v1beta1') and self.kube_client.batch_v1beta1:
+                            items = self.kube_client.batch_v1beta1.list_cron_job_for_all_namespaces()
+                        else:
+                            raise Exception("CronJob API not available")
+                else:
+                    raise Exception("Kubernetes batch API not available")
             else:
                 raise Exception(f"Unknown resource type: {self.resource_type}")
             
+            if not items or not hasattr(items, 'items'):
+                return (0, 0)  # Return empty results instead of crashing
+                
             # Calculate status
             running, total = self.calculate_status(items.items)
-            self.data_loaded.emit((running, total))
+            return (running, total)
             
         except Exception as e:
-            self.error_occurred.emit(str(e))
+            logging.error(f"OverviewResourceWorker error for {self.resource_type}: {e}")
+            raise e  # Let the base worker handle the error
             
     def calculate_status(self, items):
         """Calculate running/total status for resource type"""
@@ -248,20 +301,43 @@ class OverviewPage(QWidget):
         self.metric_cards = {}
         self.kube_client = None
         self.refresh_timer = None
+        self._initialization_complete = False
         
-        self.setup_ui()
-        self.initialize_kube_client()
-        
-        # Set up auto-refresh with longer interval to reduce load
-        self.setup_refresh_timer()
-        
-        # Initial data load - ensure it's called from main thread
-        if self.thread() == QApplication.instance().thread():
-            QTimer.singleShot(1000, self.fetch_kubernetes_data)
-        else:
-            # Use metaObject to invoke on main thread
-            from PyQt6.QtCore import QMetaObject, Q_ARG
-            QMetaObject.invokeMethod(self, "fetch_kubernetes_data", Qt.ConnectionType.QueuedConnection)
+        try:
+            self.setup_ui()
+            
+            # Initialize kubernetes client
+            if self.initialize_kube_client():
+                # Set up auto-refresh with longer interval to reduce load
+                self.setup_refresh_timer()
+                
+                # Initial data load - ensure it's called from main thread
+                if self.thread() == QApplication.instance().thread():
+                    QTimer.singleShot(1500, self._safe_initial_load)  # Increased delay for stability
+                else:
+                    # Use metaObject to invoke on main thread
+                    from PyQt6.QtCore import QMetaObject
+                    QMetaObject.invokeMethod(self, "_safe_initial_load", Qt.ConnectionType.QueuedConnection)
+            else:
+                # Show error state if client initialization failed
+                QTimer.singleShot(500, lambda: self.show_connection_error("Failed to initialize Kubernetes client"))
+                
+            self._initialization_complete = True
+            
+        except Exception as e:
+            logging.error(f"OverviewPage initialization error: {e}")
+            self.show_connection_error(f"Initialization failed: {str(e)}")
+    
+    def _safe_initial_load(self):
+        """Safely perform initial data load"""
+        try:
+            if self._initialization_complete and self.kube_client:
+                self.fetch_kubernetes_data()
+            else:
+                logging.warning("OverviewPage: Skipping initial load - not properly initialized")
+        except Exception as e:
+            logging.error(f"OverviewPage: Error in initial data load: {e}")
+            self.show_connection_error(f"Initial load failed: {str(e)}")
         
     def setup_refresh_timer(self):
         """Set up the refresh timer for periodic updates."""
@@ -383,32 +459,55 @@ class OverviewPage(QWidget):
 
     def fetch_kubernetes_data(self):
         """Fetch actual Kubernetes data using async workers."""
-        if not self.kube_client:
-            self.show_connection_error("Kubernetes client not initialized")
-            return
+        try:
+            if not self.kube_client:
+                self.show_connection_error("Kubernetes client not initialized")
+                return
 
-        if not self.kube_client.current_cluster:
-            self.show_connection_error("No active cluster context")
-            return
+            if not hasattr(self.kube_client, 'current_cluster') or not self.kube_client.current_cluster:
+                self.show_connection_error("No active cluster context")
+                return
 
-        # Check if API clients are available
-        if not hasattr(self.kube_client, 'v1') or not self.kube_client.v1:
-            self.show_connection_error("Kubernetes API client not available")
-            return
+            # Check if basic API clients are available
+            if not hasattr(self.kube_client, 'v1') or not self.kube_client.v1:
+                self.show_connection_error("Kubernetes API client not available")
+                return
 
-        # Load data asynchronously for each resource type
-        for resource_type in self.metric_cards.keys():
-            self.load_resource_async(resource_type)
+            # Load data asynchronously for each resource type
+            for resource_type in self.metric_cards.keys():
+                try:
+                    self.load_resource_async(resource_type)
+                except Exception as e:
+                    logging.error(f"Error loading {resource_type}: {e}")
+                    self.handle_resource_error(resource_type, str(e))
+                    
+        except Exception as e:
+            logging.error(f"Error in fetch_kubernetes_data: {e}")
+            self.show_connection_error(f"Error loading data: {str(e)}")
 
     def load_resource_async(self, resource_type):
         """Load a specific resource type asynchronously"""
-        worker = OverviewResourceWorker(resource_type, self.kube_client)
-        worker.data_loaded.connect(lambda data, rtype=resource_type: self.update_card_data(rtype, data))
-        worker.error_occurred.connect(lambda error, rtype=resource_type: self.handle_resource_error(rtype, error))
-        
-        # Submit to thread manager
-        thread_manager = get_thread_manager()
-        thread_manager.submit_worker(worker)
+        try:
+            worker = OverviewResourceWorker(resource_type, self.kube_client)
+            
+            # Set up callbacks
+            worker.connect_callbacks(
+                lambda data, rtype=resource_type: self.update_card_data(rtype, data),
+                lambda error, rtype=resource_type: self.handle_resource_error(rtype, error)
+            )
+            
+            # Submit to thread manager with proper worker_id
+            thread_manager = get_thread_manager()
+            worker_id = f"overview_{resource_type}_{id(self)}"
+            success = thread_manager.submit_worker(worker_id, worker)
+            
+            if not success:
+                logging.warning(f"Failed to submit worker for {resource_type}")
+                self.handle_resource_error(resource_type, "Failed to submit worker")
+                
+        except Exception as e:
+            logging.error(f"Error creating worker for {resource_type}: {e}")
+            self.handle_resource_error(resource_type, str(e))
         
     def update_card_data(self, resource_type, data):
         """Update card with loaded data"""
@@ -431,14 +530,19 @@ class OverviewPage(QWidget):
     def initialize_kube_client(self):
         """Initialize or update the Kubernetes client."""
         try:
+            from utils.kubernetes_client import get_kubernetes_client
             self.kube_client = get_kubernetes_client()
             if self.kube_client and hasattr(self.kube_client, 'current_cluster'):
                 logging.info(f"OverviewPage: Kubernetes client initialized for cluster: {self.kube_client.current_cluster}")
+                return True
             else:
                 logging.warning("OverviewPage: Kubernetes client not properly initialized")
+                self.kube_client = None
+                return False
         except Exception as e:
             logging.error(f"OverviewPage: Failed to initialize Kubernetes client: {e}")
             self.kube_client = None
+            return False
 
     def cleanup(self):
         """Cleanup when page is being destroyed."""

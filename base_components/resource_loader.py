@@ -674,10 +674,15 @@ class KubernetesResourceLoader(EnhancedBaseWorker):
 
     def _load_pod_disruption_budgets(self):
         resources = []
+        next_token = None
         api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
         api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
 
         try:
+            if not hasattr(self.kube_client, 'policy_v1') or not self.kube_client.policy_v1:
+                logging.warning("Pod disruption budgets not available: 'KubernetesClient' object has no attribute 'policy_v1'")
+                return resources, next_token
+                
             if self.namespace and self.namespace != "all":
                 pdbs_list = self.kube_client.policy_v1.list_namespaced_pod_disruption_budget(namespace=self.namespace, **api_kwargs)
             else:
@@ -699,10 +704,15 @@ class KubernetesResourceLoader(EnhancedBaseWorker):
 
     def _load_priority_classes(self):
         resources = []
+        next_token = None
         api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
         api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
 
         try:
+            if not hasattr(self.kube_client, 'scheduling_v1') or not self.kube_client.scheduling_v1:
+                logging.warning("Priority classes not available: 'KubernetesClient' object has no attribute 'scheduling_v1'")
+                return resources, next_token
+                
             priority_classes_list = self.kube_client.scheduling_v1.list_priority_class(**api_kwargs)
             next_token = self._get_continue_token(priority_classes_list)
             
@@ -722,10 +732,15 @@ class KubernetesResourceLoader(EnhancedBaseWorker):
 
     def _load_runtime_classes(self):
         resources = []
+        next_token = None
         api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
         api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
 
         try:
+            if not hasattr(self.kube_client, 'node_v1') or not self.kube_client.node_v1:
+                logging.warning("Runtime classes not available: 'KubernetesClient' object has no attribute 'node_v1'")
+                return resources, next_token
+                
             runtime_classes_list = self.kube_client.node_v1.list_runtime_class(**api_kwargs)
             next_token = self._get_continue_token(runtime_classes_list)
             
@@ -744,10 +759,15 @@ class KubernetesResourceLoader(EnhancedBaseWorker):
 
     def _load_leases(self):
         resources = []
+        next_token = None
         api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
         api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
 
         try:
+            if not hasattr(self.kube_client, 'coordination_v1') or not self.kube_client.coordination_v1:
+                logging.warning("Leases not available: 'KubernetesClient' object has no attribute 'coordination_v1'")
+                return resources, next_token
+                
             if self.namespace and self.namespace != "all":
                 leases_list = self.kube_client.coordination_v1.list_namespaced_lease(namespace=self.namespace, **api_kwargs)
             else:
@@ -768,10 +788,15 @@ class KubernetesResourceLoader(EnhancedBaseWorker):
 
     def _load_mutating_webhook_configurations(self):
         resources = []
+        next_token = None
         api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
         api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
 
         try:
+            if not hasattr(self.kube_client, 'admissionregistration_v1') or not self.kube_client.admissionregistration_v1:
+                logging.warning("Mutating webhook configurations not available: 'KubernetesClient' object has no attribute 'admissionregistration_v1'")
+                return resources, next_token
+                
             webhooks_list = self.kube_client.admissionregistration_v1.list_mutating_webhook_configuration(**api_kwargs)
             next_token = self._get_continue_token(webhooks_list)
             
@@ -791,10 +816,15 @@ class KubernetesResourceLoader(EnhancedBaseWorker):
 
     def _load_validating_webhook_configurations(self):
         resources = []
+        next_token = None
         api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
         api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
 
         try:
+            if not hasattr(self.kube_client, 'admissionregistration_v1') or not self.kube_client.admissionregistration_v1:
+                logging.warning("Validating webhook configurations not available: 'KubernetesClient' object has no attribute 'admissionregistration_v1'")
+                return resources, next_token
+                
             webhooks_list = self.kube_client.admissionregistration_v1.list_validating_webhook_configuration(**api_kwargs)
             next_token = self._get_continue_token(webhooks_list)
             
@@ -936,10 +966,15 @@ class KubernetesResourceLoader(EnhancedBaseWorker):
 
     def _load_cluster_roles(self):
         resources = []
+        next_token = None
         api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
         api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
 
         try:
+            if not hasattr(self.kube_client, 'rbac_authorization_v1') or not self.kube_client.rbac_authorization_v1:
+                logging.warning("Cluster roles not available: 'KubernetesClient' object has no attribute 'rbac_authorization_v1'")
+                return resources, next_token
+                
             cluster_roles_list = self.kube_client.rbac_authorization_v1.list_cluster_role(**api_kwargs)
             next_token = self._get_continue_token(cluster_roles_list)
             
@@ -959,10 +994,15 @@ class KubernetesResourceLoader(EnhancedBaseWorker):
 
     def _load_roles(self):
         resources = []
+        next_token = None
         api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
         api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
 
         try:
+            if not hasattr(self.kube_client, 'rbac_authorization_v1') or not self.kube_client.rbac_authorization_v1:
+                logging.warning("Roles not available: 'KubernetesClient' object has no attribute 'rbac_authorization_v1'")
+                return resources, next_token
+                
             if self.namespace and self.namespace != "all":
                 roles_list = self.kube_client.rbac_authorization_v1.list_namespaced_role(namespace=self.namespace, **api_kwargs)
             else:
@@ -985,10 +1025,15 @@ class KubernetesResourceLoader(EnhancedBaseWorker):
 
     def _load_cluster_role_bindings(self):
         resources = []
+        next_token = None
         api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
         api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
 
         try:
+            if not hasattr(self.kube_client, 'rbac_authorization_v1') or not self.kube_client.rbac_authorization_v1:
+                logging.warning("Cluster role bindings not available: 'KubernetesClient' object has no attribute 'rbac_authorization_v1'")
+                return resources, next_token
+                
             crb_list = self.kube_client.rbac_authorization_v1.list_cluster_role_binding(**api_kwargs)
             next_token = self._get_continue_token(crb_list)
             
@@ -1010,10 +1055,15 @@ class KubernetesResourceLoader(EnhancedBaseWorker):
 
     def _load_role_bindings(self):
         resources = []
+        next_token = None
         api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
         api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
 
         try:
+            if not hasattr(self.kube_client, 'rbac_authorization_v1') or not self.kube_client.rbac_authorization_v1:
+                logging.warning("Role bindings not available: 'KubernetesClient' object has no attribute 'rbac_authorization_v1'")
+                return resources, next_token
+                
             if self.namespace and self.namespace != "all":
                 rb_list = self.kube_client.rbac_authorization_v1.list_namespaced_role_binding(namespace=self.namespace, **api_kwargs)
             else:
@@ -1038,10 +1088,15 @@ class KubernetesResourceLoader(EnhancedBaseWorker):
 
     def _load_custom_resource_definitions(self):
         resources = []
+        next_token = None
         api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
         api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
 
         try:
+            if not hasattr(self.kube_client, 'apiextensions_v1') or not self.kube_client.apiextensions_v1:
+                logging.warning("Custom resource definitions not available: 'KubernetesClient' object has no attribute 'apiextensions_v1'")
+                return resources, next_token
+                
             crd_list = self.kube_client.apiextensions_v1.list_custom_resource_definition(**api_kwargs)
             next_token = self._get_continue_token(crd_list)
             

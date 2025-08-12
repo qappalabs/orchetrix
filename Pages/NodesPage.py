@@ -296,12 +296,14 @@ class NodesPage(BaseResourcePage):
         
         layout = super().setup_ui("Nodes", headers, sortable_columns)
         
-        # Keep select all checkbox but hide the checkbox column for nodes
+        # Completely remove checkbox functionality for nodes
         if self.table:
             self.table.hideColumn(0)
-            # Keep select_all_checkbox but ensure it's disabled for nodes
+            # Remove select all checkbox completely
             if hasattr(self, 'select_all_checkbox') and self.select_all_checkbox:
                 self.select_all_checkbox.hide()
+                self.select_all_checkbox.deleteLater()
+                self.select_all_checkbox = None
             
         self.layout().setContentsMargins(16, 16, 16, 16)
         self.layout().setSpacing(16)
@@ -330,39 +332,78 @@ class NodesPage(BaseResourcePage):
         # No need for custom no-data widget - use base class implementation
 
     def configure_columns(self):
-        """Configure column widths for full screen utilization"""
+        """Configure column widths for responsive screen utilization"""
         if not self.table:
             return
             
         self.table.hideColumn(0)
         header = self.table.horizontalHeader()
         
-        column_specs = [
-            (0, 40, "fixed"),        # Hidden checkbox
-            (1, 140, "interactive"), # Name
-            (2, 110, "interactive"), # CPU
-            (3, 110, "interactive"), # Memory
-            (4, 110, "interactive"), # Disk
-            (5, 60, "interactive"),  # Taints
-            (6, 120, "interactive"),  # Roles
-            (7, 90, "interactive"),  # Version
-            (8, 60, "interactive"),  # Age
-            (9, 90, "stretch"),     # Conditions
-            (10, 40, "fixed")        # Actions
+        # Use responsive column sizing
+        QTimer.singleShot(100, self._setup_responsive_columns)
+    
+    def _setup_responsive_columns(self):
+        """Setup responsive column sizing for nodes table"""
+        if not self.table:
+            return
+            
+        header = self.table.horizontalHeader()
+        available_width = self.table.viewport().width() - 20  # Account for scrollbar
+        
+        if available_width <= 0:
+            return
+        
+        # Column priorities and minimum widths
+        column_config = [
+            (0, 40, 40, "fixed"),      # Hidden checkbox
+            (1, 140, 100, "priority"), # Name (priority)
+            (2, 110, 80, "normal"),    # CPU
+            (3, 110, 80, "normal"),    # Memory
+            (4, 110, 80, "normal"),    # Disk
+            (5, 60, 50, "compact"),    # Taints
+            (6, 120, 80, "normal"),    # Roles
+            (7, 90, 60, "compact"),    # Version
+            (8, 60, 50, "compact"),    # Age
+            (9, 90, 70, "stretch"),    # Conditions (stretch)
+            (10, 40, 40, "fixed")      # Actions
         ]
         
-        for col_index, default_width, resize_type in column_specs:
-            if col_index < self.table.columnCount():
-                if resize_type == "fixed":
-                    header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Fixed)
-                    self.table.setColumnWidth(col_index, default_width)
-                elif resize_type == "interactive":
-                    header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Interactive)
-                    self.table.setColumnWidth(col_index, default_width)
-                elif resize_type == "stretch":
-                    header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Stretch)
+        # Calculate total reserved space for fixed and minimum widths
+        reserved_space = sum(min_width for _, _, min_width, _ in column_config)
+        remaining_space = max(0, available_width - reserved_space)
         
-        QTimer.singleShot(100, self._ensure_full_width_utilization)
+        # Distribute remaining space based on priorities
+        priority_columns = sum(1 for _, _, _, col_type in column_config if col_type == "priority")
+        normal_columns = sum(1 for _, _, _, col_type in column_config if col_type == "normal")
+        
+        if priority_columns > 0:
+            priority_extra = remaining_space * 0.4 / priority_columns  # 40% to priority columns
+            normal_extra = remaining_space * 0.6 / normal_columns if normal_columns > 0 else 0
+        else:
+            priority_extra = 0
+            normal_extra = remaining_space / normal_columns if normal_columns > 0 else 0
+        
+        for col_index, default_width, min_width, col_type in column_config:
+            if col_index >= self.table.columnCount():
+                continue
+                
+            if col_type == "fixed":
+                header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Fixed)
+                self.table.setColumnWidth(col_index, min_width)
+            elif col_type == "stretch":
+                header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Stretch)
+            else:
+                header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Interactive)
+                if col_type == "priority":
+                    width = int(min_width + priority_extra)
+                elif col_type == "normal":
+                    width = int(min_width + normal_extra)
+                else:  # compact
+                    width = min_width
+                
+                self.table.setColumnWidth(col_index, max(width, min_width))
+        
+        QTimer.singleShot(50, self._ensure_full_width_utilization)
 
     def show_no_data_message(self):
         """Show no data message using base class implementation"""
@@ -374,7 +415,7 @@ class NodesPage(BaseResourcePage):
             self._table_stack.setCurrentWidget(self.table)
 
     def update_nodes(self, nodes_data):
-        """Update with real node data from the cluster"""
+        """Update with real node data from the cluster - optimized for speed"""
         logging.info(f"NodesPage: update_nodes() called with {len(nodes_data) if nodes_data else 0} nodes")
         
         self.is_loading = False
@@ -392,8 +433,6 @@ class NodesPage(BaseResourcePage):
             return
         
         logging.info(f"NodesPage: Processing {len(nodes_data)} nodes")
-        if nodes_data:
-            logging.info(f"NodesPage: First node data keys: {list(nodes_data[0].keys()) if nodes_data[0] else 'No keys'}")
         
         # Store the data
         self.nodes_data = nodes_data
@@ -402,57 +441,88 @@ class NodesPage(BaseResourcePage):
         
         self.show_table()
         
-        # Generate utilization data for graphs
-        self.cpu_graph.generate_utilization_data(nodes_data)
-        self.mem_graph.generate_utilization_data(nodes_data)
-        self.disk_graph.generate_utilization_data(nodes_data)
+        # Update graphs asynchronously to avoid blocking UI
+        QTimer.singleShot(10, lambda: self._update_graphs_async(nodes_data))
         
-        # Clear and populate table
-        self.table.setRowCount(0)
+        # Populate table with optimized method
         self.populate_table(nodes_data)
-        self.table.setSortingEnabled(True)
         
         self.items_count.setText(f"{len(nodes_data)} items")
+    
+    def _update_graphs_async(self, nodes_data):
+        """Update graphs asynchronously to avoid blocking UI"""
+        try:
+            self.cpu_graph.generate_utilization_data(nodes_data)
+            self.mem_graph.generate_utilization_data(nodes_data) 
+            self.disk_graph.generate_utilization_data(nodes_data)
+        except Exception as e:
+            logging.error(f"Error updating graphs: {e}")
+    
+    def populate_resource_row(self, row, resource):
+        """Fallback method for compatibility - redirects to optimized version"""
+        return self.populate_resource_row_optimized(row, resource)
 
     def populate_table(self, resources_to_populate):
-        """Populate table with resource data - optimized for nodes"""
+        """Populate table with resource data - heavily optimized for performance"""
         if not self.table or not resources_to_populate: 
             return
             
         logging.info(f"NodesPage: populate_table() called with {len(resources_to_populate)} resources")
         
-        # Disable sorting during population for better performance
+        # Disable all expensive operations during population
         self.table.setSortingEnabled(False)
+        self.table.setUpdatesEnabled(False)
         
         # Clear and resize table efficiently
+        self.table.clearContents()
         self.table.setRowCount(len(resources_to_populate))
         
-        # Populate rows in larger batches for better performance
-        batch_size = 25  # Larger batches for better performance
-        for i in range(0, len(resources_to_populate), batch_size):
-            batch = resources_to_populate[i:i + batch_size]
-            for j, resource in enumerate(batch):
-                self.populate_resource_row(i + j, resource)
-            
-            # Process events less frequently to reduce overhead
-            if i % (batch_size * 4) == 0:
-                QApplication.processEvents()
+        # Populate all rows without batch processing to avoid overhead
+        for i, resource in enumerate(resources_to_populate):
+            self.populate_resource_row_optimized(i, resource)
         
-        # Re-enable sorting
+        # Re-enable updates and sorting
+        self.table.setUpdatesEnabled(True)
         self.table.setSortingEnabled(True)
+        
+        # Force a single repaint
+        self.table.update()
 
-    def populate_resource_row(self, row, resource):
-        """Populate a single row with Node data"""
+    def populate_resource_row_optimized(self, row, resource):
+        """Highly optimized row population - minimizes widget creation"""
         self.table.setRowHeight(row, 40)
         
         node_name = resource.get("name", "unknown")
         
-        # Create checkbox container (hidden)
+        # Skip creating complex widgets during initial population for speed
+        # Create simple checkbox container
         checkbox_container = self._create_checkbox_container(row, node_name)
         checkbox_container.setStyleSheet("background-color: transparent;")
         self.table.setCellWidget(row, 0, checkbox_container)
         
-        # Get real utilization data (no dummy data)
+        # Pre-calculate all display values
+        display_values = self._calculate_display_values_fast(resource)
+        
+        # Create table items in one pass
+        for col, (value, sort_value) in enumerate(display_values):
+            cell_col = col + 1
+            item = SortableTableWidgetItem(value, sort_value) if sort_value is not None else SortableTableWidgetItem(value)
+            
+            # Set alignment based on column type
+            if col in [1, 2, 3, 4, 5, 6, 7]:
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            else:
+                item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            
+            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, cell_col, item)
+        
+        # Create status and action widgets - defer complex styling
+        self._create_status_and_action_widgets_fast(row, resource, len(display_values))
+    
+    def _calculate_display_values_fast(self, resource):
+        """Pre-calculate all display values for faster rendering"""
+        # CPU data
         cpu_usage = resource.get("cpu_usage")
         cpu_capacity = resource.get("cpu_capacity", "")
         if cpu_usage is not None and cpu_capacity:
@@ -465,7 +535,8 @@ class NodesPage(BaseResourcePage):
             display_cpu = "N/A"
             cpu_util = 0
         
-        memory_usage = resource.get("memory_usage") 
+        # Memory data
+        memory_usage = resource.get("memory_usage")
         mem_capacity = resource.get("memory_capacity", "")
         if memory_usage is not None and mem_capacity:
             display_mem = f"{mem_capacity} ({memory_usage:.1f}%)"
@@ -477,108 +548,65 @@ class NodesPage(BaseResourcePage):
             display_mem = "N/A"
             mem_util = 0
         
+        # Disk data
         disk_usage = resource.get("disk_usage")
-        disk_capacity = resource.get("disk_capacity", "")
         if disk_usage is not None:
-            # Show cluster-wide disk usage percentage
             display_disk = f"Cluster ({disk_usage:.1f}%)"
             disk_util = disk_usage
-        elif disk_capacity:
-            display_disk = f"{disk_capacity}"
-            disk_util = 0
         else:
             display_disk = "N/A"
             disk_util = 0
         
+        # Other data
         taints = resource.get("taints", "0")
+        try:
+            taint_sort = int(taints)
+        except ValueError:
+            taint_sort = 0
         
         roles = resource.get("roles", [])
-        if isinstance(roles, list):
-            roles_text = ", ".join(roles)
-        else:
-            roles_text = str(roles)
-            
+        roles_text = ", ".join(roles) if isinstance(roles, list) else str(roles)
+        
         version = resource.get("version", "Unknown")
         age = resource.get("age", "Unknown")
-        status = resource.get("status", "Unknown")
         
-        # Store raw data for potential use
-        if "raw_data" not in resource:
-            resource["raw_data"] = {
-                "metadata": {"name": node_name},
-                "status": {"conditions": [{"type": status, "status": "True"}]}
-            }
+        # Age sorting value
+        try:
+            if 'd' in age:
+                age_sort = int(age.replace('d', '')) * 1440
+            elif 'h' in age:
+                age_sort = int(age.replace('h', '')) * 60
+            elif 'm' in age:
+                age_sort = int(age.replace('m', ''))
+            else:
+                age_sort = 0
+        except ValueError:
+            age_sort = 0
         
-        # Prepare data columns
-        columns = [
-            node_name,
-            display_cpu,
-            display_mem,
-            display_disk,
-            str(taints),
-            roles_text,
-            version,
-            age
+        return [
+            (resource.get("name", "unknown"), None),
+            (display_cpu, cpu_util),
+            (display_mem, mem_util),
+            (display_disk, disk_util),
+            (str(taints), taint_sort),
+            (roles_text, None),
+            (version, None),
+            (age, age_sort)
         ]
+    
+    def _create_status_and_action_widgets_fast(self, row, resource, column_offset):
+        """Create status and action widgets with minimal styling"""
+        status = resource.get("status", "Unknown")
+        status_col = column_offset + 1
         
-        # Add columns to table
-        for col, value in enumerate(columns):
-            cell_col = col + 1
-            
-            # Handle numeric columns for sorting
-            if col == 1:  # CPU column
-                sort_value = cpu_util
-                item = SortableTableWidgetItem(value, sort_value)
-            elif col == 2:  # Memory column
-                sort_value = mem_util
-                item = SortableTableWidgetItem(value, sort_value)
-            elif col == 3:  # Disk column
-                sort_value = disk_util
-                item = SortableTableWidgetItem(value, sort_value)
-            elif col == 4:  # Taints column
-                try:
-                    sort_value = int(taints)
-                except ValueError:
-                    sort_value = 0
-                item = SortableTableWidgetItem(value, sort_value)
-            elif col == 7:  # Age column
-                try:
-                    if 'd' in value:
-                        age_value = int(value.replace('d', '')) * 1440
-                    elif 'h' in value:
-                        age_value = int(value.replace('h', '')) * 60
-                    elif 'm' in value:
-                        age_value = int(value.replace('m', ''))
-                    else:
-                        age_value = 0
-                except ValueError:
-                    age_value = 0
-                item = SortableTableWidgetItem(value, age_value)
-            else:
-                item = SortableTableWidgetItem(value)
-            
-            # Set text alignment
-            if col in [1, 2, 3, 4, 5, 6, 7]:
-                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            else:
-                item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-            
-            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            self.table.setItem(row, cell_col, item)
-        
-        # Add Status column as a widget
-        status_col = len(columns) + 1
-        
-        if status.lower() == "ready":
-            color = AppColors.STATUS_ACTIVE
-        else:
-            color = AppColors.STATUS_DISCONNECTED
-            
+        # Simple status widget
+        color = AppColors.STATUS_ACTIVE if status.lower() == "ready" else AppColors.STATUS_DISCONNECTED
         status_widget = StatusLabel(status, color)
         status_widget.clicked.connect(lambda: self.table.selectRow(row))
         self.table.setCellWidget(row, status_col, status_widget)
         
-        # Use base class action button implementation
+        # Use base class action button implementation with proper styling
+        node_name = resource.get("name", "unknown")
         action_button = self._create_action_button(row, node_name)
         action_button.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE +
     """
@@ -596,6 +624,13 @@ class NodesPage(BaseResourcePage):
         action_layout.addWidget(action_button)
         
         self.table.setCellWidget(row, status_col + 1, action_container)
+        
+        # Store raw data for potential use
+        if "raw_data" not in resource:
+            resource["raw_data"] = {
+                "metadata": {"name": node_name},
+                "status": {"conditions": [{"type": status, "status": "True"}]}
+            }
     
     def _highlight_active_row(self, row, is_active):
         """Highlight the row when its menu is active"""
@@ -744,7 +779,16 @@ class NodesPage(BaseResourcePage):
         
     # Disable inherited methods that aren't needed for nodes
     def _handle_checkbox_change(self, state, item_name):
+        """Override to disable checkbox functionality"""
         pass
         
     def _handle_select_all(self, state):
+        """Override to disable select all functionality"""
         pass
+    
+    def _create_checkbox_container(self, row, item_name):
+        """Override to create empty container for nodes (no checkbox needed)"""
+        from PyQt6.QtWidgets import QWidget
+        container = QWidget()
+        container.setStyleSheet("background-color: transparent;")
+        return container

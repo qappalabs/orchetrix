@@ -66,11 +66,14 @@ class VirtualScrollTable(QTableView):
         self.delegate = HighPerformanceDelegate(self)
         self.setItemDelegate(self.delegate)
         
-        # Configure header
+        # Configure header for responsive layout
         self.horizontalHeader().setStretchLastSection(True)
         self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.verticalHeader().setVisible(False)
-        self.verticalHeader().setDefaultSectionSize(30)  # Compact rows
+        self.verticalHeader().setDefaultSectionSize(32)  # Slightly larger rows for better readability
+        
+        # Enable responsive column resizing
+        self._setup_responsive_columns()
         
         # Performance optimizations
         self.setShowGrid(True)
@@ -85,6 +88,65 @@ class VirtualScrollTable(QTableView):
         
         logging.info(f"VirtualScrollTable initialized with {len(headers)} columns: {headers}")
     
+    def _setup_responsive_columns(self):
+        """Setup responsive column sizing"""
+        self._responsive_timer = QTimer(self)
+        self._responsive_timer.setSingleShot(True)
+        self._responsive_timer.timeout.connect(self._adjust_columns_to_screen)
+        
+        # Connect to parent widget resize events
+        self.parent_resize_timer = QTimer(self)
+        self.parent_resize_timer.setSingleShot(True) 
+        self.parent_resize_timer.timeout.connect(self._adjust_columns_to_screen)
+    
+    def _adjust_columns_to_screen(self):
+        """Adjust column widths to fit screen size optimally"""
+        if not self._model or not self.headers:
+            return
+            
+        try:
+            available_width = self.viewport().width() - 20  # Account for scrollbar
+            if available_width <= 0:
+                return
+            
+            header = self.horizontalHeader()
+            column_count = len(self.headers)
+            
+            if column_count == 0:
+                return
+            
+            # Define column priorities (some columns should be wider than others)
+            priority_columns = ['name', 'namespace', 'status', 'age']
+            
+            # Calculate base width per column
+            base_width = max(80, available_width // column_count)
+            
+            # Adjust individual columns based on content and priority
+            for i, column_name in enumerate(self.headers):
+                if column_name.lower() in priority_columns:
+                    # Priority columns get more space
+                    width = min(int(base_width * 1.2), 200)
+                else:
+                    # Regular columns get standard space
+                    width = min(base_width, 150)
+                
+                # Ensure minimum width for readability
+                width = max(width, 80)
+                header.resizeSection(i, width)
+                
+            # Set last column to stretch to fill remaining space
+            header.setSectionResizeMode(column_count - 1, QHeaderView.ResizeMode.Stretch)
+            
+        except Exception as e:
+            logging.warning(f"Error adjusting columns to screen: {e}")
+    
+    def resizeEvent(self, event):
+        """Handle resize events to trigger responsive column adjustment"""
+        super().resizeEvent(event)
+        # Delay adjustment to avoid excessive updates during resize
+        if hasattr(self, '_responsive_timer'):
+            self._responsive_timer.start(150)  # 150ms delay
+    
     def set_resource_data(self, data: List[Dict], columns: Optional[List[str]] = None):
         """Set data using virtualized model for optimal performance"""
         try:
@@ -98,13 +160,8 @@ class VirtualScrollTable(QTableView):
             # Connect model signals
             self._model.data_changed_custom.connect(self.data_changed.emit)
             
-            # Auto-resize columns to content (but limit max width)
-            self.resizeColumnsToContents()
-            header = self.horizontalHeader()
-            for i in range(len(self.headers)):
-                current_width = header.sectionSize(i)
-                max_width = min(current_width, 300)  # Limit column width
-                header.resizeSection(i, max_width)
+            # Apply responsive column sizing
+            QTimer.singleShot(100, self._adjust_columns_to_screen)  # Delay to ensure proper widget size
             
             logging.info(f"Set resource data: {len(data)} items, {len(self.headers)} columns")
             
