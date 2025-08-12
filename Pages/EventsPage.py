@@ -21,9 +21,9 @@ class EventsPage(BaseResourcePage):
         super().__init__(parent)
         self.resource_type = "events"
 
-        # Disable pagination and lazy loading
-        self.items_per_page = None
-        self.all_data_loaded = True
+        # FIXED: Enable pagination for events to prevent loading massive datasets
+        self.items_per_page = 100  # Load 100 events at a time
+        self.all_data_loaded = False
 
         self.setup_page_ui()
 
@@ -78,10 +78,7 @@ class EventsPage(BaseResourcePage):
         # Configure column widths
         self.configure_columns()
         
-        # Add delete selected button
-        self._add_delete_selected_button()
-
-        # Force load data after setup is complete
+        # Add delete selected button        # Force load data after setup is complete
         QTimer.singleShot(100, self.force_load_data)
 
         return layout
@@ -130,133 +127,45 @@ class EventsPage(BaseResourcePage):
 
         # FIXED: Ensure the header properly handles the hidden first column
         header.setSectionHidden(0, True)
-
-    def _add_delete_selected_button(self):
-        """Add a button to delete selected resources."""
-        delete_btn = QPushButton("Delete Selected")
-        delete_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #d32f2f;
-                color: #ffffff;
-                border: none;
-                border-radius: 4px;
-                padding: 5px 10px;
-            }
-            QPushButton:hover {
-                background-color: #b71c1c;
-            }
-            QPushButton:pressed {
-                background-color: #d32f2f;
-            }
-            QPushButton:disabled {
-                background-color: #555555;
-                color: #888888;
-            }
-        """)
-        delete_btn.clicked.connect(lambda: self.delete_selected_resources())
-        
-        # Find the header layout
-        for i in range(self.layout().count()):
-            item = self.layout().itemAt(i)
-            if item.layout():
-                for j in range(item.layout().count()):
-                    widget = item.layout().itemAt(j).widget()
-                    if isinstance(widget, QPushButton) and widget.text() == "Refresh":
-                        # Insert before the refresh button
-                        item.layout().insertWidget(item.layout().count() - 1, delete_btn)
-                        break
-
     def _handle_scroll(self, value):
-        """Override to disable infinite scrolling"""
-        pass
-
-    def load_data(self, load_more=False):
-        """Override to always load all data at once"""
-        if self._shutting_down:
-            return
-
-        if self.is_loading_initial:
-            return
-
-        self.is_loading_initial = True
-        self.resources = []
-        self.selected_items.clear()
-        self.current_continue_token = None
-        self.all_data_loaded = True
-
-        if self.table:
-            self.table.setRowCount(0)
-        if hasattr(self, '_show_skeleton_loader') and self.table.rowCount() == 0:
-            self._show_skeleton_loader()
-        else:
-            self._show_table_area()
-
-        # Create worker without pagination parameters
-        worker = KubernetesResourceLoader(
-            self.resource_type,
-            self.namespace_filter,
-            limit=None,
-            continue_token=None
-        )
-
-        worker.signals.finished.connect(
-            lambda result: self.on_resources_loaded(result[0], result[1], result[2], False)
-        )
-        worker.signals.error.connect(
-            lambda err_msg: self.on_load_error(err_msg, False)
-        )
-
-        thread_manager = get_thread_manager()
-        thread_manager.submit_worker(f"resource_load_{self.resource_type}_all", worker)
+        """FIXED: Re-enable scroll handling for pagination"""
+        # Use base class scroll handling which includes pagination
+        super()._handle_scroll(value)
 
     def on_resources_loaded(self, new_resources, resource_type, next_continue_token, load_more=False):
-        """Override to handle all data loading"""
+        """FIXED: Handle paginated data loading for events"""
         if self._shutting_down:
             return
 
-        search_text = self.search_bar.text().lower() if self.search_bar and self.search_bar.text() else ""
-
-        filtered_new_resources = []
-        if search_text:
-            for r_item in new_resources:
-                match = search_text in r_item.get("name", "").lower()
-                if not match and r_item.get("namespace"):
-                    match = search_text in r_item.get("namespace", "").lower()
-                if not match and r_item.get("raw_data", {}).get("message", ""):
-                    match = search_text in r_item.get("raw_data", {}).get("message", "").lower()
-                if match:
-                    filtered_new_resources.append(r_item)
-        else:
-            filtered_new_resources = new_resources
-
-        if self.is_showing_skeleton:
-            self.is_showing_skeleton = False
-            if hasattr(self, 'skeleton_timer') and self.skeleton_timer.isActive():
-                self.skeleton_timer.stop()
-
-        self.is_loading_initial = False
-        self.resources = filtered_new_resources
-        self.all_data_loaded = True
-
-        self._clear_empty_state()
-
-        if filtered_new_resources:
-            self.table.setRowCount(0)
-            self.populate_table(self.resources)
-            self._show_table_area()
-            self.table.setSortingEnabled(True)
-        else:
-            empty_message = f"No {self.resource_type} found"
-            if search_text:
-                empty_message = f"No {self.resource_type} found matching '{search_text}'"
-                description = "Try adjusting your search criteria or check if resources exist in other namespaces."
+        # FIXED: Use base class pagination handling instead of custom logic
+        try:
+            # Call the base class method which handles pagination properly
+            super()._on_resources_loaded((new_resources, resource_type, next_continue_token))
+            
+        except AttributeError:
+            # Fallback to manual pagination handling if base method not available
+            if load_more:
+                # Append to existing resources
+                self.resources.extend(new_resources)
             else:
-                description = f"No {self.resource_type} are currently available in the selected namespace."
-
-            self._show_message_in_table_area(empty_message, description)
-
-        self.items_count.setText(f"{len(self.resources)} items")
-        QApplication.processEvents()
+                # Replace resources 
+                self.resources = new_resources
+            
+            # Update pagination state
+            self.current_continue_token = next_continue_token
+            self.all_data_loaded = not next_continue_token
+            
+            # Update UI
+            self._display_resources(self.resources)
+            self._update_items_count()
+            
+            self.is_loading_initial = False
+            self.is_loading_more = False
+            
+            if self.all_data_loaded:
+                self.all_items_loaded_signal.emit()
+            
+            self.load_more_complete.emit()
 
     def populate_resource_row(self, row, resource):
         """FIXED: Populate a single row with event data - no message truncation, add tooltips"""

@@ -10,7 +10,6 @@ from base_components.base_components import SortableTableWidgetItem
 from base_components.base_resource_page import BaseResourcePage
 from UI.Styles import AppStyles, AppColors
 
-
 class StatusLabel(QWidget):
     """Widget that displays a status with consistent styling and background handling."""
     clicked = pyqtSignal()
@@ -69,8 +68,6 @@ class PersistentVolumesPage(BaseResourcePage):
         self.configure_columns()
         
         # Add delete selected button
-        self._add_delete_selected_button()
-    
 
     def configure_columns(self):
         """Configure column widths for full screen utilization"""
@@ -106,44 +103,6 @@ class PersistentVolumesPage(BaseResourcePage):
         
         # Ensure full width utilization after configuration
         QTimer.singleShot(100, self._ensure_full_width_utilization)
-
-    def _add_delete_selected_button(self):
-        """Add a button to delete selected resources."""
-        from PyQt6.QtWidgets import QPushButton
-        
-        delete_btn = QPushButton("Delete Selected")
-        delete_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #d32f2f;
-                color: #ffffff;
-                border: none;
-                border-radius: 4px;
-                padding: 5px 10px;
-            }
-            QPushButton:hover {
-                background-color: #b71c1c;
-            }
-            QPushButton:pressed {
-                background-color: #d32f2f;
-            }
-            QPushButton:disabled {
-                background-color: #555555;
-                color: #888888;
-            }
-        """)
-        delete_btn.clicked.connect(lambda: self.delete_selected_resources())
-        
-        # Find the header layout
-        for i in range(self.layout().count()):
-            item = self.layout().itemAt(i)
-            if item.layout():
-                for j in range(item.layout().count()):
-                    widget = item.layout().itemAt(j).widget()
-                    if isinstance(widget, QPushButton) and widget.text() == "Refresh":
-                        # Insert before the refresh button
-                        item.layout().insertWidget(item.layout().count() - 1, delete_btn)
-                        break
-
     def populate_resource_row(self, row, resource):
         """
         Populate a single row with persistent volume data from live Kubernetes resources

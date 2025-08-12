@@ -1,331 +1,301 @@
 """
 Virtual Scroll Table - Efficient handling of large datasets with virtual scrolling
-Split from base_resource_page.py for better architecture
+Uses QTableView with VirtualizedResourceModel for optimal performance
 """
 
 import logging
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QScrollBar, 
-    QLabel, QFrame, QHeaderView, QSizePolicy
+    QTableView, QVBoxLayout, QWidget, QHeaderView, QAbstractItemView,
+    QStyledItemDelegate, QApplication
 )
-from PyQt6.QtCore import Qt, QRect, pyqtSignal, QTimer
-from PyQt6.QtGui import QPainter, QPaintEvent
+from PyQt6.QtCore import Qt, pyqtSignal, QModelIndex, QTimer
+from PyQt6.QtGui import QColor, QPainter, QFont
+from typing import List, Dict, Any, Optional, Callable
+
+from .virtualized_table_model import VirtualizedResourceModel
 
 
-class VirtualScrollTable(QWidget):
-    """Virtual scrolling table for handling large datasets efficiently"""
+class HighPerformanceDelegate(QStyledItemDelegate):
+    """Custom delegate for optimized cell rendering"""
     
-    # Signals
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._font_cache = {}
+    
+    def paint(self, painter: QPainter, option, index: QModelIndex):
+        """Optimized paint method"""
+        if option.state & QApplication.State.State_Selected:
+            # Custom selection color
+            painter.fillRect(option.rect, QColor(227, 242, 253))
+        
+        # Use default painting for text
+        super().paint(painter, option, index)
+
+
+class VirtualScrollTable(QTableView):
+    """
+    High-performance virtual scrolling table using QTableView + VirtualizedResourceModel.
+    Replaces the old custom widget approach for much better performance.
+    """
+    
+    # Signals - maintaining backward compatibility
     item_selected = pyqtSignal(int)  # Emitted when an item is selected
     item_double_clicked = pyqtSignal(int)  # Emitted when an item is double-clicked
+    data_changed = pyqtSignal()  # Emitted when data changes
+    selection_changed = pyqtSignal(list)  # Emitted when selection changes
     
-    def __init__(self, headers, parent=None):
+    def __init__(self, headers: List[str], parent=None):
+        """Initialize virtual scroll table with headers"""
         super().__init__(parent)
-        self.headers = headers
-        self.all_data = []
-        self.visible_range = (0, 0)
-        self.row_height = 40
-        self.viewport_rows = 20
-        self.header_height = 35
-        self.selected_indices = set()
+        self.headers = headers or []
+        self._model = None
+        self._formatters = {}
+        self._last_selected_rows = []
         
         # Performance settings
-        self.buffer_size = 5  # Extra rows to render above/below viewport
-        self.scroll_debounce_timer = QTimer()
-        self.scroll_debounce_timer.setSingleShot(True)
-        self.scroll_debounce_timer.timeout.connect(self._update_visible_items)
+        self.setAlternatingRowColors(True)
+        self.setSortingEnabled(True)
+        self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         
-        # Setup UI
-        self._setup_ui()
+        # Enable virtual scrolling
+        self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         
-        logging.debug(f"VirtualScrollTable initialized with {len(headers)} headers")
+        # Set custom delegate for optimized rendering
+        self.delegate = HighPerformanceDelegate(self)
+        self.setItemDelegate(self.delegate)
         
-    def _setup_ui(self):
-        """Setup the virtual scroll table UI"""
-        self.setMinimumHeight(400)
+        # Configure header
+        self.horizontalHeader().setStretchLastSection(True)
+        self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        self.verticalHeader().setVisible(False)
+        self.verticalHeader().setDefaultSectionSize(30)  # Compact rows
         
-        # Main layout
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        # Performance optimizations
+        self.setShowGrid(True)
+        self.setGridStyle(Qt.PenStyle.DotLine)
         
-        # Create header
-        self.header = self._create_header()
-        layout.addWidget(self.header)
+        # Connect selection changes
+        self.selectionModel().selectionChanged.connect(self._on_selection_changed)
+        self.doubleClicked.connect(self._on_double_clicked)
         
-        # Create scroll area
-        self.scroll_area = QScrollArea(self)
-        self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        # Initialize with empty model
+        self.set_resource_data([], self.headers)
         
-        # Create content widget
-        self.content_widget = QWidget()
-        self.content_layout = QVBoxLayout(self.content_widget)
-        self.content_layout.setContentsMargins(0, 0, 0, 0)
-        self.content_layout.setSpacing(0)
+        logging.info(f"VirtualScrollTable initialized with {len(headers)} columns: {headers}")
+    
+    def set_resource_data(self, data: List[Dict], columns: Optional[List[str]] = None):
+        """Set data using virtualized model for optimal performance"""
+        try:
+            if columns:
+                self.headers = columns
+            
+            # Create new model
+            self._model = VirtualizedResourceModel(data, self.headers, self._formatters)
+            self.setModel(self._model)
+            
+            # Connect model signals
+            self._model.data_changed_custom.connect(self.data_changed.emit)
+            
+            # Auto-resize columns to content (but limit max width)
+            self.resizeColumnsToContents()
+            header = self.horizontalHeader()
+            for i in range(len(self.headers)):
+                current_width = header.sectionSize(i)
+                max_width = min(current_width, 300)  # Limit column width
+                header.resizeSection(i, max_width)
+            
+            logging.info(f"Set resource data: {len(data)} items, {len(self.headers)} columns")
+            
+        except Exception as e:
+            logging.error(f"Error setting resource data: {e}")
+    
+    def append_data(self, additional_data: List[Dict]):
+        """Append new data efficiently"""
+        if self._model:
+            self._model.append_data(additional_data)
+            self.data_changed.emit()
+    
+    def update_data(self, new_data: List[Dict], incremental: bool = False):
+        """Update data efficiently"""
+        if self._model:
+            self._model.update_data(new_data, incremental)
+            self.data_changed.emit()
+    
+    def refresh_data(self, new_data: List[Dict]):
+        """Refresh all data"""
+        if self._model:
+            self._model.refresh_data(new_data)
+            self.data_changed.emit()
+    
+    def set_formatters(self, formatters: Dict[str, Callable]):
+        """Set custom formatters for columns"""
+        self._formatters = formatters
+        if self._model:
+            self._model.set_formatters(formatters)
+    
+    def _on_selection_changed(self, selected, deselected):
+        """Handle selection changes"""
+        selected_rows = []
+        for index in self.selectionModel().selectedRows():
+            row = index.row()
+            selected_rows.append(row)
+            if row not in self._last_selected_rows:
+                self.item_selected.emit(row)
         
-        self.scroll_area.setWidget(self.content_widget)
-        layout.addWidget(self.scroll_area)
-        
-        # Connect scroll events
-        self.scroll_area.verticalScrollBar().valueChanged.connect(self._on_scroll)
-        
-        # Item containers for visible items
-        self.visible_items = []
-        
-    def _create_header(self):
-        """Create the table header"""
-        header_widget = QFrame()
-        header_widget.setFixedHeight(self.header_height)
-        header_widget.setFrameStyle(QFrame.Shape.Box)
-        header_widget.setStyleSheet("""
-            QFrame {
-                background-color: #f0f0f0;
-                border: 1px solid #d0d0d0;
-                border-bottom: 2px solid #a0a0a0;
-            }
-        """)
-        
-        header_layout = QHBoxLayout(header_widget)
-        header_layout.setContentsMargins(5, 0, 5, 0)
-        
-        # Add header labels
-        for header in self.headers:
-            label = QLabel(header)
-            label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-            label.setStyleSheet("font-weight: bold; padding: 0 10px;")
-            header_layout.addWidget(label)
-        
-        return header_widget
-        
+        self._last_selected_rows = selected_rows
+        self.selection_changed.emit(selected_rows)
+    
+    def _on_double_clicked(self, index: QModelIndex):
+        """Handle double-click events"""
+        if index.isValid():
+            self.item_double_clicked.emit(index.row())
+    
+    # Backward compatibility methods for old VirtualScrollTable interface
     def set_data(self, data):
-        """Set data for virtual scrolling"""
-        self.all_data = data
-        self.selected_indices.clear()
-        
-        # Update content widget size based on total data
-        total_height = len(data) * self.row_height
-        self.content_widget.setMinimumHeight(total_height)
-        
-        # Update visible range
-        self._update_visible_range()
-        self._render_visible_items()
-        
-        logging.debug(f"VirtualScrollTable data set: {len(data)} items, total height: {total_height}px")
-        
-    def _on_scroll(self, value):
-        """Handle scroll events with debouncing"""
-        # Debounce scroll events for better performance
-        self.scroll_debounce_timer.stop()
-        self.scroll_debounce_timer.start(16)  # ~60fps
-        
-    def _update_visible_items(self):
-        """Update visible items after scroll debounce"""
-        self._update_visible_range()
-        self._render_visible_items()
-        
-    def _update_visible_range(self):
-        """Update visible range based on scroll position"""
-        if not self.all_data:
-            self.visible_range = (0, 0)
-            return
-            
-        # Get current scroll position
-        scroll_value = self.scroll_area.verticalScrollBar().value()
-        viewport_height = self.scroll_area.viewport().height()
-        
-        # Calculate visible row indices
-        first_visible_row = max(0, scroll_value // self.row_height - self.buffer_size)
-        last_visible_row = min(
-            len(self.all_data) - 1,
-            (scroll_value + viewport_height) // self.row_height + self.buffer_size
-        )
-        
-        self.visible_range = (first_visible_row, last_visible_row + 1)
-        
-    def _render_visible_items(self):
-        """Render only the visible items for performance"""
-        start_idx, end_idx = self.visible_range
-        
-        # Clear existing visible items
-        for item_widget in self.visible_items:
-            item_widget.setParent(None)
-            item_widget.deleteLater()
-        self.visible_items.clear()
-        
-        # Create spacer for items above visible range
-        if start_idx > 0:
-            spacer_height = start_idx * self.row_height
-            top_spacer = QWidget()
-            top_spacer.setFixedHeight(spacer_height)
-            self.content_layout.addWidget(top_spacer)
-        
-        # Render visible items
-        for i in range(start_idx, min(end_idx, len(self.all_data))):
-            item_widget = self._create_item_widget(i, self.all_data[i])
-            self.content_layout.addWidget(item_widget)
-            self.visible_items.append(item_widget)
-        
-        # Create spacer for items below visible range
-        if end_idx < len(self.all_data):
-            remaining_items = len(self.all_data) - end_idx
-            spacer_height = remaining_items * self.row_height
-            bottom_spacer = QWidget()
-            bottom_spacer.setFixedHeight(spacer_height)
-            self.content_layout.addWidget(bottom_spacer)
-            
-    def _create_item_widget(self, index, item_data):
-        """Create a widget for a single table item"""
-        item_widget = QFrame()
-        item_widget.setFixedHeight(self.row_height)
-        item_widget.setFrameStyle(QFrame.Shape.Box)
-        
-        # Set styling based on selection
-        if index in self.selected_indices:
-            item_widget.setStyleSheet("""
-                QFrame {
-                    background-color: #e3f2fd;
-                    border: 1px solid #2196f3;
-                }
-            """)
+        """Backward compatibility - redirect to set_resource_data"""
+        if isinstance(data, list) and data and isinstance(data[0], dict):
+            self.set_resource_data(data, self.headers)
         else:
-            item_widget.setStyleSheet("""
-                QFrame {
-                    background-color: white;
-                    border: 1px solid #e0e0e0;
-                }
-                QFrame:hover {
-                    background-color: #f5f5f5;
-                }
-            """)
-        
-        # Create layout for item content
-        item_layout = QHBoxLayout(item_widget)
-        item_layout.setContentsMargins(5, 0, 5, 0)
-        
-        # Add data columns
-        if isinstance(item_data, dict):
-            # Handle dictionary data
-            for header in self.headers:
-                value = item_data.get(header.lower(), "")
-                label = QLabel(str(value))
-                label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-                item_layout.addWidget(label)
-        elif isinstance(item_data, (list, tuple)):
-            # Handle list/tuple data
-            for i, header in enumerate(self.headers):
-                value = item_data[i] if i < len(item_data) else ""
-                label = QLabel(str(value))
-                label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-                item_layout.addWidget(label)
-        else:
-            # Handle single value
-            label = QLabel(str(item_data))
-            label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-            item_layout.addWidget(label)
-        
-        # Add mouse event handling
-        item_widget.mousePressEvent = lambda event, idx=index: self._on_item_clicked(idx, event)
-        item_widget.mouseDoubleClickEvent = lambda event, idx=index: self._on_item_double_clicked(idx, event)
-        
-        return item_widget
-    
-    def _on_item_clicked(self, index, event):
-        """Handle item click events"""
-        if event.button() == Qt.MouseButton.LeftButton:
-            # Toggle selection
-            if index in self.selected_indices:
-                self.selected_indices.remove(index)
-            else:
-                # For single selection, clear others first
-                self.selected_indices.clear()
-                self.selected_indices.add(index)
+            # Convert list data to dict format
+            dict_data = []
+            for item in data:
+                if isinstance(item, (list, tuple)):
+                    item_dict = {}
+                    for i, header in enumerate(self.headers):
+                        if i < len(item):
+                            item_dict[header] = item[i]
+                        else:
+                            item_dict[header] = ""
+                    dict_data.append(item_dict)
+                else:
+                    dict_data.append({self.headers[0] if self.headers else "value": str(item)})
             
-            # Re-render to update selection styling
-            self._render_visible_items()
-            
-            # Emit selection signal
-            self.item_selected.emit(index)
-    
-    def _on_item_double_clicked(self, index, event):
-        """Handle item double-click events"""
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.item_double_clicked.emit(index)
+            self.set_resource_data(dict_data, self.headers)
     
     def get_selected_indices(self):
         """Get currently selected item indices"""
-        return list(self.selected_indices)
+        selected_rows = []
+        if self.selectionModel():
+            for index in self.selectionModel().selectedRows():
+                selected_rows.append(index.row())
+        return selected_rows
     
     def get_selected_data(self):
         """Get data for currently selected items"""
-        return [self.all_data[i] for i in self.selected_indices if i < len(self.all_data)]
+        selected_rows = self.get_selected_indices()
+        if self._model:
+            return self._model.get_selected_data(selected_rows)
+        return []
     
     def clear_selection(self):
         """Clear all selections"""
-        self.selected_indices.clear()
-        self._render_visible_items()
+        if self.selectionModel():
+            self.selectionModel().clear()
     
     def select_all(self):
         """Select all items"""
-        self.selected_indices = set(range(len(self.all_data)))
-        self._render_visible_items()
+        if self.selectionModel():
+            self.selectAll()
     
     def scroll_to_item(self, index):
         """Scroll to make the specified item visible"""
-        if 0 <= index < len(self.all_data):
-            target_position = index * self.row_height
-            self.scroll_area.verticalScrollBar().setValue(target_position)
+        if self._model and 0 <= index < self._model.rowCount():
+            model_index = self._model.index(index, 0)
+            self.scrollTo(model_index, QAbstractItemView.ScrollHint.PositionAtCenter)
+    
+    def search_and_filter(self, search_terms: List[str], search_columns: Optional[List[str]] = None) -> List[int]:
+        """Search through data and return matching row indices"""
+        if self._model:
+            return self._model.search_and_filter(search_terms, search_columns)
+        return []
+    
+    def enable_caching(self, enabled: bool = True):
+        """Enable or disable model caching"""
+        if self._model:
+            self._model.enable_cache(enabled)
+    
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """Get cache performance statistics"""
+        if self._model:
+            return self._model.get_cache_stats()
+        return {}
     
     # Backward compatibility methods for QTableWidget interface
     def rowCount(self):
         """Return number of rows - backward compatibility method"""
-        return len(self.all_data)
+        return self._model.rowCount() if self._model else 0
     
     def insertRow(self, row):
         """Insert a row - backward compatibility method (no-op for virtual table)"""
-        # Virtual table doesn't need to insert rows, data is managed via set_data
+        # Virtual table doesn't need to insert rows, data is managed via set_resource_data
         pass
     
     def setRowCount(self, count):
         """Set row count - backward compatibility method"""
         if count == 0:
-            self.set_data([])
-        # For non-zero counts, this is a no-op since data is managed via set_data
+            self.set_resource_data([])
+        # For non-zero counts, this is a no-op since data is managed via set_resource_data
     
     def clear(self):
         """Clear all data - backward compatibility method"""
-        self.set_data([])
-    
-    def verticalScrollBar(self):
-        """Return vertical scroll bar - backward compatibility method"""
-        return self.scroll_area.verticalScrollBar()
+        self.set_resource_data([])
     
     def get_visible_range(self):
-        """Get the current visible range"""
-        return self.visible_range
+        """Get the current visible range (rows visible in viewport)"""
+        if not self._model:
+            return (0, 0)
+        
+        # Calculate visible range from viewport
+        viewport_rect = self.viewport().rect()
+        top_index = self.indexAt(viewport_rect.topLeft())
+        bottom_index = self.indexAt(viewport_rect.bottomLeft())
+        
+        if top_index.isValid() and bottom_index.isValid():
+            return (top_index.row(), bottom_index.row() + 1)
+        elif top_index.isValid():
+            return (top_index.row(), top_index.row() + 1)
+        else:
+            return (0, min(self._model.rowCount(), 100))  # Default range
     
     def get_total_items(self):
         """Get total number of items"""
-        return len(self.all_data)
+        return self._model.rowCount() if self._model else 0
     
     def refresh(self):
         """Refresh the virtual table display"""
-        self._update_visible_range()
-        self._render_visible_items()
+        if self._model:
+            self._model.layoutChanged.emit()
+        self.viewport().update()
+    
+    def get_performance_stats(self) -> Dict[str, Any]:
+        """Get performance statistics"""
+        stats = {
+            'total_items': self.get_total_items(),
+            'visible_range': self.get_visible_range(),
+            'selected_items': len(self.get_selected_indices()),
+            'headers': len(self.headers)
+        }
+        
+        if self._model:
+            stats.update(self._model.get_cache_stats())
+        
+        return stats
     
     def cleanup(self):
         """Cleanup resources"""
-        self.scroll_debounce_timer.stop()
-        for item_widget in self.visible_items:
-            item_widget.setParent(None)
-            item_widget.deleteLater()
-        self.visible_items.clear()
-        logging.debug("VirtualScrollTable cleanup completed")
+        try:
+            if self._model:
+                self._model.clear_cache()
+            self.clearSelection()
+            logging.debug("VirtualScrollTable cleanup completed")
+        except Exception as e:
+            logging.error(f"Error in VirtualScrollTable cleanup: {e}")
     
     def __del__(self):
         """Destructor to ensure cleanup"""
         try:
             self.cleanup()
         except Exception as e:
-            logging.error(f"Error in VirtualScrollTable destructor: {e}")
+            logging.debug(f"Error in VirtualScrollTable destructor: {e}")

@@ -35,6 +35,9 @@ class TitleBar(QWidget):
         # Store the currently selected cluster name
         self.current_cluster = None
 
+        # Track signal connections for proper cleanup
+        self._signal_connections = []
+
         self.setup_ui()
         self.old_pos = None
         self.dropdown_menu = None
@@ -191,21 +194,19 @@ class TitleBar(QWidget):
         # Install event filter for double-click
         self.installEventFilter(self)
 
-        # Connect the pinned items signal if provided
+        # Connect the pinned items signal if provided - with proper tracking
         if self.update_pinned_items_signal:
-            try:
-                self.update_pinned_items_signal.disconnect()
-            except Exception:
-                pass
-            self.update_pinned_items_signal.connect(self.update_pinned_dropdown)
+            self._connect_signal_safely(
+                self.update_pinned_items_signal, 
+                self.update_pinned_dropdown
+            )
 
-        # Connect the open cluster signal to update the label
+        # Connect the open cluster signal to update the label - with proper tracking
         if self.open_cluster_signal:
-            try:
-                self.open_cluster_signal.disconnect(self.update_current_cluster)
-            except Exception:
-                pass
-            self.open_cluster_signal.connect(self.update_current_cluster)
+            self._connect_signal_safely(
+                self.open_cluster_signal,
+                self.update_current_cluster
+            )
 
     def update_current_cluster(self, cluster_name):
         """Update the pinned clusters label with the selected cluster name and icon"""
@@ -662,3 +663,48 @@ class TitleBar(QWidget):
         self.pinned_items = pinned_items
         if self.dropdown_menu and self.dropdown_menu.isVisible():
             self.create_or_update_dropdown()
+
+    def _connect_signal_safely(self, signal, slot):
+        """Connect signal safely with proper tracking for cleanup"""
+        try:
+            # First, try to disconnect existing connections to this slot
+            # This prevents duplicate connections
+            signal.disconnect(slot)
+        except (RuntimeError, TypeError):
+            # No existing connection or signal is invalid
+            pass
+        
+        try:
+            # Connect the signal to the slot
+            connection = signal.connect(slot)
+            # Store the connection info for later cleanup
+            self._signal_connections.append((signal, slot))
+            logging.debug(f"Connected signal to {slot.__name__}")
+        except Exception as e:
+            logging.error(f"Failed to connect signal to {slot.__name__}: {e}")
+
+    def cleanup_signals(self):
+        """Clean up all signal connections"""
+        for signal, slot in self._signal_connections:
+            try:
+                signal.disconnect(slot)
+                logging.debug(f"Disconnected signal from {slot.__name__}")
+            except (RuntimeError, TypeError):
+                # Signal already disconnected or invalid
+                pass
+        self._signal_connections.clear()
+
+    def closeEvent(self, event):
+        """Handle close event with proper cleanup"""
+        try:
+            self.cleanup_signals()
+        except Exception as e:
+            logging.error(f"Error during TitleBar cleanup: {e}")
+        super().closeEvent(event)
+
+    def __del__(self):
+        """Destructor to ensure cleanup when object is destroyed"""
+        try:
+            self.cleanup_signals()
+        except Exception:
+            pass  # Ignore errors during destruction

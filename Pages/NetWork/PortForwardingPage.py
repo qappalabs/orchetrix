@@ -222,7 +222,7 @@ class PortForwardingPage(BaseResourcePage):
             self.resources = filtered_resources
         
         # Update table
-        self.populate_table(self.resources)
+        self._display_resources(self.resources)
         self.items_count.setText(f"{len(self.resources)} items")
         
         self.is_loading = False

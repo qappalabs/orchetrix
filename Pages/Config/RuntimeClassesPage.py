@@ -37,43 +37,7 @@ class RuntimeClassesPage(BaseResourcePage):
         self.configure_columns()
         
         # Add delete selected button
-        self._add_delete_selected_button()
-        
-    def _add_delete_selected_button(self):
-        """Add a button to delete selected resources."""
-        delete_btn = QPushButton("Delete Selected")
-        delete_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #d32f2f;
-                color: #ffffff;
-                border: none;
-                border-radius: 4px;
-                padding: 5px 10px;
-            }
-            QPushButton:hover {
-                background-color: #b71c1c;
-            }
-            QPushButton:pressed {
-                background-color: #d32f2f;
-            }
-            QPushButton:disabled {
-                background-color: #555555;
-                color: #888888;
-            }
-        """)
-        delete_btn.clicked.connect(lambda: self.delete_selected_resources())
-        
-        # Find the header layout
-        for i in range(self.layout().count()):
-            item = self.layout().itemAt(i)
-            if item.layout():
-                for j in range(item.layout().count()):
-                    widget = item.layout().itemAt(j).widget()
-                    if isinstance(widget, QPushButton) and widget.text() == "Refresh":
-                        # Insert before the refresh button
-                        item.layout().insertWidget(item.layout().count() - 1, delete_btn)
-                        break
-    
+
     def configure_columns(self):
         """Configure column widths for full screen utilization"""
         if not self.table:
@@ -155,7 +119,6 @@ class RuntimeClassesPage(BaseResourcePage):
         action_button = self._create_action_button(row, resource["name"], resource.get("namespace", ""))
         action_container = self._create_action_container(row, action_button)
         self.table.setCellWidget(row, len(columns) + 1, action_container)
-
 
     def handle_row_click(self, row, column):
         if column != self.table.columnCount() - 1:  # Skip action column

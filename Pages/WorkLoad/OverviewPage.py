@@ -1,18 +1,111 @@
 """
-Dynamic implementation of the Overview page with simplified metric cards using Kubernetes API.
+Non-blocking implementation of the Overview page with async data loading.
 """
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QSizePolicy, QScrollArea, QFrame, QPushButton
+    QSizePolicy, QScrollArea, QFrame, QPushButton, QApplication
 )
 from PyQt6.QtGui import QFont
-from PyQt6.QtCore import Qt, QSize, QTimer
+from PyQt6.QtCore import Qt, QSize, QTimer, pyqtSignal, QObject
 
 from UI.Styles import AppStyles, AppColors
 from utils.kubernetes_client import get_kubernetes_client
+from utils.enhanced_worker import EnhancedBaseWorker
+from utils.thread_manager import get_thread_manager
 from kubernetes.client.rest import ApiException
 import logging
+
+class OverviewResourceWorker(QObject, EnhancedBaseWorker):
+    """Async worker for loading overview resource data"""
+    data_loaded = pyqtSignal(tuple)  # (running_count, total_count)
+    error_occurred = pyqtSignal(str)
+    
+    def __init__(self, resource_type, kube_client):
+        QObject.__init__(self)
+        EnhancedBaseWorker.__init__(self, f"overview_{resource_type}")
+        self.resource_type = resource_type
+        self.kube_client = kube_client
+        
+    def execute(self):
+        try:
+            # Fetch data based on resource type
+            if self.resource_type == "pods":
+                items = self.kube_client.v1.list_pod_for_all_namespaces()
+            elif self.resource_type == "deployments":
+                items = self.kube_client.apps_v1.list_deployment_for_all_namespaces()
+            elif self.resource_type == "daemonsets":
+                items = self.kube_client.apps_v1.list_daemon_set_for_all_namespaces()
+            elif self.resource_type == "statefulsets":
+                items = self.kube_client.apps_v1.list_stateful_set_for_all_namespaces()
+            elif self.resource_type == "replicasets":
+                items = self.kube_client.apps_v1.list_replica_set_for_all_namespaces()
+            elif self.resource_type == "jobs":
+                items = self.kube_client.batch_v1.list_job_for_all_namespaces()
+            elif self.resource_type == "cronjobs":
+                try:
+                    items = self.kube_client.batch_v1.list_cron_job_for_all_namespaces()
+                except (AttributeError, ApiException):
+                    if hasattr(self.kube_client, 'batch_v1beta1') and self.kube_client.batch_v1beta1:
+                        items = self.kube_client.batch_v1beta1.list_cron_job_for_all_namespaces()
+                    else:
+                        raise Exception("CronJob API not available")
+            else:
+                raise Exception(f"Unknown resource type: {self.resource_type}")
+            
+            # Calculate status
+            running, total = self.calculate_status(items.items)
+            self.data_loaded.emit((running, total))
+            
+        except Exception as e:
+            self.error_occurred.emit(str(e))
+            
+    def calculate_status(self, items):
+        """Calculate running/total status for resource type"""
+        if not items:
+            return 0, 0
+
+        running = 0
+        total = len(items)
+
+        for item in items:
+            status = item.status if hasattr(item, 'status') and item.status else None
+
+            if self.resource_type == "pods":
+                if status and hasattr(status, 'phase'):
+                    if status.phase == "Running":
+                        running += 1
+
+            elif self.resource_type in ["deployments", "statefulsets", "daemonsets"]:
+                if status:
+                    available = getattr(status, 'available_replicas', 0) or 0
+                    desired = getattr(status, 'replicas', 0) or 0
+                    if available == desired and desired > 0:
+                        running += 1
+
+            elif self.resource_type == "replicasets":
+                if status:
+                    ready = getattr(status, 'ready_replicas', 0) or 0
+                    desired = getattr(status, 'replicas', 0) or 0
+                    if desired > 0 and ready == desired:
+                        running += 1
+                    elif desired == 0:
+                        total -= 1  # Don't count scaled-down replicasets
+
+            elif self.resource_type == "jobs":
+                if status:
+                    succeeded = getattr(status, 'succeeded', 0) or 0
+                    if succeeded > 0:
+                        running += 1
+
+            elif self.resource_type == "cronjobs":
+                # CronJobs are considered "running" if they exist and are not suspended
+                if hasattr(item, 'spec') and item.spec:
+                    if not getattr(item.spec, 'suspend', False):
+                        running += 1
+
+        return running, total
+
 
 class MetricCard(QWidget):
     """Simplified metric card without progress bar and view button."""
@@ -99,8 +192,7 @@ class MetricCard(QWidget):
         self.subtitle_label = QLabel(f"Running / Total {title}")
         subtitle_font = QFont()
         subtitle_font.setFamily("Segoe UI")
-        subtitle_font.setPointSize(12)
-        subtitle_font.setWeight(QFont.Weight.Normal)
+        subtitle_font.setPointSize(10)
         self.subtitle_label.setFont(subtitle_font)
         self.subtitle_label.setStyleSheet(f"""
             QLabel {{
@@ -110,13 +202,8 @@ class MetricCard(QWidget):
                 margin: 0px;
             }}
         """)
-        self.subtitle_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
         card_layout.addWidget(self.subtitle_label)
 
-        # Add stretch to push content to top
-        card_layout.addStretch()
-
-        # Add the card to main layout
         main_layout.addWidget(self.card)
 
     def update_data(self, running, total):
@@ -124,132 +211,77 @@ class MetricCard(QWidget):
         self.running = running
         self.total = total
         self.metric_label.setText(f"{running} / {total}")
+        self.card.setStyleSheet(f"""
+            QFrame#metricCard {{
+                background-color: {self.colors['bg_secondary']};
+                border: 1px solid {self.colors['border_color']};
+                border-radius: 8px;
+                padding: 0px;
+            }}
+            QFrame#metricCard:hover {{
+                border-color: {self.colors['accent_color']};
+            }}
+        """)
 
-        # Reset error state when we have valid data
-        self.show_error_state(False)
-
-    def show_error_state(self, is_error, error_message="Unable to fetch data"):
-        """Show or hide error state for this card."""
-        if is_error:
-            self.metric_label.setText("--")
+    def show_error_state(self, show_error, error_message=""):
+        """Show error state on the card."""
+        if show_error:
+            self.metric_label.setText("Error")
             self.subtitle_label.setText(error_message)
-            self.subtitle_label.setStyleSheet(f"""
-                QLabel {{
-                    color: {self.colors['text_secondary']};
-                    background-color: transparent;
-                    border: none;
-                    margin: 0px;
-                    font-style: italic;
+            self.card.setStyleSheet(f"""
+                QFrame#metricCard {{
+                    background-color: {self.colors['bg_secondary']};
+                    border: 1px solid #ff4444;
+                    border-radius: 8px;
+                    padding: 0px;
                 }}
             """)
         else:
-            # Reset to normal subtitle
-            self.subtitle_label.setText(f"Running / Total {self.title_label.text()}")
-            self.subtitle_label.setStyleSheet(f"""
-                QLabel {{
-                    color: {self.colors['text_secondary']};
-                    background-color: transparent;
-                    border: none;
-                    margin: 0px;
-                }}
-            """)
-
-    def sizeHint(self):
-        """Return fixed size for all cards."""
-        return QSize(280, 180)
-
-    def minimumSizeHint(self):
-        """Return minimum size for all cards."""
-        return QSize(280, 180)
-
-    def maximumSize(self):
-        """Return maximum size for all cards."""
-        return QSize(280, 180)
+            self.update_data(self.running, self.total)
 
 
 class OverviewPage(QWidget):
-    """
-    Overview page with simplified design and real-time data using Kubernetes API.
-    """
+    """Overview page showing workload metrics with async data loading."""
+    
     def __init__(self, parent=None):
         super().__init__(parent)
         self.metric_cards = {}
         self.kube_client = None
+        self.refresh_timer = None
+        
         self.setup_ui()
-
-        # Timer for auto-refresh
-        self.refresh_timer = QTimer(self)
-        self.refresh_timer.timeout.connect(self.refresh_data)
-        self.refresh_timer.start(5000)  # Refresh every 5 seconds
-
-        # Initial data load with slight delay to allow UI to render
-        QTimer.singleShot(500, self.initial_refresh)
-
-    def initial_refresh(self):
-        """Perform initial data refresh."""
         self.initialize_kube_client()
-        self.refresh_data()
-
-    def initialize_kube_client(self):
-        """Initialize Kubernetes client connection."""
-        try:
-            self.kube_client = get_kubernetes_client()
-            if not self.kube_client.current_cluster:
-                # Load kubeconfig asynchronously to avoid blocking UI
-                self._load_kubeconfig_async()
-        except Exception as e:
-            logging.error(f"Error initializing Kubernetes client: {e}")
-
-    def _load_kubeconfig_async(self):
-        """Load kubeconfig asynchronously in background thread"""
-        try:
-            from utils.kubernetes_client import KubeConfigWorker
-            from utils.thread_manager import get_thread_manager
-            
-            thread_manager = get_thread_manager()
-            worker = KubeConfigWorker(self.kube_client)
-            
-            def on_config_loaded(clusters):
-                if clusters:
-                    # Find active cluster or use first available
-                    active_cluster = next((c for c in clusters if c.status == "active"), None)
-                    if not active_cluster and clusters:
-                        active_cluster = clusters[0]
-
-                    if active_cluster:
-                        self.kube_client.switch_context(active_cluster.name)
-            
-            def on_error(error):
-                logging.error(f"Error loading kubeconfig async: {error}")
-            
-            worker.signals.finished.connect(on_config_loaded)
-            worker.signals.error.connect(on_error)
-            thread_manager.submit_worker(f"kubeconfig_load_{id(self)}", worker)
-            
-        except Exception as e:
-            logging.error(f"Error starting async kubeconfig load: {e}")
-            self.show_connection_error(f"Failed to initialize: {str(e)}")
+        
+        # Set up auto-refresh with longer interval to reduce load
+        self.setup_refresh_timer()
+        
+        # Initial data load - ensure it's called from main thread
+        if self.thread() == QApplication.instance().thread():
+            QTimer.singleShot(1000, self.fetch_kubernetes_data)
+        else:
+            # Use metaObject to invoke on main thread
+            from PyQt6.QtCore import QMetaObject, Q_ARG
+            QMetaObject.invokeMethod(self, "fetch_kubernetes_data", Qt.ConnectionType.QueuedConnection)
+        
+    def setup_refresh_timer(self):
+        """Set up the refresh timer for periodic updates."""
+        # Ensure timer is created on main thread
+        if self.thread() == QApplication.instance().thread():
+            self.refresh_timer = QTimer(self)  # Set parent to ensure proper cleanup
+            self.refresh_timer.timeout.connect(self.refresh_data)
+            # Refresh every 30 seconds instead of 5 to reduce load
+            self.refresh_timer.start(30000)
+        else:
+            logging.warning("OverviewPage: Timer setup called from non-main thread")
 
     def setup_ui(self):
-        """Set up the main UI."""
-        # Define colors
-        colors = {
-            'text_primary': getattr(AppColors, 'TEXT_LIGHT', '#ffffff'),
-            'accent_color': getattr(AppColors, 'ACCENT_BLUE', '#0ea5e9'),
-            'accent_hover': getattr(AppColors, 'ACCENT_BLUE', '#0284c7'),
-        }
-
-        # Main layout
+        """Set up the main UI layout."""
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(24, 24, 24, 24)
-        main_layout.setSpacing(24)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
 
-        # Header
-        header_layout = QHBoxLayout()
-        header_layout.setContentsMargins(0, 0, 0, 0)
-
-        # Title
-        title_label = QLabel("Overview")
+        # Page title
+        title_label = QLabel("Workload Overview")
         title_font = QFont()
         title_font.setFamily("Segoe UI")
         title_font.setPointSize(28)
@@ -257,38 +289,20 @@ class OverviewPage(QWidget):
         title_label.setFont(title_font)
         title_label.setStyleSheet(f"""
             QLabel {{
-                color: {colors['text_primary']};
+                color: {getattr(AppColors, 'TEXT_LIGHT', '#ffffff')};
                 background-color: transparent;
                 border: none;
-                margin: 0px;
+                margin: 24px 0px 32px 0px;
+                padding: 0px 24px;
             }}
         """)
-
-        # Refresh button
-        refresh_btn = QPushButton("Refresh")
-        refresh_style = getattr(AppStyles, "SECONDARY_BUTTON_STYLE",
-                                """QPushButton { background-color: #2d2d2d; color: #ffffff; border: 1px solid #3d3d3d;
-                                               border-radius: 4px; padding: 5px 10px; }
-                                   QPushButton:hover { background-color: #3d3d3d; }
-                                   QPushButton:pressed { background-color: #1e1e1e; }"""
-                                )
-        refresh_btn.setStyleSheet(refresh_style)
-        refresh_btn.clicked.connect(lambda: self.force_load_data())
-
-        header_layout.addWidget(title_label)
-        header_layout.addStretch()
-        header_layout.addWidget(refresh_btn)
-
-        # Create header widget
-        header_widget = QWidget()
-        header_widget.setLayout(header_layout)
-        main_layout.addWidget(header_widget)
+        main_layout.addWidget(title_label)
 
         # Cards container
         cards_container = QWidget()
         cards_layout = QVBoxLayout(cards_container)
-        cards_layout.setSpacing(20)
-        cards_layout.setContentsMargins(0, 0, 0, 0)
+        cards_layout.setContentsMargins(24, 0, 24, 24)
+        cards_layout.setSpacing(24)
 
         # First row (4 cards)
         first_row = QWidget()
@@ -296,7 +310,6 @@ class OverviewPage(QWidget):
         first_row_layout.setSpacing(20)
         first_row_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Create cards for first row
         card_configs = [
             ("Pods", "pods"),
             ("Deployments", "deployments"),
@@ -369,7 +382,7 @@ class OverviewPage(QWidget):
         self.fetch_kubernetes_data()
 
     def fetch_kubernetes_data(self):
-        """Fetch actual Kubernetes data using the API client."""
+        """Fetch actual Kubernetes data using async workers."""
         if not self.kube_client:
             self.show_connection_error("Kubernetes client not initialized")
             return
@@ -383,134 +396,51 @@ class OverviewPage(QWidget):
             self.show_connection_error("Kubernetes API client not available")
             return
 
-        success_count = 0
-        total_resources = len(self.metric_cards)
+        # Load data asynchronously for each resource type
+        for resource_type in self.metric_cards.keys():
+            self.load_resource_async(resource_type)
 
-        for resource_type, card in self.metric_cards.items():
-            try:
-                # Get resource data using API calls
-                if resource_type == "pods":
-                    items = self.kube_client.v1.list_pod_for_all_namespaces()
-                elif resource_type == "deployments":
-                    items = self.kube_client.apps_v1.list_deployment_for_all_namespaces()
-                elif resource_type == "daemonsets":
-                    items = self.kube_client.apps_v1.list_daemon_set_for_all_namespaces()
-                elif resource_type == "statefulsets":
-                    items = self.kube_client.apps_v1.list_stateful_set_for_all_namespaces()
-                elif resource_type == "replicasets":
-                    items = self.kube_client.apps_v1.list_replica_set_for_all_namespaces()
-                elif resource_type == "jobs":
-                    items = self.kube_client.batch_v1.list_job_for_all_namespaces()
-                elif resource_type == "cronjobs":
-                    # Try batch/v1 first (Kubernetes 1.21+), fallback to batch/v1beta1
-                    try:
-                        items = self.kube_client.batch_v1.list_cron_job_for_all_namespaces()
-                    except (AttributeError, ApiException):
-                        # Fallback to batch/v1beta1 for older clusters
-                        if hasattr(self.kube_client, 'batch_v1beta1') and self.kube_client.batch_v1beta1:
-                            items = self.kube_client.batch_v1beta1.list_cron_job_for_all_namespaces()
-                        else:
-                            raise Exception("CronJob API not available")
-                else:
-                    card.show_error_state(True, f"Unknown resource type: {resource_type}")
-                    continue
-
-                # Calculate running/total status
-                running, total = self.calculate_status(resource_type, items.items)
-                card.update_data(running, total)
-                success_count += 1
-
-            except ApiException as e:
-                if e.status == 403:
-                    card.show_error_state(True, f"Permission denied")
-                elif e.status == 404:
-                    card.show_error_state(True, f"Resource not found")
-                else:
-                    card.show_error_state(True, f"API error: {e.reason}")
-                logging.error(f"API error fetching {resource_type}: {e}")
-
-            except Exception as e:
-                card.show_error_state(True, "Connection error")
-                logging.error(f"Error fetching {resource_type}: {e}")
-
-        # Log overall status
-        if success_count == 0:
-            logging.warning("Failed to fetch data for all resource types")
-        elif success_count < total_resources:
-            logging.warning(f"Successfully fetched {success_count}/{total_resources} resource types")
-        else:
-            logging.info(f"Successfully fetched all {total_resources} resource types")
+    def load_resource_async(self, resource_type):
+        """Load a specific resource type asynchronously"""
+        worker = OverviewResourceWorker(resource_type, self.kube_client)
+        worker.data_loaded.connect(lambda data, rtype=resource_type: self.update_card_data(rtype, data))
+        worker.error_occurred.connect(lambda error, rtype=resource_type: self.handle_resource_error(rtype, error))
+        
+        # Submit to thread manager
+        thread_manager = get_thread_manager()
+        thread_manager.submit_worker(worker)
+        
+    def update_card_data(self, resource_type, data):
+        """Update card with loaded data"""
+        if resource_type in self.metric_cards:
+            running_count, total_count = data
+            self.metric_cards[resource_type].update_data(running_count, total_count)
+            logging.info(f"Updated {resource_type}: {running_count}/{total_count}")
+            
+    def handle_resource_error(self, resource_type, error):
+        """Handle error loading resource data"""
+        if resource_type in self.metric_cards:
+            self.metric_cards[resource_type].show_error_state(True, f"Error: {error}")
+            logging.error(f"Error loading {resource_type}: {error}")
 
     def show_connection_error(self, error_message):
         """Show connection error on all cards."""
         for card in self.metric_cards.values():
             card.show_error_state(True, error_message)
 
-    def calculate_status(self, resource_type, items):
-        """Calculate running/total status for resource type using API objects."""
-        if not items:
-            return 0, 0
-
-        running = 0
-        total = len(items)
-
-        for item in items:
-            status = item.status if hasattr(item, 'status') and item.status else None
-
-            if resource_type == "pods":
-                if status and hasattr(status, 'phase'):
-                    if status.phase == "Running":
-                        running += 1
-
-            elif resource_type in ["deployments", "statefulsets", "daemonsets"]:
-                if status:
-                    available = getattr(status, 'available_replicas', 0) or 0
-                    desired = getattr(status, 'replicas', 0) or 0
-                    if available == desired and desired > 0:
-                        running += 1
-
-            elif resource_type == "replicasets":
-                if status:
-                    ready = getattr(status, 'ready_replicas', 0) or 0
-                    desired = getattr(status, 'replicas', 0) or 0
-                    if desired > 0 and ready == desired:
-                        running += 1
-                    elif desired == 0:
-                        total -= 1  # Don't count scaled-down replicasets
-
-            elif resource_type == "jobs":
-                if status:
-                    succeeded = getattr(status, 'succeeded', 0) or 0
-                    if succeeded > 0:
-                        running += 1
-
-            elif resource_type == "cronjobs":
-                # CronJobs are considered "running" if they exist and are not suspended
-                if hasattr(item, 'spec') and item.spec:
-                    suspended = getattr(item.spec, 'suspend', False)
-                    if not suspended:
-                        running += 1
-
-        return running, max(total, 0)
-
-    def showEvent(self, event):
-        """Start refresh timer when page is shown."""
-        super().showEvent(event)
-        self.refresh_timer.start(5000)
-        if not self.kube_client:
-            self.initialize_kube_client()
-        self.refresh_data()
-
-    def hideEvent(self, event):
-        """Stop refresh timer when page is hidden."""
-        super().hideEvent(event)
-        self.refresh_timer.stop()
-
-    def closeEvent(self, event):
-        """Clean up when the widget is closed."""
+    def initialize_kube_client(self):
+        """Initialize or update the Kubernetes client."""
         try:
-            if hasattr(self, 'refresh_timer') and self.refresh_timer:
-                self.refresh_timer.stop()
+            self.kube_client = get_kubernetes_client()
+            if self.kube_client and hasattr(self.kube_client, 'current_cluster'):
+                logging.info(f"OverviewPage: Kubernetes client initialized for cluster: {self.kube_client.current_cluster}")
+            else:
+                logging.warning("OverviewPage: Kubernetes client not properly initialized")
         except Exception as e:
-            logging.error(f"Error cleaning up overview page: {e}")
-        super().closeEvent(event)
+            logging.error(f"OverviewPage: Failed to initialize Kubernetes client: {e}")
+            self.kube_client = None
+
+    def cleanup(self):
+        """Cleanup when page is being destroyed."""
+        if self.refresh_timer:
+            self.refresh_timer.stop()

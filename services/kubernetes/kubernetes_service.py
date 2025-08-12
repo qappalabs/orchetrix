@@ -27,7 +27,7 @@ class KubeCluster:
     kind: str = "Kubernetes Cluster"
     source: str = "local"
     label: str = "General"
-    status: str = "disconnect"
+    status: str = "available"  # Default to available instead of disconnect
     badge_color: Optional[str] = None
     server: Optional[str] = None
     user: Optional[str] = None
@@ -340,23 +340,25 @@ class KubernetesService(QObject):
                 context_name = context_info['name']
                 cluster_info = context_info.get('context', {})
                 
+                # Determine correct status for the cluster
+                if active_context and context_name == active_context['name'] and self.current_cluster == context_name:
+                    # This is the currently connected cluster
+                    status = "connected"
+                else:
+                    # All other clusters are available to connect to
+                    status = "available"
+                
                 cluster = KubeCluster(
                     name=context_name,
                     context=context_name,
                     kind="Kubernetes Cluster",
                     source="kubeconfig",
                     label="General",
-                    status="disconnect",
+                    status=status,
                     server=cluster_info.get('cluster'),
                     user=cluster_info.get('user'),
                     namespace=cluster_info.get('namespace', 'default')
                 )
-                
-                # Mark active context
-                if active_context and context_name == active_context['name']:
-                    cluster.status = "connected" if self.current_cluster == context_name else "available"
-                else:
-                    cluster.status = "available"
                 
                 clusters.append(cluster)
             

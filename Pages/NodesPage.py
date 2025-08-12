@@ -111,10 +111,10 @@ class GraphWidget(QFrame):
         layout.addLayout(header_layout)
         layout.addStretch()
 
-        # Longer timer interval for better performance
+        # Much longer timer interval for better performance
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_data)
-        self.timer.start(int(self._update_interval * 1000))
+        self.timer.start(30000)  # 30 seconds for better performance
 
     def generate_utilization_data(self, nodes_data):
         """Generate utilization data for nodes"""
@@ -122,7 +122,7 @@ class GraphWidget(QFrame):
             return
             
         current_time = time.time()
-        if current_time - self._last_update_time < 5.0:  # Throttle to 5 seconds
+        if current_time - self._last_update_time < 15.0:  # Throttle to 15 seconds
             return
         
         self._is_updating = True
@@ -296,15 +296,12 @@ class NodesPage(BaseResourcePage):
         
         layout = super().setup_ui("Nodes", headers, sortable_columns)
         
-        # Remove default checkbox header
-        header_widget = self._item_widgets.get("header_widget")
-        if header_widget:
-            header_widget.hide()
-        self.select_all_checkbox = None
-        
-        # Hide the checkbox column
+        # Keep select all checkbox but hide the checkbox column for nodes
         if self.table:
             self.table.hideColumn(0)
+            # Keep select_all_checkbox but ensure it's disabled for nodes
+            if hasattr(self, 'select_all_checkbox') and self.select_all_checkbox:
+                self.select_all_checkbox.hide()
             
         self.layout().setContentsMargins(16, 16, 16, 16)
         self.layout().setSpacing(16)
@@ -418,14 +415,31 @@ class NodesPage(BaseResourcePage):
         self.items_count.setText(f"{len(nodes_data)} items")
 
     def populate_table(self, resources_to_populate):
-        """Populate table with resource data - uses base class rendering logic"""
+        """Populate table with resource data - optimized for nodes"""
         if not self.table or not resources_to_populate: 
             return
             
         logging.info(f"NodesPage: populate_table() called with {len(resources_to_populate)} resources")
         
-        # Use base class batch rendering which calls populate_resource_row for each resource
-        self._render_resources_batch(resources_to_populate)
+        # Disable sorting during population for better performance
+        self.table.setSortingEnabled(False)
+        
+        # Clear and resize table efficiently
+        self.table.setRowCount(len(resources_to_populate))
+        
+        # Populate rows in larger batches for better performance
+        batch_size = 25  # Larger batches for better performance
+        for i in range(0, len(resources_to_populate), batch_size):
+            batch = resources_to_populate[i:i + batch_size]
+            for j, resource in enumerate(batch):
+                self.populate_resource_row(i + j, resource)
+            
+            # Process events less frequently to reduce overhead
+            if i % (batch_size * 4) == 0:
+                QApplication.processEvents()
+        
+        # Re-enable sorting
+        self.table.setSortingEnabled(True)
 
     def populate_resource_row(self, row, resource):
         """Populate a single row with Node data"""
@@ -665,6 +679,23 @@ class NodesPage(BaseResourcePage):
         logging.info("NodesPage: force_load_data() called")
         self.load_data()
     
+    def _add_controls_to_header(self, header_layout):
+        """Override to add custom controls for nodes page without delete button"""
+        self._add_filter_controls(header_layout)
+        header_layout.addStretch(1)
+
+        # Only add refresh button, no delete button for nodes
+        refresh_btn = QPushButton("Refresh")
+        refresh_style = getattr(AppStyles, "SECONDARY_BUTTON_STYLE",
+                                """QPushButton { background-color: #2d2d2d; color: #ffffff; border: 1px solid #3d3d3d;
+                                               border-radius: 4px; padding: 5px 10px; }
+                                   QPushButton:hover { background-color: #3d3d3d; }
+                                   QPushButton:pressed { background-color: #1e1e1e; }"""
+                                )
+        refresh_btn.setStyleSheet(refresh_style)
+        refresh_btn.clicked.connect(lambda: self.force_load_data())
+        header_layout.addWidget(refresh_btn)
+        
     def _add_filter_controls(self, header_layout):
         """Override to remove namespace dropdown for nodes (cluster-scoped resources)"""
         from PyQt6.QtWidgets import QLineEdit, QLabel
@@ -712,9 +743,6 @@ class NodesPage(BaseResourcePage):
         self.namespace_combo = None
         
     # Disable inherited methods that aren't needed for nodes
-    def _add_delete_selected_button(self):
-        pass
-        
     def _handle_checkbox_change(self, state, item_name):
         pass
         

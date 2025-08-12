@@ -16,10 +16,10 @@ class KubernetesResourceLoader(EnhancedBaseWorker):
         super().__init__(f"resource_load_{resource_type}_{namespace or 'all'}")
         self.resource_type = resource_type
         self.namespace = namespace
-        self.limit = limit or 100  # Increased default limit
+        self.limit = limit or 500  # Even higher default limit for faster loading
         self.continue_token = continue_token
         self.kube_client = get_kubernetes_client()
-        self._timeout = 15  # Reduced timeout for faster failure
+        self._timeout = 15  # Balanced timeout
 
     def execute(self):
         if self.is_cancelled():
@@ -576,63 +576,488 @@ class KubernetesResourceLoader(EnhancedBaseWorker):
         except:
             return "Unknown"
 
-    # Placeholder methods for remaining resource types
+    # Implemented methods for remaining resource types
     def _load_replication_controllers(self):
-        return [], None
+        resources = []
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
+
+        if self.namespace and self.namespace != "all":
+            rcs_list = self.kube_client.v1.list_namespaced_replication_controller(namespace=self.namespace, **api_kwargs)
+        else:
+            rcs_list = self.kube_client.v1.list_replication_controller_for_all_namespaces(**api_kwargs)
+
+        next_token = self._get_continue_token(rcs_list)
+        for rc in rcs_list.items:
+            resource = {
+                "name": rc.metadata.name,
+                "namespace": rc.metadata.namespace or "default",
+                "age": self._format_age(rc.metadata.creation_timestamp),
+                "raw_data": client.ApiClient().sanitize_for_serialization(rc)
+            }
+            if rc.spec:
+                resource["replicas"] = rc.spec.replicas or 0
+            if rc.status:
+                resource["ready"] = rc.status.ready_replicas or 0
+            resources.append(resource)
+        return resources, next_token
 
     def _load_resource_quotas(self):
-        return [], None
+        resources = []
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
+
+        if self.namespace and self.namespace != "all":
+            quotas_list = self.kube_client.v1.list_namespaced_resource_quota(namespace=self.namespace, **api_kwargs)
+        else:
+            quotas_list = self.kube_client.v1.list_resource_quota_for_all_namespaces(**api_kwargs)
+
+        next_token = self._get_continue_token(quotas_list)
+        for quota in quotas_list.items:
+            resource = {
+                "name": quota.metadata.name,
+                "namespace": quota.metadata.namespace or "default",
+                "age": self._format_age(quota.metadata.creation_timestamp),
+                "raw_data": client.ApiClient().sanitize_for_serialization(quota)
+            }
+            if quota.status and quota.status.hard:
+                resource["hard_limits"] = len(quota.status.hard)
+            resources.append(resource)
+        return resources, next_token
 
     def _load_limit_ranges(self):
-        return [], None
+        resources = []
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
+
+        if self.namespace and self.namespace != "all":
+            limits_list = self.kube_client.v1.list_namespaced_limit_range(namespace=self.namespace, **api_kwargs)
+        else:
+            limits_list = self.kube_client.v1.list_limit_range_for_all_namespaces(**api_kwargs)
+
+        next_token = self._get_continue_token(limits_list)
+        for limit_range in limits_list.items:
+            resource = {
+                "name": limit_range.metadata.name,
+                "namespace": limit_range.metadata.namespace or "default",
+                "age": self._format_age(limit_range.metadata.creation_timestamp),
+                "raw_data": client.ApiClient().sanitize_for_serialization(limit_range)
+            }
+            resources.append(resource)
+        return resources, next_token
 
     def _load_horizontal_pod_autoscalers(self):
-        return [], None
+        resources = []
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
+
+        if self.namespace and self.namespace != "all":
+            hpas_list = self.kube_client.autoscaling_v1.list_namespaced_horizontal_pod_autoscaler(namespace=self.namespace, **api_kwargs)
+        else:
+            hpas_list = self.kube_client.autoscaling_v1.list_horizontal_pod_autoscaler_for_all_namespaces(**api_kwargs)
+
+        next_token = self._get_continue_token(hpas_list)
+        for hpa in hpas_list.items:
+            resource = {
+                "name": hpa.metadata.name,
+                "namespace": hpa.metadata.namespace or "default",
+                "age": self._format_age(hpa.metadata.creation_timestamp),
+                "raw_data": client.ApiClient().sanitize_for_serialization(hpa)
+            }
+            if hpa.spec:
+                resource["min_replicas"] = hpa.spec.min_replicas or 1
+                resource["max_replicas"] = hpa.spec.max_replicas or 1
+            if hpa.status:
+                resource["current_replicas"] = hpa.status.current_replicas or 0
+            resources.append(resource)
+        return resources, next_token
 
     def _load_pod_disruption_budgets(self):
-        return [], None
+        resources = []
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
+
+        try:
+            if self.namespace and self.namespace != "all":
+                pdbs_list = self.kube_client.policy_v1.list_namespaced_pod_disruption_budget(namespace=self.namespace, **api_kwargs)
+            else:
+                pdbs_list = self.kube_client.policy_v1.list_pod_disruption_budget_for_all_namespaces(**api_kwargs)
+
+            next_token = self._get_continue_token(pdbs_list)
+            for pdb in pdbs_list.items:
+                resource = {
+                    "name": pdb.metadata.name,
+                    "namespace": pdb.metadata.namespace or "default",
+                    "age": self._format_age(pdb.metadata.creation_timestamp),
+                    "raw_data": client.ApiClient().sanitize_for_serialization(pdb)
+                }
+                resources.append(resource)
+        except Exception as e:
+            # policy_v1 API might not be available in some clusters
+            logging.warning(f"Pod disruption budgets not available: {e}")
+        return resources, next_token
 
     def _load_priority_classes(self):
-        return [], None
+        resources = []
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
+
+        try:
+            priority_classes_list = self.kube_client.scheduling_v1.list_priority_class(**api_kwargs)
+            next_token = self._get_continue_token(priority_classes_list)
+            
+            for pc in priority_classes_list.items:
+                resource = {
+                    "name": pc.metadata.name,
+                    "namespace": "",  # Priority classes are cluster-scoped
+                    "age": self._format_age(pc.metadata.creation_timestamp),
+                    "raw_data": client.ApiClient().sanitize_for_serialization(pc)
+                }
+                resource["value"] = pc.value or 0
+                resource["global_default"] = pc.global_default or False
+                resources.append(resource)
+        except Exception as e:
+            logging.warning(f"Priority classes not available: {e}")
+        return resources, next_token
 
     def _load_runtime_classes(self):
-        return [], None
+        resources = []
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
+
+        try:
+            runtime_classes_list = self.kube_client.node_v1.list_runtime_class(**api_kwargs)
+            next_token = self._get_continue_token(runtime_classes_list)
+            
+            for rc in runtime_classes_list.items:
+                resource = {
+                    "name": rc.metadata.name,
+                    "namespace": "",  # Runtime classes are cluster-scoped
+                    "age": self._format_age(rc.metadata.creation_timestamp),
+                    "raw_data": client.ApiClient().sanitize_for_serialization(rc)
+                }
+                resource["handler"] = rc.handler or "Unknown"
+                resources.append(resource)
+        except Exception as e:
+            logging.warning(f"Runtime classes not available: {e}")
+        return resources, next_token
 
     def _load_leases(self):
-        return [], None
+        resources = []
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
+
+        try:
+            if self.namespace and self.namespace != "all":
+                leases_list = self.kube_client.coordination_v1.list_namespaced_lease(namespace=self.namespace, **api_kwargs)
+            else:
+                leases_list = self.kube_client.coordination_v1.list_lease_for_all_namespaces(**api_kwargs)
+
+            next_token = self._get_continue_token(leases_list)
+            for lease in leases_list.items:
+                resource = {
+                    "name": lease.metadata.name,
+                    "namespace": lease.metadata.namespace or "default",
+                    "age": self._format_age(lease.metadata.creation_timestamp),
+                    "raw_data": client.ApiClient().sanitize_for_serialization(lease)
+                }
+                resources.append(resource)
+        except Exception as e:
+            logging.warning(f"Leases not available: {e}")
+        return resources, next_token
 
     def _load_mutating_webhook_configurations(self):
-        return [], None
+        resources = []
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
+
+        try:
+            webhooks_list = self.kube_client.admissionregistration_v1.list_mutating_webhook_configuration(**api_kwargs)
+            next_token = self._get_continue_token(webhooks_list)
+            
+            for webhook in webhooks_list.items:
+                resource = {
+                    "name": webhook.metadata.name,
+                    "namespace": "",  # Webhook configs are cluster-scoped
+                    "age": self._format_age(webhook.metadata.creation_timestamp),
+                    "raw_data": client.ApiClient().sanitize_for_serialization(webhook)
+                }
+                if webhook.webhooks:
+                    resource["webhooks_count"] = len(webhook.webhooks)
+                resources.append(resource)
+        except Exception as e:
+            logging.warning(f"Mutating webhook configurations not available: {e}")
+        return resources, next_token
 
     def _load_validating_webhook_configurations(self):
-        return [], None
+        resources = []
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
+
+        try:
+            webhooks_list = self.kube_client.admissionregistration_v1.list_validating_webhook_configuration(**api_kwargs)
+            next_token = self._get_continue_token(webhooks_list)
+            
+            for webhook in webhooks_list.items:
+                resource = {
+                    "name": webhook.metadata.name,
+                    "namespace": "",  # Webhook configs are cluster-scoped
+                    "age": self._format_age(webhook.metadata.creation_timestamp),
+                    "raw_data": client.ApiClient().sanitize_for_serialization(webhook)
+                }
+                if webhook.webhooks:
+                    resource["webhooks_count"] = len(webhook.webhooks)
+                resources.append(resource)
+        except Exception as e:
+            logging.warning(f"Validating webhook configurations not available: {e}")
+        return resources, next_token
 
     def _load_endpoints(self):
-        return [], None
+        resources = []
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
+
+        if self.namespace and self.namespace != "all":
+            endpoints_list = self.kube_client.v1.list_namespaced_endpoints(namespace=self.namespace, **api_kwargs)
+        else:
+            endpoints_list = self.kube_client.v1.list_endpoints_for_all_namespaces(**api_kwargs)
+
+        next_token = self._get_continue_token(endpoints_list)
+        for endpoint in endpoints_list.items:
+            resource = {
+                "name": endpoint.metadata.name,
+                "namespace": endpoint.metadata.namespace or "default",
+                "age": self._format_age(endpoint.metadata.creation_timestamp),
+                "raw_data": client.ApiClient().sanitize_for_serialization(endpoint)
+            }
+            if endpoint.subsets:
+                addresses_count = sum(len(subset.addresses or []) for subset in endpoint.subsets)
+                resource["endpoints"] = addresses_count
+            else:
+                resource["endpoints"] = 0
+            resources.append(resource)
+        return resources, next_token
 
     def _load_ingress_classes(self):
-        return [], None
+        resources = []
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
+
+        try:
+            ingress_classes_list = self.kube_client.networking_v1.list_ingress_class(**api_kwargs)
+            next_token = self._get_continue_token(ingress_classes_list)
+            
+            for ingress_class in ingress_classes_list.items:
+                resource = {
+                    "name": ingress_class.metadata.name,
+                    "namespace": "",  # Ingress classes are cluster-scoped
+                    "age": self._format_age(ingress_class.metadata.creation_timestamp),
+                    "raw_data": client.ApiClient().sanitize_for_serialization(ingress_class)
+                }
+                if ingress_class.spec:
+                    resource["controller"] = ingress_class.spec.controller or "Unknown"
+                resources.append(resource)
+        except Exception as e:
+            logging.warning(f"Ingress classes not available: {e}")
+        return resources, next_token
 
     def _load_network_policies(self):
-        return [], None
+        resources = []
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
+
+        try:
+            if self.namespace and self.namespace != "all":
+                policies_list = self.kube_client.networking_v1.list_namespaced_network_policy(namespace=self.namespace, **api_kwargs)
+            else:
+                policies_list = self.kube_client.networking_v1.list_network_policy_for_all_namespaces(**api_kwargs)
+
+            next_token = self._get_continue_token(policies_list)
+            for policy in policies_list.items:
+                resource = {
+                    "name": policy.metadata.name,
+                    "namespace": policy.metadata.namespace or "default",
+                    "age": self._format_age(policy.metadata.creation_timestamp),
+                    "raw_data": client.ApiClient().sanitize_for_serialization(policy)
+                }
+                resources.append(resource)
+        except Exception as e:
+            logging.warning(f"Network policies not available: {e}")
+        return resources, next_token
 
     def _load_storage_classes(self):
-        return [], None
+        resources = []
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
+
+        try:
+            storage_classes_list = self.kube_client.storage_v1.list_storage_class(**api_kwargs)
+            next_token = self._get_continue_token(storage_classes_list)
+            
+            for sc in storage_classes_list.items:
+                resource = {
+                    "name": sc.metadata.name,
+                    "namespace": "",  # Storage classes are cluster-scoped
+                    "age": self._format_age(sc.metadata.creation_timestamp),
+                    "raw_data": client.ApiClient().sanitize_for_serialization(sc)
+                }
+                resource["provisioner"] = sc.provisioner or "Unknown"
+                resource["reclaim_policy"] = sc.reclaim_policy or "Delete"
+                resource["volume_binding_mode"] = sc.volume_binding_mode or "Immediate"
+                resources.append(resource)
+        except Exception as e:
+            logging.warning(f"Storage classes not available: {e}")
+        return resources, next_token
 
     def _load_service_accounts(self):
-        return [], None
+        resources = []
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
+
+        if self.namespace and self.namespace != "all":
+            sa_list = self.kube_client.v1.list_namespaced_service_account(namespace=self.namespace, **api_kwargs)
+        else:
+            sa_list = self.kube_client.v1.list_service_account_for_all_namespaces(**api_kwargs)
+
+        next_token = self._get_continue_token(sa_list)
+        for sa in sa_list.items:
+            resource = {
+                "name": sa.metadata.name,
+                "namespace": sa.metadata.namespace or "default",
+                "age": self._format_age(sa.metadata.creation_timestamp),
+                "raw_data": client.ApiClient().sanitize_for_serialization(sa)
+            }
+            if sa.secrets:
+                resource["secrets"] = len(sa.secrets)
+            else:
+                resource["secrets"] = 0
+            resources.append(resource)
+        return resources, next_token
 
     def _load_cluster_roles(self):
-        return [], None
+        resources = []
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
+
+        try:
+            cluster_roles_list = self.kube_client.rbac_authorization_v1.list_cluster_role(**api_kwargs)
+            next_token = self._get_continue_token(cluster_roles_list)
+            
+            for cr in cluster_roles_list.items:
+                resource = {
+                    "name": cr.metadata.name,
+                    "namespace": "",  # Cluster roles are cluster-scoped
+                    "age": self._format_age(cr.metadata.creation_timestamp),
+                    "raw_data": client.ApiClient().sanitize_for_serialization(cr)
+                }
+                if cr.rules:
+                    resource["rules"] = len(cr.rules)
+                resources.append(resource)
+        except Exception as e:
+            logging.warning(f"Cluster roles not available: {e}")
+        return resources, next_token
 
     def _load_roles(self):
-        return [], None
+        resources = []
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
+
+        try:
+            if self.namespace and self.namespace != "all":
+                roles_list = self.kube_client.rbac_authorization_v1.list_namespaced_role(namespace=self.namespace, **api_kwargs)
+            else:
+                roles_list = self.kube_client.rbac_authorization_v1.list_role_for_all_namespaces(**api_kwargs)
+
+            next_token = self._get_continue_token(roles_list)
+            for role in roles_list.items:
+                resource = {
+                    "name": role.metadata.name,
+                    "namespace": role.metadata.namespace or "default",
+                    "age": self._format_age(role.metadata.creation_timestamp),
+                    "raw_data": client.ApiClient().sanitize_for_serialization(role)
+                }
+                if role.rules:
+                    resource["rules"] = len(role.rules)
+                resources.append(resource)
+        except Exception as e:
+            logging.warning(f"Roles not available: {e}")
+        return resources, next_token
 
     def _load_cluster_role_bindings(self):
-        return [], None
+        resources = []
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
+
+        try:
+            crb_list = self.kube_client.rbac_authorization_v1.list_cluster_role_binding(**api_kwargs)
+            next_token = self._get_continue_token(crb_list)
+            
+            for crb in crb_list.items:
+                resource = {
+                    "name": crb.metadata.name,
+                    "namespace": "",  # Cluster role bindings are cluster-scoped
+                    "age": self._format_age(crb.metadata.creation_timestamp),
+                    "raw_data": client.ApiClient().sanitize_for_serialization(crb)
+                }
+                if crb.subjects:
+                    resource["subjects"] = len(crb.subjects)
+                if crb.role_ref:
+                    resource["role"] = crb.role_ref.name
+                resources.append(resource)
+        except Exception as e:
+            logging.warning(f"Cluster role bindings not available: {e}")
+        return resources, next_token
 
     def _load_role_bindings(self):
-        return [], None
+        resources = []
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
+
+        try:
+            if self.namespace and self.namespace != "all":
+                rb_list = self.kube_client.rbac_authorization_v1.list_namespaced_role_binding(namespace=self.namespace, **api_kwargs)
+            else:
+                rb_list = self.kube_client.rbac_authorization_v1.list_role_binding_for_all_namespaces(**api_kwargs)
+
+            next_token = self._get_continue_token(rb_list)
+            for rb in rb_list.items:
+                resource = {
+                    "name": rb.metadata.name,
+                    "namespace": rb.metadata.namespace or "default",
+                    "age": self._format_age(rb.metadata.creation_timestamp),
+                    "raw_data": client.ApiClient().sanitize_for_serialization(rb)
+                }
+                if rb.subjects:
+                    resource["subjects"] = len(rb.subjects)
+                if rb.role_ref:
+                    resource["role"] = rb.role_ref.name
+                resources.append(resource)
+        except Exception as e:
+            logging.warning(f"Role bindings not available: {e}")
+        return resources, next_token
 
     def _load_custom_resource_definitions(self):
-        return [], None
+        resources = []
+        api_kwargs = {'limit': self.limit, '_continue': self.continue_token}
+        api_kwargs = {k: v for k, v in api_kwargs.items() if v is not None}
+
+        try:
+            crd_list = self.kube_client.apiextensions_v1.list_custom_resource_definition(**api_kwargs)
+            next_token = self._get_continue_token(crd_list)
+            
+            for crd in crd_list.items:
+                resource = {
+                    "name": crd.metadata.name,
+                    "namespace": "",  # CRDs are cluster-scoped
+                    "age": self._format_age(crd.metadata.creation_timestamp),
+                    "raw_data": client.ApiClient().sanitize_for_serialization(crd)
+                }
+                if crd.spec:
+                    resource["group"] = crd.spec.group or "Unknown"
+                    resource["scope"] = crd.spec.scope or "Unknown"
+                    if crd.spec.versions:
+                        resource["versions"] = len(crd.spec.versions)
+                resources.append(resource)
+        except Exception as e:
+            logging.warning(f"Custom resource definitions not available: {e}")
+        return resources, next_token

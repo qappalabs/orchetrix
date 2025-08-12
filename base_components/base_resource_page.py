@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QProcess, QRect
+from typing import List, Any, Dict
 
 # Import the split components
 from .resource_loader import KubernetesResourceLoader
@@ -26,12 +27,17 @@ from utils.enhanced_worker import EnhancedBaseWorker
 from utils.thread_manager import get_thread_manager
 from log_handler import method_logger, class_logger
 
-# Constants for performance tuning
-BATCH_SIZE = 50  # Number of items to render in each batch
-SCROLL_DEBOUNCE_MS = 100  # Debounce time for scroll events
-SEARCH_DEBOUNCE_MS = 300  # Debounce time for search input
-CACHE_TTL_SECONDS = 300  # Cache time-to-live
+# Constants for performance tuning - optimized values
+BATCH_SIZE = 100  # Increased number of items to render in each batch
+SCROLL_DEBOUNCE_MS = 50   # Reduced debounce for more responsive scrolling
+SEARCH_DEBOUNCE_MS = 200  # Reduced debounce for faster search
+CACHE_TTL_SECONDS = 600   # Increased cache time for better performance
 
+# Import new performance components
+from utils.bounded_cache import get_age_cache, get_formatted_data_cache, clear_all_caches
+from utils.search_index import get_search_index
+
+from .resource_processing_worker import create_processing_worker
 
 @class_logger(log_level=logging.INFO, exclude_methods=['__init__', 'clear_table', 'update_table_row', 'load_more_complete', 'all_items_loaded_signal', 'force_load_data'])
 class BaseResourcePage(BaseTablePage):
@@ -40,9 +46,7 @@ class BaseResourcePage(BaseTablePage):
     load_more_complete = pyqtSignal()
     all_items_loaded_signal = pyqtSignal()
 
-    # Class-level cache for formatted ages
-    _age_cache = {}
-    _age_cache_timestamps = {}
+    # Use bounded cache system instead of unbounded class variables
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -61,21 +65,42 @@ class BaseResourcePage(BaseTablePage):
         self.is_loading_more = False
         self.all_data_loaded = False
         self.current_continue_token = None
-        self.items_per_page = 25  # User specified
+        self.items_per_page = 100  # Increased for better performance
         self.selected_items = set()
         self.reload_on_show = True
 
         self.is_showing_skeleton = False
 
-        # Caching
-        self._data_cache = {}
-        self._cache_timestamps = {}
+        # Replace unbounded caches with bounded cache system
+        from utils.bounded_cache import get_cache_manager
+        self._cache_manager = get_cache_manager()
+        
+        # Use specific caches for different data types
+        self._data_cache = self._cache_manager.get_cache(
+            f'resource_data_{self.__class__.__name__}', 
+            max_size=1000, ttl_seconds=300
+        )
+        self._age_cache = self._cache_manager.get_cache(
+            'age_formatting', 
+            max_size=5000, ttl_seconds=60
+        )
+        self._formatted_cache = self._cache_manager.get_cache(
+            'formatted_data', 
+            max_size=2000, ttl_seconds=300
+        )
+        
         self._shutting_down = False
+        
+        # Thread safety
+        import threading
+        self._data_lock = threading.RLock()  # Allow recursive locking
+        self._loading_lock = threading.Lock()
+        self._cache_lock = threading.RLock()
 
-        # Virtual scrolling
+        # Virtual scrolling - optimized thresholds
         self._visible_start = 0
-        self._visible_end = 50
-        self._render_buffer = 10  # Extra rows to render for smooth scrolling
+        self._visible_end = 100  # Increased for better performance
+        self._render_buffer = 20  # Extra rows to render for smooth scrolling
         
         # Debouncing timers
         self._search_timer = QTimer()
@@ -90,12 +115,35 @@ class BaseResourcePage(BaseTablePage):
         self._render_timer = QTimer()
         self._render_timer.timeout.connect(self._render_next_batch)
         self._render_queue = []
+        
+        # Search index for efficient search
+        self._search_index = None
 
         self.kube_client = get_kubernetes_client()
         self._load_more_indicator_widget = None
 
         self._message_widget_container = None
         self._table_stack = None
+        
+        # Background processing
+        self._processing_worker = None
+        self._progress_dialog = None
+        
+        # Track if data has been loaded at least once
+        self._initial_load_done = False
+
+    def showEvent(self, event):
+        """Override showEvent to automatically load data when page becomes visible"""
+        super().showEvent(event)
+        # Only auto-load if we haven't loaded data yet and it's not already loading
+        if not self._initial_load_done and not self.is_loading_initial and not self.resources:
+            QTimer.singleShot(100, self._auto_load_data)
+
+    def _auto_load_data(self):
+        """Auto-load data when page is shown"""
+        if hasattr(self, 'resource_type') and self.resource_type:
+            logging.info(f"Auto-loading data for {self.__class__.__name__}")
+            self.load_data()
 
     def setup_ui(self, title, headers, sortable_columns=None):
         """Setup the main UI components"""
@@ -124,7 +172,7 @@ class BaseResourcePage(BaseTablePage):
         self._table_stack.setCurrentWidget(self.table)
 
         self.select_all_checkbox = self._create_select_all_checkbox()
-        self._set_header_widget(0, self.select_all_checkbox)
+        self._add_select_all_to_header()
 
         if hasattr(self, 'table') and self.table:
             self.table.verticalScrollBar().valueChanged.connect(self._handle_scroll)
@@ -134,19 +182,18 @@ class BaseResourcePage(BaseTablePage):
         self.installEventFilter(self)
         return page_main_layout
 
-    @classmethod
-    def _format_age_cached(cls, timestamp):
-        """Format age with caching to avoid repeated calculations"""
+    def _format_age_cached(self, timestamp):
+        """Format age with bounded caching to avoid repeated calculations"""
         if not timestamp:
             return "Unknown"
         
-        # Check cache
-        cache_key = str(timestamp)
-        if cache_key in cls._age_cache:
-            # Check if cache is still valid (update every 60 seconds)
-            import time
-            if time.time() - cls._age_cache_timestamps.get(cache_key, 0) < 60:
-                return cls._age_cache[cache_key]
+        # Use instance-level bounded cache
+        cache_key = f"age_{hash(str(timestamp))}"
+        
+        # Check cache first
+        cached_age = self._age_cache.get(cache_key)
+        if cached_age is not None:
+            return cached_age
         
         # Calculate age
         try:
@@ -172,35 +219,194 @@ class BaseResourcePage(BaseTablePage):
             else:
                 result = f"{minutes}m"
             
-            # Cache result
-            cls._age_cache[cache_key] = result
-            cls._age_cache_timestamps[cache_key] = time.time()
-            
-            # Clean old cache entries periodically
-            if len(cls._age_cache) > 1000:
-                cls._clean_age_cache()
-            
+            # Cache result with TTL and size limits
+            self._age_cache.set(cache_key, result)
             return result
             
         except Exception as e:
             logging.error(f"Error formatting age: {e}")
             return "Unknown"
 
-    @classmethod
-    def _clean_age_cache(cls):
-        """Clean old entries from age cache"""
-        import time
-        current_time = time.time()
+    def _clean_age_cache(self):
+        """Clean old entries from age cache - now handled automatically by bounded cache"""
+        # Bounded cache handles cleanup automatically with TTL and size limits
+        # Manual cleanup is no longer needed
+        pass
+
+    # Thread-safe data access methods
+    def get_cached_data(self, key: str) -> Any:
+        """Thread-safe cache data retrieval"""
+        with self._cache_lock:
+            return self._data_cache.get(key)
+    
+    def set_cached_data(self, key: str, value: Any) -> bool:
+        """Thread-safe cache data storage"""
+        with self._cache_lock:
+            return self._data_cache.set(key, value)
+    
+    def get_resources_safely(self) -> List[Dict]:
+        """Thread-safe resource list access"""
+        with self._data_lock:
+            return self.resources.copy() if self.resources else []
+    
+    def set_resources_safely(self, resources: List[Dict]):
+        """Thread-safe resource list update"""
+        with self._data_lock:
+            self.resources = resources
+    
+    def is_currently_loading(self) -> bool:
+        """Thread-safe loading state check"""
+        with self._loading_lock:
+            return self.is_loading_initial or self.is_loading_more
+    
+    def set_loading_state(self, is_loading: bool, is_initial: bool = True) -> bool:
+        """Thread-safe loading state management - returns False if already loading"""
+        with self._loading_lock:
+            if is_loading:
+                if self.is_loading_initial or self.is_loading_more:
+                    return False  # Already loading
+                if is_initial:
+                    self.is_loading_initial = True
+                else:
+                    self.is_loading_more = True
+            else:
+                if is_initial:
+                    self.is_loading_initial = False
+                else:
+                    self.is_loading_more = False
+            return True
+    
+    def add_resources_safely(self, new_resources: List[Dict]):
+        """Thread-safe resource addition (for incremental loading)"""
+        with self._data_lock:
+            if not self.resources:
+                self.resources = []
+            self.resources.extend(new_resources)
+    
+    # Background processing methods
+    def process_data_in_background(self, raw_data: List[Dict], show_progress: bool = True):
+        """Process resource data in background thread to prevent UI blocking"""
+        if self._processing_worker and self._processing_worker.isRunning():
+            logging.warning("Background processing already in progress")
+            return False
         
-        # Remove entries older than 5 minutes
-        keys_to_remove = [
-            key for key, timestamp in cls._age_cache_timestamps.items()
-            if current_time - timestamp > 300
-        ]
+        # Show progress dialog if requested
+        if show_progress:
+            self._show_progress_dialog("Processing data...")
         
-        for key in keys_to_remove:
-            cls._age_cache.pop(key, None)
-            cls._age_cache_timestamps.pop(key, None)
+        # Create processing worker
+        self._processing_worker = create_processing_worker(
+            self.resource_type or "resource", 
+            raw_data
+        )
+        
+        # Connect signals
+        self._processing_worker.data_processed.connect(self._on_processing_complete)
+        self._processing_worker.error_occurred.connect(self._on_processing_error)
+        if show_progress:
+            self._processing_worker.progress_updated.connect(self._on_processing_progress)
+        self._processing_worker.processing_finished.connect(self._hide_progress_dialog)
+        
+        # Start processing
+        self._processing_worker.start()
+        
+        return True
+    
+    def _process_single_resource(self, raw_resource: Dict) -> Dict:
+        """Process a single resource item - this method is now handled by ResourceProcessingWorker"""
+        # This method is kept for compatibility but processing is now handled by the worker
+        # Individual resource pages can provide custom processing through the worker
+        return raw_resource
+    
+    def _on_processing_progress(self, progress: int, message: str):
+        """Handle processing progress updates (runs in UI thread)"""
+        if self._progress_dialog:
+            self._progress_dialog.setValue(progress)
+            self._progress_dialog.setLabelText(message)
+    
+    def _on_processing_complete(self, processed_data: List[Dict]):
+        """Handle completed processing (runs in UI thread)"""
+        try:
+            # Hide progress dialog
+            self._hide_progress_dialog()
+            
+            # Update resources safely
+            self.set_resources_safely(processed_data)
+            
+            # Update UI
+            self._update_table_from_processed_data()
+            
+            # Update count
+            if hasattr(self, 'items_count'):
+                self.items_count.setText(f"{len(processed_data)} items")
+            
+            logging.info(f"Background processing completed: {len(processed_data)} items processed")
+            
+        except Exception as e:
+            logging.error(f"Error in _on_processing_complete: {e}")
+            self._on_processing_error(f"Failed to update UI: {e}")
+    
+    def _on_processing_error(self, error_message: str):
+        """Handle processing errors (runs in UI thread)"""
+        # Hide progress dialog
+        self._hide_progress_dialog()
+        
+        # Show error message
+        from PyQt6.QtWidgets import QMessageBox
+        QMessageBox.critical(
+            self, 
+            "Processing Error", 
+            f"Failed to process data:\n{error_message}"
+        )
+        
+        logging.error(f"Background processing error: {error_message}")
+    
+    def _show_progress_dialog(self, message: str):
+        """Show progress dialog for background processing"""
+        from PyQt6.QtWidgets import QProgressDialog
+        from PyQt6.QtCore import Qt
+        
+        if not self._progress_dialog:
+            self._progress_dialog = QProgressDialog(self)
+            self._progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+            self._progress_dialog.setMinimumDuration(500)  # Show after 500ms
+            self._progress_dialog.setCancelButton(None)  # No cancel for now
+        
+        self._progress_dialog.setLabelText(message)
+        self._progress_dialog.setRange(0, 100)
+        self._progress_dialog.setValue(0)
+        self._progress_dialog.show()
+    
+    def _hide_progress_dialog(self):
+        """Hide progress dialog"""
+        if self._progress_dialog:
+            self._progress_dialog.hide()
+            self._progress_dialog.deleteLater()
+            self._progress_dialog = None
+    
+    def _update_table_from_processed_data(self):
+        """Update table with processed data - to be implemented by subclasses"""
+        # Default implementation using populate_resource_row
+        if hasattr(self, 'populate_resource_row') and hasattr(self, 'table'):
+            try:
+                self.table.setRowCount(0)  # Clear existing rows
+                resources = self.get_resources_safely()
+                
+                self.table.setRowCount(len(resources))
+                for row, resource in enumerate(resources):
+                    self.populate_resource_row(row, resource)
+                
+                logging.debug(f"Table updated with {len(resources)} rows")
+                
+            except Exception as e:
+                logging.error(f"Error updating table: {e}")
+    
+    def stop_background_processing(self):
+        """Stop any ongoing background processing"""
+        if self._processing_worker and self._processing_worker.isRunning():
+            self._processing_worker.cancel()
+            self._processing_worker.wait(3000)  # Wait up to 3 seconds
+        self._hide_progress_dialog()
 
     def _create_title_and_count(self, layout, title_text):
         """Create title and count labels"""
@@ -217,9 +423,13 @@ class BaseResourcePage(BaseTablePage):
         layout.addWidget(self.items_count)
 
     def _add_controls_to_header(self, header_layout):
-        """Add filter controls and refresh button to header"""
+        """Add filter controls, delete button, and refresh button to header"""
         self._add_filter_controls(header_layout)
         header_layout.addStretch(1)
+
+        # Add delete selected button
+        delete_btn = self._create_delete_selected_button()
+        header_layout.addWidget(delete_btn)
 
         refresh_btn = QPushButton("Refresh")
         refresh_style = getattr(AppStyles, "SECONDARY_BUTTON_STYLE",
@@ -231,6 +441,98 @@ class BaseResourcePage(BaseTablePage):
         refresh_btn.setStyleSheet(refresh_style)
         refresh_btn.clicked.connect(lambda: self.force_load_data())
         header_layout.addWidget(refresh_btn)
+    
+    def _create_delete_selected_button(self):
+        """Create centralized delete selected button with consistent styling"""
+        delete_btn = QPushButton("Delete Selected")
+        delete_btn.setObjectName("deleteSelectedBtn")
+        
+        # Use centralized styling
+        delete_btn.setStyleSheet(self._get_delete_button_style())
+        delete_btn.clicked.connect(self._handle_delete_selected)
+        
+        return delete_btn
+    
+    def _get_delete_button_style(self):
+        """Centralized delete button styling"""
+        return """
+            QPushButton#deleteSelectedBtn {
+                background-color: #d32f2f;
+                color: #ffffff;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-weight: bold;
+                font-size: 13px;
+                margin-right: 8px;
+            }
+            QPushButton#deleteSelectedBtn:hover {
+                background-color: #b71c1c;
+            }
+            QPushButton#deleteSelectedBtn:pressed {
+                background-color: #8d1e1e;
+            }
+            QPushButton#deleteSelectedBtn:disabled {
+                background-color: #cccccc;
+                color: #666666;
+            }
+        """
+    
+    def _handle_delete_selected(self):
+        """Base implementation for delete selected functionality"""
+        selected_items = self._get_selected_resources()
+        if not selected_items:
+            QMessageBox.information(self, "No Selection", 
+                                    "Please select resources to delete.")
+            return
+        
+        # Confirmation dialog
+        if not self._confirm_deletion(selected_items):
+            return
+            
+        # Start deletion process
+        self._start_deletion_process(selected_items)
+    
+    def _get_selected_resources(self):
+        """Get currently selected resources - to be implemented by subclasses"""
+        # Default implementation - subclasses should override
+        if hasattr(self, 'table'):
+            selected_rows = []
+            for row in range(self.table.rowCount()):
+                if hasattr(self.table, 'item'):
+                    item = self.table.item(row, 0)  # First column
+                    if item and item.isSelected():
+                        selected_rows.append(row)
+            return selected_rows
+        return []
+    
+    def _confirm_deletion(self, selected_items):
+        """Confirm deletion with user"""
+        count = len(selected_items)
+        resource_name = self.resource_type or "resource"
+        
+        reply = QMessageBox.question(
+            self, 
+            "Confirm Deletion",
+            f"Are you sure you want to delete {count} {resource_name}(s)?\n\n"
+            f"This action cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        return reply == QMessageBox.StandardButton.Yes
+    
+    def _start_deletion_process(self, selected_items):
+        """Start the deletion process - to be implemented by subclasses"""
+        # Default implementation
+        if hasattr(self, 'delete_selected_resources'):
+            self.delete_selected_resources()
+        else:
+            QMessageBox.information(
+                self, 
+                "Not Implemented", 
+                "Delete functionality not implemented for this resource type."
+            )
 
     def _add_filter_controls(self, header_layout):
         """Add search and namespace filter controls with proper layout"""
@@ -330,18 +632,39 @@ class BaseResourcePage(BaseTablePage):
         self._search_timer.start(SEARCH_DEBOUNCE_MS)
 
     def _perform_search(self):
-        """Perform the actual search"""
-        search_text = self.search_bar.text().lower()
+        """Perform efficient indexed search"""
+        search_text = self.search_bar.text().strip()
         logging.debug(f"Performing search for: '{search_text}', resources count: {len(self.resources)}")
-        self._filter_resources(search_text)
+        
+        if not search_text:
+            # No search query, show all resources
+            self._display_resources(self.resources)
+            return
+        
+        # Use indexed search for better performance with large datasets
+        if self._search_index and len(self.resources) > 100:
+            self._perform_indexed_search(search_text)
+        else:
+            # Fallback to linear search for smaller datasets
+            self._filter_resources_linear(search_text.lower())
 
-    def _on_namespace_changed(self, namespace):
-        """Handle namespace filter changes"""
-        self.namespace_filter = namespace
-        self.force_load_data()
+    def _perform_indexed_search(self, search_text):
+        """Perform search using search index for large datasets"""
+        try:
+            search_results = self._search_index.search(search_text, max_results=1000)
+            
+            # Extract resources from search results
+            filtered_resources = [result.resource for result in search_results]
+            
+            logging.debug(f"Indexed search returned {len(filtered_resources)} results")
+            self._display_resources(filtered_resources)
+            
+        except Exception as e:
+            logging.warning(f"Indexed search failed, falling back to linear search: {e}")
+            self._filter_resources_linear(search_text.lower())
 
-    def _filter_resources(self, search_text):
-        """Filter resources based on search text"""
+    def _filter_resources_linear(self, search_text):
+        """Linear search fallback for smaller datasets or index failures"""
         if not search_text:
             self._display_resources(self.resources)
             return
@@ -355,6 +678,50 @@ class BaseResourcePage(BaseTablePage):
                 filtered_resources.append(resource)
         
         self._display_resources(filtered_resources)
+        
+    def _update_search_index(self):
+        """Update search index when resources change"""
+        if not self.resource_type or not self.resources:
+            return
+        
+        try:
+            # Get or create search index for this resource type
+            self._search_index = get_search_index(self.resource_type)
+            
+            # Define searchable fields based on resource type
+            searchable_fields = self._get_searchable_fields()
+            
+            # Build index
+            self._search_index.build_index(self.resources, searchable_fields)
+            
+            logging.debug(f"Search index updated for {len(self.resources)} {self.resource_type} resources")
+            
+        except Exception as e:
+            logging.error(f"Failed to update search index: {e}")
+            self._search_index = None
+    
+    def _get_searchable_fields(self) -> List[str]:
+        """Get list of searchable fields for the resource type"""
+        # Base searchable fields that most resources have
+        base_fields = ["name", "namespace", "status"]
+        
+        # Add resource-specific fields
+        if self.resource_type == "events":
+            return base_fields + ["raw_data.message", "raw_data.reason", "raw_data.type"]
+        elif self.resource_type == "pods":
+            return base_fields + ["node", "raw_data.spec.containers.*.name"]
+        elif self.resource_type == "services":
+            return base_fields + ["raw_data.spec.type", "raw_data.spec.ports.*.port"]
+        elif self.resource_type == "deployments":
+            return base_fields + ["raw_data.spec.strategy.type"]
+        else:
+            # Generic searchable fields
+            return base_fields
+
+    def _on_namespace_changed(self, namespace):
+        """Handle namespace filter changes"""
+        self.namespace_filter = namespace
+        self.force_load_data()
 
     def _handle_scroll(self, value):
         """Handle scroll events with debouncing"""
@@ -418,6 +785,7 @@ class BaseResourcePage(BaseTablePage):
             
             self.is_loading_initial = False
             self.is_loading_more = False
+            self._initial_load_done = True
             
             if self.all_data_loaded:
                 self.all_items_loaded_signal.emit()
@@ -446,11 +814,19 @@ class BaseResourcePage(BaseTablePage):
         self._table_stack.setCurrentWidget(self.table)
         self.clear_table()
         
-        # Use progressive rendering for large datasets
-        if len(resources) > BATCH_SIZE:
+        # Clear previous selections when displaying new data
+        self.selected_items.clear()
+        
+        # Update search index for large datasets
+        if len(resources) > 100:
+            self._update_search_index()
+        
+        # Use progressive rendering only for very large datasets (increased threshold)
+        if len(resources) > 500:  # Increased from BATCH_SIZE (50) to 500
             self._render_queue = resources.copy()
-            self._render_timer.start(16)  # ~60fps
+            self._render_timer.start(1)  # Much faster rendering (1ms instead of 16ms)
         else:
+            # Render directly for smaller datasets (much faster)
             self._render_resources_batch(resources)
 
     def _render_next_batch(self):
@@ -459,8 +835,10 @@ class BaseResourcePage(BaseTablePage):
             self._render_timer.stop()
             return
         
-        batch = self._render_queue[:BATCH_SIZE]
-        self._render_queue = self._render_queue[BATCH_SIZE:]
+        # Use larger batch size for faster rendering
+        batch_size = min(200, len(self._render_queue))  # Increased from BATCH_SIZE (50) to 200
+        batch = self._render_queue[:batch_size]
+        self._render_queue = self._render_queue[batch_size:]
         
         self._render_resources_batch(batch, append=True)
         
@@ -468,27 +846,50 @@ class BaseResourcePage(BaseTablePage):
             self._render_timer.stop()
 
     def _render_resources_batch(self, resources, append=False):
-        """Render a batch of resources to the table"""
+        """Render a batch of resources to the table with optimized performance"""
         if not append:
             self.clear_table()
         
+        if not resources:
+            return
+            
+        # Disable sorting during batch rendering for better performance
+        self.table.setSortingEnabled(False)
+        
         start_row = self.table.rowCount() if append else 0
         
-        for i, resource in enumerate(resources):
-            row = start_row + i
-            self.table.insertRow(row)
-            # Call the correct method name - check both variations for compatibility
-            if hasattr(self, 'populate_resource_row'):
-                self.populate_resource_row(row, resource)
-            else:
-                self._populate_resource_row(row, resource)
+        # Set row count all at once instead of inserting one by one
+        total_rows = start_row + len(resources)
+        self.table.setRowCount(total_rows)
+        
+        # Render in larger batches with less frequent UI updates
+        batch_size = 50  # Larger batch size for better performance
+        for i in range(0, len(resources), batch_size):
+            batch = resources[i:i + batch_size]
+            
+            for j, resource in enumerate(batch):
+                row = start_row + i + j
+                # Call the correct method name - check both variations for compatibility
+                if hasattr(self, 'populate_resource_row'):
+                    self.populate_resource_row(row, resource)
+                else:
+                    self._populate_resource_row(row, resource)
+            
+            # Process events less frequently to reduce overhead
+            if i % (batch_size * 2) == 0:
+                QApplication.processEvents()
+        
+        # Re-enable sorting after all rows are added
+        self.table.setSortingEnabled(True)
 
     def _populate_resource_row(self, row, resource):
         """Populate a table row with resource data - default implementation"""
         from PyQt6.QtWidgets import QTableWidgetItem
         
         # Default implementation for common fields - can be overridden by subclasses
-        self.table.setItem(row, 0, QTableWidgetItem(""))  # Checkbox column
+        # Create checkbox for the first column
+        checkbox_container = self._create_checkbox_container(row, resource.get("name", "Unknown"))
+        self.table.setCellWidget(row, 0, checkbox_container)
         
         # Extract common resource fields
         name = resource.get("name", "Unknown")
@@ -517,9 +918,11 @@ class BaseResourcePage(BaseTablePage):
         self.items_count.setText(f"{count} items")
 
     def _show_empty_message(self):
-        """Show empty state message in center of table section"""
-        # Clear the table data
-        self.clear_table()
+        """Show empty state message in center of table section while keeping headers visible"""
+        # Keep table headers visible - don't clear the table completely
+        if self.table:
+            self.table.setRowCount(0)  # Just clear rows, keep headers
+            self.table.show()  # Ensure table is visible
         
         # Clear and setup the message container
         self._clear_message_container()
@@ -536,6 +939,9 @@ class BaseResourcePage(BaseTablePage):
         # Add widgets to message container
         self._message_widget_container.layout().addWidget(empty_title)
         self._message_widget_container.layout().addWidget(empty_subtitle)
+        
+        # Show the message overlay but keep table visible in background
+        self._table_stack.setCurrentWidget(self.table)
         
         # Switch to message container view
         self._table_stack.setCurrentWidget(self._message_widget_container)
@@ -609,8 +1015,13 @@ class BaseResourcePage(BaseTablePage):
         """Delete selected resources"""
         if hasattr(self, 'delete_thread') and self.delete_thread and self.delete_thread.isRunning():
             self.delete_thread.wait(300)
+        
+        # Enhanced debugging for selection
+        logging.info(f"Delete selected called. Selected items: {len(self.selected_items)}")
+        logging.info(f"Selected items content: {list(self.selected_items)}")
+        
         if not self.selected_items:
-            QMessageBox.information(self, "No Selection", "No resources selected for deletion.")
+            QMessageBox.information(self, "No Selection", "Please select resources to delete by checking the checkboxes in the first column.")
             return
         
         count = len(self.selected_items)
@@ -631,30 +1042,54 @@ class BaseResourcePage(BaseTablePage):
         progress.setMinimumDuration(0)
         progress.setAutoClose(False)
         progress.setValue(0)
+        progress.show()  # Ensure dialog is visible immediately
+        
+        # Process events to ensure UI responsiveness
+        QApplication.processEvents()
 
-        self.batch_delete_thread = BatchResourceDeleterThread(self.resource_type, resources_list)
-        self.batch_delete_thread.batch_delete_progress.connect(progress.setValue)
-        self.batch_delete_thread.batch_delete_completed.connect(
-            lambda success, errors: self.on_batch_delete_completed(success, errors, progress))
-        self.batch_delete_thread.start()
+        try:
+            self.batch_delete_thread = BatchResourceDeleterThread(self.resource_type, resources_list)
+            self.batch_delete_thread.batch_delete_progress.connect(lambda current, total: progress.setValue(current))
+            self.batch_delete_thread.batch_delete_completed.connect(
+                lambda success, errors: self.on_batch_delete_completed(success, errors, progress))
+            self.batch_delete_thread.start()
+        except Exception as e:
+            progress.close()
+            QMessageBox.critical(self, "Delete Error", f"Failed to start deletion process: {str(e)}")
+            logging.error(f"Error starting batch delete thread: {e}")
 
     def on_batch_delete_completed(self, success_list, error_list, progress_dialog):
         """Handle batch delete completion"""
-        progress_dialog.close()
-        success_count = len(success_list)
-        error_count = len(error_list)
-        result_message = f"Deleted {success_count} of {success_count + error_count} {self.resource_type}."
-        
-        if error_count > 0:
-            result_message += f"\n\nFailed to delete {error_count} resources:"
-            for name, namespace, error in error_list[:5]:
-                ns_text = f" in namespace {namespace}" if namespace else ""
-                result_message += f"\n- {name}{ns_text}: {error}"
-            if error_count > 5:
-                result_message += f"\n... and {error_count - 5} more."
-        
-        QMessageBox.information(self, "Deletion Results", result_message)
-        self.force_load_data()
+        try:
+            progress_dialog.close()
+            success_count = len(success_list)
+            error_count = len(error_list)
+            result_message = f"Deleted {success_count} of {success_count + error_count} {self.resource_type}."
+            
+            if error_count > 0:
+                result_message += f"\n\nFailed to delete {error_count} resources:"
+                for name, namespace, error in error_list[:5]:
+                    ns_text = f" in namespace {namespace}" if namespace else ""
+                    result_message += f"\n- {name}{ns_text}: {error}"
+                if error_count > 5:
+                    result_message += f"\n... and {error_count - 5} more."
+            
+            # Clear selected items after deletion attempt
+            self.selected_items.clear()
+            
+            QMessageBox.information(self, "Deletion Results", result_message)
+            
+            # Refresh data to show current state
+            self.force_load_data()
+            
+        except Exception as e:
+            logging.error(f"Error in batch delete completion handler: {e}")
+            QMessageBox.critical(self, "Error", f"Error processing deletion results: {str(e)}")
+            # Still try to refresh data even if there was an error
+            try:
+                self.force_load_data()
+            except:
+                pass
 
     def delete_resource(self, resource_name, resource_namespace):
         """Delete a single resource"""
@@ -793,24 +1228,88 @@ class BaseResourcePage(BaseTablePage):
             QCheckBox {
                 margin: 0px;
                 padding: 0px;
+                background-color: transparent;
             }
             QCheckBox::indicator {
-                width: 12px;
-                height: 12px;
+                width: 14px;
+                height: 14px;
                 margin: 1px;
+                background-color: #2d2d2d;
+                border: 1px solid #555;
+                border-radius: 3px;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #0078d4;
+                border-color: #0078d4;
+                image: url(icons/check.svg);
+            }
+            QCheckBox::indicator:hover {
+                border-color: #0078d4;
             }
         """)
         select_all_checkbox.stateChanged.connect(self._on_select_all_changed)
         return select_all_checkbox
 
+    def _add_select_all_to_header(self):
+        """Add select all checkbox to table header using viewport overlay"""
+        if not self.table or not self.select_all_checkbox:
+            return
+            
+        # Set the header label to empty for column 0
+        self.table.setHorizontalHeaderItem(0, QTableWidgetItem(""))
+        
+        # Position the checkbox over the header
+        def position_checkbox():
+            if self.table and self.select_all_checkbox:
+                header = self.table.horizontalHeader()
+                if header:
+                    # Get the position and size of the first column header
+                    rect = header.sectionPosition(0)
+                    width = header.sectionSize(0)
+                    height = header.height()
+                    
+                    # Center the checkbox in the header
+                    checkbox_size = self.select_all_checkbox.sizeHint()
+                    x = rect + (width - checkbox_size.width()) // 2
+                    y = (height - checkbox_size.height()) // 2
+                    
+                    # Set parent to header and position
+                    self.select_all_checkbox.setParent(header)
+                    self.select_all_checkbox.move(x, y)
+                    self.select_all_checkbox.show()
+        
+        # Position immediately and on resize - ensure main thread
+        def safe_position():
+            if self.thread() == QApplication.instance().thread():
+                position_checkbox()
+                
+        QTimer.singleShot(100, safe_position)
+        self.table.horizontalHeader().sectionResized.connect(lambda: QTimer.singleShot(10, safe_position))
+
     def _set_header_widget(self, column, widget):
         """Set widget in table header"""
-        from PyQt6.QtWidgets import QTableWidgetItem
+        from PyQt6.QtWidgets import QTableWidgetItem, QWidget, QHBoxLayout
         
-        if hasattr(self.table, 'horizontalHeader'):
-            self.table.setHorizontalHeaderItem(column, QTableWidgetItem())
+        if hasattr(self.table, 'horizontalHeader') and widget:
+            # Create a container widget to center the checkbox
+            container = QWidget()
+            layout = QHBoxLayout(container)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(widget)
+            
+            # Set header item and widget
+            self.table.setHorizontalHeaderItem(column, QTableWidgetItem(""))
             self.table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.Fixed)
-            self.table.setColumnWidth(column, 20)
+            self.table.setColumnWidth(column, 30)
+            
+            # Set the container as the header widget
+            header_view = self.table.horizontalHeader()
+            if hasattr(header_view, 'setSectionWidget'):
+                header_view.setSectionWidget(column, container)
+            else:
+                # Fallback: use viewport to position widget
+                self.table.setIndexWidget(self.table.model().index(0, column), container)
 
     def _on_select_all_changed(self, state):
         """Handle select all checkbox state change"""
@@ -1303,8 +1802,14 @@ class BaseResourcePage(BaseTablePage):
             row = checkbox.property("row")
             resource_name = checkbox.property("resource_name")
             
-            if row < len(self.resources):
-                resource = self.resources[row]
+            # Find the resource by name instead of relying only on row index
+            resource = None
+            for r in self.resources:
+                if r.get("name") == resource_name:
+                    resource = r
+                    break
+            
+            if resource:
                 # Handle both namespaced and cluster-scoped resources
                 resource_namespace = resource.get("namespace", "")
                 resource_key = (resource["name"], resource_namespace) if resource_namespace else (resource["name"], "")
@@ -1318,6 +1823,8 @@ class BaseResourcePage(BaseTablePage):
                     
                 # Update select-all checkbox state
                 self._update_select_all_state()
+            else:
+                logging.warning(f"Resource not found for checkbox: {resource_name}")
                     
         except Exception as e:
             logging.error(f"Error handling checkbox change: {e}")
@@ -1351,8 +1858,48 @@ class BaseResourcePage(BaseTablePage):
             if hasattr(self, '_shutting_down') and not self._shutting_down:
                 logging.debug("BaseResourcePage destructor called, performing cleanup")
                 self.cleanup_timers_and_threads()
+                # Cache cleanup is handled automatically by bounded cache system
+                # No manual cache cleanup needed
         except Exception as e:
             logging.error(f"Error in BaseResourcePage destructor: {e}")
+
+    def cleanup_on_destroy(self):
+        """Explicit cleanup method that can be called before destruction"""
+        try:
+            self._shutting_down = True
+            
+            # Stop all timers
+            if hasattr(self, '_search_timer'):
+                self._search_timer.stop()
+            if hasattr(self, '_scroll_timer'):
+                self._scroll_timer.stop()
+            if hasattr(self, '_render_timer'):
+                self._render_timer.stop()
+            
+            # Stop background processing
+            if hasattr(self, '_processing_worker') and self._processing_worker:
+                if self._processing_worker.isRunning():
+                    self._processing_worker.cancel()
+                    self._processing_worker.wait(3000)
+            
+            # Hide progress dialog
+            self._hide_progress_dialog()
+            
+            # Cleanup threads
+            self.cleanup_timers_and_threads()
+            
+            # Clear cache references (bounded caches will handle memory cleanup)
+            if hasattr(self, '_data_cache'):
+                self._data_cache.clear()
+            if hasattr(self, '_age_cache'):
+                self._age_cache.clear()
+            if hasattr(self, '_formatted_cache'):
+                self._formatted_cache.clear()
+                
+            logging.debug(f"Cleanup completed for {self.__class__.__name__}")
+            
+        except Exception as e:
+            logging.error(f"Error in cleanup_on_destroy: {e}")
 
 
 # Factory function for creating resource pages

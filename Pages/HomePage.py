@@ -218,6 +218,12 @@ class OrchestrixGUI(QMainWindow):
         self.setup_ui()
         self.update_content_view("Browse All")
         QTimer.singleShot(100, self.load_kubernetes_clusters)
+        
+        # Set up periodic cluster status refresh (every 30 seconds)
+        self.cluster_refresh_timer = QTimer()
+        self.cluster_refresh_timer.timeout.connect(self.refresh_cluster_status)
+        self.cluster_refresh_timer.start(30000)  # 30 seconds
+        logging.info("HomePage: Set up periodic cluster status refresh (30s interval)")
 
     def _connect_signals(self):
         """Connect signals with error handling"""
@@ -430,13 +436,21 @@ class OrchestrixGUI(QMainWindow):
 
     def load_kubernetes_clusters(self):
         """Load clusters asynchronously"""
+        logging.info("HomePage: Loading Kubernetes clusters...")
         self.kube_client.load_clusters_async()
+        
+    def refresh_cluster_status(self):
+        """Force refresh of cluster status"""
+        logging.info("HomePage: Forcing cluster status refresh...")
+        self.load_kubernetes_clusters()
 
     def on_clusters_loaded(self, clusters):
         """Handle loaded clusters with batch updates"""
+        logging.info(f"HomePage: Received {len(clusters)} clusters from kubernetes client")
         updates = []
         
         for cluster in clusters:
+            logging.debug(f"HomePage: Processing cluster {cluster.name} with status {cluster.status}")
             # FIXED: Check actual cluster state instead of just cluster.status
             actual_status = "available"
             if self.cluster_state_manager:
@@ -448,9 +462,13 @@ class OrchestrixGUI(QMainWindow):
                 elif cluster_state == ClusterState.CONNECTING:
                     actual_status = "connecting"
                 else:
-                    actual_status = "available" if cluster.status == "active" else "disconnect"
+                    # Use the cluster's actual status from the service
+                    actual_status = cluster.status if cluster.status in ["available", "connected", "connecting"] else "available"
             else:
-                actual_status = "available" if cluster.status == "active" else "disconnect"
+                # Use the cluster's actual status from the service
+                actual_status = cluster.status if cluster.status in ["available", "connected", "connecting"] else "available"
+            
+            logging.debug(f"HomePage: Final status for {cluster.name}: {actual_status} (original: {cluster.status})")
             
             cluster_data = {
                 "name": cluster.name,

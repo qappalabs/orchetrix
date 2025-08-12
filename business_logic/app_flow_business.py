@@ -20,6 +20,7 @@ class ResourceType(Enum):
 class GraphLayout(Enum):
     VERTICAL = "vertical"
     HORIZONTAL = "horizontal"
+    CIRCULAR = "circular"
 
 @dataclass
 class ResourceInfo:

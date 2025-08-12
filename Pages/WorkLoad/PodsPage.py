@@ -78,46 +78,13 @@ class PodsPage(BaseResourcePage):
         # Configure column widths
         self.configure_columns()
         
-        # Add delete selected button
-        self._add_delete_selected_button()
+        # Delete button is now automatically added by BaseResourcePage
         
         # Add port forwarding management button
         self._add_port_forward_management_button()
         
-    def _add_delete_selected_button(self):
-        """Add a button to delete selected resources."""
-        delete_btn = QPushButton("Delete Selected")
-        delete_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #d32f2f;
-                color: #ffffff;
-                border: none;
-                border-radius: 4px;
-                padding: 5px 10px;
-            }
-            QPushButton:hover {
-                background-color: #b71c1c;
-            }
-            QPushButton:pressed {
-                background-color: #d32f2f;
-            }
-            QPushButton:disabled {
-                background-color: #555555;
-                color: #888888;
-            }
-        """)
-        delete_btn.clicked.connect(lambda: self.delete_selected_resources())
-        
-        # Find the header layout
-        for i in range(self.layout().count()):
-            item = self.layout().itemAt(i)
-            if item.layout():
-                for j in range(item.layout().count()):
-                    widget = item.layout().itemAt(j).widget()
-                    if isinstance(widget, QPushButton) and widget.text() == "Refresh":
-                        # Insert before the refresh button
-                        item.layout().insertWidget(item.layout().count() - 1, delete_btn)
-                        break
+    # Delete button functionality now inherited from BaseResourcePage
+    # No longer need to duplicate the _add_delete_selected_button method
 
     def _add_port_forward_management_button(self):
         """Add port forward management button"""
@@ -163,7 +130,7 @@ class PodsPage(BaseResourcePage):
             (1, 140, "interactive"), # Name
             (2, 90, "interactive"),  # Namespace
             (3, 80, "interactive"),  # Containers
-            (4, 70, "interactive"),  # Restarts
+            (4, 170, "interactive"),  # Restarts
             (5, 130, "interactive"), # Controlled By
             (6, 110, "interactive"), # Node
             (7, 60, "interactive"),  # QoS

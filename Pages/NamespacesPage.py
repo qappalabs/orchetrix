@@ -17,9 +17,6 @@ from kubernetes import client
 import datetime
 import logging
 
-import subprocess
-import json
-
 class StatusLabel(QWidget):
     """Widget that displays a status with consistent styling and background handling."""
     clicked = pyqtSignal()
@@ -43,7 +40,6 @@ class StatusLabel(QWidget):
     def mousePressEvent(self, event):
         self.clicked.emit()
         super().mousePressEvent(event)
-
 
 class NamespaceOperationThread(QThread):
     """Thread for performing namespace operations asynchronously"""
@@ -180,7 +176,6 @@ class NamespacesPage(BaseResourcePage):
         self.configure_columns()
         
         # Add delete selected button
-        self._add_delete_selected_button()
 
     def configure_columns(self):
         """Configure column widths for full screen utilization"""
@@ -214,42 +209,6 @@ class NamespacesPage(BaseResourcePage):
         
         # Ensure full width utilization after configuration
         QTimer.singleShot(100, self._ensure_full_width_utilization)
-
-    def _add_delete_selected_button(self):
-        """Add a button to delete selected resources."""
-        delete_btn = QPushButton("Delete Selected")
-        delete_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #d32f2f;
-                color: #ffffff;
-                border: none;
-                border-radius: 4px;
-                padding: 5px 10px;
-            }
-            QPushButton:hover {
-                background-color: #b71c1c;
-            }
-            QPushButton:pressed {
-                background-color: #d32f2f;
-            }
-            QPushButton:disabled {
-                background-color: #555555;
-                color: #888888;
-            }
-        """)
-        delete_btn.clicked.connect(lambda: self.delete_selected_resources())
-        
-        # Find the header layout
-        for i in range(self.layout().count()):
-            item = self.layout().itemAt(i)
-            if item.layout():
-                for j in range(item.layout().count()):
-                    widget = item.layout().itemAt(j).widget()
-                    if isinstance(widget, QPushButton) and widget.text() == "Refresh":
-                        # Insert before the refresh button
-                        item.layout().insertWidget(item.layout().count() - 1, delete_btn)
-                        break
-
     def populate_resource_row(self, row, resource):
         self.table.setRowHeight(row, 40)
         resource_name = resource["name"]
@@ -310,37 +269,16 @@ class NamespacesPage(BaseResourcePage):
         self.table.setCellWidget(row, len(columns) + 2, action_container)
 
     def refresh_table(self):
-        """Refresh the namespaces table using Kubernetes API"""
+        """Refresh the namespaces table using async resource loading"""
         try:
-            if not self.kube_client.v1:
-                QMessageBox.critical(self, "Error", "Kubernetes client not initialized. Please connect to a cluster first.")
-                return
-
-            # Get namespaces using API
-            namespaces_list = self.kube_client.v1.list_namespace()
-
+            # Clear table before loading
             self.clear_table()
-            resources = []
             
-            for namespace_item in namespaces_list.items:
-                # Convert API object to dict for consistency
-                namespace_dict = self.kube_client.v1.api_client.sanitize_for_serialization(namespace_item)
-
-                resource = {
-                    "name": namespace_item.metadata.name,
-                    "age": self._calculate_age(namespace_item.metadata.creation_timestamp),
-                    "raw_data": namespace_dict
-                }
-                resources.append(resource)
+            # Use base class async loading method
+            self.load_data()
             
-            # Use the base class method to display resources
-            self.resources = resources
-            self._display_resources(resources)
-            self._update_items_count()
-
-        except ApiException as e:
-            QMessageBox.critical(self, "API Error", f"Failed to refresh namespaces: {e.reason}")
         except Exception as e:
+            logging.error(f"Error refreshing namespace table: {e}")
             QMessageBox.critical(self, "Error", f"Unexpected error while refreshing: {str(e)}")
 
     def _calculate_age(self, creation_timestamp):
@@ -561,9 +499,19 @@ class NamespacesPage(BaseResourcePage):
         super().closeEvent(event)
     
     def load_data(self):
-        """Override base class load_data to use refresh_table method"""
-        self.refresh_table()
+        """Load namespace data using async resource loader"""
+        try:
+            # Use base class async loading with proper resource type
+            super().load_data()
+        except Exception as e:
+            logging.error(f"Error in load_data: {e}")
+            QMessageBox.critical(self, "Error", f"Failed to load namespaces: {str(e)}")
     
     def force_load_data(self):
-        """Override base class force_load_data to use refresh_table method"""
-        self.refresh_table()
+        """Force load namespace data using async resource loader"""
+        try:
+            # Use base class async loading with proper resource type
+            super().force_load_data()
+        except Exception as e:
+            logging.error(f"Error in force_load_data: {e}")
+            QMessageBox.critical(self, "Error", f"Failed to load namespaces: {str(e)}")

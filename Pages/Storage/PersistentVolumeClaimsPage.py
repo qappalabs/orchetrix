@@ -10,7 +10,6 @@ from base_components.base_components import SortableTableWidgetItem
 from base_components.base_resource_page import BaseResourcePage
 from UI.Styles import AppStyles, AppColors
 
-
 class StatusLabel(QWidget):
     """Widget that displays a status with consistent styling and background handling."""
     clicked = pyqtSignal()
@@ -69,43 +68,7 @@ class PersistentVolumeClaimsPage(BaseResourcePage):
         self.configure_columns()
         
         # Add delete selected button
-        self._add_delete_selected_button()
-        
-    def _add_delete_selected_button(self):
-        """Add a button to delete selected resources."""
-        delete_btn = QPushButton("Delete Selected")
-        delete_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #d32f2f;
-                color: #ffffff;
-                border: none;
-                border-radius: 4px;
-                padding: 5px 10px;
-            }
-            QPushButton:hover {
-                background-color: #b71c1c;
-            }
-            QPushButton:pressed {
-                background-color: #d32f2f;
-            }
-            QPushButton:disabled {
-                background-color: #555555;
-                color: #888888;
-            }
-        """)
-        delete_btn.clicked.connect(lambda: self.delete_selected_resources())
-        
-        # Find the header layout
-        for i in range(self.layout().count()):
-            item = self.layout().itemAt(i)
-            if item.layout():
-                for j in range(item.layout().count()):
-                    widget = item.layout().itemAt(j).widget()
-                    if isinstance(widget, QPushButton) and widget.text() == "Refresh":
-                        # Insert before the refresh button
-                        item.layout().insertWidget(item.layout().count() - 1, delete_btn)
-                        break
-    
+
     def configure_columns(self):
         """Configure column widths for full screen utilization"""
         if not self.table:
@@ -173,9 +136,9 @@ class PersistentVolumeClaimsPage(BaseResourcePage):
         elif spec.get("resources") and spec["resources"].get("requests") and spec["resources"]["requests"].get("storage"):
             size = spec["resources"]["requests"]["storage"]
         
-        # Get pods using this PVC (we'll need to search for this)
-        # For now, show placeholder - this requires additional API call to find pods using this PVC
-        pods = self._get_pods_using_pvc(resource_name, resource["namespace"])
+        # Get pods using this PVC - show placeholder to avoid blocking API calls
+        # This information would require additional API calls which can block the UI
+        pods = "<none>"
         
         # Get status
         pvc_status = status.get("phase", "Unknown")
@@ -295,44 +258,4 @@ class PersistentVolumeClaimsPage(BaseResourcePage):
                 if parent and hasattr(parent, 'detail_manager'):
                     parent.detail_manager.show_detail("persistentvolumeclaim", resource_name, namespace)
     
-    def _get_pods_using_pvc(self, pvc_name, namespace):
-        """Get the names of pods that are using this PVC"""
-        try:
-            # Get kubernetes client from parent or create new one
-            kube_client = None
-            
-            # Try to get from parent first
-            parent = self.parent()
-            while parent and not hasattr(parent, 'kube_client'):
-                parent = parent.parent()
-            
-            if parent and hasattr(parent, 'kube_client'):
-                kube_client = parent.kube_client
-            else:
-                # Import and create new client
-                from utils.kubernetes_client import get_kubernetes_client
-                kube_client = get_kubernetes_client()
-            
-            # Get all pods in the same namespace
-            pods_list = kube_client.v1.list_namespaced_pod(namespace=namespace)
-            
-            using_pods = []
-            for pod in pods_list.items:
-                if pod.spec and pod.spec.volumes:
-                    for volume in pod.spec.volumes:
-                        if (volume.persistent_volume_claim and 
-                            volume.persistent_volume_claim.claim_name == pvc_name):
-                            using_pods.append(pod.metadata.name)
-                            break  # Found it, no need to check other volumes
-            
-            if using_pods:
-                if len(using_pods) <= 3:
-                    return ", ".join(using_pods)
-                else:
-                    return f"{using_pods[0]}, {using_pods[1]} +{len(using_pods)-2} more"
-            else:
-                return "<none>"
-                
-        except Exception as e:
-            # If we can't get the pod info, return placeholder
-            return "<none>"
+    # Removed _get_pods_using_pvc method to prevent blocking API calls on UI thread
