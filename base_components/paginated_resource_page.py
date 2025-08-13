@@ -15,9 +15,9 @@ from typing import List, Dict, Any, Optional
 from .base_resource_page import BaseResourcePage
 from .virtualized_table_model import VirtualizedResourceModel
 from .virtual_scroll_table import VirtualScrollTable
-from .resource_loader import KubernetesResourceLoader
+from utils.unified_resource_loader import get_unified_resource_loader
 from .resource_processing_worker import create_processing_worker
-from utils.enhanced_worker import get_thread_manager
+from utils.thread_manager import get_thread_manager
 
 
 class PaginationControls(QFrame):
@@ -220,25 +220,38 @@ class PaginatedResourcePage(BaseResourcePage):
             if not load_more:
                 self.show_loading_indicator("Loading resources...")
         
-        # Create and start data loader
-        self.data_worker = KubernetesResourceLoader(
+        # Create and start data loader using unified resource loader
+        unified_loader = get_unified_resource_loader()
+        
+        # Connect signals for unified loader
+        unified_loader.loading_completed.connect(self._on_unified_data_loaded)
+        unified_loader.loading_error.connect(self._on_unified_data_error)
+        
+        # Start loading
+        operation_id = unified_loader.load_resources_async(
             resource_type=self.resource_type,
-            namespace=self.namespace_filter if self.namespace_filter != "All Namespaces" else None,
-            limit=self.page_size,
-            continue_token=self.continue_token if load_more else None
+            namespace=self.namespace_filter if self.namespace_filter != "All Namespaces" else None
         )
-        
-        # Connect signals
-        self.data_worker.signals.finished.connect(self._on_data_loaded)
-        self.data_worker.signals.error.connect(self._on_data_load_error)
-        
-        # Submit to thread manager
-        thread_manager = get_thread_manager()
-        worker_id = f"load_{self.resource_type}_{load_more}"
-        thread_manager.submit_worker(worker_id, self.data_worker)
         
         logging.info(f"Started loading {self.resource_type}, page_size={self.page_size}, load_more={load_more}")
     
+    def _on_unified_data_loaded(self, resource_type, load_result):
+        """Handle data loaded from unified resource loader"""
+        try:
+            if load_result.success:
+                resources = load_result.items
+                self._on_data_loaded((resources, resource_type, None))
+            else:
+                self._on_unified_data_error(resource_type, load_result.error_message)
+        except Exception as e:
+            logging.error(f"Error handling unified data load: {e}")
+            self._on_unified_data_error(resource_type, str(e))
+    
+    def _on_unified_data_error(self, resource_type, error_message):
+        """Handle error from unified resource loader"""
+        logging.error(f"Failed to load {resource_type}: {error_message}")
+        self._on_data_load_error(error_message)
+
     def _on_data_loaded(self, result):
         """Handle raw data loaded from API"""
         try:

@@ -20,7 +20,7 @@ class KubernetesMetricsService:
     def get_cluster_metrics(self, cluster_name: str) -> Optional[Dict[str, Any]]:
         """Get cluster metrics with caching"""
         # Check cache first
-        cached_metrics = self.cache_service.get_cached_metrics(cluster_name)
+        cached_metrics = self.cache_service.get_cached_resources('metrics', f'cluster_{cluster_name}')
         if cached_metrics:
             logging.debug(f"Using cached metrics for {cluster_name}")
             return cached_metrics
@@ -30,7 +30,7 @@ class KubernetesMetricsService:
             metrics = self._calculate_cluster_metrics()
             
             # Cache the results
-            self.cache_service.cache_metrics(cluster_name, metrics)
+            self.cache_service.cache_resources('metrics', f'cluster_{cluster_name}', metrics)
             
             logging.info(f"Calculated fresh metrics for {cluster_name}")
             return metrics

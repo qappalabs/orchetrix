@@ -4,7 +4,8 @@ Modular architecture for Kubernetes client functionality.
 """
 
 from .api_service import KubernetesAPIService, LazyAPIClient
-from .cache_service import KubernetesCacheService, parse_resource_value, format_age, clear_lru_caches
+from utils.unified_cache_system import get_unified_cache, clear_all_unified_caches
+from utils.data_formatters import parse_memory_value, format_age, clear_formatter_caches
 from .metrics_service import KubernetesMetricsService
 from .events_service import KubernetesEventsService
 from .log_service import KubernetesLogService, KubernetesLogStreamer, LogStreamThread
@@ -19,9 +20,8 @@ __all__ = [
     
     # Individual services
     'KubernetesAPIService',
-    'KubernetesCacheService', 
     'KubernetesMetricsService',
-    'KubernetesEventsService',
+    'KubernetesEventsService', 
     'KubernetesLogService',
     
     # API components
@@ -32,7 +32,9 @@ __all__ = [
     'LogStreamThread',
     
     # Cache utilities
-    'parse_resource_value',
+    'get_unified_cache',
+    'clear_all_unified_caches',
+    'parse_memory_value', 
     'format_age',
-    'clear_lru_caches',
+    'clear_formatter_caches',
 ]

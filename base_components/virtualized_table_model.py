@@ -30,17 +30,13 @@ class VirtualizedResourceModel(QAbstractTableModel):
         self._cache_hits = 0
         self._cache_misses = 0
         
-        # Replace unbounded caches with bounded cache system
-        from utils.bounded_cache import get_cache_manager
-        self._cache_manager = get_cache_manager()
+        # Use unified cache system
+        from utils.unified_cache_system import get_unified_cache
+        self._cache_manager = get_unified_cache()
         
-        # Use bounded caches for formatted data and colors
-        self._formatted_cache = self._cache_manager.get_cache(
-            'table_formatted_data', max_size=1000, ttl_seconds=300
-        )
-        self._row_colors_cache = self._cache_manager.get_cache(
-            'table_row_colors', max_size=1000, ttl_seconds=600
-        )
+        # Use unified caches for formatted data and colors  
+        self._formatted_cache = self._cache_manager._formatted_data_cache
+        self._row_colors_cache = self._cache_manager._formatted_data_cache
         
         # Configuration
         self.enable_caching = True

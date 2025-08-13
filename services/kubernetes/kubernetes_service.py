@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer, QThreadPool
 
 from .api_service import get_kubernetes_api_service, reset_kubernetes_api_service
-from .cache_service import get_kubernetes_cache_service, reset_kubernetes_cache_service
+from utils.unified_cache_system import get_unified_cache
 from .log_service import create_kubernetes_log_service
 from .metrics_service import create_kubernetes_metrics_service
 from .events_service import create_kubernetes_events_service
@@ -95,7 +95,7 @@ class KubernetesService(QObject):
         try:
             # Core services
             self.api_service = get_kubernetes_api_service()
-            self.cache_service = get_kubernetes_cache_service()
+            self.cache_service = get_unified_cache()
             
             # Specialized services
             self.log_service = create_kubernetes_log_service(self.api_service)
@@ -146,7 +146,7 @@ class KubernetesService(QObject):
             self.current_cluster = cluster_name
             
             # Clear cache for new cluster
-            self.cache_service.invalidate_cluster_cache(cluster_name)
+            self.cache_service.clear_resource_cache()
             
             # Start polling
             self.start_polling()
@@ -177,7 +177,7 @@ class KubernetesService(QObject):
                 self.current_cluster = None
                 
                 # Clear cache for disconnected cluster
-                self.cache_service.invalidate_cluster_cache(old_cluster)
+                self.cache_service.clear_resource_cache()
                 
                 logging.info(f"Disconnected from cluster: {old_cluster}")
                 
@@ -268,7 +268,7 @@ class KubernetesService(QObject):
     def _periodic_cache_cleanup(self):
         """Periodic cache cleanup"""
         if not self._shutting_down:
-            self.cache_service.cleanup_cache()
+            self.cache_service.optimize_caches()
     
     # Public API methods
     
@@ -373,7 +373,7 @@ class KubernetesService(QObject):
     
     def get_cache_stats(self) -> Dict[str, Any]:
         """Get cache statistics"""
-        return self.cache_service.get_cache_stats()
+        return self.cache_service.get_global_stats()
     
     def cleanup(self):
         """Cleanup all resources"""
@@ -395,7 +395,7 @@ class KubernetesService(QObject):
             self.log_service.cleanup()
             self.metrics_service.cleanup()
             self.events_service.cleanup()
-            self.cache_service.cleanup()
+            self.cache_service.clear_all_caches()
             self.api_service.cleanup()
             
             # Clear active workers
@@ -437,5 +437,5 @@ def reset_kubernetes_service():
     _kubernetes_service_instance = None
     
     # Also reset dependent services
-    reset_kubernetes_cache_service()
     reset_kubernetes_api_service()
+    # Note: Unified cache system is a singleton and doesn't need explicit reset

@@ -58,7 +58,7 @@ def collect_data_files():
         ('UI', 'UI'),
         ('Pages', 'Pages'),
         ('utils', 'utils'),
-        ('base_components', 'base_components'),
+        ('Base_Bomponents', 'base_components'),
     ]
     
     for src_dir, dest_dir in directories_to_check:

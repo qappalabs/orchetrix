@@ -15,16 +15,18 @@ from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QProcess, QRect
 from typing import List, Any, Dict
 
-# Import the split components
-from .resource_loader import KubernetesResourceLoader
+# Import optimized unified components
 from .resource_deleters import ResourceDeleterThread, BatchResourceDeleterThread
 from .virtual_scroll_table import VirtualScrollTable
 
-from base_components.base_components import BaseTablePage
+from Base_Components.base_components import BaseTablePage
 from UI.Styles import AppStyles, AppColors
-from utils.kubernetes_client import get_kubernetes_client
+from utils.unified_resource_loader import get_unified_resource_loader, LoadResult
+from utils.data_formatters import format_age, parse_memory_value, format_percentage, truncate_string
+from utils.error_handler import get_error_handler, safe_execute, error_handler
 from utils.enhanced_worker import EnhancedBaseWorker
 from utils.thread_manager import get_thread_manager
+from utils.kubernetes_client import get_kubernetes_client
 from log_handler import method_logger, class_logger
 
 # Constants for performance tuning - optimized values
@@ -33,8 +35,8 @@ SCROLL_DEBOUNCE_MS = 50   # Reduced debounce for more responsive scrolling
 SEARCH_DEBOUNCE_MS = 200  # Reduced debounce for faster search
 CACHE_TTL_SECONDS = 600   # Increased cache time for better performance
 
-# Import new performance components
-from utils.bounded_cache import get_age_cache, get_formatted_data_cache, clear_all_caches
+# Import new performance components  
+from utils.unified_cache_system import get_unified_cache, clear_all_unified_caches
 from utils.search_index import get_search_index
 
 from .resource_processing_worker import create_processing_worker
@@ -71,23 +73,14 @@ class BaseResourcePage(BaseTablePage):
 
         self.is_showing_skeleton = False
 
-        # Replace unbounded caches with bounded cache system
-        from utils.bounded_cache import get_cache_manager
-        self._cache_manager = get_cache_manager()
+        # Use unified cache system
+        from utils.unified_cache_system import get_unified_cache
+        self._cache_manager = get_unified_cache()
         
-        # Use specific caches for different data types
-        self._data_cache = self._cache_manager.get_cache(
-            f'resource_data_{self.__class__.__name__}', 
-            max_size=1000, ttl_seconds=300
-        )
-        self._age_cache = self._cache_manager.get_cache(
-            'age_formatting', 
-            max_size=5000, ttl_seconds=60
-        )
-        self._formatted_cache = self._cache_manager.get_cache(
-            'formatted_data', 
-            max_size=2000, ttl_seconds=300
-        )
+        # Use specific caches for different data types  
+        self._data_cache = self._cache_manager._resource_cache
+        self._age_cache = self._cache_manager._formatted_data_cache
+        self._formatted_cache = self._cache_manager._formatted_data_cache
         
         self._shutting_down = False
         
@@ -103,13 +96,9 @@ class BaseResourcePage(BaseTablePage):
         self._render_buffer = 20  # Extra rows to render for smooth scrolling
         
         # Debouncing timers
-        self._search_timer = QTimer()
-        self._search_timer.setSingleShot(True)
-        self._search_timer.timeout.connect(self._perform_search)
-        
-        self._scroll_timer = QTimer()
-        self._scroll_timer.setSingleShot(True)
-        self._scroll_timer.timeout.connect(self._handle_scroll_debounced)
+        # Use unified debounced updater instead of individual timers
+        from utils.debounced_updater import get_debounced_updater
+        self._debounced_updater = get_debounced_updater()
         
         # Progressive rendering
         self._render_timer = QTimer()
@@ -628,8 +617,12 @@ class BaseResourcePage(BaseTablePage):
 
     def _on_search_text_changed(self, text):
         """Handle search text changes with debouncing"""
-        self._search_timer.stop()
-        self._search_timer.start(SEARCH_DEBOUNCE_MS)
+        # Use debounced updater for search
+        self._debounced_updater.schedule_update(
+            'search_' + self.__class__.__name__,
+            self._perform_search,
+            delay_ms=SEARCH_DEBOUNCE_MS
+        )
 
     def _perform_search(self):
         """Perform efficient indexed search"""
@@ -725,8 +718,12 @@ class BaseResourcePage(BaseTablePage):
 
     def _handle_scroll(self, value):
         """Handle scroll events with debouncing"""
-        self._scroll_timer.stop()
-        self._scroll_timer.start(SCROLL_DEBOUNCE_MS)
+        # Use debounced updater for scroll
+        self._debounced_updater.schedule_update(
+            'scroll_' + self.__class__.__name__,
+            self._handle_scroll_debounced,
+            delay_ms=SCROLL_DEBOUNCE_MS
+        )
 
     def _handle_scroll_debounced(self):
         """Handle debounced scroll events"""
@@ -746,24 +743,85 @@ class BaseResourcePage(BaseTablePage):
         self._start_loading_thread(continue_token=self.current_continue_token)
 
     def _start_loading_thread(self, continue_token=None):
-        """Start the resource loading thread"""
-        if self.loading_thread and self.loading_thread.isRunning():
+        """Start the resource loading using unified high-performance loader"""
+        # Cancel any existing loading
+        if hasattr(self, 'loading_thread') and self.loading_thread and self.loading_thread.isRunning():
             self.loading_thread.cancel()
             self.loading_thread.wait(1000)
         
-        self.loading_thread = KubernetesResourceLoader(
+        # Get the unified resource loader
+        unified_loader = get_unified_resource_loader()
+        
+        # Connect signals if not already connected
+        if not hasattr(self, '_signals_connected'):
+            unified_loader.loading_completed.connect(self._on_unified_resources_loaded)
+            unified_loader.loading_error.connect(self._on_unified_loading_error)
+            self._signals_connected = True
+        
+        # Start loading with optimized configuration
+        namespace = self.namespace_filter if self.namespace_filter != "all" else None
+        self._current_operation_id = unified_loader.load_resources_async(
             resource_type=self.resource_type,
-            namespace=self.namespace_filter if self.namespace_filter != "all" else None,
-            limit=self.items_per_page,
-            continue_token=continue_token
+            namespace=namespace
         )
         
-        self.loading_thread.signals.finished.connect(self._on_resources_loaded)
-        self.loading_thread.signals.error.connect(self._on_loading_error)
+        logging.debug(f"Started unified loading for {self.resource_type} (operation: {self._current_operation_id})")
+
+    def _on_unified_resources_loaded(self, resource_type: str, result: LoadResult):
+        """Handle resources loaded from unified loader"""
+        try:
+            # Only process if this matches our resource type
+            if resource_type != self.resource_type:
+                return
+            
+            if not result.success:
+                self._on_unified_loading_error(resource_type, result.error_message or "Unknown error")
+                return
+            
+            # Process the optimized result format
+            resources = result.items
+            
+            # Replace resources (unified loader loads all at once for better performance)
+            self.resources = resources
+            self.all_data_loaded = True  # Unified loader loads everything efficiently
+            
+            self._display_resources(self.resources)
+            self._update_items_count()
+            
+            self.is_loading_initial = False
+            self.is_loading_more = False
+            self._initial_load_done = True
+            
+            self.all_items_loaded_signal.emit()
+            self.load_more_complete.emit()
+            
+            # Log performance info
+            if result.from_cache:
+                logging.info(f"Loaded {result.total_count} {resource_type} from cache instantly")
+            else:
+                logging.info(f"Loaded {result.total_count} {resource_type} in {result.load_time_ms:.1f}ms")
+            
+        except Exception as e:
+            logging.error(f"Error processing unified resources: {e}")
+            self._on_unified_loading_error(resource_type, str(e))
+
+    def _on_unified_loading_error(self, resource_type: str, error_message: str):
+        """Handle loading errors from unified loader"""
+        if resource_type != self.resource_type:
+            return
         
-        # Start the thread
-        thread_manager = get_thread_manager()
-        thread_manager.start_worker(self.loading_thread)
+        self.is_loading_initial = False
+        self.is_loading_more = False
+        
+        # Use centralized error handling
+        error_handler = get_error_handler()
+        error_handler.handle_error(
+            Exception(error_message), 
+            f"loading {resource_type}", 
+            show_dialog=True
+        )
+        
+        self.load_more_complete.emit()
 
     def _on_resources_loaded(self, result):
         """Handle loaded resources"""
@@ -1128,9 +1186,17 @@ class BaseResourcePage(BaseTablePage):
         self._shutting_down = True
         
         # Stop timers
-        for timer in [self._search_timer, self._scroll_timer, self._render_timer]:
-            if timer and timer.isActive():
-                timer.stop()
+        # Stop render timer with safety checks
+        if hasattr(self, '_render_timer'):
+            try:
+                if self._render_timer is not None and self._render_timer.isActive():
+                    self._render_timer.stop()
+            except RuntimeError:
+                # QTimer was already deleted by Qt - this is fine during shutdown
+                pass
+        if hasattr(self, '_debounced_updater'):
+            self._debounced_updater.cancel_update('search_' + self.__class__.__name__)
+            self._debounced_updater.cancel_update('scroll_' + self.__class__.__name__)
         
         # Stop threads
         for thread in [self.loading_thread, self.delete_thread, self.batch_delete_thread]:
@@ -1163,7 +1229,7 @@ class BaseResourcePage(BaseTablePage):
     def _create_table(self, headers, sortable_columns=None):
         """Create and configure the table with proper column resizing"""
         from PyQt6.QtWidgets import QTableWidget, QAbstractItemView, QHeaderView
-        from base_components.base_components import CustomHeader
+        from Base_Components.base_components import CustomHeader
         from UI.Styles import AppStyles
         
         table = QTableWidget()
@@ -1873,12 +1939,16 @@ class BaseResourcePage(BaseTablePage):
             self._shutting_down = True
             
             # Stop all timers
-            if hasattr(self, '_search_timer'):
-                self._search_timer.stop()
-            if hasattr(self, '_scroll_timer'):
-                self._scroll_timer.stop()
+            if hasattr(self, '_debounced_updater'):
+                self._debounced_updater.cancel_update('search_' + self.__class__.__name__)
+                self._debounced_updater.cancel_update('scroll_' + self.__class__.__name__)
             if hasattr(self, '_render_timer'):
-                self._render_timer.stop()
+                try:
+                    if self._render_timer is not None and self._render_timer.isActive():
+                        self._render_timer.stop()
+                except RuntimeError:
+                    # QTimer was already deleted by Qt - this is fine during shutdown
+                    pass
             
             # Stop background processing
             if hasattr(self, '_processing_worker') and self._processing_worker:
@@ -1917,7 +1987,6 @@ def create_base_resource_page(resource_type, title, headers, parent=None):
 
 # Export all classes for backward compatibility
 __all__ = [
-    'KubernetesResourceLoader',
     'ResourceDeleterThread', 
     'BatchResourceDeleterThread',
     'VirtualScrollTable',

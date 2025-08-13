@@ -26,7 +26,7 @@ class KubernetesEventsService:
     def get_cluster_issues(self, cluster_name: str) -> List[Dict[str, Any]]:
         """Get cluster issues with real data and improved filtering"""
         # Check cache first
-        cached_issues = self.cache_service.get_cached_issues(cluster_name)
+        cached_issues = self.cache_service.get_cached_resources('issues', f'cluster_{cluster_name}')
         if cached_issues:
             logging.debug(f"Using cached issues for {cluster_name}")
             return cached_issues
@@ -79,7 +79,7 @@ class KubernetesEventsService:
             issues = issues[:MAX_ISSUES_RETURNED]
             
             # Cache the results
-            self.cache_service.cache_issues(cluster_name, issues)
+            self.cache_service.cache_resources('issues', f'cluster_{cluster_name}', issues)
             
             logging.info(f"Found {len(issues)} real cluster issues")
             return issues

@@ -1,890 +1,439 @@
 """
-Fixed ClusterConnector with proper current cluster handling
+Enhanced Kubernetes Cluster Connector - Single Responsibility Version
+Replaces the complex monolithic cluster_connector.py with a clean, maintainable solution.
 """
 
-from PyQt6.QtCore import QObject, pyqtSignal, QTimer
-from utils.kubernetes_client import get_kubernetes_client
-from kubernetes.client.rest import ApiException
 import logging
+import threading
 import time
-from collections import deque
-from datetime import datetime, timedelta
+from collections import defaultdict, deque
+from typing import Dict, List, Optional, Tuple, Any, Callable
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+
+from PyQt6.QtCore import QObject, pyqtSignal, QTimer
+
+from utils.kubernetes_client import get_kubernetes_client
 from utils.enhanced_worker import EnhancedBaseWorker
 from utils.thread_manager import get_thread_manager
+from utils.unified_resource_loader import get_unified_resource_loader
 from log_handler import method_logger, class_logger
 
-# Performance tuning constants
-INITIAL_POLL_INTERVAL = 5000  # 5 seconds
-MAX_POLL_INTERVAL = 60000     # 60 seconds  
-MIN_POLL_INTERVAL = 2000      # 2 seconds
-CACHE_TTL_SECONDS = 300       # 5 minutes
-MAX_CACHE_SIZE_MB = 50        # Maximum cache size in MB
-CONNECTION_POOL_SIZE = 5      # Number of pooled connections
-BATCH_REQUEST_DELAY = 100     # Delay for batching requests in ms
 
-@class_logger(log_level=logging.DEBUG, exclude_methods=['__init__'])
-class AdaptivePoller:
-    """Manages adaptive polling intervals based on data change frequency"""
-    
-    def __init__(self, initial_interval=INITIAL_POLL_INTERVAL):
-        self.current_interval = initial_interval
-        self.min_interval = MIN_POLL_INTERVAL
-        self.max_interval = MAX_POLL_INTERVAL
-        self.change_history = deque(maxlen=10)  # Track last 10 polling results
-        self.last_data_hash = None
-        
-    def record_poll_result(self, data_hash):
-        """Record polling result and adjust interval"""
-        current_time = time.time()
-        data_changed = data_hash != self.last_data_hash
-        
-        self.change_history.append({
-            'time': current_time,
-            'changed': data_changed
-        })
-        
-        self.last_data_hash = data_hash
-        
-        # Adjust interval based on change frequency
-        if len(self.change_history) >= 3:
-            recent_changes = sum(1 for h in list(self.change_history)[-5:] if h['changed'])
-            
-            if recent_changes >= 3:
-                # Frequent changes - decrease interval
-                self.current_interval = max(
-                    self.min_interval,
-                    int(self.current_interval * 0.8)
-                )
-            elif recent_changes == 0:
-                # No recent changes - increase interval
-                self.current_interval = min(
-                    self.max_interval,
-                    int(self.current_interval * 1.5)
-                )
-        
-        return self.current_interval
-    
-    def reset(self):
-        """Reset to initial state"""
-        self.current_interval = INITIAL_POLL_INTERVAL
-        self.change_history.clear()
-        self.last_data_hash = None
+@dataclass
+class ClusterMetrics:
+    """Data structure for cluster metrics"""
+    cpu_usage: float = 0.0
+    memory_usage: float = 0.0
+    disk_usage: float = 0.0
+    pods_count: int = 0
+    nodes_count: int = 0
+    timestamp: float = field(default_factory=time.time)
 
-class ConnectionPool:
-    """Manages a pool of cluster connections for reuse"""
-    
-    def __init__(self, max_size=CONNECTION_POOL_SIZE):
-        self.max_size = max_size
-        self.connections = {}
-        self.last_used = {}
-        self.connection_timeout = 300  # 5 minutes
-        
-    def get_connection(self, cluster_name):
-        """Get a connection from the pool"""
-        self._cleanup_stale_connections()
-        
-        if cluster_name in self.connections:
-            self.last_used[cluster_name] = time.time()
-            return self.connections[cluster_name]
-        
-        return None
-    
-    def add_connection(self, cluster_name, connection):
-        """Add a connection to the pool"""
-        # Remove oldest connection if at capacity
-        if len(self.connections) >= self.max_size:
-            oldest = min(self.last_used.items(), key=lambda x: x[1])[0]
-            self.remove_connection(oldest)
-        
-        self.connections[cluster_name] = connection
-        self.last_used[cluster_name] = time.time()
-    
-    def remove_connection(self, cluster_name):
-        """Remove a connection from the pool"""
-        self.connections.pop(cluster_name, None)
-        self.last_used.pop(cluster_name, None)
-    
-    def _cleanup_stale_connections(self):
-        """Remove connections that haven't been used recently"""
-        current_time = time.time()
-        stale_clusters = [
-            cluster for cluster, last_time in self.last_used.items()
-            if current_time - last_time > self.connection_timeout
-        ]
-        
-        for cluster in stale_clusters:
-            self.remove_connection(cluster)
 
-class SmartCache:
-    """Intelligent cache with TTL and size management"""
-    
-    def __init__(self, ttl_seconds=CACHE_TTL_SECONDS, max_size_mb=MAX_CACHE_SIZE_MB):
-        self.cache = {}
-        self.timestamps = {}
-        self.access_counts = {}
-        self.ttl_seconds = ttl_seconds
-        self.max_size_bytes = max_size_mb * 1024 * 1024
-        
-    def get(self, key):
-        """Get item from cache if valid"""
-        if key not in self.cache:
-            return None
-        
-        # Check TTL
-        if time.time() - self.timestamps[key] > self.ttl_seconds:
-            self.remove(key)
-            return None
-        
-        # Update access count
-        self.access_counts[key] = self.access_counts.get(key, 0) + 1
-        return self.cache[key]
-    
-    def set(self, key, value):
-        """Set item in cache with automatic cleanup"""
-        # Estimate size and cleanup if needed
-        self._ensure_capacity()
-        
-        self.cache[key] = value
-        self.timestamps[key] = time.time()
-        self.access_counts[key] = 1
-    
-    def remove(self, key):
-        """Remove item from cache"""
-        self.cache.pop(key, None)
-        self.timestamps.pop(key, None)
-        self.access_counts.pop(key, None)
-    
-    def clear_cluster(self, cluster_name):
-        """Clear all cache entries for a specific cluster"""
-        keys_to_remove = [k for k in self.cache.keys() if k.startswith(f"{cluster_name}:")]
-        for key in keys_to_remove:
-            self.remove(key)
-    
-    def _ensure_capacity(self):
-        """Ensure cache doesn't exceed size limit using LRU eviction"""
-        # Simplified size check - in production, use sys.getsizeof
-        if len(self.cache) > 1000:  # Arbitrary limit
-            # Remove least recently used items
-            sorted_items = sorted(
-                self.access_counts.items(),
-                key=lambda x: (x[1], self.timestamps.get(x[0], 0))
-            )
-            
-            # Remove bottom 20%
-            to_remove = len(sorted_items) // 5
-            for key, _ in sorted_items[:to_remove]:
-                self.remove(key)
+@dataclass
+class NodeInfo:
+    """Data structure for processed node information"""
+    name: str
+    status: str
+    roles: List[str]
+    cpu_capacity: str
+    memory_capacity: str
+    disk_capacity: str
+    cpu_usage: Optional[float] = None
+    memory_usage: Optional[float] = None
+    disk_usage: Optional[float] = None
+    taints: str = "0"
+    version: str = "Unknown"
+    age: str = "Unknown"
+    raw_data: Optional[Dict] = None
 
-class ConnectionWorker(EnhancedBaseWorker):
 
-    def __init__(self, client, cluster_name, connection_pool):
+@dataclass  
+class ConnectionState:
+    """Thread-safe connection state"""
+    cluster_name: str
+    is_connected: bool = False
+    is_connecting: bool = False
+    last_error: Optional[str] = None
+    connected_at: Optional[float] = None
+    
+    def __post_init__(self):
+        self._lock = threading.RLock()
+    
+    def update_state(self, connected: bool, connecting: bool = False, error: str = None):
+        """Thread-safe state update"""
+        with self._lock:
+            self.is_connected = connected
+            self.is_connecting = connecting
+            if error:
+                self.last_error = error
+            if connected:
+                self.connected_at = time.time()
+                self.last_error = None
+
+
+# DataCache class replaced by unified cache system
+# Now using get_unified_cache() for all caching needs
+
+
+class ClusterConnectionWorker(EnhancedBaseWorker):
+    """Worker for establishing cluster connections"""
+    
+    def __init__(self, client, cluster_name: str):
         super().__init__(f"cluster_connection_{cluster_name}")
         self.client = client
         self.cluster_name = cluster_name
-        self.connection_pool = connection_pool
-        self._timeout = 10  # Reduced timeout
+        self._timeout = 30
     
-    def execute(self):
-        if self.is_cancelled():
-            return None
-        
-        # Check connection pool first
-        existing_conn = self.connection_pool.get_connection(self.cluster_name)
-        if existing_conn and self._validate_connection(existing_conn):
-            return (self.cluster_name, True, "Connected (cached)")
-        
-        # Create new connection
+    def execute(self) -> Tuple[str, bool, str]:
+        """Execute connection attempt"""
         try:
+            # Attempt to switch context
             success = self.client.switch_context(self.cluster_name)
             if not success:
-                raise Exception("Failed to switch cluster context")
+                return self.cluster_name, False, "Failed to switch cluster context"
             
-            # Validate connection
+            # Validate connection with version check
             version_info = self.client.version_api.get_code()
+            if not version_info:
+                return self.cluster_name, False, "Failed to validate cluster connection"
             
-            # Store in connection pool
-            connection_info = {
-                'context': self.cluster_name,
-                'version': version_info.git_version,
-                'connected_at': time.time()
-            }
-            self.connection_pool.add_connection(self.cluster_name, connection_info)
-            
-            return (self.cluster_name, True, f"Connected to Kubernetes {version_info.git_version}")
+            message = f"Connected to Kubernetes {version_info.git_version}"
+            return self.cluster_name, True, message
             
         except Exception as e:
-            error_msg = self._get_user_friendly_error(e)
-            raise Exception(error_msg)
-        
-    def _validate_connection(self, connection_info):
-        """Validate cached connection is still good"""
-        # Simple validation - check if connection is recent
-        return time.time() - connection_info.get('connected_at', 0) < 300
+            error_msg = self._format_error(str(e))
+            return self.cluster_name, False, error_msg
     
-    def _get_user_friendly_error(self, error):
-        """Convert technical errors to user-friendly messages"""
-        error_str = str(error).lower()
+    def _format_error(self, error: str) -> str:
+        """Format error message for user display"""
+        error_lower = error.lower()
         
-        if "docker-desktop" in self.cluster_name.lower() and "refused" in error_str:
+        if "docker-desktop" in self.cluster_name.lower() and "refused" in error_lower:
             return "Docker Desktop Kubernetes is not running. Please start Docker Desktop and enable Kubernetes."
-        elif "timeout" in error_str:
+        elif "timeout" in error_lower:
             return f"Connection timeout. Check if cluster '{self.cluster_name}' is accessible."
-        elif "certificate" in error_str:
+        elif "certificate" in error_lower:
             return f"Certificate error. Check your kubeconfig for '{self.cluster_name}'."
-        
-        return f"Connection failed: {str(error)[:100]}..."
+        else:
+            return f"Connection failed: {error[:100]}"
 
-class NodesWorker(EnhancedBaseWorker):
-    def __init__(self, client, parent):
-        super().__init__("nodes_fetch")
+
+class DataLoadWorker(EnhancedBaseWorker):
+    """Worker for loading various types of cluster data"""
+    
+    def __init__(self, client, data_type: str, cluster_name: str, processor: Callable = None):
+        super().__init__(f"{data_type}_load_{cluster_name}")
         self.client = client
-        self.parent = parent
-        
-    def execute(self):
-        logging.info("NodesWorker: execute() called")
-        if self.is_cancelled():
-            logging.warning("NodesWorker: Worker was cancelled")
-            return []
-        
+        self.data_type = data_type
+        self.cluster_name = cluster_name
+        self.processor = processor or self._default_processor
+    
+    def execute(self) -> Tuple[str, Any]:
+        """Execute data loading"""
         try:
-            nodes = self.client._get_nodes()
-            logging.info(f"NodesWorker: Retrieved {len(nodes) if nodes else 0} nodes from client")
-            return nodes
+            if self.data_type == "nodes":
+                data = self.client._get_nodes()
+            elif self.data_type == "metrics":
+                self.client.get_cluster_metrics_async()
+                return self.data_type, None  # Metrics are handled via signals
+            elif self.data_type == "issues":
+                self.client.get_cluster_issues_async()
+                return self.data_type, None  # Issues are handled via signals
+            elif self.data_type == "cluster_info":
+                data = self.client.get_cluster_info(self.cluster_name)
+            else:
+                raise ValueError(f"Unknown data type: {self.data_type}")
+            
+            processed_data = self.processor(data) if data else None
+            return self.data_type, processed_data
+            
         except Exception as e:
-            logging.error(f"NodesWorker: Error getting nodes: {e}")
+            logging.error(f"Error loading {self.data_type} for {self.cluster_name}: {e}")
             raise
     
-@class_logger(log_level=logging.INFO, exclude_methods=['__init__', '_start_workers', '_stop_workers', 'connection_started', 'connection_finished', 'connection_error', 'cluster_info_loaded', 'nodes_loaded'])
-class ClusterConnection(QObject):
+    def _default_processor(self, data: Any) -> Any:
+        """Default data processor - returns data as-is"""
+        return data
+
+
+@class_logger(log_level=logging.INFO)
+class EnhancedClusterConnector(QObject):
     """
-    Enhanced cluster connection manager with better error handling and user feedback
+    Enhanced Kubernetes Cluster Connector with single responsibility design.
+    Replaces the complex monolithic cluster_connector.py.
     """
+    
+    # Signals
     connection_started = pyqtSignal(str)
-    connection_progress = pyqtSignal(str, str)  # cluster_name, progress_message
-    connection_complete = pyqtSignal(str, bool, str)  # cluster_name, success, message
+    connection_complete = pyqtSignal(str, bool, str)
     cluster_data_loaded = pyqtSignal(dict)
     node_data_loaded = pyqtSignal(list)
-    issues_data_loaded = pyqtSignal(list)
     metrics_data_loaded = pyqtSignal(dict)
-    error_occurred = pyqtSignal(str, str)  # error_type, error_message
+    issues_data_loaded = pyqtSignal(list)
+    error_occurred = pyqtSignal(str, str)
     
     def __init__(self):
         super().__init__()
+        
+        # Core dependencies
         self.kube_client = get_kubernetes_client()
         self.thread_manager = get_thread_manager()
         
-        # Performance optimizations
-        self.connection_pool = ConnectionPool()
-        self.smart_cache = SmartCache()
-        self.adaptive_pollers = {}  # Per-cluster adaptive polling
+        # State management (thread-safe)
+        self._connection_states: Dict[str, ConnectionState] = {}
+        self._current_cluster: Optional[str] = None
+        self._state_lock = threading.RLock()
         
-        # Request batching
-        self._pending_requests = deque()
-        self._batch_timer = QTimer()
-        self._batch_timer.timeout.connect(self._process_batch_requests)
-        self._batch_timer.setSingleShot(True)
-
-        self._is_being_destroyed = False
-        self._active_workers = set()
+        # Data management
+        # Use unified cache system instead of custom DataCache
+        from utils.unified_cache_system import get_unified_cache
+        self._cache = get_unified_cache()
         
-        # Polling timers with adaptive intervals
-        self.metrics_poller = AdaptivePoller(5000)
-        self.issues_poller = AdaptivePoller(10000)
+        # Polling management
+        self._polling_active = False
+        self._polling_lock = threading.RLock()
+        self._metrics_timer = QTimer()
+        self._issues_timer = QTimer()
+        self._cleanup_timer = QTimer()
         
-        self.metrics_timer = QTimer(self)
-        self.metrics_timer.timeout.connect(self._poll_metrics_adaptive)
-        
-        self.issues_timer = QTimer(self)
-        self.issues_timer.timeout.connect(self._poll_issues_adaptive)
-        
-        # State tracking - FIXED: Initialize current_cluster properly
-        self.current_cluster = None
-        self.connection_states = {}
+        # Shutdown management
         self._shutting_down = False
-
-        # Data cache for cluster information
-        self.data_cache = {}
-        self.loading_complete = {}
-        self.cache_timestamps = {}
-        self.cache_ttl = 300  # 5 minutes
-        self.max_cache_entries = 20  # Limit cache entries per cluster
+        self._active_workers = set()
+        self._workers_lock = threading.RLock()
         
-        # Connect signals
-        self._connect_signals()
+        # Initialize
+        self._setup_timers()
+        self._connect_client_signals()
+        self._connect_resource_loader_signals()
+        
+        logging.info("Enhanced Cluster Connector initialized")
     
-    def _connect_signals(self):
-        """Connect Kubernetes client signals with enhanced logging"""
+    def _setup_timers(self):
+        """Initialize and configure timers"""
+        # Metrics polling timer
+        self._metrics_timer.timeout.connect(self._poll_metrics)
+        
+        # Issues polling timer  
+        self._issues_timer.timeout.connect(self._poll_issues)
+        
+        # Cache cleanup timer
+        self._cleanup_timer.timeout.connect(self._cleanup_cache)
+        self._cleanup_timer.start(60000)  # Cleanup every minute
+    
+    def _connect_client_signals(self):
+        """Connect to Kubernetes client signals"""
         try:
-            # Disconnect any existing connections first
+            # Disconnect existing connections first
             try:
                 self.kube_client.cluster_info_loaded.disconnect()
-                self.kube_client.cluster_metrics_updated.disconnect()
+                self.kube_client.cluster_metrics_updated.disconnect()  
                 self.kube_client.cluster_issues_updated.disconnect()
                 self.kube_client.error_occurred.disconnect()
             except (TypeError, RuntimeError):
                 pass  # No existing connections
-                
+            
             # Connect signals
-            self.kube_client.cluster_info_loaded.connect(self.handle_cluster_info_loaded)
-            self.kube_client.cluster_metrics_updated.connect(self.handle_metrics_updated)
-            self.kube_client.cluster_issues_updated.connect(self.handle_issues_updated)
-            self.kube_client.error_occurred.connect(self.handle_kubernetes_error)
-            
-            logging.info("ClusterConnector: Successfully connected to KubernetesClient signals")
+            self.kube_client.cluster_info_loaded.connect(self._handle_cluster_info)
+            self.kube_client.cluster_metrics_updated.connect(self._handle_metrics_update)
+            self.kube_client.cluster_issues_updated.connect(self._handle_issues_update)
+            self.kube_client.error_occurred.connect(self._handle_client_error)
             
         except Exception as e:
-            logging.error(f"ClusterConnector: Error connecting signals: {e}")
-
-    def __del__(self):
-        """Clean up resources when object is deleted"""
+            logging.error(f"Error connecting client signals: {e}")
+    
+    def _connect_resource_loader_signals(self):
+        """Connect to unified resource loader signals"""
         try:
-            self._is_being_destroyed = True
-            self._shutting_down = True
+            from utils.unified_resource_loader import get_unified_resource_loader
+            unified_loader = get_unified_resource_loader()
             
-            # Stop all timers
-            if hasattr(self, 'metrics_timer') and self.metrics_timer.isActive():
-                self.metrics_timer.stop()
+            # Connect to resource loading completion signal
+            unified_loader.loading_completed.connect(self._handle_resource_loading_completed)
+            unified_loader.loading_error.connect(self._handle_resource_loading_error)
             
-            if hasattr(self, 'issues_timer') and self.issues_timer.isActive():
-                self.issues_timer.stop()
-            
-            # Stop all workers
-            for worker in list(self._active_workers):
-                if hasattr(worker, 'stop'):
-                    worker.stop()
-            
-            # Cancel all active workers
-            if hasattr(self, 'thread_manager') and self.thread_manager:
-                for worker in list(self._active_workers):
-                    if hasattr(worker, 'cancel'):
-                        worker.cancel()
+            logging.info("Connected to unified resource loader signals")
+        except Exception as e:
+            logging.error(f"Error connecting resource loader signals: {e}")
+    
+    def _handle_resource_loading_completed(self, resource_type: str, load_result):
+        """Handle completion of resource loading from unified loader"""
+        try:
+            if resource_type == "nodes" and load_result.success:
+                # The unified loader already processed the data into dictionaries
+                # No need to process again - just emit the processed data
+                nodes_data = load_result.items
                 
-            if hasattr(self, '_active_workers'):
-                self._active_workers.clear()
+                logging.info(f"Received {len(nodes_data)} processed nodes from unified loader")
+                
+                # Emit the processed data directly
+                self.node_data_loaded.emit(nodes_data)
+                logging.info(f"Emitted {len(nodes_data)} processed nodes to UI")
                 
         except Exception as e:
-            logging.error(f"Error during ClusterConnection cleanup: {str(e)}")
-
-    def on_connection_complete(self, result):
+            logging.error(f"Error handling resource loading completion: {e}")
+            self.error_occurred.emit(resource_type, str(e))
+    
+    def _handle_resource_loading_error(self, resource_type: str, error_message: str):
+        """Handle resource loading errors from unified loader"""
+        logging.error(f"Resource loading error for {resource_type}: {error_message}")
+        self.error_occurred.emit(resource_type, error_message)
+    
+    @property
+    def current_cluster(self) -> Optional[str]:
+        """Thread-safe current cluster getter"""
+        with self._state_lock:
+            return self._current_cluster
+    
+    def connect_to_cluster(self, cluster_name: str) -> None:
+        """Connect to a Kubernetes cluster"""
+        if self._shutting_down:
+            return
+        
+        with self._state_lock:
+            # Initialize connection state if needed
+            if cluster_name not in self._connection_states:
+                self._connection_states[cluster_name] = ConnectionState(cluster_name)
+            
+            connection_state = self._connection_states[cluster_name]
+            
+            # Check if already connected
+            if connection_state.is_connected:
+                logging.info(f"Already connected to {cluster_name}")
+                self.connection_complete.emit(cluster_name, True, "Already connected")
+                return
+            
+            # Check if currently connecting
+            if connection_state.is_connecting:
+                logging.info(f"Already connecting to {cluster_name}")
+                return
+            
+            # Update state and start connection
+            connection_state.update_state(connected=False, connecting=True)
+        
+        self.connection_started.emit(cluster_name)
+        self._start_connection_worker(cluster_name)
+    
+    def _start_connection_worker(self, cluster_name: str) -> None:
+        """Start connection worker for cluster"""
+        worker = ClusterConnectionWorker(self.kube_client, cluster_name)
+        
+        # Setup worker callbacks
+        worker.signals.finished.connect(self._handle_connection_complete)
+        worker.signals.error.connect(lambda error: self._handle_connection_error(cluster_name, str(error)))
+        
+        # Track worker
+        with self._workers_lock:
+            self._active_workers.add(worker)
+        
+        # Submit to thread manager
+        self.thread_manager.submit_worker(f"connect_{cluster_name}", worker)
+    
+    def _handle_connection_complete(self, result: Tuple[str, bool, str]) -> None:
         """Handle connection completion"""
-        if self._shutting_down or not result:
+        if self._shutting_down:
             return
         
         cluster_name, success, message = result
         
+        with self._state_lock:
+            if cluster_name in self._connection_states:
+                self._connection_states[cluster_name].update_state(
+                    connected=success, 
+                    connecting=False,
+                    error=None if success else message
+                )
+                
+                if success:
+                    self._current_cluster = cluster_name
+        
+        self.connection_complete.emit(cluster_name, success, message)
+        
+        # Start data loading and polling if successful
         if success:
-            self.connection_states[cluster_name] = "connected"
-            self.current_cluster = cluster_name  # FIXED: Set current_cluster here
-            self.connection_complete.emit(cluster_name, success, message)
-            
-            # Queue initial data load requests
-            self._queue_request('cluster_info', cluster_name)
-            self._queue_request('metrics', cluster_name)
-            self._queue_request('issues', cluster_name)
-            
-            # Start adaptive polling
-            self._start_adaptive_polling(cluster_name)
-        else:
-            self.connection_states[cluster_name] = "failed"
-            self.connection_complete.emit(cluster_name, success, message)
+            self._start_data_loading(cluster_name)
+            self._start_polling()
     
-    def _queue_request(self, request_type, cluster_name):
-        """Queue a request for batch processing"""
-        self._pending_requests.append((request_type, cluster_name))
+    def _handle_connection_error(self, cluster_name: str, error_message: str) -> None:
+        """Handle connection errors"""
+        with self._state_lock:
+            if cluster_name in self._connection_states:
+                self._connection_states[cluster_name].update_state(
+                    connected=False, 
+                    connecting=False, 
+                    error=error_message
+                )
         
-        if not self._batch_timer.isActive():
-            self._batch_timer.start(BATCH_REQUEST_DELAY)
+        self.connection_complete.emit(cluster_name, False, error_message)
+        self.error_occurred.emit("connection", error_message)
     
-    def _process_batch_requests(self):
-        """Process queued requests in batch"""
-        if not self._pending_requests:
-            return
+    def _start_data_loading(self, cluster_name: str) -> None:
+        """Start loading initial data for cluster"""
+        # Load cluster info
+        self._start_data_worker("cluster_info", cluster_name)
         
-        # Group requests by type
-        requests_by_type = {}
-        while self._pending_requests:
-            req_type, cluster = self._pending_requests.popleft()
-            if req_type not in requests_by_type:
-                requests_by_type[req_type] = []
-            requests_by_type[req_type].append(cluster)
+        # Load nodes
+        self._start_data_worker("nodes", cluster_name, self._process_nodes_data)
         
-        # Process each type
-        for req_type, clusters in requests_by_type.items():
-            if req_type == 'cluster_info':
-                self._batch_load_cluster_info(clusters)
-            elif req_type == 'metrics':
-                self._batch_load_metrics(clusters)
-            elif req_type == 'issues':
-                self._batch_load_issues(clusters)
-
-    def _batch_load_cluster_info(self, clusters):
-        """Load cluster info for multiple clusters"""
-        for cluster_name in clusters:
-            try:
-                if cluster_name == self.current_cluster:
-                    self.load_cluster_info()
-            except Exception as e:
-                logging.error(f"Error in batch load cluster info for {cluster_name}: {e}")
-
-    def _batch_load_metrics(self, clusters):
-        """Load metrics for multiple clusters"""
-        for cluster_name in clusters:
-            try:
-                if cluster_name == self.current_cluster:
-                    self.load_metrics()
-            except Exception as e:
-                logging.error(f"Error in batch load metrics for {cluster_name}: {e}")
-
-    def _batch_load_issues(self, clusters):
-        """Load issues for multiple clusters"""
-        for cluster_name in clusters:
-            try:
-                if cluster_name == self.current_cluster:
-                    self.load_issues()
-            except Exception as e:
-                logging.error(f"Error in batch load issues for {cluster_name}: {e}")
+        # Start metrics and issues loading (via signals)
+        self._start_data_worker("metrics", cluster_name)
+        self._start_data_worker("issues", cluster_name)
     
-    def _start_adaptive_polling(self, cluster_name):
-        """Start polling with adaptive intervals"""
-        if cluster_name not in self.adaptive_pollers:
-            self.adaptive_pollers[cluster_name] = {
-                'metrics': AdaptivePoller(5000),
-                'issues': AdaptivePoller(10000)
-            }
+    def _start_data_worker(self, data_type: str, cluster_name: str, processor: Callable = None) -> None:
+        """Start a data loading worker"""
+        worker = DataLoadWorker(self.kube_client, data_type, cluster_name, processor)
         
-        # Start timers with initial intervals
-        if not self.metrics_timer.isActive():
-            interval = self.adaptive_pollers[cluster_name]['metrics'].current_interval
-            self.metrics_timer.start(interval)
+        # Setup callbacks
+        worker.signals.finished.connect(self._handle_data_loaded)
+        worker.signals.error.connect(lambda error: self._handle_data_error(data_type, str(error)))
         
-        if not self.issues_timer.isActive():
-            interval = self.adaptive_pollers[cluster_name]['issues'].current_interval
-            self.issues_timer.start(interval)
-    
-    def _poll_metrics_adaptive(self):
-        """Poll metrics with adaptive interval"""
-        if self._shutting_down or not self.current_cluster:
-            return
-        
-        # Get metrics
-        self.kube_client.get_cluster_metrics_async()
-        
-        # Adjust polling interval will be done when metrics are received
-    
-    def _poll_issues_adaptive(self):
-        """Poll issues with adaptive interval"""
-        if self._shutting_down or not self.current_cluster:
-            return
-        
-        # Get issues
-        self.kube_client.get_cluster_issues_async()
-    
-    def handle_metrics_updated(self, metrics):
-        """Handle metrics update with proper signal forwarding - FIXED"""
-        if self._shutting_down:
-            return
-        
-        # FIXED: Get cluster name from KubernetesClient instead of self.current_cluster
-        cluster_name = self.kube_client.current_cluster if hasattr(self.kube_client, 'current_cluster') else self.current_cluster
-        
-        if not cluster_name:
-            logging.warning("ClusterConnector: No current cluster set for metrics update")
-            return
-        
-        # FIXED: Set current_cluster from KubernetesClient if not already set
-        if not self.current_cluster and cluster_name:
-            self.current_cluster = cluster_name
-            self.connection_states[cluster_name] = "connected"
-        
-        logging.info(f"ClusterConnector: Received metrics from KubernetesClient for {cluster_name}")
-        
-        # Cache metrics in BOTH cache systems for consistency
-        cache_key = f"{cluster_name}:metrics"
-        self.smart_cache.set(cache_key, metrics)
-        
-        # Store in data_cache for ClusterView compatibility
-        if cluster_name not in self.data_cache:
-            self.data_cache[cluster_name] = {}
-        self.data_cache[cluster_name]['metrics'] = metrics
-        self._update_cache_timestamp(cluster_name)
-        
-        # Calculate data hash for change detection
-        data_hash = hash(str(metrics))
-        
-        # Adjust polling interval
-        if cluster_name in self.adaptive_pollers:
-            poller = self.adaptive_pollers[cluster_name]['metrics']
-            new_interval = poller.record_poll_result(data_hash)
-            
-            # FIXED: Update timer interval safely
-            if hasattr(self, 'metrics_timer') and self.metrics_timer and self.metrics_timer.isActive():
-                # Stop and restart with new interval to avoid race conditions
-                self.metrics_timer.stop()
-                self.metrics_timer.start(new_interval)
-        
-        # Emit signal to ClusterPage
-        try:
-            logging.info(f"ClusterConnector: Emitting metrics_data_loaded signal for {cluster_name}")
-            self.metrics_data_loaded.emit(metrics)
-            logging.info(f"ClusterConnector: Successfully emitted metrics_data_loaded signal")
-        except Exception as e:
-            logging.error(f"ClusterConnector: Error emitting metrics signal: {e}")
-
-    def handle_issues_updated(self, issues):
-        """Handle issues update with proper signal forwarding - FIXED"""
-        if self._shutting_down:
-            return
-        
-        # FIXED: Get cluster name from KubernetesClient instead of self.current_cluster
-        cluster_name = self.kube_client.current_cluster if hasattr(self.kube_client, 'current_cluster') else self.current_cluster
-        
-        if not cluster_name:
-            logging.warning("ClusterConnector: No current cluster set for issues update")
-            return
-        
-        # FIXED: Set current_cluster from KubernetesClient if not already set
-        if not self.current_cluster and cluster_name:
-            self.current_cluster = cluster_name
-            self.connection_states[cluster_name] = "connected"
-        
-        logging.info(f"ClusterConnector: Received {len(issues)} issues from KubernetesClient for {cluster_name}")
-        
-        # Cache issues in BOTH cache systems for consistency
-        cache_key = f"{cluster_name}:issues"
-        self.smart_cache.set(cache_key, issues)
-        
-        # Store in data_cache for ClusterView compatibility
-        if cluster_name not in self.data_cache:
-            self.data_cache[cluster_name] = {}
-        self.data_cache[cluster_name]['issues'] = issues
-        self._update_cache_timestamp(cluster_name)
-        
-        # Calculate data hash
-        data_hash = hash(str(issues))
-        
-        # Adjust polling interval
-        if cluster_name in self.adaptive_pollers:
-            poller = self.adaptive_pollers[cluster_name]['issues']
-            new_interval = poller.record_poll_result(data_hash)
-            
-            # FIXED: Update timer interval safely
-            if hasattr(self, 'issues_timer') and self.issues_timer and self.issues_timer.isActive():
-                # Stop and restart with new interval to avoid race conditions
-                self.issues_timer.stop()
-                self.issues_timer.start(new_interval)
-        
-        # Emit signal to ClusterPage
-        try:
-            logging.info(f"ClusterConnector: Emitting issues_data_loaded signal for {cluster_name}")
-            self.issues_data_loaded.emit(issues)
-            logging.info(f"ClusterConnector: Successfully emitted issues_data_loaded signal")
-        except Exception as e:
-            logging.error(f"ClusterConnector: Error emitting issues signal: {e}")
-
-    def handle_cluster_info_loaded(self, info):
-        """Handle when cluster info is loaded from the client"""
-        if self._is_being_destroyed or self._shutting_down:
-            return
-            
-        try:
-            # FIXED: Get cluster name properly
-            cluster_name = self.kube_client.current_cluster if hasattr(self.kube_client, 'current_cluster') else self.current_cluster
-            
-            if cluster_name:
-                logging.info(f"ClusterConnector: Received cluster info from KubernetesClient for {cluster_name}")
-                
-                # FIXED: Set current_cluster if not already set
-                if not self.current_cluster:
-                    self.current_cluster = cluster_name
-                    self.connection_states[cluster_name] = "connected"
-                
-                # Store in data_cache for consistency
-                if cluster_name not in self.data_cache:
-                    self.data_cache[cluster_name] = {}
-                self.data_cache[cluster_name]['cluster_info'] = info
-                self._update_cache_timestamp(cluster_name)
-                
-                # Check if we have all required data now
-                self._check_data_completeness(cluster_name)
-                
-            try:
-                logging.info(f"ClusterConnector: Emitting cluster_data_loaded signal for {cluster_name}")
-                self.cluster_data_loaded.emit(info)
-                logging.info(f"ClusterConnector: Successfully emitted cluster_data_loaded signal")
-            except Exception as e:
-                logging.error(f"ClusterConnector: Error emitting cluster info signal: {e}")
-            
-        except Exception as e:
-            logging.error(f"ClusterConnector: Error handling cluster info loaded: {e}")
-
-    # FIXED: Add method to set current cluster externally
-    def set_current_cluster(self, cluster_name):
-        """Set the current cluster - called from ClusterView"""
-        if cluster_name and cluster_name != self.current_cluster:
-            logging.info(f"ClusterConnector: Setting current cluster to {cluster_name}")
-            self.current_cluster = cluster_name
-            self.connection_states[cluster_name] = "connected"
-
-    def connect_to_cluster(self, cluster_name):
-        """Connect to cluster with optimizations and proper signal setup"""
-        if self._shutting_down or not cluster_name:
-            return
-        
-        # Ensure signals are connected
-        self._connect_signals()
-        
-        # FIXED: Set current cluster immediately when starting connection
-        self.current_cluster = cluster_name
-        
-        # Check cache first
-        cache_key = f"{cluster_name}:info"
-        cached_info = self.smart_cache.get(cache_key)
-        if cached_info:
-            self.cluster_data_loaded.emit(cached_info)
-            self.connection_complete.emit(cluster_name, True, "Connected (cached)")
-            self._start_adaptive_polling(cluster_name)
-            return
-        
-        # Start connection
-        self.connection_states[cluster_name] = "connecting"
-        self.connection_started.emit(cluster_name)
-        
-        # Create optimized worker
-        worker = ConnectionWorker(
-            self.kube_client,
-            cluster_name,
-            self.connection_pool
-        )
-        
-        worker.signals.finished.connect(self.on_connection_complete)
-        worker.signals.error.connect(
-            lambda error: self.handle_connection_error(cluster_name, error)
-        )
-        
-        self.thread_manager.submit_worker(f"connect_{cluster_name}", worker)
-
-    def get_cached_data(self, cluster_name):
-        """Get cached data for a cluster if available"""
-        try:
-            # Check cache validity first
-            self._cleanup_expired_cache()
-            
-            cached_data = self.data_cache.get(cluster_name, {})
-            
-            # FIXED: Also check smart_cache for missing data
-            if cluster_name not in cached_data or not cached_data:
-                cached_data = {}
-                
-                # Try to get from smart_cache
-                metrics_key = f"{cluster_name}:metrics"
-                issues_key = f"{cluster_name}:issues"
-                
-                metrics = self.smart_cache.get(metrics_key)
-                issues = self.smart_cache.get(issues_key)
-                
-                if metrics:
-                    cached_data['metrics'] = metrics
-                if issues:
-                    cached_data['issues'] = issues
-                    
-            logging.info(f"ClusterConnector: Retrieved cached data for {cluster_name}: {list(cached_data.keys())}")
-            return cached_data
-            
-        except Exception as e:
-            logging.error(f"Error getting cached data for {cluster_name}: {e}")
-            return {}
-
-    def disconnect_cluster(self, cluster_name):
-        """Disconnect from cluster and cleanup resources"""
-        try:
-            logging.info(f"Disconnecting from cluster: {cluster_name}")
-            
-            # Update state
-            self.connection_states[cluster_name] = "disconnected"
-            
-            # FIXED: Clear current_cluster if disconnecting from current cluster
-            if self.current_cluster == cluster_name:
-                self.current_cluster = None
-            
-            # Clear caches
-            self.smart_cache.clear_cluster(cluster_name)
-            
-            # Reset adaptive pollers
-            if cluster_name in self.adaptive_pollers:
-                del self.adaptive_pollers[cluster_name]
-            
-            # Stop polling if this is current cluster
-            if self.current_cluster == cluster_name:
-                self.stop_polling()
-                self.current_cluster = None
-            
-        except Exception as e:
-            logging.error(f"Error disconnecting cluster: {e}")
-    
-    def stop_polling(self):
-        """Stop all polling timers"""
-        # FIXED: Stop timers safely
-        for timer in [self.metrics_timer, self.issues_timer]:
-            if timer and hasattr(timer, 'isActive') and timer.isActive():
-                timer.stop()
-
-    def handle_connection_error(self, cluster_name, error_message):
-        """Enhanced connection error handling"""
-        try:
-            logging.error(f"Connection error for cluster {cluster_name}: {error_message}")
-            
-            # Update connection state to failed
-            self.connection_states[cluster_name] = "failed"
-            
-            # FIXED: Clear current_cluster if connection failed
-            if self.current_cluster == cluster_name:
-                self.current_cluster = None
-            
-            # Emit connection complete with failure
-            self.connection_complete.emit(cluster_name, False, error_message)
-            
-            # Emit specific error
-            self.error_occurred.emit("connection", error_message)
-            
-        except Exception as e:
-            logging.error(f"Error in connection error handler: {e}")
-
-    def _stop_workers_for_cluster(self, cluster_name):
-        """Stop any active workers for a specific cluster"""
-        try:
-            workers_to_stop = []
-            for worker in self._active_workers:
-                if (hasattr(worker, 'cluster_name') and 
-                    worker.cluster_name == cluster_name):
-                    workers_to_stop.append(worker)
-            
-            for worker in workers_to_stop:
-                if hasattr(worker, 'stop'):
-                    worker.stop()
-                    
-        except Exception as e:
-            logging.error(f"Error stopping workers for cluster {cluster_name}: {e}")
-
-    def get_connection_state(self, cluster_name):
-        """Get current connection state for a cluster"""
-        return self.connection_states.get(cluster_name, "disconnected")
-
-    def start_polling(self):
-        """Start polling for metrics and issues"""
-        if self._shutting_down:
-            return
-            
-        try:
-            if not self.metrics_timer.isActive():
-                self.metrics_timer.start(5000)  # Poll every 5 seconds
-                
-            if not self.issues_timer.isActive():
-                self.issues_timer.start(10000)  # Poll every 10 seconds
-                
-        except Exception as e:
-            logging.error(f"Error starting polling: {e}")
-    
-    def load_cluster_info(self):
-        """Load basic cluster info safely"""
-        if self._shutting_down:
-            return
-            
-        try:
-            info = self.kube_client.get_cluster_info(self.kube_client.current_cluster)
-            if info:
-                self.cluster_data_loaded.emit(info)
-                # Also load nodes data
-                self.load_nodes()
-        except Exception as e:
-            self.error_occurred.emit("data_loading", f"Error loading cluster info: {str(e)}")
-
-    def load_metrics(self):
-        """Load cluster metrics safely"""
-        if self._is_being_destroyed or self._shutting_down:
-            return
-        
-        try:
-            # Use the kubernetes client to get metrics
-            self.kube_client.get_cluster_metrics_async()
-        except Exception as e:
-            if not self._is_being_destroyed and not self._shutting_down:
-                logging.warning(f"Error loading metrics: {str(e)}")
-                # Don't emit error for metrics failures as they're not critical
-
-    def load_issues(self):
-        """Load cluster issues safely"""
-        if self._is_being_destroyed or self._shutting_down:
-            return
-        
-        try:
-            # Use the kubernetes client to get issues
-            self.kube_client.get_cluster_issues_async()
-        except Exception as e:
-            if not self._is_being_destroyed and not self._shutting_down:
-                logging.warning(f"Error loading issues: {str(e)}")
-                # Don't emit error for issues failures as they're not critical
-
-    def load_nodes(self):
-        """Load nodes data from the connected cluster"""
-        logging.info("ClusterConnector: load_nodes() called")
-        
-        if self._shutting_down:
-            logging.warning("ClusterConnector: Shutting down, not loading nodes")
-            return
-            
-        try:
-            logging.info("ClusterConnector: Creating NodesWorker")
-            # Create and start the worker
-            worker = NodesWorker(self.kube_client, self)
-            
-            # Track the worker
+        # Track worker
+        with self._workers_lock:
             self._active_workers.add(worker)
-            
-            # Set up cleanup for when the worker is done
-            def cleanup_worker(result=None):
-                if worker in self._active_workers:
-                    self._active_workers.remove(worker)
-            
-            # Define a wrapper that handles both cleanup and data processing
-            def handle_nodes_finished(nodes_data):
-                logging.info(f"ClusterConnector: handle_nodes_finished called with {len(nodes_data) if nodes_data else 0} nodes")
-                cleanup_worker(nodes_data)
-                self.on_nodes_loaded(nodes_data)
-            
-            # Connect signals
-            worker.signals.finished.connect(handle_nodes_finished)
-            worker.signals.error.connect(lambda error: (cleanup_worker(), self.handle_error("nodes", str(error))))
-            
-            # Submit worker to thread manager
-            logging.info("ClusterConnector: Submitting NodesWorker to thread manager")
-            self.thread_manager.submit_worker(f"nodes_load_{id(worker)}", worker)
-            
-        except Exception as e:
-            logging.error(f"Error loading nodes: {e}")
-            self.handle_error("nodes", f"Failed to load nodes: {str(e)}")
-
-    def on_nodes_loaded(self, nodes):
-        """Handle nodes data loaded from worker thread"""
-        try:
-            if not self._is_being_destroyed and not self._shutting_down:
-                # Process raw node data into the format expected by NodesPage
-                processed_nodes = self._process_node_data(nodes)
-                self.node_data_loaded.emit(processed_nodes)
-        except Exception as e:
-            logging.error(f"Error handling nodes loaded: {e}")
+        
+        # Submit to thread manager
+        self.thread_manager.submit_worker(f"{data_type}_{cluster_name}", worker)
     
-    def _process_node_data(self, raw_nodes):
-        """Process raw Kubernetes node objects into NodesPage format"""
-        logging.info(f"ClusterConnector: _process_node_data() called with {len(raw_nodes) if raw_nodes else 0} raw nodes")
+    def _handle_data_loaded(self, result: Tuple[str, Any]) -> None:
+        """Handle data loading completion"""
+        if self._shutting_down:
+            return
+        
+        data_type, data = result
+        
+        if data is None:
+            return  # Some data types (metrics, issues) are handled via signals
+        
+        # Cache the data
+        cache_key = f"{self.current_cluster}:{data_type}"
+        self._cache.cache_resources('cluster_data', cache_key, data)
+        
+        # Emit appropriate signal
+        if data_type == "cluster_info":
+            self.cluster_data_loaded.emit(data)
+        elif data_type == "nodes":
+            self.node_data_loaded.emit(data)
+    
+    def _handle_data_error(self, data_type: str, error_message: str) -> None:
+        """Handle data loading errors"""
+        logging.error(f"Error loading {data_type}: {error_message}")
+        self.error_occurred.emit(f"{data_type}_loading", error_message)
+    
+    def _process_nodes_data(self, raw_nodes: List) -> List[NodeInfo]:
+        """Process raw Kubernetes node objects into NodeInfo objects"""
+        if not raw_nodes:
+            return []
+        
         processed_nodes = []
         
         for node in raw_nodes:
             try:
-                # Extract basic node information
+                # Extract basic information
                 node_name = node.metadata.name
                 node_labels = node.metadata.labels or {}
                 
-                # Extract node status
+                # Determine status
                 conditions = node.status.conditions or []
                 status = "Unknown"
                 for condition in conditions:
@@ -892,89 +441,35 @@ class ClusterConnection(QObject):
                         status = "Ready" if condition.status == "True" else "NotReady"
                         break
                 
-                # Extract capacity information
+                # Extract capacity
                 capacity = node.status.capacity or {}
                 cpu_capacity = capacity.get("cpu", "")
-                memory_capacity = capacity.get("memory", "")
-                storage_capacity = capacity.get("ephemeral-storage", "")
+                memory_capacity = self._format_memory_capacity(capacity.get("memory", ""))
+                storage_capacity = self._format_storage_capacity(capacity.get("ephemeral-storage", ""))
                 
-                # Format capacity values for display
-                if memory_capacity:
-                    # Convert from Ki to more readable format
-                    try:
-                        if "Ki" in memory_capacity:
-                            memory_ki = int(memory_capacity.replace("Ki", ""))
-                            memory_gb = round(memory_ki / 1024 / 1024, 1)
-                            memory_capacity = f"{memory_gb}GB"
-                        elif "Mi" in memory_capacity:
-                            memory_mi = int(memory_capacity.replace("Mi", ""))
-                            memory_gb = round(memory_mi / 1024, 1)
-                            memory_capacity = f"{memory_gb}GB"
-                        elif "Gi" in memory_capacity:
-                            memory_gi = int(memory_capacity.replace("Gi", ""))
-                            memory_capacity = f"{memory_gi}GB"
-                    except (ValueError, TypeError):
-                        pass  # Keep original value if conversion fails
+                # Extract roles
+                roles = self._extract_node_roles(node_labels)
                 
-                if storage_capacity:
-                    # Convert from Ki to more readable format  
-                    try:
-                        if "Ki" in storage_capacity:
-                            storage_ki = int(storage_capacity.replace("Ki", ""))
-                            storage_gb = round(storage_ki / 1024 / 1024, 1)
-                            storage_capacity = f"{storage_gb}GB"
-                        elif "Mi" in storage_capacity:
-                            storage_mi = int(storage_capacity.replace("Mi", ""))
-                            storage_gb = round(storage_mi / 1024, 1)
-                            storage_capacity = f"{storage_gb}GB"
-                        elif "Gi" in storage_capacity:
-                            storage_gi = int(storage_capacity.replace("Gi", ""))
-                            storage_capacity = f"{storage_gi}GB"
-                    except (ValueError, TypeError):
-                        pass  # Keep original value if conversion fails
-                
-                # Extract roles from labels
-                roles = []
-                for label_key in node_labels:
-                    if "node-role.kubernetes.io/" in label_key:
-                        role = label_key.replace("node-role.kubernetes.io/", "")
-                        if role:
-                            roles.append(role)
-                
-                if not roles:
-                    roles = ["<none>"]
-                
-                # Extract taints count
+                # Extract other info
                 taints_count = len(node.spec.taints) if node.spec.taints else 0
-                
-                # Extract version
                 kubelet_version = node.status.node_info.kubelet_version if node.status.node_info else "Unknown"
+                age = self._calculate_age(node.metadata.creation_timestamp)
                 
-                # Calculate age
-                creation_timestamp = node.metadata.creation_timestamp
-                age = self._calculate_age(creation_timestamp) if creation_timestamp else "Unknown"
+                # Create NodeInfo object
+                node_info = NodeInfo(
+                    name=node_name,
+                    status=status,
+                    roles=roles,
+                    cpu_capacity=cpu_capacity,
+                    memory_capacity=memory_capacity,
+                    disk_capacity=storage_capacity,
+                    taints=str(taints_count),
+                    version=kubelet_version,
+                    age=age,
+                    raw_data=self.kube_client.v1.api_client.sanitize_for_serialization(node)
+                )
                 
-                # Get real utilization data from cluster metrics
-                cpu_usage, memory_usage, disk_usage = self._get_node_metrics(node)
-                
-                # Create processed node data
-                processed_node = {
-                    "name": node_name,
-                    "status": status,
-                    "roles": roles,
-                    "cpu_capacity": cpu_capacity,
-                    "memory_capacity": memory_capacity,
-                    "disk_capacity": storage_capacity,
-                    "cpu_usage": cpu_usage,
-                    "memory_usage": memory_usage, 
-                    "disk_usage": disk_usage,
-                    "taints": str(taints_count),
-                    "version": kubelet_version,
-                    "age": age,
-                    "raw_data": self.kube_client.v1.api_client.sanitize_for_serialization(node)
-                }
-                
-                processed_nodes.append(processed_node)
+                processed_nodes.append(node_info)
                 
             except Exception as e:
                 logging.error(f"Error processing node {getattr(node, 'metadata', {}).get('name', 'unknown')}: {e}")
@@ -983,10 +478,46 @@ class ClusterConnection(QObject):
         logging.info(f"Processed {len(processed_nodes)} nodes")
         return processed_nodes
     
-    def _calculate_age(self, creation_timestamp):
+    def _format_memory_capacity(self, memory_str: str) -> str:
+        """Format memory capacity for display"""
+        if not memory_str:
+            return ""
+        
+        try:
+            if "Ki" in memory_str:
+                memory_ki = int(memory_str.replace("Ki", ""))
+                memory_gb = round(memory_ki / 1024 / 1024, 1)
+                return f"{memory_gb}GB"
+            elif "Mi" in memory_str:
+                memory_mi = int(memory_str.replace("Mi", ""))
+                memory_gb = round(memory_mi / 1024, 1)
+                return f"{memory_gb}GB"
+            elif "Gi" in memory_str:
+                memory_gi = int(memory_str.replace("Gi", ""))
+                return f"{memory_gi}GB"
+        except (ValueError, TypeError):
+            pass
+        
+        return memory_str
+    
+    def _format_storage_capacity(self, storage_str: str) -> str:
+        """Format storage capacity for display"""
+        return self._format_memory_capacity(storage_str)  # Same logic
+    
+    def _extract_node_roles(self, labels: Dict[str, str]) -> List[str]:
+        """Extract node roles from labels"""
+        roles = []
+        for label_key in labels:
+            if "node-role.kubernetes.io/" in label_key:
+                role = label_key.replace("node-role.kubernetes.io/", "")
+                if role:
+                    roles.append(role)
+        
+        return roles if roles else ["<none>"]
+    
+    def _calculate_age(self, creation_timestamp) -> str:
         """Calculate age string from creation timestamp"""
         try:
-            from datetime import datetime, timezone
             if hasattr(creation_timestamp, 'timestamp'):
                 created = datetime.fromtimestamp(creation_timestamp.timestamp(), tz=timezone.utc)
             else:
@@ -1009,618 +540,210 @@ class ClusterConnection(QObject):
             logging.error(f"Error calculating age: {e}")
             return "Unknown"
     
-    def _get_node_metrics(self, node):
-        """Get consistent node metrics based on resource requests (matching cluster page methodology)"""
-        try:
-            node_name = node.metadata.name
+    def _start_polling(self) -> None:
+        """Start polling for metrics and issues"""
+        with self._polling_lock:
+            if self._polling_active or self._shutting_down:
+                return
             
-            # Use the same calculation method as cluster page for consistency
-            cpu_usage = self._calculate_node_cpu_from_requests(node_name, node)
-            memory_usage = self._calculate_node_memory_from_requests(node_name, node)
-            disk_usage = self._calculate_node_disk_from_requests(node_name, node)
-            
-            return cpu_usage, memory_usage, disk_usage
-            
-        except Exception as e:
-            logging.error(f"Error getting metrics for node {getattr(node, 'metadata', {}).get('name', 'unknown')}: {e}")
-            # Return None values instead of dummy data
-            return None, None, None
+            self._polling_active = True
+            self._metrics_timer.start(5000)   # Poll metrics every 5 seconds
+            self._issues_timer.start(10000)   # Poll issues every 10 seconds
     
-    def _calculate_node_cpu_from_requests(self, node_name, node):
-        """Calculate node CPU usage based on pod requests (matching cluster page)"""
-        try:
-            # Get node capacity
-            if not node.status or not node.status.capacity:
-                return None
-            
-            cpu_capacity = self._parse_cpu_value(node.status.capacity.get('cpu', '0'))
-            if cpu_capacity <= 0:
-                return None
-            
-            # Get pods running on this node
-            pods_list = self.kube_client.v1.list_pod_for_all_namespaces(
-                field_selector=f"spec.nodeName={node_name}"
-            )
-            
-            cpu_requests_total = 0
-            for pod in pods_list.items:
-                if pod.status and pod.status.phase == "Running":
-                    if pod.spec and pod.spec.containers:
-                        for container in pod.spec.containers:
-                            if container.resources and container.resources.requests:
-                                cpu_request = container.resources.requests.get('cpu', '0')
-                                cpu_requests_total += self._parse_cpu_value(cpu_request)
-            
-            # Calculate percentage
-            cpu_usage_percent = (cpu_requests_total / cpu_capacity * 100)
-            return min(cpu_usage_percent, 100)
-            
-        except Exception as e:
-            logging.error(f"Error calculating CPU from requests for node {node_name}: {e}")
-            return None
+    def _stop_polling(self) -> None:
+        """Stop all polling"""
+        with self._polling_lock:
+            self._polling_active = False
+            self._metrics_timer.stop()
+            self._issues_timer.stop()
     
-    def _calculate_node_memory_from_requests(self, node_name, node):
-        """Calculate node memory usage based on pod requests (matching cluster page)"""
+    def _poll_metrics(self) -> None:
+        """Poll for cluster metrics"""
+        if self._shutting_down or not self.current_cluster:
+            return
+        
         try:
-            # Get node capacity
-            if not node.status or not node.status.capacity:
-                return None
-            
-            memory_capacity = self._parse_memory_value(node.status.capacity.get('memory', '0Ki'))
-            if memory_capacity <= 0:
-                return None
-            
-            # Get pods running on this node
-            pods_list = self.kube_client.v1.list_pod_for_all_namespaces(
-                field_selector=f"spec.nodeName={node_name}"
-            )
-            
-            memory_requests_total = 0
-            for pod in pods_list.items:
-                if pod.status and pod.status.phase == "Running":
-                    if pod.spec and pod.spec.containers:
-                        for container in pod.spec.containers:
-                            if container.resources and container.resources.requests:
-                                memory_request = container.resources.requests.get('memory', '0')
-                                memory_requests_total += self._parse_memory_value(memory_request)
-            
-            # Calculate percentage
-            memory_usage_percent = (memory_requests_total / memory_capacity * 100)
-            return min(memory_usage_percent, 100)
-            
+            self.kube_client.get_cluster_metrics_async()
         except Exception as e:
-            logging.error(f"Error calculating memory from requests for node {node_name}: {e}")
-            return None
+            logging.warning(f"Error polling metrics: {e}")
     
-    def _calculate_node_disk_from_requests(self, node_name, node):
-        """Calculate cluster-wide disk usage based on pod density and storage utilization"""
+    def _poll_issues(self) -> None:
+        """Poll for cluster issues"""
+        if self._shutting_down or not self.current_cluster:
+            return
+        
         try:
-            # Get all nodes to calculate cluster-wide metrics
-            nodes_list = self.kube_client.v1.list_node()
+            self.kube_client.get_cluster_issues_async()
+        except Exception as e:
+            logging.warning(f"Error polling issues: {e}")
+    
+    def _handle_cluster_info(self, info: Dict) -> None:
+        """Handle cluster info updates from client"""
+        if self._shutting_down:
+            return
+        
+        cluster_name = getattr(self.kube_client, 'current_cluster', self.current_cluster)
+        if cluster_name:
+            cache_key = f"{cluster_name}:cluster_info"
+            self._cache.cache_resources('cluster_info', cache_key, info)
+        
+        self.cluster_data_loaded.emit(info)
+    
+    def _handle_metrics_update(self, metrics: Dict) -> None:
+        """Handle metrics updates from client"""
+        if self._shutting_down:
+            return
+        
+        cluster_name = getattr(self.kube_client, 'current_cluster', self.current_cluster)
+        if cluster_name:
+            cache_key = f"{cluster_name}:metrics"
+            self._cache.cache_resources('metrics', cache_key, metrics)
+        
+        self.metrics_data_loaded.emit(metrics)
+    
+    def _handle_issues_update(self, issues: List) -> None:
+        """Handle issues updates from client"""
+        if self._shutting_down:
+            return
+        
+        cluster_name = getattr(self.kube_client, 'current_cluster', self.current_cluster)
+        if cluster_name:
+            cache_key = f"{cluster_name}:issues"
+            self._cache.cache_resources('issues', cache_key, issues)
+        
+        self.issues_data_loaded.emit(issues)
+    
+    def _handle_client_error(self, error_message: str) -> None:
+        """Handle Kubernetes client errors"""
+        if self._shutting_down:
+            return
+        
+        # Filter out non-critical errors
+        error_lower = error_message.lower()
+        if any(keyword in error_lower for keyword in [
+            'connection refused', 'timeout', 'certificate', 'authentication',
+            'authorization', 'permission denied', 'config'
+        ]):
+            self.error_occurred.emit("kubernetes", error_message)
+        else:
+            logging.warning(f"Kubernetes client error (suppressed): {error_message}")
+    
+    def _cleanup_cache(self) -> None:
+        """Periodic cache cleanup - handled by unified cache system"""
+        try:
+            self._cache.optimize_caches()
+            logging.debug("Cache optimization completed")
+        except Exception as e:
+            logging.error(f"Error during cache cleanup: {e}")
+    
+    def disconnect_cluster(self, cluster_name: str) -> None:
+        """Disconnect from a cluster"""
+        with self._state_lock:
+            if cluster_name in self._connection_states:
+                self._connection_states[cluster_name].update_state(connected=False)
             
-            total_storage_capacity = 0
-            total_pods_capacity = 0
-            total_running_pods = 0
-            has_storage_metrics = False
+            if self._current_cluster == cluster_name:
+                self._current_cluster = None
+                self._stop_polling()
+        
+        # Clear cache for this cluster
+        # Clear cluster data from unified cache
+        self._cache.clear_resource_cache(f'cluster_{cluster_name}')
+        
+        logging.info(f"Disconnected from cluster: {cluster_name}")
+    
+    def load_nodes(self):
+        """Load nodes data using unified resource loader"""
+        try:
+            unified_loader = get_unified_resource_loader()
+            operation_id = unified_loader.load_resources_async('nodes')
+            logging.info(f"Started loading nodes, operation_id: {operation_id}")
+        except Exception as e:
+            error_msg = f"Failed to load nodes: {e}"
+            logging.error(error_msg)
+            self.error_occurred.emit("nodes", error_msg)
+    
+    def get_cached_data(self, cluster_name: str) -> Dict[str, Any]:
+        """Get cached data for a cluster"""
+        cached_data = {}
+        
+        data_types = ["cluster_info", "metrics", "issues", "nodes"]
+        for data_type in data_types:
+            cache_key = f"{cluster_name}:{data_type}"
+            data = self._cache.get_cached_resources('cluster_data', cache_key)
+            if data:
+                cached_data[data_type] = data
+        
+        return cached_data
+    
+    def get_connection_state(self, cluster_name: str) -> str:
+        """Get current connection state for a cluster"""
+        with self._state_lock:
+            if cluster_name not in self._connection_states:
+                return "disconnected"
             
-            # Calculate cluster-wide capacity metrics
-            for cluster_node in nodes_list.items:
-                if cluster_node.status and cluster_node.status.capacity:
-                    # Storage capacity
-                    storage_capacity = cluster_node.status.capacity.get('ephemeral-storage', '0')
-                    if storage_capacity and storage_capacity != '0':
-                        capacity_bytes = self._parse_memory_value(storage_capacity)
-                        total_storage_capacity += capacity_bytes
-                        has_storage_metrics = True
-                    
-                    # Pod capacity
-                    pods_capacity = int(cluster_node.status.capacity.get('pods', '110'))
-                    total_pods_capacity += pods_capacity
-            
-            # Get all running pods across the cluster
-            pods_list = self.kube_client.v1.list_pod_for_all_namespaces()
-            total_storage_requests = 0
-            
-            for pod in pods_list.items:
-                if pod.status and pod.status.phase == "Running":
-                    total_running_pods += 1
-                    
-                    # Try to get storage requests
-                    if pod.spec and pod.spec.containers:
-                        for container in pod.spec.containers:
-                            if container.resources and container.resources.requests:
-                                storage_request = container.resources.requests.get('ephemeral-storage', '0')
-                                if storage_request and storage_request != '0':
-                                    storage_bytes = self._parse_memory_value(storage_request)
-                                    total_storage_requests += storage_bytes
-            
-            # Calculate usage percentage
-            if has_storage_metrics and total_storage_capacity > 0 and total_storage_requests > 0:
-                # Use actual storage requests if available
-                disk_usage_percent = (total_storage_requests / total_storage_capacity * 100)
-                return min(disk_usage_percent, 100)
-            elif total_pods_capacity > 0:
-                # Fallback: Use pod density as proxy for disk usage
-                # Assume each pod uses some baseline storage
-                pod_density_percent = (total_running_pods / total_pods_capacity * 100)
-                # Apply a reasonable multiplier (pods typically use 20-60% of available storage)
-                estimated_disk_usage = pod_density_percent * 0.35  # Conservative estimate
-                return min(max(estimated_disk_usage, 5.0), 85.0)  # Between 5% and 85%
+            state = self._connection_states[cluster_name]
+            if state.is_connected:
+                return "connected"
+            elif state.is_connecting:
+                return "connecting"
             else:
-                # Default fallback
-                return 15.0
-            
-        except Exception as e:
-            logging.error(f"Error calculating cluster disk usage: {e}")
-            return 10.0  # Return reasonable default instead of None
+                return "disconnected"
     
-    def _parse_cpu_value(self, cpu_str):
-        """Parse CPU values (cores, millicores) to cores"""
-        if not cpu_str or not isinstance(cpu_str, str):
-            return 0.0
-        
-        cpu_str = cpu_str.strip()
-        
-        # Handle millicores (e.g., "500m" = 0.5 cores)
-        if cpu_str.endswith('m'):
-            try:
-                return float(cpu_str[:-1]) / 1000.0
-            except ValueError:
-                return 0.0
-        
-        # Handle cores (e.g., "2" = 2 cores)
-        try:
-            return float(cpu_str)
-        except ValueError:
-            return 0.0
+    def set_current_cluster(self, cluster_name: str) -> None:
+        """Set the current cluster (called from ClusterView)"""
+        with self._state_lock:
+            if cluster_name != self._current_cluster:
+                logging.info(f"Setting current cluster to {cluster_name}")
+                self._current_cluster = cluster_name
+                
+                if cluster_name in self._connection_states:
+                    self._connection_states[cluster_name].update_state(connected=True)
     
-    def _parse_memory_value(self, memory_str):
-        """Parse memory values to bytes"""
-        if not memory_str or not isinstance(memory_str, str):
-            return 0
-        
-        memory_str = memory_str.strip()
-        
-        # Memory unit multipliers
-        multipliers = {
-            'Ki': 1024,
-            'Mi': 1024**2,
-            'Gi': 1024**3,
-            'Ti': 1024**4,
-            'K': 1000,
-            'M': 1000**2,
-            'G': 1000**3,
-            'T': 1000**4
-        }
-        
-        # Check for unit suffixes
-        for suffix, multiplier in multipliers.items():
-            if memory_str.endswith(suffix):
-                try:
-                    value = float(memory_str[:-len(suffix)])
-                    return int(value * multiplier)
-                except ValueError:
-                    return 0
-        
-        # Handle plain numbers (assume bytes)
-        try:
-            return int(float(memory_str))
-        except ValueError:
-            return 0
-    
-    def _get_node_cpu_usage(self, node_name, node):
-        """Get real CPU usage from node metrics"""
-        try:
-            # Method 1: Try metrics server API
-            cpu_usage = self._get_metrics_server_cpu(node_name)
-            if cpu_usage is not None:
-                return cpu_usage
-            
-            # Method 2: Try node proxy stats
-            cpu_usage = self._get_node_proxy_cpu(node_name)
-            if cpu_usage is not None:
-                return cpu_usage
-            
-            # Method 3: Calculate from allocatable vs capacity
-            cpu_usage = self._calculate_cpu_from_capacity(node)
-            if cpu_usage is not None:
-                return cpu_usage
-                
-            return None
-            
-        except Exception as e:
-            logging.debug(f"Could not get CPU usage for node {node_name}: {e}")
-            return None
-    
-    def _get_node_memory_usage(self, node_name, node):
-        """Get real memory usage from node metrics"""
-        try:
-            # Method 1: Try metrics server API
-            memory_usage = self._get_metrics_server_memory(node_name)
-            if memory_usage is not None:
-                return memory_usage
-            
-            # Method 2: Try node proxy stats
-            memory_usage = self._get_node_proxy_memory(node_name)
-            if memory_usage is not None:
-                return memory_usage
-                
-            # Method 3: Calculate from allocatable vs capacity
-            memory_usage = self._calculate_memory_from_capacity(node)
-            if memory_usage is not None:
-                return memory_usage
-                
-            return None
-            
-        except Exception as e:
-            logging.debug(f"Could not get memory usage for node {node_name}: {e}")
-            return None
-    
-    def _get_node_disk_usage(self, node_name, node):
-        """Get real disk usage from node metrics"""
-        try:
-            # Method 1: Try node proxy stats
-            disk_usage = self._get_node_proxy_disk(node_name)
-            if disk_usage is not None:
-                return disk_usage
-            
-            # Method 2: Calculate from allocatable vs capacity  
-            disk_usage = self._calculate_disk_from_capacity(node)
-            if disk_usage is not None:
-                return disk_usage
-                
-            return None
-            
-        except Exception as e:
-            logging.debug(f"Could not get disk usage for node {node_name}: {e}")
-            return None
-    
-    def _get_metrics_server_cpu(self, node_name):
-        """Get CPU usage from metrics server API"""
-        try:
-            # Try to get metrics from metrics.k8s.io API
-            from kubernetes import client
-            custom_api = client.CustomObjectsApi()
-            
-            metrics = custom_api.get_cluster_custom_object(
-                group="metrics.k8s.io",
-                version="v1beta1", 
-                plural="nodes",
-                name=node_name
-            )
-            
-            # Parse CPU usage from metrics
-            cpu_usage_nano = int(metrics.get("usage", {}).get("cpu", "0").replace("n", ""))
-            
-            # Get node capacity to calculate percentage
-            node_info = self.kube_client.v1.read_node(name=node_name)
-            cpu_capacity = node_info.status.capacity.get("cpu", "1")
-            cpu_capacity_milli = float(cpu_capacity) * 1000
-            
-            # Convert nanocores to percentage
-            cpu_usage_percentage = (cpu_usage_nano / 1000000) / (cpu_capacity_milli * 10)
-            return round(cpu_usage_percentage, 1)
-            
-        except Exception as e:
-            logging.debug(f"Metrics server CPU failed for {node_name}: {e}")
-            return None
-    
-    def _get_metrics_server_memory(self, node_name):
-        """Get memory usage from metrics server API"""
-        try:
-            from kubernetes import client
-            custom_api = client.CustomObjectsApi()
-            
-            metrics = custom_api.get_cluster_custom_object(
-                group="metrics.k8s.io",
-                version="v1beta1",
-                plural="nodes", 
-                name=node_name
-            )
-            
-            # Parse memory usage
-            memory_usage_ki = int(metrics.get("usage", {}).get("memory", "0").replace("Ki", ""))
-            
-            # Get node capacity
-            node_info = self.kube_client.v1.read_node(name=node_name)
-            memory_capacity_ki = int(node_info.status.capacity.get("memory", "0").replace("Ki", ""))
-            
-            # Calculate percentage
-            memory_usage_percentage = (memory_usage_ki / memory_capacity_ki) * 100
-            return round(memory_usage_percentage, 1)
-            
-        except Exception as e:
-            logging.debug(f"Metrics server memory failed for {node_name}: {e}")
-            return None
-    
-    def _get_node_proxy_cpu(self, node_name):
-        """Get CPU usage from node proxy stats"""
-        try:
-            # Try node proxy stats endpoint
-            stats = self.kube_client.v1.connect_get_node_proxy_with_path(
-                name=node_name,
-                path="stats/summary"
-            )
-            
-            import json
-            stats_data = json.loads(stats)
-            node_stats = stats_data.get("node", {})
-            cpu_stats = node_stats.get("cpu", {})
-            
-            # Get CPU usage in nanocores
-            cpu_usage_nano = cpu_stats.get("usageNanoCores", 0)
-            
-            # Get node capacity
-            node_info = self.kube_client.v1.read_node(name=node_name)
-            cpu_capacity = float(node_info.status.capacity.get("cpu", "1"))
-            
-            # Convert to percentage
-            cpu_usage_percentage = (cpu_usage_nano / 1000000000) / cpu_capacity * 100
-            return round(cpu_usage_percentage, 1)
-            
-        except Exception as e:
-            logging.debug(f"Node proxy CPU failed for {node_name}: {e}")
-            return None
-    
-    def _get_node_proxy_memory(self, node_name):
-        """Get memory usage from node proxy stats"""
-        try:
-            stats = self.kube_client.v1.connect_get_node_proxy_with_path(
-                name=node_name,
-                path="stats/summary"
-            )
-            
-            import json
-            stats_data = json.loads(stats)
-            node_stats = stats_data.get("node", {})
-            memory_stats = node_stats.get("memory", {})
-            
-            # Get memory usage in bytes
-            memory_usage_bytes = memory_stats.get("usageBytes", 0)
-            
-            # Get node capacity in Ki and convert to bytes
-            node_info = self.kube_client.v1.read_node(name=node_name)
-            memory_capacity_ki = int(node_info.status.capacity.get("memory", "0").replace("Ki", ""))
-            memory_capacity_bytes = memory_capacity_ki * 1024
-            
-            # Calculate percentage
-            memory_usage_percentage = (memory_usage_bytes / memory_capacity_bytes) * 100
-            return round(memory_usage_percentage, 1)
-            
-        except Exception as e:
-            logging.debug(f"Node proxy memory failed for {node_name}: {e}")
-            return None
-    
-    def _get_node_proxy_disk(self, node_name):
-        """Get disk usage from node proxy stats"""
-        try:
-            stats = self.kube_client.v1.connect_get_node_proxy_with_path(
-                name=node_name,
-                path="stats/summary"
-            )
-            
-            import json
-            stats_data = json.loads(stats)
-            node_stats = stats_data.get("node", {})
-            fs_stats = node_stats.get("fs", {})
-            
-            # Get filesystem usage
-            fs_usage_bytes = fs_stats.get("usedBytes", 0)
-            fs_capacity_bytes = fs_stats.get("capacityBytes", 1)
-            
-            # Calculate percentage
-            disk_usage_percentage = (fs_usage_bytes / fs_capacity_bytes) * 100
-            return round(disk_usage_percentage, 1)
-            
-        except Exception as e:
-            logging.debug(f"Node proxy disk failed for {node_name}: {e}")
-            return None
-    
-    def _calculate_cpu_from_capacity(self, node):
-        """Calculate CPU usage estimate from capacity vs allocatable"""
-        try:
-            capacity = node.status.capacity or {}
-            allocatable = node.status.allocatable or {}
-            
-            cpu_capacity = float(capacity.get("cpu", "0"))
-            cpu_allocatable = float(allocatable.get("cpu", "0"))
-            
-            if cpu_capacity > 0:
-                # Rough estimate: system overhead percentage
-                system_overhead = ((cpu_capacity - cpu_allocatable) / cpu_capacity) * 100
-                return round(system_overhead, 1)
-                
-            return None
-            
-        except Exception as e:
-            logging.debug(f"CPU capacity calculation failed: {e}")
-            return None
-    
-    def _calculate_memory_from_capacity(self, node):
-        """Calculate memory usage estimate from capacity vs allocatable"""
-        try:
-            capacity = node.status.capacity or {}
-            allocatable = node.status.allocatable or {}
-            
-            memory_capacity_str = capacity.get("memory", "0")
-            memory_allocatable_str = allocatable.get("memory", "0")
-            
-            # Convert Ki to bytes
-            memory_capacity = int(memory_capacity_str.replace("Ki", "")) * 1024 if "Ki" in memory_capacity_str else 0
-            memory_allocatable = int(memory_allocatable_str.replace("Ki", "")) * 1024 if "Ki" in memory_allocatable_str else 0
-            
-            if memory_capacity > 0:
-                # Rough estimate: system overhead percentage
-                system_overhead = ((memory_capacity - memory_allocatable) / memory_capacity) * 100
-                return round(system_overhead, 1)
-                
-            return None
-            
-        except Exception as e:
-            logging.debug(f"Memory capacity calculation failed: {e}")
-            return None
-    
-    def _calculate_disk_from_capacity(self, node):
-        """Calculate disk usage estimate from capacity vs allocatable"""
-        try:
-            capacity = node.status.capacity or {}
-            allocatable = node.status.allocatable or {}
-            
-            disk_capacity_str = capacity.get("ephemeral-storage", "0")
-            disk_allocatable_str = allocatable.get("ephemeral-storage", "0")
-            
-            # Convert Ki to bytes
-            disk_capacity = int(disk_capacity_str.replace("Ki", "")) * 1024 if "Ki" in disk_capacity_str else 0
-            disk_allocatable = int(disk_allocatable_str.replace("Ki", "")) * 1024 if "Ki" in disk_allocatable_str else 0
-            
-            if disk_capacity > 0:
-                # Rough estimate: system overhead percentage
-                system_overhead = ((disk_capacity - disk_allocatable) / disk_capacity) * 100
-                return round(system_overhead, 1)
-                
-            return None
-            
-        except Exception as e:
-            logging.debug(f"Disk capacity calculation failed: {e}")
-            return None
-
-    def handle_error(self, error_type, error_message):
-        """Handle general errors"""
-        try:
-            if not self._is_being_destroyed and not self._shutting_down:
-                logging.error(f"Cluster connector error ({error_type}): {error_message}")
-                self.error_occurred.emit(error_type, error_message)
-        except Exception as e:
-            logging.error(f"Error in error handler: {e}")
-
-    def _update_cache_timestamp(self, cluster_name):
-        """Update cache timestamp for a cluster"""
-        import time
-        self.cache_timestamps[cluster_name] = time.time()
-
-    def _check_data_completeness(self, cluster_name):
-        """Check if we have sufficient data for a cluster (more flexible)"""
-        try:
-            if cluster_name not in self.data_cache:
-                return False
-                
-            cache = self.data_cache[cluster_name]
-            
-            # We need at least cluster_info to consider it "loaded"
-            # Metrics and issues are nice to have but not required
-            if 'cluster_info' in cache:
-                self.loading_complete[cluster_name] = True
-                return True
-                
-            # If we have any data at all, consider it partially loaded
-            if cache:
-                return True
-                
-            return False
-            
-        except Exception as e:
-            logging.error(f"Error checking data completeness for {cluster_name}: {e}")
-            return False
-
-    def is_data_loaded(self, cluster_name):
-        """Check if essential data is loaded for a cluster (more flexible)"""
-        try:
-            # Check if marked as complete
-            if self.loading_complete.get(cluster_name, False):
-                return True
-                
-            # Check if we have any useful data
-            cached_data = self.data_cache.get(cluster_name, {})
-            return bool(cached_data.get('cluster_info'))
-            
-        except Exception as e:
-            logging.error(f"Error checking if data is loaded for {cluster_name}: {e}")
-            return False
-
-    def _cleanup_expired_cache(self):
-        """Clean up expired cache entries to prevent memory leaks"""
-        try:
-            import time
-            current_time = time.time()
-            expired_keys = []
-            
-            # Time-based cleanup
-            for cluster_name, timestamp in self.cache_timestamps.items():
-                if current_time - timestamp > self.cache_ttl:
-                    expired_keys.append(cluster_name)
-            
-            for key in expired_keys:
-                self.data_cache.pop(key, None)
-                self.cache_timestamps.pop(key, None)
-                self.loading_complete.pop(key, None)
-                logging.debug(f"Cleaned up expired cache for cluster: {key}")
-            
-            # Size-based cleanup - if too many clusters cached
-            if len(self.data_cache) > self.max_cache_entries:
-                # Sort by timestamp and remove oldest
-                sorted_items = sorted(self.cache_timestamps.items(), key=lambda x: x[1])
-                oldest_keys = [item[0] for item in sorted_items[:len(sorted_items)//2]]
-                
-                for key in oldest_keys:
-                    self.data_cache.pop(key, None)
-                    self.cache_timestamps.pop(key, None)
-                    self.loading_complete.pop(key, None)
-                    logging.debug(f"Cleaned up cache for cluster (size limit): {key}")
-                
-        except Exception as e:
-            logging.error(f"Error cleaning up expired cache: {e}")
-
-    def handle_kubernetes_error(self, error_message):
-        """Handle Kubernetes client errors with filtering"""
-        try:
-            if not self._is_being_destroyed and not self._shutting_down:
-                # Filter out non-critical errors to avoid spam
-                error_lower = error_message.lower()
-                
-                # Only emit critical errors that users should know about
-                if any(keyword in error_lower for keyword in [
-                    'connection refused', 'timeout', 'certificate', 'authentication',
-                    'authorization', 'permission denied', 'config'
-                ]):
-                    self.error_occurred.emit("kubernetes", error_message)
-                else:
-                    # Log other errors but don't emit signals
-                    logging.warning(f"Kubernetes client error (suppressed): {error_message}")
-                    
-        except Exception as e:
-            logging.error(f"Error handling kubernetes error: {e}")
-
-    def cleanup(self):
-        """Cleanup resources"""
+    def cleanup(self) -> None:
+        """Cleanup all resources"""
+        logging.info("Starting Enhanced Cluster Connector cleanup")
         self._shutting_down = True
-        self.stop_polling()
         
-        # FIXED: Stop batch timer safely
-        if hasattr(self, '_batch_timer') and self._batch_timer and hasattr(self._batch_timer, 'stop'):
-            self._batch_timer.stop()
-            
-        if hasattr(self, 'smart_cache') and self.smart_cache:
-            self.smart_cache.cache.clear()
-        if hasattr(self, 'connection_pool') and self.connection_pool:
-            self.connection_pool.connections.clear()
+        # Stop polling
+        self._stop_polling()
+        self._cleanup_timer.stop()
+        
+        # Cancel active workers
+        with self._workers_lock:
+            for worker in list(self._active_workers):
+                if hasattr(worker, 'cancel'):
+                    worker.cancel()
+            self._active_workers.clear()
+        
+        # Clear cache
+        # Clear all caches using unified cache system
+        self._cache.clear_all_caches()
+        
+        # Reset state
+        with self._state_lock:
+            self._connection_states.clear()
+            self._current_cluster = None
+        
+        logging.info("Enhanced Cluster Connector cleanup completed")
     
     def __del__(self):
-        """Destructor to ensure cleanup when ClusterConnector is destroyed"""
+        """Destructor to ensure cleanup"""
         try:
             if hasattr(self, '_shutting_down') and not self._shutting_down:
-                logging.debug("ClusterConnector destructor called, performing cleanup")
                 self.cleanup()
         except Exception as e:
-            logging.error(f"Error in ClusterConnector destructor: {e}")
+            logging.error(f"Error in Enhanced Cluster Connector destructor: {e}")
 
-# Singleton instance management
+
+# Singleton management
 _connector_instance = None
 
-def get_cluster_connector():
+def get_cluster_connector() -> EnhancedClusterConnector:
     """Get or create the cluster connector singleton"""
     global _connector_instance
     if _connector_instance is None:
-        _connector_instance = ClusterConnection()
+        _connector_instance = EnhancedClusterConnector()
     return _connector_instance
 
 def shutdown_cluster_connector():
@@ -1629,3 +752,8 @@ def shutdown_cluster_connector():
     if _connector_instance is not None:
         _connector_instance.cleanup()
         _connector_instance = None
+
+# Backward compatibility aliases
+get_enhanced_cluster_connector = get_cluster_connector
+shutdown_enhanced_cluster_connector = shutdown_cluster_connector
+ClusterConnection = EnhancedClusterConnector

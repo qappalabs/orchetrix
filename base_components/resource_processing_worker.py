@@ -9,7 +9,8 @@ import logging
 import time
 from datetime import datetime, timezone
 import threading
-from utils.bounded_cache import get_formatted_data_cache, cached
+from utils.unified_cache_system import get_unified_cache
+from utils.data_formatters import format_age
 
 
 class ResourceProcessingWorker(QThread):
@@ -42,8 +43,10 @@ class ResourceProcessingWorker(QThread):
         self.end_time = None
         self.processed_count = 0
         
-        # Cache for processed data
-        self.cache = get_formatted_data_cache()
+        # Cache for processed data - use unified cache system
+        from utils.unified_cache_system import get_unified_cache
+        unified_cache = get_unified_cache()
+        self.cache = unified_cache._formatted_data_cache
         
         logging.info(f"ResourceProcessingWorker created for {len(self.raw_resources)} {resource_type} items")
     
@@ -243,7 +246,6 @@ class PodProcessingWorker(ResourceProcessingWorker):
             logging.error(f"Error processing pod: {e}")
             return resource  # Return original on error
     
-    @cached('pod_status', ttl_seconds=60)
     def _calculate_pod_status(self, status: Dict) -> str:
         """Calculate pod status with caching"""
         try:
@@ -383,7 +385,6 @@ class PodProcessingWorker(ResourceProcessingWorker):
         except:
             return "0"
     
-    @cached('age_calculation', ttl_seconds=30)
     def _calculate_age(self, creation_timestamp) -> str:
         """Calculate age string from creation timestamp with caching"""
         try:

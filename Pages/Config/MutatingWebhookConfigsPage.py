@@ -5,8 +5,8 @@ Dynamic implementation of the MutatingWebhookConfigs page with live Kubernetes d
 from PyQt6.QtWidgets import QHeaderView, QPushButton
 from PyQt6.QtCore import Qt, QTimer
 
-from base_components.base_components import SortableTableWidgetItem
-from base_components.base_resource_page import BaseResourcePage
+from Base_Components.base_components import SortableTableWidgetItem
+from Base_Components.base_resource_page import BaseResourcePage
 
 class MutatingWebhookConfigsPage(BaseResourcePage):
     """

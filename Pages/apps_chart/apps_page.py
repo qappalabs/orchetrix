@@ -26,8 +26,8 @@ from business_logic.app_flow_business import (
 
 # Import modular components from the same package
 from .deployment_analyzer import DeploymentAnalyzer
-from .namespace_loader import NamespaceLoader
-from .resource_loader import ResourceLoader
+from utils.unified_resource_loader import get_unified_resource_loader
+from utils.data_formatters import format_age, truncate_string
 from .app_flow_analyzer import AppFlowAnalyzer
 
 
@@ -238,11 +238,34 @@ class AppsPage(QWidget):
     # Diagram functionality added above
     
     def load_namespaces(self):
-        """Load namespaces asynchronously"""
-        self.namespace_loader = NamespaceLoader(self)
-        self.namespace_loader.namespaces_loaded.connect(self.on_namespaces_loaded)
-        self.namespace_loader.error_occurred.connect(self.on_namespace_error)
-        self.namespace_loader.start()
+        """Load namespaces using unified loader"""
+        unified_loader = get_unified_resource_loader()
+        
+        # Connect signals if not already connected
+        if not hasattr(self, '_namespace_signals_connected'):
+            unified_loader.loading_completed.connect(self._on_namespaces_loaded_unified)
+            unified_loader.loading_error.connect(self._on_namespace_error_unified)
+            self._namespace_signals_connected = True
+        
+        # Load namespaces
+        self._namespace_operation_id = unified_loader.load_resources_async('namespaces')
+    
+    def _on_namespaces_loaded_unified(self, resource_type: str, result):
+        """Handle namespaces loaded from unified loader"""
+        if resource_type != 'namespaces':
+            return
+        
+        if result.success:
+            # Extract namespace names from the processed results
+            namespaces = [item.get('name', '') for item in result.items if item.get('name')]
+            self.on_namespaces_loaded(namespaces)
+        else:
+            self.on_namespace_error(result.error_message or "Failed to load namespaces")
+    
+    def _on_namespace_error_unified(self, resource_type: str, error_message: str):
+        """Handle namespace loading errors from unified loader"""
+        if resource_type == 'namespaces':
+            self.on_namespace_error(error_message)
     
     def on_namespaces_loaded(self, namespaces):
         """Handle loaded namespaces"""
@@ -322,22 +345,49 @@ class AppsPage(QWidget):
         self.load_resources(namespace, workload_type)
     
     def load_resources(self, namespace, workload_type):
-        """Load resources based on namespace and workload type"""
+        """Load resources based on namespace and workload type using unified loader"""
         try:
-            # Stop any existing resource loader
-            if hasattr(self, 'resource_loader') and self.resource_loader.isRunning():
-                self.resource_loader.terminate()
-                self.resource_loader.wait()
+            unified_loader = get_unified_resource_loader()
             
-            # Start new resource loader
-            self.resource_loader = ResourceLoader(namespace, workload_type, self)
-            self.resource_loader.resources_loaded.connect(self.on_resources_loaded)
-            self.resource_loader.error_occurred.connect(self.on_resource_error)
-            self.resource_loader.start()
+            # Connect signals if not already connected
+            if not hasattr(self, '_resource_signals_connected'):
+                unified_loader.loading_completed.connect(self._on_resources_loaded_unified)
+                unified_loader.loading_error.connect(self._on_resource_error_unified)
+                self._resource_signals_connected = True
+            
+            # Determine namespace for loading
+            load_namespace = namespace if namespace != "All Namespaces" else None
+            
+            # Load the appropriate workload type
+            self._current_workload_type = workload_type
+            self._resource_operation_id = unified_loader.load_resources_async(
+                resource_type=workload_type.lower(),
+                namespace=load_namespace
+            )
+            
+            logging.debug(f"Started loading {workload_type} in namespace {namespace}")
             
         except Exception as e:
-            logging.error(f"Error starting resource loader: {e}")
+            logging.error(f"Error starting unified resource loader: {e}")
             self.on_resource_error(f"Error loading resources: {str(e)}")
+    
+    def _on_resources_loaded_unified(self, resource_type: str, result):
+        """Handle resources loaded from unified loader"""
+        # Check if this matches our current workload type
+        if resource_type != getattr(self, '_current_workload_type', '').lower():
+            return
+        
+        if result.success:
+            # Process the unified format resources
+            resources = result.items
+            self.on_resources_loaded(resources)
+        else:
+            self.on_resource_error(result.error_message or "Failed to load resources")
+    
+    def _on_resource_error_unified(self, resource_type: str, error_message: str):
+        """Handle resource loading errors from unified loader"""
+        if resource_type == getattr(self, '_current_workload_type', '').lower():
+            self.on_resource_error(error_message)
     
     def on_resources_loaded(self, resources):
         """Handle loaded resources"""
@@ -345,18 +395,35 @@ class AppsPage(QWidget):
         self.resource_combo.clear()
         
         if resources:
-            self.resource_combo.addItems(resources)
-            logging.info(f"Loaded {len(resources)} resources for Apps page")
+            # Extract resource names from the processed dictionaries
+            # The unified resource loader now returns dictionaries with 'name' field
+            resource_names = []
+            for resource in resources:
+                if isinstance(resource, dict) and 'name' in resource:
+                    resource_names.append(resource['name'])
+                elif isinstance(resource, str):
+                    # Handle case where it might still be strings (backward compatibility)
+                    resource_names.append(resource)
+                else:
+                    # Fallback for unexpected format
+                    logging.warning(f"Unexpected resource format: {type(resource)}")
+                    resource_names.append(str(resource))
+            
+            # Store the full resource data for later use if needed
+            self._current_resources = resources
+            
+            self.resource_combo.addItems(resource_names)
+            logging.info(f"Loaded {len(resource_names)} resources for Apps page")
             
             # Auto-select and generate graph if there's only one resource
-            if len(resources) == 1:
+            if len(resource_names) == 1:
                 self.resource_combo.setCurrentIndex(0)
                 self.resource_combo.blockSignals(False)
                 self.resource_combo.setEnabled(False)  # Disable dropdown since there's only one option
                 
                 # Auto-trigger graph generation
                 QTimer.singleShot(100, self.on_resource_selected)
-                logging.info(f"Auto-selected single resource: {resources[0]}")
+                logging.info(f"Auto-selected single resource: {resource_names[0]}")
             else:
                 self.resource_combo.blockSignals(False)
                 self.resource_combo.setEnabled(True)
@@ -411,9 +478,7 @@ class AppsPage(QWidget):
             self.live_app_flow_analyzer.terminate()
             self.live_app_flow_analyzer.wait()
         
-        if hasattr(self, 'resource_loader') and self.resource_loader.isRunning():
-            self.resource_loader.terminate()
-            self.resource_loader.wait()
+        # The unified loader handles cancellation internally - no manual termination needed
         
         # Reload namespaces
         self.load_namespaces()

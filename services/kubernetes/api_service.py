@@ -10,80 +10,108 @@ from kubernetes import client, config
 from kubernetes.config.config_exception import ConfigException
 
 
-class LazyAPIClient:
-    """Lazy initialization wrapper for Kubernetes API clients with thread safety"""
+class ThreadSafeAPIClient:
+    """Thread-safe wrapper for Kubernetes API clients with proper error isolation"""
     
     def __init__(self, api_class):
         self.api_class = api_class
         self._instance = None
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()  # Use RLock for better thread safety
         self._initialization_failed = False
-        self._last_error = None
+        self._initialization_error = None
+        self._creation_attempts = 0
+        self._max_attempts = 3
+    
+    def get_instance(self):
+        """Thread-safe instance getter with proper error isolation"""
+        # Fast path: if we already have an instance, return it
+        if self._instance is not None:
+            return self._instance
+            
+        # Slow path: need to create instance
+        with self._lock:
+            # Double-check pattern with proper error handling
+            if self._instance is not None:
+                return self._instance
+                
+            # Check if we've permanently failed
+            if self._initialization_failed:
+                raise self._initialization_error
+                
+            # Attempt to create instance
+            try:
+                self._creation_attempts += 1
+                if self._creation_attempts > self._max_attempts:
+                    self._initialization_failed = True
+                    self._initialization_error = Exception(
+                        f"Max initialization attempts ({self._max_attempts}) exceeded for {self.api_class.__name__}"
+                    )
+                    raise self._initialization_error
+                
+                logging.debug(f"Creating API client instance: {self.api_class.__name__} (attempt {self._creation_attempts})")
+                self._instance = self.api_class()
+                logging.debug(f"Successfully initialized {self.api_class.__name__}")
+                return self._instance
+                
+            except Exception as e:
+                logging.error(f"Failed to initialize {self.api_class.__name__} (attempt {self._creation_attempts}): {e}")
+                
+                # On final attempt, mark as permanently failed
+                if self._creation_attempts >= self._max_attempts:
+                    self._initialization_failed = True
+                    self._initialization_error = Exception(
+                        f"Failed to initialize {self.api_class.__name__} after {self._creation_attempts} attempts: {str(e)}"
+                    )
+                    raise self._initialization_error
+                
+                # For non-final attempts, re-raise the original exception
+                raise
     
     def __getattr__(self, name):
-        # FIXED: Proper double-checked locking pattern
-        if self._instance is None and not self._initialization_failed:
-            with self._lock:
-                # Double-check pattern to prevent race conditions
-                if self._instance is None and not self._initialization_failed:
-                    try:
-                        # FIXED: Add proper error handling for API client creation
-                        self._instance = self.api_class()
-                        logging.debug(f"Successfully initialized {self.api_class.__name__}")
-                    except Exception as e:
-                        self._initialization_failed = True
-                        self._last_error = str(e)
-                        logging.error(f"Failed to initialize {self.api_class.__name__}: {e}")
-                        # Don't raise here, let the check below handle it
-        
-        if self._initialization_failed:
-            raise Exception(f"API client initialization failed: {self._last_error}")
-            
-        if self._instance is None:
-            raise Exception(f"API client not initialized: {self.api_class.__name__}")
-            
-        return getattr(self._instance, name)
+        """Delegate attribute access to the API client instance"""
+        instance = self.get_instance()
+        return getattr(instance, name)
     
     def reset(self):
-        """Reset the cached instance"""
+        """Reset the cached instance and error state"""
         with self._lock:
             self._instance = None
             self._initialization_failed = False
-            self._last_error = None
-            logging.debug(f"Reset {self.api_class.__name__} lazy client")
+            self._initialization_error = None
+            self._creation_attempts = 0
+            logging.debug(f"Reset {self.api_class.__name__} API client")
+    
+    def is_initialized(self):
+        """Check if the API client is initialized without triggering initialization"""
+        return self._instance is not None
+    
+    def has_failed(self):
+        """Check if initialization has permanently failed"""
+        return self._initialization_failed
 
 
 class KubernetesAPIService:
     """Service for managing Kubernetes API clients"""
     
     def __init__(self):
-        self._api_clients: Dict[str, LazyAPIClient] = {}
+        self._api_clients: Dict[str, ThreadSafeAPIClient] = {}
         self._cached_clients = False
         self._cached_context = None
         self._setup_lazy_clients()
     
     def _setup_lazy_clients(self):
-        """Initialize lazy API clients"""
-        self.v1 = LazyAPIClient(client.CoreV1Api)
-        self.apps_v1 = LazyAPIClient(client.AppsV1Api)
-        self.networking_v1 = LazyAPIClient(client.NetworkingV1Api)
-        self.storage_v1 = LazyAPIClient(client.StorageV1Api)
-        self.rbac_v1 = LazyAPIClient(client.RbacAuthorizationV1Api)
-        self.batch_v1 = LazyAPIClient(client.BatchV1Api)
-        self.autoscaling_v1 = LazyAPIClient(client.AutoscalingV1Api)
-        self.custom_objects_api = LazyAPIClient(client.CustomObjectsApi)
-        self.version_api = LazyAPIClient(client.VersionApi)
-        
+        """Initialize thread-safe API clients"""
         self._api_clients = {
-            'v1': self.v1,
-            'apps_v1': self.apps_v1,
-            'networking_v1': self.networking_v1,
-            'storage_v1': self.storage_v1,
-            'rbac_v1': self.rbac_v1,
-            'batch_v1': self.batch_v1,
-            'autoscaling_v1': self.autoscaling_v1,
-            'custom_objects_api': self.custom_objects_api,
-            'version_api': self.version_api,
+            'CoreV1Api': ThreadSafeAPIClient(client.CoreV1Api),
+            'AppsV1Api': ThreadSafeAPIClient(client.AppsV1Api),
+            'NetworkingV1Api': ThreadSafeAPIClient(client.NetworkingV1Api),
+            'StorageV1Api': ThreadSafeAPIClient(client.StorageV1Api),
+            'RbacAuthorizationV1Api': ThreadSafeAPIClient(client.RbacAuthorizationV1Api),
+            'BatchV1Api': ThreadSafeAPIClient(client.BatchV1Api),
+            'AutoscalingV1Api': ThreadSafeAPIClient(client.AutoscalingV1Api),
+            'ApiextensionsV1Api': ThreadSafeAPIClient(client.ApiextensionsV1Api),
+            'CustomObjectsApi': ThreadSafeAPIClient(client.CustomObjectsApi),
+            'VersionApi': ThreadSafeAPIClient(client.VersionApi),
         }
     
     def load_kube_config(self, context_name: Optional[str] = None):
@@ -123,7 +151,7 @@ class KubernetesAPIService:
         self._cached_clients = False
         self._cached_context = None
     
-    def get_api_client(self, client_type: str) -> LazyAPIClient:
+    def get_api_client(self, client_type: str) -> ThreadSafeAPIClient:
         """Get a specific API client by type"""
         if client_type not in self._api_clients:
             raise ValueError(f"Unknown API client type: {client_type}")
@@ -149,6 +177,57 @@ class KubernetesAPIService:
         except Exception as e:
             logging.error(f"Failed to get cluster version: {e}")
             return None
+    
+    # API client properties for backward compatibility
+    @property
+    def v1(self):
+        """Get CoreV1Api client"""
+        return self.get_api_client('CoreV1Api').get_instance()
+    
+    @property
+    def apps_v1(self):
+        """Get AppsV1Api client"""
+        return self.get_api_client('AppsV1Api').get_instance()
+    
+    @property
+    def networking_v1(self):
+        """Get NetworkingV1Api client"""
+        return self.get_api_client('NetworkingV1Api').get_instance()
+    
+    @property
+    def storage_v1(self):
+        """Get StorageV1Api client"""
+        return self.get_api_client('StorageV1Api').get_instance()
+    
+    @property
+    def rbac_v1(self):
+        """Get RbacAuthorizationV1Api client"""
+        return self.get_api_client('RbacAuthorizationV1Api').get_instance()
+    
+    @property
+    def batch_v1(self):
+        """Get BatchV1Api client"""
+        return self.get_api_client('BatchV1Api').get_instance()
+    
+    @property
+    def autoscaling_v1(self):
+        """Get AutoscalingV1Api client"""
+        return self.get_api_client('AutoscalingV1Api').get_instance()
+    
+    @property
+    def apiextensions_v1(self):
+        """Get ApiextensionsV1Api client"""
+        return self.get_api_client('ApiextensionsV1Api').get_instance()
+    
+    @property
+    def custom_objects_api(self):
+        """Get CustomObjectsApi client"""
+        return self.get_api_client('CustomObjectsApi').get_instance()
+    
+    @property
+    def version_api(self):
+        """Get VersionApi client"""
+        return self.get_api_client('VersionApi').get_instance()
     
     def cleanup(self):
         """Cleanup API service resources"""
@@ -181,3 +260,7 @@ def reset_kubernetes_api_service():
     if _api_service_instance:
         _api_service_instance.cleanup()
     _api_service_instance = None
+
+
+# Backward compatibility alias
+LazyAPIClient = ThreadSafeAPIClient

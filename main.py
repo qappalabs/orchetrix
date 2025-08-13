@@ -52,6 +52,7 @@ try:
 
     from utils.cluster_state_manager import get_cluster_state_manager, ClusterState
     from utils.thread_manager import get_thread_manager, shutdown_thread_manager
+    from utils.error_handler import get_error_handler, ResourceCleaner, error_handler
 
 
     logging.info("All modules imported successfully")
@@ -184,7 +185,7 @@ class MainWindow(QMainWindow):
             
             # Cleanup age caches from base resource pages
             try:
-                from base_components.base_resource_page import BaseResourcePage
+                from Base_Components.base_resource_page import BaseResourcePage
                 if len(BaseResourcePage._age_cache) > 1000:
                     BaseResourcePage._clean_age_cache()
             except Exception as cache_error:
@@ -192,10 +193,10 @@ class MainWindow(QMainWindow):
             
             # Cleanup service caches
             try:
-                from services.kubernetes.cache_service import get_kubernetes_cache_service
-                cache_service = get_kubernetes_cache_service()
-                if hasattr(cache_service, 'cleanup_cache'):
-                    cache_service.cleanup_cache()
+                from utils.unified_cache_system import get_unified_cache
+                cache_service = get_unified_cache()
+                if hasattr(cache_service, 'clear_all_caches'):
+                    cache_service.clear_all_caches()
             except Exception as service_error:
                 logging.debug(f"Could not cleanup service caches: {service_error}")
                     
@@ -607,49 +608,21 @@ class MainWindow(QMainWindow):
             self.show_error_message(f"Error switching to cluster: {str(e)}")
 
     def show_error_message(self, error_message):
-        """Display error messages with improved handling"""
+        """Display error messages using centralized error handler"""
         if self._shutting_down:
             return
 
         try:
-            # FIXED: Prevent error dialog spam
-            if not hasattr(self, '_error_shown'):
-                self._error_shown = False
-
-            if self._error_shown:
-                logging.error(f"Suppressed duplicate error dialog: {error_message}")
-                return
-
-            self._error_shown = True
-            
-            # FIXED: Hide loading overlay when showing error
+            # Hide loading overlay when showing error
             if hasattr(self, 'loading_overlay'):
                 self.loading_overlay.hide_loading()
             
-            # Create and show error message
-            msg = QMessageBox(self)
-            msg.setIcon(QMessageBox.Icon.Critical)
-            msg.setWindowTitle("Error")
-            msg.setText(str(error_message))
-            msg.setStandardButtons(QMessageBox.StandardButton.Ok)
-            
-            # FIXED: Add timeout to prevent hanging dialogs
-            QTimer.singleShot(10000, msg.close)  # Auto-close after 10 seconds
-            
-            msg.exec()
-            
-            # Reset error flag after showing
-            QTimer.singleShot(2000, self._reset_error_flag)
+            # Use centralized error handler
+            error_handler = get_error_handler()
+            error_handler._show_error_dialog("Application", error_message)
             
         except Exception as e:
             logging.error(f"Error showing error message: {e}")
-
-    def _reset_error_flag(self):
-        """Reset the error dialog flag"""
-        try:
-            self._error_shown = False
-        except:
-            pass
   
 
     def handle_page_change(self, index):
@@ -781,91 +754,31 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logging.error(f"Error in cleanup_ui_components: {e}")
 
+    @error_handler("cleanup_timers_and_threads")
     def cleanup_timers_and_threads(self):
-        """Enhanced cleanup for all QTimer objects and threads"""
-        logging.debug("Starting comprehensive cleanup of timers and threads.")
+        """Simplified cleanup using centralized ResourceCleaner"""
+        logging.info("Starting resource cleanup...")
 
-        try:
-            # Use new performance optimizer for cleanup
-            from utils.performance_optimizer import ResourceCleaner
-            
-            # Collect all timer parents
-            potential_timer_parents = [self, self.main_widget, self.title_bar, self.stacked_widget,
-                                       self.home_page, self.cluster_view, self.preferences_page,
-                                       self.loading_overlay]
-            
-            if hasattr(self, 'cluster_view') and hasattr(self.cluster_view, 'terminal_panel'):
-                potential_timer_parents.append(self.cluster_view.terminal_panel)
-
-            # Collect all timers
-            all_timers = []
-            for parent_obj in potential_timer_parents:
-                if parent_obj is None:
-                    continue
-                try:
-                    child_timers = parent_obj.findChildren(QTimer)
-                    all_timers.extend(child_timers)
-                except RuntimeError:
-                    logging.warning(f"RuntimeError while finding timers for {type(parent_obj).__name__}")
-                except Exception as e:
-                    logging.error(f"Error finding timers for {type(parent_obj).__name__}: {e}")
-
-            # Cleanup timers using the utility
-            ResourceCleaner.cleanup_timers(all_timers)
-            
-            # Collect and cleanup threads
-            all_threads = []
-            for parent_obj in potential_timer_parents:
-                if parent_obj is None:
-                    continue
-                try:
-                    child_threads = parent_obj.findChildren(QThread)
-                    all_threads.extend(child_threads)
-                except RuntimeError:
-                    logging.warning(f"RuntimeError while finding threads for {type(parent_obj).__name__}")
-                except Exception as e:
-                    logging.error(f"Error finding threads for {type(parent_obj).__name__}: {e}")
-            
-            # Cleanup threads using the utility
-            ResourceCleaner.cleanup_threads(all_threads)
-            
-            # Force garbage collection
-            ResourceCleaner.force_garbage_collection()
-            
-            QThread.msleep(100)
-            logging.info("Comprehensive cleanup completed successfully.")
-            
-        except ImportError:
-            # Fall back to original cleanup if performance_optimizer not available
-            logging.warning("Performance optimizer not available, using fallback cleanup")
-            self._fallback_cleanup()
-    
-    def _fallback_cleanup(self):
-        """Fallback cleanup method if performance optimizer is not available"""
-        potential_timer_parents = [self, self.main_widget, self.title_bar, self.stacked_widget,
-                                   self.home_page, self.cluster_view, self.preferences_page,
-                                   self.loading_overlay]
+        # Collect all widget parents for cleanup
+        widget_parents = [
+            self, self.main_widget, self.title_bar, self.stacked_widget,
+            self.home_page, self.cluster_view, self.preferences_page,
+            self.loading_overlay
+        ]
         
         if hasattr(self, 'cluster_view') and hasattr(self.cluster_view, 'terminal_panel'):
-            potential_timer_parents.append(self.cluster_view.terminal_panel)
+            widget_parents.append(self.cluster_view.terminal_panel)
 
-        timers_stopped = 0
-        for parent_obj in potential_timer_parents:
-            if parent_obj is None:
-                continue
-
-            try:
-                child_timers = parent_obj.findChildren(QTimer)
-                for timer in child_timers:
-                    if timer.isActive():
-                        timer.stop()
-                        timers_stopped += 1
-            except RuntimeError:
-                logging.warning(f"RuntimeError while finding timers for {type(parent_obj).__name__}")
-            except Exception as e:
-                logging.error(f"Error finding/stopping timers for {type(parent_obj).__name__}: {e}")
-
-        logging.info(f"Fallback cleanup: Stopped {timers_stopped} active QTimers.")
+        # Use centralized resource cleaner
+        total_cleaned = ResourceCleaner.cleanup_widgets(widget_parents)
+        
+        # Force garbage collection
+        collected = ResourceCleaner.force_garbage_collection()
+        
+        # Brief pause for cleanup to complete
+        QThread.msleep(50)
+        
+        logging.info(f"Resource cleanup completed: {total_cleaned} resources cleaned, {collected} objects collected")
     
     def _disconnect_cluster_signals(self):
         """Disconnect cluster-related signals to prevent issues during shutdown"""

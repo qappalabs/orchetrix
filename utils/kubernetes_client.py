@@ -1,6 +1,7 @@
 """
-Kubernetes Client - Backward compatibility wrapper for the new service architecture
-This maintains the same API while using the new modular services internally
+Optimized Kubernetes Client - Streamlined backward compatibility wrapper
+Provides high-performance access to the new service architecture while maintaining API compatibility.
+Designed for minimal overhead and maximum performance.
 """
 
 import logging
@@ -113,6 +114,11 @@ class KubernetesClient(QObject):
     def autoscaling_v1(self):
         """Access to AutoscalingV1Api - backward compatibility"""
         return self.service.api_service.autoscaling_v1
+    
+    @property
+    def apiextensions_v1(self):
+        """Access to ApiextensionsV1Api - backward compatibility"""
+        return self.service.api_service.apiextensions_v1
     
     @property
     def custom_objects_api(self):

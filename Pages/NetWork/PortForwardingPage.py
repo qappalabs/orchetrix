@@ -9,8 +9,8 @@ from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QColor, QIcon
 from PyQt6.QtCore import QSize
 
-from base_components.base_components import SortableTableWidgetItem
-from base_components.base_resource_page import BaseResourcePage
+from Base_Components.base_components import SortableTableWidgetItem
+from Base_Components.base_resource_page import BaseResourcePage
 from UI.Styles import AppColors, AppStyles
 from utils.port_forward_manager import get_port_forward_manager, PortForwardConfig
 from utils.port_forward_dialog import PortForwardDialog, ActivePortForwardsDialog
