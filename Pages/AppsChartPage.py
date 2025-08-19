@@ -14,17 +14,3 @@ __all__ = [
     'AppFlowAnalyzer',
     'AppsPage'
 ]
-
-
-
-
-
-
-
-
-
-
-"""I want you to analyze this full app code all files and give  │
-│   me a plan to make this app code a well structure             │
-│   filestructure and modulaert and resuble code files with      │
-│   seprate backend and frontend. clean and mantainable."""

@@ -1,11 +1,11 @@
-from PyQt6.QtCore import QObject, QThreadPool, QTimer
+from PyQt6.QtCore import QObject, QThreadPool, QTimer, Qt
 import threading
 import weakref
 import logging
 import time
 
 class EnhancedThreadPoolManager(QObject):
-    def __init__(self, max_threads=8):
+    def __init__(self, max_threads=4):  # Reduced from 8 to 4 for better performance
         super().__init__()
         self.thread_pool = QThreadPool()
         self.thread_pool.setMaxThreadCount(max_threads)
@@ -14,10 +14,27 @@ class EnhancedThreadPoolManager(QObject):
         self.lock = threading.RLock()
         self._shutdown = False
         
-        # Cleanup timer for expired workers
+        # Setup timers with thread safety
+        self._setup_timers()
+    
+    def _setup_timers(self):
+        """Initialize and configure timers with thread safety"""
+        # Ensure timers are created on main thread
+        from PyQt6.QtWidgets import QApplication
+        if self.thread() != QApplication.instance().thread():
+            logging.warning("ThreadManager timers being created from non-main thread - deferring to main thread")
+            from PyQt6.QtCore import QMetaObject
+            QMetaObject.invokeMethod(self, "_setup_timers_on_main_thread", Qt.ConnectionType.QueuedConnection)
+            return
+        
+        # Cleanup timer for expired workers - less frequent for better performance
         self.cleanup_timer = QTimer()
         self.cleanup_timer.timeout.connect(self._cleanup_expired_workers)
-        self.cleanup_timer.start(5000)  # Cleanup every 5 seconds
+        self.cleanup_timer.start(30000)  # Cleanup every 30 seconds for better performance
+    
+    def _setup_timers_on_main_thread(self):
+        """Setup timers on main thread - called via QMetaObject.invokeMethod"""
+        self._setup_timers()
         
     def submit_worker(self, worker_id, worker, priority=0):
         if self._shutdown:

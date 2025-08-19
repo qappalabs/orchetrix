@@ -115,7 +115,7 @@ class KubernetesAPIService:
         }
     
     def load_kube_config(self, context_name: Optional[str] = None):
-        """Load kubernetes configuration for the specified context"""
+        """Load kubernetes configuration with connection optimization"""
         try:
             if context_name:
                 config.load_kube_config(context=context_name)
@@ -123,6 +123,23 @@ class KubernetesAPIService:
             else:
                 config.load_kube_config()
                 logging.info("Loaded default kubeconfig")
+            
+            # Configure API client settings for better performance and reliability
+            configuration = client.Configuration.get_default_copy()
+            
+            # Connection pooling settings for better performance
+            configuration.connection_pool_maxsize = 10  # Increase connection pool size
+            
+            # Timeout settings for better reliability with slow clusters
+            configuration.socket_timeout = 30  # 30 seconds socket timeout
+            configuration.request_timeout = 60  # 60 seconds request timeout
+            
+            # Retry settings for better reliability
+            configuration.retries = 3
+            
+            # Apply optimized configuration
+            client.Configuration.set_default(configuration)
+            logging.debug("Applied optimized Kubernetes API client configuration")
             
             # Reset clients when context changes
             if self._cached_context != context_name:
@@ -159,14 +176,23 @@ class KubernetesAPIService:
         return self._api_clients[client_type]
     
     def is_connected(self) -> bool:
-        """Check if API clients are properly initialized"""
+        """Check if API clients are properly initialized with improved error handling"""
         try:
-            # Try to access the version API as a connectivity test
-            version_info = self.version_api.get_code()
+            # Try to access the version API as a connectivity test with timeout
+            version_info = self.version_api.get_code(_request_timeout=10)
             logging.debug(f"Kubernetes API connectivity test successful: {version_info}")
             return version_info is not None
         except Exception as e:
-            logging.error(f"Kubernetes API connectivity check failed: {type(e).__name__}: {e}")
+            # Classify error types for better handling
+            error_type = type(e).__name__
+            if "timeout" in str(e).lower() or "timed out" in str(e).lower():
+                logging.warning(f"Kubernetes API connectivity timeout: {e}")
+            elif "connection" in str(e).lower() or "refused" in str(e).lower():
+                logging.warning(f"Kubernetes API connection refused: {e}")
+            elif "unauthorized" in str(e).lower() or "forbidden" in str(e).lower():
+                logging.error(f"Kubernetes API authentication/authorization error: {e}")
+            else:
+                logging.error(f"Kubernetes API connectivity check failed: {error_type}: {e}")
             return False
     
     def get_cluster_version(self) -> Optional[str]:

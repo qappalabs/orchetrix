@@ -550,30 +550,45 @@ class KubernetesClient(QObject):
                 if namespace:
                     resource_detail = self.v1.read_namespaced_pod(name=resource_name, namespace=namespace)
                 else:
-                    # Try to find the pod in all namespaces
-                    pods = self.v1.list_pod_for_all_namespaces()
-                    for pod in pods.items:
-                        if pod.metadata.name == resource_name:
-                            resource_detail = pod
+                    # Search efficiently in common namespaces instead of all namespaces
+                    common_namespaces = ["default", "kube-system", "kube-public"]
+                    for ns in common_namespaces:
+                        try:
+                            resource_detail = self.v1.read_namespaced_pod(name=resource_name, namespace=ns)
                             break
+                        except Exception as ns_error:
+                            # Only log if it's not a simple "not found" error
+                            if "404" not in str(ns_error) and "not found" not in str(ns_error).lower():
+                                logging.debug(f"Error searching for {resource_name} in namespace {ns}: {ns_error}")
+                            continue
             elif resource_type.lower() == "service":
                 if namespace:
                     resource_detail = self.v1.read_namespaced_service(name=resource_name, namespace=namespace)
                 else:
-                    services = self.v1.list_service_for_all_namespaces()
-                    for svc in services.items:
-                        if svc.metadata.name == resource_name:
-                            resource_detail = svc
+                    # Search efficiently in common namespaces instead of all namespaces
+                    common_namespaces = ["default", "kube-system", "kube-public"]
+                    for ns in common_namespaces:
+                        try:
+                            resource_detail = self.v1.read_namespaced_service(name=resource_name, namespace=ns)
                             break
+                        except Exception as ns_error:
+                            if "404" not in str(ns_error) and "not found" not in str(ns_error).lower():
+                                logging.debug(f"Error searching for service {resource_name} in namespace {ns}: {ns_error}")
+                            continue
             elif resource_type.lower() == "deployment":
                 if namespace:
                     resource_detail = self.apps_v1.read_namespaced_deployment(name=resource_name, namespace=namespace)
                 else:
-                    deployments = self.apps_v1.list_deployment_for_all_namespaces()
-                    for dep in deployments.items:
-                        if dep.metadata.name == resource_name:
-                            resource_detail = dep
+                    # Search efficiently in common namespaces instead of all namespaces
+                    common_namespaces = ["default", "kube-system", "kube-public"]
+                    for ns in common_namespaces:
+                        try:
+                            resource_detail = self.apps_v1.read_namespaced_deployment(name=resource_name, namespace=ns)
                             break
+                        except Exception as ns_error:
+                            if "404" not in str(ns_error) and "not found" not in str(ns_error).lower():
+                                logging.debug(f"Error searching for deployment {resource_name} in namespace {ns}: {ns_error}")
+                            continue
             elif resource_type.lower() == "node":
                 resource_detail = self.v1.read_node(name=resource_name)
             elif resource_type.lower() == "namespace":
@@ -600,13 +615,22 @@ class KubernetesClient(QObject):
                 self.resource_detail_loaded.emit(detail_dict)
                 return detail_dict
             else:
-                logging.warning(f"Resource {resource_type}/{resource_name} not found")
+                logging.debug(f"Resource {resource_type}/{resource_name} not found - may not exist or be accessible")
                 return None
                 
         except Exception as e:
-            logging.error(f"Error getting resource detail for {resource_type}/{resource_name}: {e}")
-            self.error_occurred.emit(f"Failed to get resource detail: {str(e)}")
-            return None
+            # Handle API exceptions more gracefully
+            error_str = str(e)
+            if "404" in error_str or "not found" in error_str.lower():
+                logging.debug(f"Resource {resource_type}/{resource_name} not found in cluster")
+                return None
+            elif "403" in error_str or "forbidden" in error_str.lower():
+                logging.debug(f"Access denied to resource {resource_type}/{resource_name}")
+                return None
+            else:
+                logging.error(f"Error getting resource detail for {resource_type}/{resource_name}: {e}")
+                self.error_occurred.emit(f"Failed to get resource detail: {str(e)}")
+                return None
     
     def _get_nodes(self):
         """Legacy compatibility method for getting nodes"""
@@ -625,45 +649,81 @@ class KubernetesClient(QObject):
             return []
     
     def _get_pods(self, namespace=None):
-        """Legacy compatibility method for getting pods"""
+        """Legacy compatibility method for getting pods with pagination"""
         try:
             if namespace and namespace != "all":
-                return self.v1.list_namespaced_pod(namespace=namespace).items
+                return self.v1.list_namespaced_pod(namespace=namespace, limit=100).items
             else:
-                return self.v1.list_pod_for_all_namespaces().items
+                # Get pods from common namespaces only for performance
+                all_pods = []
+                common_namespaces = ["default", "kube-system", "kube-public"]
+                for ns in common_namespaces:
+                    try:
+                        pods = self.v1.list_namespaced_pod(namespace=ns, limit=50).items
+                        all_pods.extend(pods)
+                    except Exception as e:
+                        logging.debug(f"Could not get pods from namespace {ns}: {e}")
+                return all_pods
         except Exception as e:
             logging.error(f'Failed to get pods: {e}')
             return []
     
     def _get_services(self, namespace=None):
-        """Legacy compatibility method for getting services"""
+        """Legacy compatibility method for getting services with pagination"""
         try:
             if namespace and namespace != "all":
-                return self.v1.list_namespaced_service(namespace=namespace).items
+                return self.v1.list_namespaced_service(namespace=namespace, limit=100).items
             else:
-                return self.v1.list_service_for_all_namespaces().items
+                # Get services from common namespaces only for performance
+                all_services = []
+                common_namespaces = ["default", "kube-system", "kube-public"]
+                for ns in common_namespaces:
+                    try:
+                        services = self.v1.list_namespaced_service(namespace=ns, limit=50).items
+                        all_services.extend(services)
+                    except Exception as e:
+                        logging.debug(f"Could not get services from namespace {ns}: {e}")
+                return all_services
         except Exception as e:
             logging.error(f'Failed to get services: {e}')
             return []
     
     def _get_deployments(self, namespace=None):
-        """Legacy compatibility method for getting deployments"""
+        """Legacy compatibility method for getting deployments with pagination"""
         try:
             if namespace and namespace != "all":
-                return self.apps_v1.list_namespaced_deployment(namespace=namespace).items
+                return self.apps_v1.list_namespaced_deployment(namespace=namespace, limit=100).items
             else:
-                return self.apps_v1.list_deployment_for_all_namespaces().items
+                # Get deployments from common namespaces only for performance
+                all_deployments = []
+                common_namespaces = ["default", "kube-system", "kube-public"]
+                for ns in common_namespaces:
+                    try:
+                        deployments = self.apps_v1.list_namespaced_deployment(namespace=ns, limit=50).items
+                        all_deployments.extend(deployments)
+                    except Exception as e:
+                        logging.debug(f"Could not get deployments from namespace {ns}: {e}")
+                return all_deployments
         except Exception as e:
             logging.error(f'Failed to get deployments: {e}')
             return []
     
     def _get_events(self, namespace=None):
-        """Legacy compatibility method for getting events"""
+        """Legacy compatibility method for getting events with pagination"""
         try:
             if namespace and namespace != "all":
-                return self.v1.list_namespaced_event(namespace=namespace).items
+                return self.v1.list_namespaced_event(namespace=namespace, limit=100).items
             else:
-                return self.v1.list_event_for_all_namespaces().items
+                # Get events from common namespaces only for performance
+                all_events = []
+                common_namespaces = ["default", "kube-system", "kube-public"]
+                for ns in common_namespaces:
+                    try:
+                        events = self.v1.list_namespaced_event(namespace=ns, limit=50).items
+                        all_events.extend(events)
+                    except Exception as e:
+                        logging.debug(f"Could not get events from namespace {ns}: {e}")
+                return all_events
         except Exception as e:
             logging.error(f'Failed to get events: {e}')
             return []

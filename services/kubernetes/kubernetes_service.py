@@ -79,9 +79,9 @@ class KubernetesService(QObject):
         # Initialize services
         self._init_services()
         
-        # Thread management
+        # Thread management - reduced for better performance
         self.threadpool = QThreadPool()
-        self.threadpool.setMaxThreadCount(8)
+        self.threadpool.setMaxThreadCount(4)  # Reduced from 8 to 4 threads
         self.thread_manager = get_thread_manager()
         self._active_workers = weakref.WeakSet()
         
@@ -126,10 +126,10 @@ class KubernetesService(QObject):
         self.issues_timer = QTimer(self)
         self.issues_timer.timeout.connect(self._poll_issues_async)
         
-        # Cache cleanup timer
+        # Cache cleanup timer - less frequent for better performance
         self.cache_cleanup_timer = QTimer(self)
         self.cache_cleanup_timer.timeout.connect(self._periodic_cache_cleanup)
-        self.cache_cleanup_timer.start(60000)  # Cleanup every minute
+        self.cache_cleanup_timer.start(600000)  # Cleanup every 10 minutes for better performance
     
     def _setup_timers_on_main_thread(self):
         """Setup timers on main thread - called via QMetaObject.invokeMethod"""
@@ -196,7 +196,7 @@ class KubernetesService(QObject):
         except Exception as e:
             logging.error(f"Error disconnecting from cluster: {e}")
     
-    def start_polling(self, metrics_interval: int = 5000, issues_interval: int = 10000):
+    def start_polling(self, metrics_interval: int = 30000, issues_interval: int = 60000):
         """Start polling for metrics and issues"""
         if not self.current_cluster:
             return

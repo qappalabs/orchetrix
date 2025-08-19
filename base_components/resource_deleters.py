@@ -122,6 +122,124 @@ class ResourceDeleterThread(QThread):
                     name=self.resource_name, 
                     body=delete_options
                 )
+            # RBAC resources
+            elif self.resource_type == "roles":
+                self.kube_client.rbac_v1.delete_namespaced_role(
+                    name=self.resource_name, 
+                    namespace=self.namespace, 
+                    body=delete_options
+                )
+            elif self.resource_type == "rolebindings":
+                self.kube_client.rbac_v1.delete_namespaced_role_binding(
+                    name=self.resource_name, 
+                    namespace=self.namespace, 
+                    body=delete_options
+                )
+            elif self.resource_type == "clusterroles":
+                self.kube_client.rbac_v1.delete_cluster_role(
+                    name=self.resource_name, 
+                    body=delete_options
+                )
+            elif self.resource_type == "clusterrolebindings":
+                self.kube_client.rbac_v1.delete_cluster_role_binding(
+                    name=self.resource_name, 
+                    body=delete_options
+                )
+            elif self.resource_type == "serviceaccounts":
+                self.kube_client.v1.delete_namespaced_service_account(
+                    name=self.resource_name, 
+                    namespace=self.namespace, 
+                    body=delete_options
+                )
+            # Storage resources
+            elif self.resource_type == "storageclasses":
+                self.kube_client.storage_v1.delete_storage_class(
+                    name=self.resource_name, 
+                    body=delete_options
+                )
+            # Network resources
+            elif self.resource_type == "networkpolicies":
+                self.kube_client.networking_v1.delete_namespaced_network_policy(
+                    name=self.resource_name, 
+                    namespace=self.namespace, 
+                    body=delete_options
+                )
+            elif self.resource_type == "ingressclasses":
+                self.kube_client.networking_v1.delete_ingress_class(
+                    name=self.resource_name, 
+                    body=delete_options
+                )
+            elif self.resource_type == "endpoints":
+                self.kube_client.v1.delete_namespaced_endpoints(
+                    name=self.resource_name, 
+                    namespace=self.namespace, 
+                    body=delete_options
+                )
+            # Config resources
+            elif self.resource_type == "resourcequotas":
+                self.kube_client.v1.delete_namespaced_resource_quota(
+                    name=self.resource_name, 
+                    namespace=self.namespace, 
+                    body=delete_options
+                )
+            elif self.resource_type == "limitranges":
+                self.kube_client.v1.delete_namespaced_limit_range(
+                    name=self.resource_name, 
+                    namespace=self.namespace, 
+                    body=delete_options
+                )
+            elif self.resource_type == "horizontalpodautoscalers":
+                self.kube_client.autoscaling_v1.delete_namespaced_horizontal_pod_autoscaler(
+                    name=self.resource_name, 
+                    namespace=self.namespace, 
+                    body=delete_options
+                )
+            elif self.resource_type == "poddisruptionbudgets":
+                self.kube_client.policy_v1.delete_namespaced_pod_disruption_budget(
+                    name=self.resource_name, 
+                    namespace=self.namespace, 
+                    body=delete_options
+                )
+            elif self.resource_type == "events":
+                self.kube_client.v1.delete_namespaced_event(
+                    name=self.resource_name, 
+                    namespace=self.namespace, 
+                    body=delete_options
+                )
+            elif self.resource_type == "leases":
+                self.kube_client.coordination_v1.delete_namespaced_lease(
+                    name=self.resource_name, 
+                    namespace=self.namespace, 
+                    body=delete_options
+                )
+            # Custom Resource Definitions
+            elif self.resource_type == "customresourcedefinitions":
+                self.kube_client.apiextensions_v1.delete_custom_resource_definition(
+                    name=self.resource_name, 
+                    body=delete_options
+                )
+            # Webhook configurations
+            elif self.resource_type == "validatingwebhookconfigurations":
+                self.kube_client.admissionregistration_v1.delete_validating_admission_webhook_configuration(
+                    name=self.resource_name, 
+                    body=delete_options
+                )
+            elif self.resource_type == "mutatingwebhookconfigurations":
+                self.kube_client.admissionregistration_v1.delete_mutating_admission_webhook_configuration(
+                    name=self.resource_name, 
+                    body=delete_options
+                )
+            # Priority and Runtime classes
+            elif self.resource_type == "priorityclasses":
+                self.kube_client.scheduling_v1.delete_priority_class(
+                    name=self.resource_name, 
+                    body=delete_options
+                )
+            elif self.resource_type == "runtimeclasses":
+                self.kube_client.node_v1.delete_runtime_class(
+                    name=self.resource_name, 
+                    body=delete_options
+                )
             else:
                 if not self._is_running:
                     return
@@ -205,8 +323,15 @@ class BatchResourceDeleterThread(QThread):
                     error_list.append((resource_name, namespace, "Deletion method not implemented"))
                     
             except ApiException as e:
-                error_list.append((resource_name, namespace, f"API error: {e.reason}"))
+                if e.status == 404:
+                    # Resource not found - log as warning instead of error for better UX
+                    logging.warning(f"Resource {self.resource_type}/{resource_name} not found during delete (may have been deleted already)")
+                    error_list.append((resource_name, namespace, f"Resource not found (may have been deleted already)"))
+                else:
+                    logging.error(f"API error deleting {self.resource_type}/{resource_name}: {e.reason}")
+                    error_list.append((resource_name, namespace, f"API error: {e.reason}"))
             except Exception as e:
+                logging.error(f"Unexpected error deleting {self.resource_type}/{resource_name}: {str(e)}")
                 error_list.append((resource_name, namespace, f"Error: {str(e)}"))
         
         if self._is_running:
@@ -308,8 +433,127 @@ class BatchResourceDeleterThread(QThread):
                     name=resource_name, 
                     body=delete_options
                 )
+            # RBAC resources
+            elif self.resource_type == "roles":
+                self.kube_client.rbac_v1.delete_namespaced_role(
+                    name=resource_name, 
+                    namespace=namespace, 
+                    body=delete_options
+                )
+            elif self.resource_type == "rolebindings":
+                self.kube_client.rbac_v1.delete_namespaced_role_binding(
+                    name=resource_name, 
+                    namespace=namespace, 
+                    body=delete_options
+                )
+            elif self.resource_type == "clusterroles":
+                self.kube_client.rbac_v1.delete_cluster_role(
+                    name=resource_name, 
+                    body=delete_options
+                )
+            elif self.resource_type == "clusterrolebindings":
+                self.kube_client.rbac_v1.delete_cluster_role_binding(
+                    name=resource_name, 
+                    body=delete_options
+                )
+            elif self.resource_type == "serviceaccounts":
+                self.kube_client.v1.delete_namespaced_service_account(
+                    name=resource_name, 
+                    namespace=namespace, 
+                    body=delete_options
+                )
+            # Storage resources
+            elif self.resource_type == "storageclasses":
+                self.kube_client.storage_v1.delete_storage_class(
+                    name=resource_name, 
+                    body=delete_options
+                )
+            # Network resources
+            elif self.resource_type == "networkpolicies":
+                self.kube_client.networking_v1.delete_namespaced_network_policy(
+                    name=resource_name, 
+                    namespace=namespace, 
+                    body=delete_options
+                )
+            elif self.resource_type == "ingressclasses":
+                self.kube_client.networking_v1.delete_ingress_class(
+                    name=resource_name, 
+                    body=delete_options
+                )
+            elif self.resource_type == "endpoints":
+                self.kube_client.v1.delete_namespaced_endpoints(
+                    name=resource_name, 
+                    namespace=namespace, 
+                    body=delete_options
+                )
+            # Config resources
+            elif self.resource_type == "resourcequotas":
+                self.kube_client.v1.delete_namespaced_resource_quota(
+                    name=resource_name, 
+                    namespace=namespace, 
+                    body=delete_options
+                )
+            elif self.resource_type == "limitranges":
+                self.kube_client.v1.delete_namespaced_limit_range(
+                    name=resource_name, 
+                    namespace=namespace, 
+                    body=delete_options
+                )
+            elif self.resource_type == "horizontalpodautoscalers":
+                self.kube_client.autoscaling_v1.delete_namespaced_horizontal_pod_autoscaler(
+                    name=resource_name, 
+                    namespace=namespace, 
+                    body=delete_options
+                )
+            elif self.resource_type == "poddisruptionbudgets":
+                self.kube_client.policy_v1.delete_namespaced_pod_disruption_budget(
+                    name=resource_name, 
+                    namespace=namespace, 
+                    body=delete_options
+                )
+            elif self.resource_type == "events":
+                self.kube_client.v1.delete_namespaced_event(
+                    name=resource_name, 
+                    namespace=namespace, 
+                    body=delete_options
+                )
+            elif self.resource_type == "leases":
+                self.kube_client.coordination_v1.delete_namespaced_lease(
+                    name=resource_name, 
+                    namespace=namespace, 
+                    body=delete_options
+                )
+            # Custom Resource Definitions
+            elif self.resource_type == "customresourcedefinitions":
+                self.kube_client.apiextensions_v1.delete_custom_resource_definition(
+                    name=resource_name, 
+                    body=delete_options
+                )
+            # Webhook configurations
+            elif self.resource_type == "validatingwebhookconfigurations":
+                self.kube_client.admissionregistration_v1.delete_validating_admission_webhook_configuration(
+                    name=resource_name, 
+                    body=delete_options
+                )
+            elif self.resource_type == "mutatingwebhookconfigurations":
+                self.kube_client.admissionregistration_v1.delete_mutating_admission_webhook_configuration(
+                    name=resource_name, 
+                    body=delete_options
+                )
+            # Priority and Runtime classes
+            elif self.resource_type == "priorityclasses":
+                self.kube_client.scheduling_v1.delete_priority_class(
+                    name=resource_name, 
+                    body=delete_options
+                )
+            elif self.resource_type == "runtimeclasses":
+                self.kube_client.node_v1.delete_runtime_class(
+                    name=resource_name, 
+                    body=delete_options
+                )
             else:
                 # Resource type not supported
+                logging.warning(f"Delete operation not implemented for resource type: {self.resource_type}")
                 return False
                 
             return True

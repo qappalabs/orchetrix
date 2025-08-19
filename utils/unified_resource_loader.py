@@ -22,6 +22,7 @@ from Utils.kubernetes_client import get_kubernetes_client
 from Utils.error_handler import get_error_handler, safe_execute, log_performance
 from Utils.unified_cache_system import get_unified_cache
 from Utils.enhanced_worker import EnhancedBaseWorker
+from Utils.thread_manager import get_thread_manager
 
 
 @dataclass
@@ -49,6 +50,361 @@ class LoadResult:
     from_cache: bool = False
     error_message: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+class SearchResourceLoadWorker(EnhancedBaseWorker):
+    """Worker specifically for search operations across all resources"""
+    
+    def __init__(self, config: ResourceConfig, loader_instance, search_query: str):
+        super().__init__(f"search_resource_load_{config.resource_type}")
+        self.config = config
+        self.loader = loader_instance
+        self.search_query = search_query.lower() if search_query else ""
+        self._start_time = time.time()
+    
+    def execute(self) -> LoadResult:
+        """Execute search across all resources with filtering"""
+        start_time = time.time()
+        
+        try:
+            # Check cache first (but search results are cached separately)
+            cached_result = self._try_search_cache_first()
+            if cached_result:
+                return cached_result
+            
+            # Load from API with comprehensive search
+            items = self._load_and_filter_from_api()
+            
+            if self.is_cancelled():
+                return LoadResult(
+                    success=False, 
+                    resource_type=self.config.resource_type,
+                    error_message="Search operation cancelled"
+                )
+            
+            # Process search results using the parent loader's processing logic
+            processed_items = self._process_search_items(items)
+            self._cache_search_results(processed_items)
+            
+            load_time = (time.time() - start_time) * 1000
+            
+            return LoadResult(
+                success=True,
+                resource_type=self.config.resource_type,
+                items=processed_items,
+                total_count=len(processed_items),
+                load_time_ms=load_time,
+                from_cache=False,
+                metadata={'search_query': self.search_query}
+            )
+            
+        except ApiException as api_error:
+            # Handle Kubernetes API exceptions during search
+            if api_error.status == 404:
+                logging.info(f"Resource type {self.config.resource_type} not available for search in this cluster")
+                return LoadResult(
+                    success=True,
+                    resource_type=self.config.resource_type,
+                    items=[],
+                    total_count=0,
+                    load_time_ms=(time.time() - start_time) * 1000,
+                    from_cache=False,
+                    metadata={'search_query': self.search_query}
+                )
+            else:
+                error_message = f"Search API Error {api_error.status}: {api_error.reason}"
+                return LoadResult(
+                    success=False,
+                    resource_type=self.config.resource_type,
+                    error_message=f"Search failed: {error_message}",
+                    load_time_ms=(time.time() - start_time) * 1000
+                )
+        except Exception as e:
+            error_handler = get_error_handler()
+            error_message = error_handler.format_connection_error(str(e), self.config.resource_type)
+            
+            return LoadResult(
+                success=False,
+                resource_type=self.config.resource_type,
+                error_message=f"Search failed: {error_message}",
+                load_time_ms=(time.time() - start_time) * 1000
+            )
+    
+    def _try_search_cache_first(self) -> Optional[LoadResult]:
+        """Try to get search results from cache"""
+        try:
+            cache_service = get_unified_cache()
+            # Use search-specific cache key
+            cache_key = f"{self._generate_cache_key()}_search_{hash(self.search_query)}"
+            
+            cached_items = cache_service.get_cached_resources(
+                self.config.resource_type, 
+                cache_key,
+                max_age_seconds=self.config.cache_ttl
+            )
+            
+            if cached_items:
+                logging.debug(f"Search cache hit for {self.config.resource_type}: {len(cached_items)} items")
+                return LoadResult(
+                    success=True,
+                    resource_type=self.config.resource_type,
+                    items=cached_items,
+                    total_count=len(cached_items),
+                    load_time_ms=0,
+                    from_cache=True,
+                    metadata={'search_query': self.search_query}
+                )
+                
+        except Exception as e:
+            logging.debug(f"Search cache lookup failed for {self.config.resource_type}: {e}")
+        
+        return None
+    
+    def _load_and_filter_from_api(self) -> List[Any]:
+        """Load from API and filter by search query"""
+        # Use the same loading mechanism as the parent class
+        if not self.config.namespace:
+            # Search all namespaces
+            all_items = self._load_from_multiple_namespaces_with_search()
+        else:
+            # Search specific namespace
+            all_items = self._load_from_single_namespace_with_search()
+        
+        # Filter results by search query
+        if self.search_query:
+            filtered_items = []
+            for item in all_items:
+                if self._item_matches_search(item):
+                    filtered_items.append(item)
+            return filtered_items
+        
+        return all_items
+    
+    def _load_from_single_namespace_with_search(self) -> List[Any]:
+        """Load from single namespace for search"""
+        kube_client = get_kubernetes_client()
+        api_client = self.loader._get_api_client(kube_client)
+        
+        # Get the correct namespaced API method
+        namespaced_method_name = self.loader._get_namespaced_api_method(self.config.resource_type)
+        api_method = getattr(api_client, namespaced_method_name)
+        
+        kwargs = {
+            'namespace': self.config.namespace,
+            'timeout_seconds': self.config.timeout_seconds,
+            '_request_timeout': self.config.timeout_seconds + 5,
+            'limit': 200  # Larger limit for search
+        }
+        
+        response = api_method(**kwargs)
+        return response.items if hasattr(response, 'items') else []
+    
+    def _load_from_multiple_namespaces_with_search(self) -> List[Any]:
+        """Load from multiple namespaces for comprehensive search"""
+        all_items = []
+        
+        try:
+            # Get namespaces first
+            namespaces_response = get_kubernetes_client().v1.list_namespace(limit=100)
+            namespace_names = [ns.metadata.name for ns in namespaces_response.items]
+            
+            # Search in all namespaces (not limited to 20 for search)
+            kube_client = get_kubernetes_client()
+            api_client = self.loader._get_api_client(kube_client)
+            namespaced_method_name = self.loader._get_namespaced_api_method(self.config.resource_type)
+            api_method = getattr(api_client, namespaced_method_name)
+            
+            for namespace in namespace_names:
+                if self.is_cancelled():
+                    break
+                    
+                try:
+                    kwargs = {
+                        'namespace': namespace,
+                        'timeout_seconds': 30,
+                        '_request_timeout': 35,
+                        'limit': 100  # Reasonable limit per namespace
+                    }
+                    
+                    response = api_method(**kwargs)
+                    if hasattr(response, 'items'):
+                        all_items.extend(response.items)
+                        
+                except ApiException as api_error:
+                    # Handle API exceptions gracefully during search
+                    if api_error.status == 404:
+                        logging.debug(f"Resource {self.config.resource_type} not found in namespace {namespace} during search")
+                    elif api_error.status == 403:
+                        logging.debug(f"Access denied for {self.config.resource_type} in namespace {namespace} during search")
+                    continue
+                except Exception as e:
+                    # Continue with other namespaces silently
+                    logging.debug(f"Search error in namespace {namespace}: {e}")
+                    continue
+            
+            logging.info(f"Search loaded {len(all_items)} {self.config.resource_type} from {len(namespace_names)} namespaces")
+            return all_items
+            
+        except Exception as e:
+            logging.warning(f"Error in multi-namespace search: {e}")
+            # Fallback to default namespace
+            return self._load_from_single_namespace_with_search()
+    
+    def _item_matches_search(self, item: Any) -> bool:
+        """Check if item matches the search query"""
+        if not self.search_query:
+            return True
+        
+        try:
+            # Search in name
+            if hasattr(item, 'metadata') and item.metadata:
+                name = getattr(item.metadata, 'name', '').lower()
+                if self.search_query in name:
+                    return True
+                
+                # Search in namespace
+                namespace = getattr(item.metadata, 'namespace', '').lower()
+                if self.search_query in namespace:
+                    return True
+                
+                # Search in labels
+                labels = getattr(item.metadata, 'labels', {}) or {}
+                for key, value in labels.items():
+                    if (self.search_query in key.lower() or 
+                        self.search_query in str(value).lower()):
+                        return True
+            
+            # Search in spec fields (for certain resources)
+            if hasattr(item, 'spec') and item.spec:
+                # Convert spec to string and search
+                spec_str = str(item.spec).lower()
+                if self.search_query in spec_str:
+                    return True
+            
+        except Exception:
+            pass
+        
+        return False
+    
+    def _cache_search_results(self, processed_items: List[Dict[str, Any]]):
+        """Cache search results separately from regular cache"""
+        try:
+            cache_service = get_unified_cache()
+            cache_key = f"{self._generate_cache_key()}_search_{hash(self.search_query)}"
+            
+            cache_service.cache_resources(
+                self.config.resource_type,
+                cache_key,
+                processed_items,
+                ttl_seconds=self.config.cache_ttl
+            )
+            
+        except Exception as e:
+            logging.debug(f"Failed to cache search results: {e}")
+    
+    def _process_search_items(self, items: List[Any]) -> List[Dict[str, Any]]:
+        """Process search results using simplified processing for speed"""
+        if not items:
+            return []
+        
+        processed_items = []
+        
+        for item in items:
+            if self.is_cancelled():
+                break
+            
+            try:
+                # Use basic processing for search results (faster)
+                processed_item = self._process_single_search_item(item)
+                if processed_item:
+                    processed_items.append(processed_item)
+            except Exception as e:
+                logging.debug(f"Error processing search item: {e}")
+                continue
+        
+        return processed_items
+    
+    def _process_single_search_item(self, item: Any) -> Optional[Dict[str, Any]]:
+        """Process a single search result item (simplified for speed)"""
+        try:
+            # Extract basic fields efficiently
+            metadata = item.metadata
+            name = metadata.name
+            namespace = getattr(metadata, 'namespace', None)
+            creation_timestamp = metadata.creation_timestamp
+            
+            # Basic age calculation
+            age = "Unknown"
+            if creation_timestamp:
+                try:
+                    import datetime
+                    if hasattr(creation_timestamp, 'replace'):
+                        created_time = creation_timestamp.replace(tzinfo=datetime.timezone.utc)
+                    else:
+                        created_time = datetime.datetime.fromisoformat(str(creation_timestamp).replace('Z', '+00:00'))
+                    
+                    now = datetime.datetime.now(datetime.timezone.utc)
+                    diff = now - created_time
+                    
+                    if diff.days > 0:
+                        age = f"{diff.days}d"
+                    elif diff.seconds > 3600:
+                        age = f"{diff.seconds // 3600}h"
+                    else:
+                        age = f"{diff.seconds // 60}m"
+                except Exception:
+                    pass
+            
+            # Build basic resource data
+            resource_data = {
+                'name': name,
+                'namespace': namespace or '',
+                'age': age,
+                'created': creation_timestamp.isoformat() if creation_timestamp else None,
+                'resource_type': self.config.resource_type,
+                'search_matched': True  # Mark as search result
+            }
+            
+            # Add resource-specific fields efficiently
+            self._add_basic_resource_fields(resource_data, item)
+            
+            return resource_data
+            
+        except Exception as e:
+            logging.debug(f"Error processing single search item: {e}")
+            return None
+    
+    def _add_basic_resource_fields(self, processed_item: Dict[str, Any], item: Any):
+        """Add basic resource-specific fields for search results"""
+        try:
+            # Add status and basic info based on resource type
+            if self.config.resource_type == 'pods':
+                if hasattr(item, 'status') and item.status:
+                    processed_item['status'] = item.status.phase or 'Unknown'
+                    if item.status.container_statuses:
+                        ready_containers = sum(1 for cs in item.status.container_statuses if cs.ready)
+                        total_containers = len(item.status.container_statuses)
+                        processed_item['ready'] = f"{ready_containers}/{total_containers}"
+                
+            elif self.config.resource_type in ['deployments', 'replicasets', 'daemonsets', 'statefulsets']:
+                if hasattr(item, 'status') and item.status:
+                    replicas = getattr(item.status, 'replicas', 0) or 0
+                    ready_replicas = getattr(item.status, 'ready_replicas', 0) or 0
+                    processed_item['ready'] = f"{ready_replicas}/{replicas}"
+                    processed_item['status'] = 'Ready' if ready_replicas == replicas and replicas > 0 else 'Not Ready'
+                
+            elif self.config.resource_type == 'services':
+                if hasattr(item, 'spec') and item.spec:
+                    processed_item['type'] = item.spec.type or 'Unknown'
+                    processed_item['cluster_ip'] = item.spec.cluster_ip or 'None'
+            
+        except Exception as e:
+            logging.debug(f"Error adding basic resource fields: {e}")
+    
+    def _generate_cache_key(self) -> str:
+        """Generate cache key for search results"""
+        namespace_key = self.config.namespace or "all_namespaces"
+        return f"{self.config.resource_type}_{namespace_key}"
 
 
 class ResourceLoadWorker(EnhancedBaseWorker):
@@ -95,6 +451,37 @@ class ResourceLoadWorker(EnhancedBaseWorker):
                 from_cache=False
             )
             
+        except ApiException as api_error:
+            # Handle Kubernetes API exceptions gracefully
+            if api_error.status == 404:
+                # Resource type not found - return empty result, not error
+                logging.info(f"Resource type {self.config.resource_type} not available in this cluster")
+                return LoadResult(
+                    success=True,
+                    resource_type=self.config.resource_type,
+                    items=[],
+                    total_count=0,
+                    load_time_ms=(time.time() - start_time) * 1000,
+                    from_cache=False
+                )
+            elif api_error.status == 403:
+                # Forbidden - insufficient permissions
+                logging.warning(f"Insufficient permissions to access {self.config.resource_type}")
+                return LoadResult(
+                    success=False,
+                    resource_type=self.config.resource_type,
+                    error_message=f"Access denied to {self.config.resource_type} - check cluster permissions",
+                    load_time_ms=(time.time() - start_time) * 1000
+                )
+            else:
+                error_message = f"API Error {api_error.status}: {api_error.reason}"
+                logging.error(f"API error loading {self.config.resource_type}: {error_message}")
+                return LoadResult(
+                    success=False,
+                    resource_type=self.config.resource_type,
+                    error_message=error_message,
+                    load_time_ms=(time.time() - start_time) * 1000
+                )
         except Exception as e:
             error_handler = get_error_handler()
             error_message = str(e)
@@ -156,25 +543,31 @@ class ResourceLoadWorker(EnhancedBaseWorker):
         # Get the appropriate API client
         api_client = self._get_api_client(kube_client)
         
-        # Get the API method
-        api_method = getattr(api_client, self.config.api_method)
-        
         # Build method parameters for optimal performance and fast failure
         kwargs = {
             'timeout_seconds': 30,  # Longer timeout for Docker Desktop
             '_request_timeout': 35  # Longer request timeout for slow clusters
         }
         
-        # Add namespace if specified and resource is namespaced
+        # Handle cluster scoped vs namespaced resources
         cluster_scoped_resources = {
             'nodes', 'namespaces', 'persistentvolumes', 'storageclasses',
             'ingressclasses', 'clusterroles', 'clusterrolebindings',
             'customresourcedefinitions'
         }
         
-        if (self.config.namespace and 
-            self.config.resource_type not in cluster_scoped_resources):
+        is_cluster_scoped = self.config.resource_type in cluster_scoped_resources
+        
+        # Handle "All Namespaces" case efficiently
+        if not self.config.namespace and not is_cluster_scoped:
+            # For "All Namespaces", use optimized multi-namespace approach
+            return self._load_from_multiple_namespaces(api_client, kwargs)
+        elif self.config.namespace and not is_cluster_scoped:
+            # Specific namespace
             kwargs['namespace'] = self.config.namespace
+        
+        # Get the API method
+        api_method = getattr(api_client, self.config.api_method)
         
         # Enable streaming for large datasets
         if self.config.enable_streaming:
@@ -189,6 +582,75 @@ class ResourceLoadWorker(EnhancedBaseWorker):
         response = api_method(**kwargs)
         
         return response.items if hasattr(response, 'items') else []
+    
+    def _load_from_multiple_namespaces(self, api_client, base_kwargs) -> List[Any]:
+        """Load resources from multiple namespaces efficiently for 'All Namespaces' option"""
+        all_items = []
+        
+        try:
+            # Get namespaces first (with caching)
+            namespaces_response = get_kubernetes_client().v1.list_namespace(limit=100)
+            namespace_names = [ns.metadata.name for ns in namespaces_response.items]
+            
+            # Prioritize important namespaces and limit total namespaces for performance
+            important_namespaces = ["default", "kube-system", "kube-public"]
+            other_namespaces = [ns for ns in namespace_names if ns not in important_namespaces]
+            
+            # Limit to first 20 namespaces to prevent excessive API calls
+            selected_namespaces = important_namespaces + other_namespaces[:17]  # Total of 20
+            
+            # Get the correct namespaced API method for multi-namespace loading
+            namespaced_method_name = self.loader._get_namespaced_api_method(self.config.resource_type)
+            api_method = getattr(api_client, namespaced_method_name)
+            
+            for namespace in selected_namespaces:
+                if self.is_cancelled():
+                    break
+                    
+                try:
+                    # Create kwargs for this namespace
+                    ns_kwargs = base_kwargs.copy()
+                    ns_kwargs['namespace'] = namespace
+                    ns_kwargs['limit'] = 50  # Limit per namespace for performance
+                    
+                    # Execute API call for this namespace
+                    response = api_method(**ns_kwargs)
+                    if hasattr(response, 'items'):
+                        all_items.extend(response.items)
+                        
+                except ApiException as api_error:
+                    # Handle API exceptions gracefully - log but continue
+                    if api_error.status == 404:
+                        logging.debug(f"Resource {self.config.resource_type} not found in namespace {namespace} - skipping")
+                    elif api_error.status == 403:
+                        logging.debug(f"Access denied for {self.config.resource_type} in namespace {namespace} - skipping")
+                    else:
+                        logging.warning(f"API error loading {self.config.resource_type} from namespace {namespace}: {api_error.reason}")
+                    continue
+                except Exception as ns_error:
+                    # Continue with other namespaces silently for better performance
+                    logging.debug(f"Error loading {self.config.resource_type} from namespace {namespace}: {ns_error}")
+                    continue
+            
+            if all_items:
+                logging.info(f"Loaded {len(all_items)} {self.config.resource_type} from {len(selected_namespaces)} namespaces")
+            return all_items
+            
+        except Exception as e:
+            logging.warning(f"Error loading from multiple namespaces, falling back to specific namespaces: {e}")
+            # Fallback to loading from default namespace only
+            try:
+                fallback_kwargs = base_kwargs.copy()
+                fallback_kwargs['namespace'] = 'default'
+                fallback_kwargs['limit'] = 100
+                
+                namespaced_method_name = self.loader._get_namespaced_api_method(self.config.resource_type)
+                api_method = getattr(api_client, namespaced_method_name)
+                response = api_method(**fallback_kwargs)
+                return response.items if hasattr(response, 'items') else []
+            except Exception as fallback_error:
+                logging.error(f"Fallback namespace loading also failed: {fallback_error}")
+                return []
     
     def _get_api_client(self, kube_client):
         """Get the appropriate API client for the resource type"""
@@ -641,7 +1103,6 @@ class HighPerformanceResourceLoader(QObject):
         super().__init__()
         
         # Use unified thread manager for consistency
-        from Utils.thread_manager import get_thread_manager
         self._thread_manager = get_thread_manager()
         self._active_workers: Dict[str, ResourceLoadWorker] = {}
         self._worker_lock = threading.RLock()
@@ -794,6 +1255,41 @@ class HighPerformanceResourceLoader(QObject):
         
         return namespaced_method_mapping.get(resource_type, 'list_namespaced_pod')
     
+    @log_performance
+    def load_resources_with_search_async(
+        self,
+        resource_type: str,
+        namespace: Optional[str] = None,
+        search_query: Optional[str] = None
+    ) -> str:
+        """Load resources with search filtering across all namespaces"""
+        if not resource_type:
+            logging.error("Resource type is required for search loading")
+            return ""
+        
+        # Create search-enabled configuration
+        config = ResourceConfig(
+            resource_type=resource_type,
+            api_method=self._get_api_method(resource_type),
+            namespace=namespace,
+            batch_size=50,  # Larger batch for search
+            timeout_seconds=45,  # Longer timeout for search
+            cache_ttl=300,  # 5 minutes cache for search results
+            enable_pagination=True,  # Enable pagination for comprehensive search
+            max_concurrent_requests=3  # More requests for search
+        )
+        
+        operation_id = f"search_{resource_type}_{int(time.time())}"
+        
+        # Create and submit search worker
+        worker = SearchResourceLoadWorker(config, self, search_query)
+        
+        # Submit to thread manager
+        thread_manager = get_thread_manager()
+        thread_manager.submit_worker(operation_id, worker)
+        
+        return operation_id
+
     @log_performance
     def load_resources_async(
         self, 

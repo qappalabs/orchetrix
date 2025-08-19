@@ -30,17 +30,43 @@ class DeploymentAnalyzer(QThread):
             
             self.progress_updated.emit("Fetching deployments...")
             
-            # Fetch deployments from the specified namespace
+            # Use paginated fetching for better performance
+            all_deployments = []
             if self.namespace == "All Namespaces":
-                deployments = self.kube_client.apps_v1.list_deployment_for_all_namespaces()
+                # Get list of namespaces first, then fetch deployments per namespace
+                try:
+                    namespaces = self.kube_client.v1.list_namespace(limit=100)
+                    for ns in namespaces.items:
+                        try:
+                            # Fetch deployments for each namespace with pagination
+                            deployments = self.kube_client.apps_v1.list_namespaced_deployment(
+                                namespace=ns.metadata.name, 
+                                limit=50  # Limit per namespace for performance
+                            )
+                            all_deployments.extend(deployments.items)
+                            self.progress_updated.emit(f"Processed namespace: {ns.metadata.name}")
+                        except Exception as ns_error:
+                            logging.warning(f"Could not fetch deployments from namespace {ns.metadata.name}: {ns_error}")
+                            continue
+                except Exception as e:
+                    logging.error(f"Could not fetch namespaces, falling back to specific namespace: {e}")
+                    # Fallback to default namespace
+                    deployments = self.kube_client.apps_v1.list_namespaced_deployment(
+                        namespace="default", limit=50
+                    )
+                    all_deployments = deployments.items
             else:
-                deployments = self.kube_client.apps_v1.list_namespaced_deployment(namespace=self.namespace)
+                # Fetch from specific namespace with pagination
+                deployments = self.kube_client.apps_v1.list_namespaced_deployment(
+                    namespace=self.namespace, limit=100
+                )
+                all_deployments = deployments.items
             
-            self.progress_updated.emit(f"Found {len(deployments.items)} deployments. Analyzing...")
+            self.progress_updated.emit(f"Found {len(all_deployments)} deployments. Analyzing...")
             
             # Filter deployments by labels if provided
             filtered_deployments = []
-            for deployment in deployments.items:
+            for deployment in all_deployments:
                 if self._matches_label_filter(deployment):
                     filtered_deployments.append(deployment)
             
@@ -123,11 +149,18 @@ class DeploymentAnalyzer(QThread):
         """Find services that target this deployment"""
         services = []
         try:
-            # Get services from the same namespace
+            # Get services only from the deployment's namespace for performance
             if deployment.metadata.namespace:
-                svc_list = self.kube_client.v1.list_namespaced_service(namespace=deployment.metadata.namespace)
+                svc_list = self.kube_client.v1.list_namespaced_service(
+                    namespace=deployment.metadata.namespace,
+                    limit=50  # Limit services per namespace
+                )
             else:
-                svc_list = self.kube_client.v1.list_service_for_all_namespaces()
+                # Fallback to default namespace only instead of all namespaces
+                svc_list = self.kube_client.v1.list_namespaced_service(
+                    namespace="default",
+                    limit=50
+                )
             
             deployment_labels = deployment.spec.selector.match_labels or {}
             

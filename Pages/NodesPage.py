@@ -124,7 +124,10 @@ class GraphWidget(QFrame):
             return
             
         current_time = time.time()
-        if current_time - self._last_update_time < 20.0:  # Increased throttle to 20 seconds
+        # Only throttle if we have data and enough time hasn't passed
+        if (self.utilization_data and 
+            self._last_update_time > 0 and 
+            current_time - self._last_update_time < self._update_interval):
             return
         
         self._is_updating = True
@@ -149,6 +152,9 @@ class GraphWidget(QFrame):
             # Update utilization_data in one operation
             if new_data:
                 self.utilization_data.update(new_data)
+                logging.debug(f"{self.title}: Updated utilization data for {len(new_data)} nodes: {new_data}")
+            else:
+                logging.debug(f"{self.title}: No utilization data found in nodes for metric_key: {metric_key}")
                 
         finally:
             self._is_updating = False
@@ -165,9 +171,15 @@ class GraphWidget(QFrame):
         self.node_name = node_name
         self.title_label.setText(f"{self.title} ({node_name})")
         
+        logging.debug(f"Setting selected node {node_name} for {self.title}")
+        logging.debug(f"Available utilization data: {list(self.utilization_data.keys())}")
+        
         if node_name in self.utilization_data:
             self.current_value = round(self.utilization_data[node_name], 1)
             self.value_label.setText(f"{self.current_value}{self.unit}")
+            logging.debug(f"Set {self.title} value: {self.current_value}{self.unit}")
+        else:
+            logging.debug(f"No utilization data found for {node_name} in {self.title}")
 
     def update_data(self):
         """Update the chart data - only use real cluster data"""
@@ -292,6 +304,10 @@ class NodesPage(BaseResourcePage):
         # Initialize data structure
         self.nodes_data = []
         
+        # Initialize search state
+        self._is_searching = False
+        self._current_search_query = None
+        
         # Set up UI
         self.setup_page_ui()
         
@@ -331,6 +347,9 @@ class NodesPage(BaseResourcePage):
         # Apply table style
         self.table.setStyleSheet(AppStyles.TABLE_STYLE)
         self.table.horizontalHeader().setStyleSheet(AppStyles.CUSTOM_HEADER_STYLE)
+        
+        # Connect double-click to show detail page
+        self.table.cellDoubleClicked.connect(self.handle_row_double_click)
         
         # Configure column widths
         self.configure_columns()
@@ -443,6 +462,9 @@ class NodesPage(BaseResourcePage):
             logging.warning("NodesPage: No nodes data received")
             self.nodes_data = []
             self.resources = []
+            # Clear search state when no data is available
+            self._is_searching = False
+            self._current_search_query = None
             self.show_no_data_message()
             self.items_count.setText("0 items")
             return
@@ -454,15 +476,22 @@ class NodesPage(BaseResourcePage):
         self.resources = nodes_data
         self.has_loaded_data = True
         
-        self.show_table()
-        
         # Update graphs asynchronously to avoid blocking UI
         QTimer.singleShot(10, lambda: self._update_graphs_async(nodes_data))
         
-        # Populate table with optimized method
-        self.populate_table(nodes_data)
+        # Also update graphs immediately if this is the first load
+        if not hasattr(self, '_graphs_initialized'):
+            self._update_graphs_async(nodes_data)
+            self._graphs_initialized = True
         
-        self.items_count.setText(f"{len(nodes_data)} items")
+        # Check if we're in search mode and apply search filter
+        if self._is_searching and self._current_search_query:
+            self._filter_nodes_by_search(self._current_search_query)
+        else:
+            self.show_table()
+            # Populate table with optimized method
+            self.populate_table(nodes_data)
+            self.items_count.setText(f"{len(nodes_data)} items")
     
     def _update_graphs_async(self, nodes_data):
         """Update graphs asynchronously to avoid blocking UI"""
@@ -472,6 +501,121 @@ class NodesPage(BaseResourcePage):
             self.disk_graph.generate_utilization_data(nodes_data)
         except Exception as e:
             logging.error(f"Error updating graphs: {e}")
+    
+    def _display_resources(self, resources):
+        """Override to use nodes-specific table population"""
+        if not resources:
+            self.show_no_data_message()
+            return
+        
+        self.show_table()
+        
+        # Clear previous selections when displaying new data
+        if hasattr(self, 'selected_items'):
+            self.selected_items.clear()
+        
+        # Store current selection before repopulating
+        selected_node_name = None
+        if (hasattr(self, 'selected_row') and self.selected_row >= 0 and 
+            self.table.item(self.selected_row, 1)):
+            selected_node_name = self.table.item(self.selected_row, 1).text()
+        
+        # Use the nodes-specific populate_table method
+        self.populate_table(resources)
+        
+        # Restore selection if possible
+        if selected_node_name:
+            for row in range(self.table.rowCount()):
+                if (self.table.item(row, 1) and 
+                    self.table.item(row, 1).text() == selected_node_name):
+                    self.selected_row = row
+                    self.table.selectRow(row)
+                    # Don't call select_node_for_graphs here to avoid recursion
+                    break
+        
+        # Update items count
+        if hasattr(self, 'items_count') and self.items_count:
+            self.items_count.setText(f"{len(resources)} items")
+    
+    def _perform_global_search(self, search_text):
+        """Override to perform node-specific search"""
+        try:
+            # Mark that we're in search mode
+            self._is_searching = True
+            self._current_search_query = search_text
+            
+            # For nodes, we'll do a local search since they are cluster-scoped
+            self._filter_nodes_by_search(search_text)
+            
+        except Exception as e:
+            logging.error(f"Error performing nodes search: {e}")
+            # Fall back to base class implementation
+            super()._perform_global_search(search_text)
+    
+    def _filter_nodes_by_search(self, search_text):
+        """Filter nodes based on search text"""
+        try:
+            if not search_text or not self.nodes_data:
+                self._display_resources(self.nodes_data)
+                return
+            
+            search_lower = search_text.lower().strip()
+            filtered_nodes = []
+            
+            for node in self.nodes_data:
+                try:
+                    # Search in multiple node fields with safe string conversion
+                    node_name = str(node.get("name", "")).lower()
+                    node_roles = str(node.get("roles", [])).lower()
+                    node_version = str(node.get("version", "")).lower()
+                    node_status = str(node.get("status", "")).lower()
+                    
+                    # Also search in capacity and usage information
+                    cpu_capacity = str(node.get("cpu_capacity", "")).lower()
+                    memory_capacity = str(node.get("memory_capacity", "")).lower()
+                    
+                    # Convert age to searchable text
+                    age = str(node.get("age", "")).lower()
+                    
+                    # Check if search term matches any searchable field
+                    if (search_lower in node_name or 
+                        search_lower in node_roles or 
+                        search_lower in node_version or 
+                        search_lower in node_status or
+                        search_lower in cpu_capacity or
+                        search_lower in memory_capacity or
+                        search_lower in age):
+                        filtered_nodes.append(node)
+                        
+                except Exception as e:
+                    logging.debug(f"Error processing node during search: {e}")
+                    continue
+            
+            logging.info(f"Node search for '{search_text}' found {len(filtered_nodes)} results out of {len(self.nodes_data)} total nodes")
+            self._display_resources(filtered_nodes)
+            
+        except Exception as e:
+            logging.error(f"Error in node search filtering: {e}")
+            # Fallback to showing all nodes
+            self._display_resources(self.nodes_data)
+    
+    def _clear_search_and_reload(self):
+        """Override to clear search and show all nodes"""
+        self._is_searching = False
+        self._current_search_query = None
+        
+        # Show all nodes data
+        self._display_resources(self.nodes_data)
+    
+    def _on_search_text_changed(self, text):
+        """Override to handle search text changes for nodes"""
+        # If search is cleared, show all nodes immediately
+        if not text.strip():
+            self._clear_search_and_reload()
+            return
+        
+        # Use the parent class debounced search
+        super()._on_search_text_changed(text)
     
     def populate_resource_row(self, row, resource):
         """Fallback method for compatibility - redirects to optimized version"""
@@ -488,8 +632,17 @@ class NodesPage(BaseResourcePage):
         self.table.setSortingEnabled(False)
         self.table.setUpdatesEnabled(False)
         
-        # Clear and resize table efficiently
+        # Clear and resize table efficiently - also clear all cell widgets
         self.table.clearContents()
+        
+        # Clear all cell widgets explicitly
+        for row in range(self.table.rowCount()):
+            for col in range(self.table.columnCount()):
+                widget = self.table.cellWidget(row, col)
+                if widget:
+                    widget.setParent(None)
+                    widget.deleteLater()
+        
         self.table.setRowCount(len(resources_to_populate))
         
         # Use batched rendering for better performance with large datasets
@@ -520,6 +673,7 @@ class NodesPage(BaseResourcePage):
         self.table.setRowHeight(row, 40)
         
         node_name = resource.get("name", "unknown")
+        logging.info(f"NodesPage: Populating row {row} for node {node_name}")
         
         # Skip creating complex widgets during initial population for speed
         # Create simple checkbox container
@@ -545,6 +699,7 @@ class NodesPage(BaseResourcePage):
             self.table.setItem(row, cell_col, item)
         
         # Create status and action widgets - defer complex styling
+        logging.info(f"NodesPage: Creating status and action widgets for row {row}")
         self._create_status_and_action_widgets_fast(row, resource, len(display_values))
     
     def _calculate_display_values_fast(self, resource):
@@ -623,17 +778,22 @@ class NodesPage(BaseResourcePage):
     
     def _create_status_and_action_widgets_fast(self, row, resource, column_offset):
         """Create status and action widgets with minimal styling"""
+        node_name = resource.get("name", "unknown")
         status = resource.get("status", "Unknown")
-        status_col = column_offset + 1
+        
+        logging.info(f"NodesPage: _create_status_and_action_widgets_fast called for row {row}, node {node_name}, status {status}")
+        
+        # Status goes in column 9 (Conditions column)
+        status_col = 9
         
         # Simple status widget
         color = AppColors.STATUS_ACTIVE if status.lower() == "ready" else AppColors.STATUS_DISCONNECTED
         status_widget = StatusLabel(status, color)
-        status_widget.clicked.connect(lambda: self.table.selectRow(row))
+        status_widget.clicked.connect(lambda r=row: self.table.selectRow(r))
         self.table.setCellWidget(row, status_col, status_widget)
+        logging.info(f"NodesPage: Status widget created for row {row}, column {status_col}")
         
         # Use base class action button implementation with proper styling
-        node_name = resource.get("name", "unknown")
         action_button = self._create_action_button(row, node_name)
         action_button.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE +
     """
@@ -642,15 +802,18 @@ class NodesPage(BaseResourcePage):
         
         # Create action container with proper styling
         action_container = QWidget()
-        action_container.setFixedWidth(AppConstants.SIZES["ACTION_WIDTH"])
+        action_container.setFixedSize(40, 30)  # Fixed size instead of just width
         action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
         action_layout = QHBoxLayout(action_container)
-        action_layout.setContentsMargins(0, 0, 0, 0)
+        action_layout.setContentsMargins(5, 0, 5, 0)
         action_layout.setSpacing(0)
         action_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         action_layout.addWidget(action_button)
         
-        self.table.setCellWidget(row, status_col + 1, action_container)
+        # Action button goes in column 10 (last column)
+        action_col = 10
+        self.table.setCellWidget(row, action_col, action_container)
+        logging.info(f"NodesPage: Action widget created for row {row}, column {action_col}")
         
         # Store raw data for potential use
         if "raw_data" not in resource:
@@ -694,15 +857,35 @@ class NodesPage(BaseResourcePage):
             return
             
         self.table.selectRow(row)
+        
+        # Force update graphs with current data first - bypass throttling
+        for graph in [self.cpu_graph, self.mem_graph, self.disk_graph]:
+            # Temporarily reset throttling to force immediate update
+            old_time = graph._last_update_time
+            graph._last_update_time = 0
+            graph._is_updating = False
+            graph.generate_utilization_data(self.nodes_data)
+            graph._last_update_time = old_time
+        
+        # Then set the selected node
         self.cpu_graph.set_selected_node(node_data, node_name)
         self.mem_graph.set_selected_node(node_data, node_name)
         self.disk_graph.set_selected_node(node_data, node_name)
+        
+        # Log for debugging
+        logging.info(f"Selected node: {node_name}")
+        logging.info(f"CPU utilization data: {self.cpu_graph.utilization_data.get(node_name, 'Not found')}")
+        logging.info(f"Memory utilization data: {self.mem_graph.utilization_data.get(node_name, 'Not found')}")
+        logging.info(f"Disk utilization data: {self.disk_graph.utilization_data.get(node_name, 'Not found')}")
     
     def handle_row_click(self, row, column):
         if column != self.table.columnCount() - 1:  # Skip action column
             self.table.selectRow(row)
             self.select_node_for_graphs(row)
-            
+    
+    def handle_row_double_click(self, row, column):
+        """Handle double-click to show node detail page"""
+        if column != self.table.columnCount() - 1:  # Skip action column
             resource_name = None
             if self.table.item(row, 1) is not None:
                 resource_name = self.table.item(row, 1).text()
@@ -804,6 +987,7 @@ class NodesPage(BaseResourcePage):
         # Set namespace_combo to None since nodes don't use namespaces
         self.namespace_combo = None
         
+    
     # Disable inherited methods that aren't needed for nodes
     def _handle_checkbox_change(self, state, item_name):
         """Override to disable checkbox functionality"""

@@ -181,9 +181,27 @@ class DetailPageOverviewSection(BaseDetailSection):
         """Handle data loaded from Kubernetes API"""
         try:
             self.disconnect_api_signals()
-            self.handle_data_loaded(data)
+            if data:
+                self.handle_data_loaded(data)
+            else:
+                # Resource exists in list but not accessible individually
+                self.handle_resource_not_accessible()
         except Exception as e:
             self.handle_error(f"Error processing loaded data: {str(e)}")
+            
+    def handle_resource_not_accessible(self):
+        """Handle case where resource exists in list but not accessible individually"""
+        self.hide_loading()
+        # Create basic info from what we know
+        basic_data = {
+            'metadata': {
+                'name': self.resource_name,
+                'namespace': self.resource_namespace
+            },
+            'kind': self.resource_type.capitalize(),
+            '_note': 'Resource details not accessible individually'
+        }
+        self.update_ui_with_basic_info(basic_data)
 
     def handle_api_error(self, error_message):
         """Handle API error with better error messages"""
@@ -238,6 +256,38 @@ class DetailPageOverviewSection(BaseDetailSection):
 
         except Exception as e:
             self.handle_error(f"Error updating UI: {str(e)}")
+            
+    def update_ui_with_basic_info(self, data: Dict[str, Any]):
+        """Update UI with basic info when full details aren't available"""
+        try:
+            metadata = data.get("metadata", {})
+            
+            # Update resource header
+            self.resource_name_label.setText(metadata.get("name", "Unnamed"))
+            
+            resource_info = f"{self.resource_type.capitalize()}"
+            if "namespace" in metadata:
+                resource_info += f" / {metadata.get('namespace')}"
+            self.resource_info_label.setText(resource_info)
+            
+            # Set creation time as unavailable
+            self.creation_time_label.setText("Created: Details not available")
+            
+            # Set status as limited info
+            self.clear_status_content()
+            self.add_status_item("Status", "Available in cluster list", "limited")
+            self.add_status_item("Details", "Not accessible individually", "info")
+            
+            # Clear other sections
+            self.clear_conditions_content()
+            self.clear_labels_content()
+            
+            # Add note about limited access
+            if data.get('_note'):
+                self.add_status_item("Note", data['_note'], "info")
+                
+        except Exception as e:
+            self.handle_error(f"Error updating UI with basic info: {str(e)}")
 
     def update_resource_status(self, data):
         """Update resource status display"""
@@ -1308,6 +1358,34 @@ class DetailPageOverviewSection(BaseDetailSection):
                 widget.setParent(None)
                 widget.deleteLater()
 
+        self.specific_section.hide()
+        
+    def clear_status_content(self):
+        """Clear status items"""
+        self.status_badge.setText("Unknown")
+        self.status_text_label.setText("Status not available")
+                
+    def clear_conditions_content(self):
+        """Clear conditions items"""
+        while self.conditions_container_layout.count():
+            item = self.conditions_container_layout.takeAt(0)
+            if item.widget():
+                widget = item.widget()
+                widget.setParent(None)
+                widget.deleteLater()
+                
+    def clear_labels_content(self):
+        """Clear labels items"""
+        self.labels_content.setText("No labels")
+                
+    def clear_specific_content(self):
+        """Clear specific items"""
+        while self.specific_layout.count():
+            item = self.specific_layout.takeAt(0)
+            if item.widget():
+                widget = item.widget()
+                widget.setParent(None)
+                widget.deleteLater()
         self.specific_section.hide()
 
     def _add_validating_webhook_specific_fields(self, data):

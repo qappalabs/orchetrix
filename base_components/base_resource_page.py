@@ -51,7 +51,7 @@ class BaseResourcePage(BaseTablePage):
         super().__init__(parent)
         self.resource_type = None
         self.resources = []
-        self.namespace_filter = "default"
+        self.namespace_filter = "default"  # Start with default namespace, will be updated when namespaces are loaded
         self.search_bar = None
         self.namespace_combo = None
 
@@ -112,9 +112,78 @@ class BaseResourcePage(BaseTablePage):
     def showEvent(self, event):
         """Override showEvent to automatically load data when page becomes visible"""
         super().showEvent(event)
+        
+        # Check if app is still in startup/splash screen mode
+        if self._is_app_starting():
+            # Defer loading until after splash screen to prevent startup lag
+            QTimer.singleShot(5000, self._deferred_startup_load)  # Wait 5 seconds after startup
+            return
+        
+        # Normal show event handling - load immediately if app is already started
+        self._handle_normal_show_event()
+    
+    def _is_app_starting(self):
+        """Check if the application is still in startup phase"""
+        try:
+            from PyQt6.QtWidgets import QApplication
+            app = QApplication.instance()
+            if not app:
+                return False
+            
+            # Check if we're still within the first few seconds of app startup
+            if not hasattr(app, '_startup_time'):
+                import time
+                app._startup_time = time.time()
+                return True
+            
+            import time
+            time_since_startup = time.time() - app._startup_time
+            return time_since_startup < 6  # Consider app starting for first 6 seconds
+            
+        except Exception:
+            return False  # If we can't determine, assume app is ready
+    
+    def _deferred_startup_load(self):
+        """Perform deferred loading after startup to avoid splash screen lag"""
+        try:
+            # Only proceed if we haven't loaded yet and widget is still visible
+            if self.isVisible() and not hasattr(self, '_startup_load_done'):
+                self._startup_load_done = True
+                
+                # Show a subtle loading indicator
+                self._show_startup_loading_message()
+                
+                # Start the actual loading
+                self._handle_normal_show_event()
+        except Exception as e:
+            logging.debug(f"Error in deferred startup load: {e}")
+    
+    def _show_startup_loading_message(self):
+        """Show a subtle message that data is loading"""
+        try:
+            if hasattr(self, 'table') and self.table:
+                # Set a loading message in the table temporarily
+                self.table.setRowCount(1)
+                from PyQt6.QtWidgets import QTableWidgetItem
+                from PyQt6.QtCore import Qt
+                
+                item = QTableWidgetItem("🔄 Loading resources...")
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self.table.setItem(0, 0, item)
+                self.table.setSpan(0, 0, 1, self.table.columnCount())
+        except Exception as e:
+            logging.debug(f"Error showing startup loading message: {e}")
+    
+    def _handle_normal_show_event(self):
+        """Handle normal show event loading (after startup)"""
+        # Load namespaces dynamically on first show
+        if not hasattr(self, '_namespaces_loaded'):
+            self._namespaces_loaded = True
+            QTimer.singleShot(100, self._load_namespaces_async)  # Load namespaces first
+        
         # Always try to load data when page becomes visible if we don't have current data
         if not self.is_loading_initial and (not self.resources or not self._initial_load_done):
-            QTimer.singleShot(50, self._auto_load_data)  # Faster response
+            QTimer.singleShot(200, self._auto_load_data)  # Load data after namespaces
 
     def _auto_load_data(self):
         """Auto-load data when page is shown"""
@@ -438,7 +507,8 @@ class BaseResourcePage(BaseTablePage):
         namespace_label.setMinimumWidth(70)
         
         self.namespace_combo = QComboBox()
-        self.namespace_combo.addItems(["default", "all", "kube-system", "kube-public", "kube-node-lease"])
+        # Start with loading indicator, will be populated dynamically
+        self.namespace_combo.addItem("Loading namespaces...")
         self.namespace_combo.currentTextChanged.connect(self._on_namespace_changed)
         self.namespace_combo.setFixedWidth(150)
         self.namespace_combo.setFixedHeight(32)
@@ -498,21 +568,143 @@ class BaseResourcePage(BaseTablePage):
         )
 
     def _perform_search(self):
-        """Perform fast linear search"""
+        """Perform comprehensive search across all resources"""
         search_text = self.search_bar.text().strip()
-        logging.debug(f"Performing search for: '{search_text}', resources count: {len(self.resources)}")
         
         if not search_text:
-            # No search query, show all resources
-            self._display_resources(self.resources)
+            # No search query, reload normal resources
+            self._clear_search_and_reload()
             return
         
-        # Always use fast linear search - simpler and faster for most cases
-        self._filter_resources_linear(search_text.lower())
+        # Perform global search across all resources
+        self._perform_global_search(search_text.lower())
 
-
+    def _clear_search_and_reload(self):
+        """Clear search and reload normal resources"""
+        # Mark that we're no longer in search mode
+        self._is_searching = False
+        self._current_search_query = None
+        
+        # Reload normal resources
+        self.force_load_data()
+    
+    def _perform_global_search(self, search_text):
+        """Perform global search across all resources in cluster"""
+        try:
+            # Mark that we're in search mode
+            self._is_searching = True
+            self._current_search_query = search_text
+            
+            # Show search loading indicator
+            self._show_search_loading_message(search_text)
+            
+            # Start global search using the unified resource loader
+            self._start_global_search_thread(search_text)
+            
+        except Exception as e:
+            logging.error(f"Error starting global search: {e}")
+            # Fall back to local search
+            self._filter_resources_linear(search_text)
+    
+    def _show_search_loading_message(self, search_query):
+        """Show loading message during search"""
+        try:
+            if hasattr(self, 'table') and self.table:
+                self.table.setRowCount(1)
+                from PyQt6.QtWidgets import QTableWidgetItem
+                from PyQt6.QtCore import Qt
+                
+                item = QTableWidgetItem(f"🔍 Searching for '{search_query}' across all resources...")
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self.table.setItem(0, 0, item)
+                if self.table.columnCount() > 1:
+                    self.table.setSpan(0, 0, 1, self.table.columnCount())
+        except Exception as e:
+            logging.debug(f"Error showing search loading message: {e}")
+    
+    def _start_global_search_thread(self, search_text):
+        """Start global search using background thread"""
+        try:
+            # Use the unified resource loader with search parameters
+            from Utils.unified_resource_loader import get_unified_resource_loader
+            
+            unified_loader = get_unified_resource_loader()
+            
+            # Connect to search results handler
+            if not hasattr(self, '_search_signals_connected'):
+                unified_loader.loading_completed.connect(self._on_search_results_loaded)
+                unified_loader.loading_error.connect(self._on_search_error)
+                self._search_signals_connected = True
+            
+            # Determine namespace for search
+            search_namespace = None if self.namespace_filter == "All Namespaces" else self.namespace_filter
+            
+            # Start comprehensive search
+            self._current_search_operation_id = unified_loader.load_resources_with_search_async(
+                resource_type=self.resource_type,
+                namespace=search_namespace,
+                search_query=search_text
+            )
+            
+            logging.info(f"Started global search for '{search_text}' in {self.resource_type}")
+            
+        except Exception as e:
+            logging.error(f"Failed to start global search thread: {e}")
+            # Fallback to local search
+            self._filter_resources_linear(search_text)
+    
+    def _on_search_results_loaded(self, resource_type, result):
+        """Handle search results from unified loader"""
+        try:
+            # Only process if this matches our resource type and we're still searching
+            if (resource_type != self.resource_type or 
+                not getattr(self, '_is_searching', False)):
+                return
+            
+            if not result.success:
+                self._on_search_error(resource_type, result.error_message or "Search failed")
+                return
+            
+            # Update resources with search results
+            search_results = result.items or []
+            
+            # Display search results
+            self._display_resources(search_results)
+            self._update_items_count()
+            
+            # Log search results
+            if search_results:
+                logging.info(f"Search found {len(search_results)} {resource_type} matching '{self._current_search_query}'")
+            else:
+                logging.info(f"Search found no {resource_type} matching '{self._current_search_query}'")
+            
+        except Exception as e:
+            logging.error(f"Error processing search results: {e}")
+    
+    def _on_search_error(self, resource_type, error_message):
+        """Handle search errors"""
+        if resource_type != self.resource_type:
+            return
+            
+        logging.error(f"Search error for {resource_type}: {error_message}")
+        
+        # Show error message in table
+        try:
+            if hasattr(self, 'table') and self.table:
+                self.table.setRowCount(1)
+                from PyQt6.QtWidgets import QTableWidgetItem
+                from PyQt6.QtCore import Qt
+                
+                item = QTableWidgetItem(f"❌ Search failed: {error_message}")
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self.table.setItem(0, 0, item)
+                if self.table.columnCount() > 1:
+                    self.table.setSpan(0, 0, 1, self.table.columnCount())
+        except Exception as e:
+            logging.debug(f"Error showing search error message: {e}")
+    
     def _filter_resources_linear(self, search_text):
-        """Fast simple search"""
+        """Fallback local search (when global search fails)"""
         if not search_text:
             self._display_resources(self.resources)
             return
@@ -525,8 +717,95 @@ class BaseResourcePage(BaseTablePage):
         
         self._display_resources(filtered)
 
+    def _load_namespaces_async(self):
+        """Load available namespaces dynamically with minimal startup impact"""
+        try:
+            # Quick fallback during startup to avoid any lag
+            if self._is_app_starting():
+                self._on_namespaces_loaded(["default", "kube-system", "kube-public"])
+                return
+            
+            # Use thread manager to load namespaces asynchronously (only after startup)
+            from Utils.enhanced_worker import EnhancedBaseWorker
+            
+            class NamespaceLoader(EnhancedBaseWorker):
+                def __init__(self):
+                    super().__init__("namespace_loader")
+                
+                def execute(self):
+                    try:
+                        kube_client = get_kubernetes_client()
+                        if not kube_client or not kube_client.v1:
+                            return ["default", "kube-system", "kube-public"]
+                        
+                        # Get namespaces with pagination for performance
+                        namespaces_response = kube_client.v1.list_namespace(limit=100)
+                        namespace_names = [ns.metadata.name for ns in namespaces_response.items]
+                        
+                        # Sort namespaces with default first, then alphabetically
+                        important_namespaces = ["default", "kube-system", "kube-public", "kube-node-lease"]
+                        other_namespaces = sorted([ns for ns in namespace_names if ns not in important_namespaces])
+                        
+                        return important_namespaces + other_namespaces
+                        
+                    except Exception as e:
+                        return ["default", "kube-system", "kube-public"]
+            
+            # Create and submit worker
+            worker = NamespaceLoader()
+            worker.signals.finished.connect(self._on_namespaces_loaded)
+            worker.signals.error.connect(lambda error: self._on_namespaces_loaded(["default", "kube-system", "kube-public"]))
+            
+            thread_manager = get_thread_manager()
+            thread_manager.submit_worker("namespace_loader", worker)
+            
+        except Exception as e:
+            logging.error(f"Failed to start namespace loading: {e}")
+            # Fallback to default namespaces
+            self._on_namespaces_loaded(["default", "kube-system", "kube-public"])
+    
+    def _on_namespaces_loaded(self, namespaces):
+        """Handle loaded namespaces and populate dropdown"""
+        try:
+            if not self.namespace_combo:
+                return
+            
+            # Clear existing items
+            self.namespace_combo.clear()
+            
+            # Add "All Namespaces" option first for backward compatibility
+            self.namespace_combo.addItem("All Namespaces")
+            
+            # Add all loaded namespaces
+            for namespace in namespaces:
+                if namespace:  # Ensure namespace is not empty
+                    self.namespace_combo.addItem(namespace)
+            
+            # Set default selection to "default" namespace if available
+            default_index = self.namespace_combo.findText("default")
+            if default_index >= 0:
+                self.namespace_combo.setCurrentIndex(default_index)
+                self.namespace_filter = "default"
+            else:
+                # If no default namespace, use "All Namespaces"
+                self.namespace_combo.setCurrentIndex(0)
+                self.namespace_filter = "All Namespaces"
+                
+            logging.info(f"Loaded {len(namespaces)} namespaces into dropdown")
+            
+        except Exception as e:
+            logging.error(f"Error updating namespace dropdown: {e}")
+    
+    def refresh_namespaces(self):
+        """Refresh the namespace dropdown - can be called externally"""
+        self._namespaces_loaded = False  # Reset the flag
+        self._load_namespaces_async()
+
     def _on_namespace_changed(self, namespace):
         """Handle namespace filter changes"""
+        if namespace == "Loading namespaces...":
+            return  # Ignore the loading placeholder
+            
         self.namespace_filter = namespace
         self.force_load_data()
 
@@ -573,7 +852,8 @@ class BaseResourcePage(BaseTablePage):
             self._signals_connected = True
         
         # Start loading with optimized configuration
-        namespace = self.namespace_filter if self.namespace_filter != "all" else None
+        # Handle "All Namespaces" efficiently by using None (which triggers optimized multi-namespace loading)
+        namespace = None if self.namespace_filter == "All Namespaces" else self.namespace_filter
         self._current_operation_id = unified_loader.load_resources_async(
             resource_type=self.resource_type,
             namespace=namespace
@@ -893,6 +1173,21 @@ class BaseResourcePage(BaseTablePage):
             QMessageBox.information(self, "No Selection", "Please select resources to delete by checking the checkboxes in the first column.")
             return
         
+        # Validate selected items have correct resource type format
+        validated_items = []
+        for resource_name, namespace in self.selected_items:
+            if self._validate_resource_name(resource_name):
+                validated_items.append((resource_name, namespace))
+            else:
+                logging.warning(f"Skipping invalid resource name for deletion: {resource_name}")
+        
+        if not validated_items:
+            QMessageBox.information(self, "Invalid Selection", "No valid resources selected for deletion.")
+            return
+        
+        # Update selected items to validated list
+        self.selected_items = set(validated_items)
+        
         count = len(self.selected_items)
         result = QMessageBox.warning(
             self, "Confirm Deletion",
@@ -940,6 +1235,21 @@ class BaseResourcePage(BaseTablePage):
             # This should not happen since we already checked, but log it
             logging.warning("No selected items in _delete_selected_resources_no_confirm - this should not happen")
             return
+        
+        # Validate selected items have correct resource type format
+        validated_items = []
+        for resource_name, namespace in self.selected_items:
+            if self._validate_resource_name(resource_name):
+                validated_items.append((resource_name, namespace))
+            else:
+                logging.warning(f"Skipping invalid resource name for deletion: {resource_name}")
+        
+        if not validated_items:
+            logging.warning("No valid resources selected for deletion after validation")
+            return
+        
+        # Update selected items to validated list
+        self.selected_items = set(validated_items)
 
         count = len(self.selected_items)
         resources_list = list(self.selected_items)
@@ -1895,6 +2205,35 @@ class ResourcePageHelpers:
             
         except Exception as e:
             logging.error(f"Error setting up standard table: {e}")
+    
+    def _validate_resource_name(self, resource_name):
+        """Validate that resource name is appropriate for the current resource type"""
+        if not resource_name or not isinstance(resource_name, str):
+            return False
+        
+        # Skip validation for cluster-scoped resources that don't have namespaces
+        cluster_scoped_resources = {
+            'nodes', 'clusterroles', 'clusterrolebindings', 
+            'storageclasses', 'customresourcedefinitions',
+            'ingressclasses', 'persistentvolumes',
+            'validatingwebhookconfigurations', 'mutatingwebhookconfigurations',
+            'priorityclasses', 'runtimeclasses'
+        }
+        
+        if hasattr(self, 'resource_type') and self.resource_type in cluster_scoped_resources:
+            return True  # Allow all names for cluster-scoped resources
+            
+        # For namespaced resources, check for common pod naming patterns that shouldn't appear in other resource types
+        if hasattr(self, 'resource_type') and self.resource_type != 'pods':
+            # Check for ReplicaSet hash patterns (pod names like "deployment-abc123-xyz789")
+            import re
+            # Pattern for pod names generated by ReplicaSets/Deployments
+            pod_pattern = r'^.+-[a-f0-9]{8,10}-[a-z0-9]{5}$'
+            if re.match(pod_pattern, resource_name):
+                logging.warning(f"Resource name '{resource_name}' appears to be a pod name but resource type is '{self.resource_type}'")
+                return False
+                
+        return True
 
 
 __all__ = [

@@ -430,6 +430,36 @@ class UnifiedCacheSystem:
         
         logging.info("Optimized all caches")
     
+    def clear_expired_entries(self):
+        """Clear expired entries from all caches"""
+        current_time = time.time()
+        total_cleared = 0
+        
+        for cache_name, cache_instance in self._caches.items():
+            initial_count = len(cache_instance._cache)
+            cache_instance._cleanup_expired(current_time)
+            cleared = initial_count - len(cache_instance._cache)
+            total_cleared += cleared
+        
+        if total_cleared > 0:
+            logging.info(f"Cleared {total_cleared} expired cache entries")
+    
+    def optimize_all_caches(self):
+        """Perform deep optimization of all caches"""
+        self.clear_expired_entries()
+        
+        # Optimize memory usage by forcing compaction
+        for cache_instance in self._caches.values():
+            with cache_instance._lock:
+                # Rebuild OrderedDict to eliminate fragmentation
+                cache_instance._cache = OrderedDict(cache_instance._cache.items())
+        
+        # Force garbage collection
+        import gc
+        gc.collect()
+        
+        logging.info("Performed deep optimization of all caches")
+    
     def get_cache_recommendations(self) -> List[str]:
         """Get performance recommendations based on cache usage"""
         recommendations = []

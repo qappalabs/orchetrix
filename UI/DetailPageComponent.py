@@ -527,7 +527,14 @@ class DetailPageComponent(QWidget):
         """Handle section error"""
         self.section_loading_states[section_name] = False
         self.update_global_loading_state()
-        logging.error(f"Error in {section_name}: {error_message}")
+        
+        # Don't log missing resources as errors
+        if ("not found" in error_message.lower() or 
+            "404" in error_message or
+            "not available in this cluster" in error_message.lower()):
+            logging.debug(f"Resource not available in {section_name}: {error_message}")
+        else:
+            logging.error(f"Error in {section_name}: {error_message}")
 
     def handle_section_data_loaded(self, section_name: str, data: Dict[str, Any]):
         """Handle section data loaded - including refresh requests"""
