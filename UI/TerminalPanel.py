@@ -559,11 +559,11 @@ class TerminalPanel(QWidget):
             self.normal_height = self.height()
             max_height = top_level_window.height() - 50 if top_level_window else 1030
             self.setFixedHeight(int(max_height))
-            self.unified_header.maximize_btn.setIcon(QIcon(resource_path("icons/terminal_up_down.svg")))
+            self.unified_header.maximize_btn.setIcon(QIcon(resource_path("Icons/terminal_up_down.svg")))
             self.unified_header.maximize_btn.setToolTip("Restore Terminal")
         else:
             self.setFixedHeight(self.normal_height)
-            self.unified_header.maximize_btn.setIcon(QIcon(resource_path("icons/terminal_up_down.svg")))
+            self.unified_header.maximize_btn.setIcon(QIcon(resource_path("Icons/terminal_up_down.svg")))
             self.unified_header.maximize_btn.setToolTip("Maximize Terminal")
         self.reposition()
 

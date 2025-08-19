@@ -12,7 +12,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QPixmap, QPalette
 from typing import Optional, Dict, List
 from UI.Styles import AppStyles, AppColors
-from utils.port_forward_manager import get_port_forward_manager, PortForwardConfig
+from Utils.port_forward_manager import get_port_forward_manager, PortForwardConfig
 import time
 
 class PortForwardDialog(QDialog):

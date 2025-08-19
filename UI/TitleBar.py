@@ -66,7 +66,7 @@ class TitleBar(QWidget):
 
         try:
             from UI.Icons import resource_path  # Import the resource_path function
-            logo_path = resource_path("icons/logoIcon.png")
+            logo_path = resource_path("Icons/logoIcon.png")
             pixmap = QPixmap(logo_path)
             if not pixmap.isNull():
                 self.logo_label.setPixmap(pixmap.scaled(self.logo_icon_size, Qt.AspectRatioMode.KeepAspectRatio,
@@ -240,7 +240,7 @@ class TitleBar(QWidget):
 
                 # Create colored icon using same size as HomePage (16x16)
                 colored_pixmap = home_page.create_colored_icon(
-                    "icons/Cluster_Logo.svg",
+                    "Icons/Cluster_Logo.svg",
                     cluster_color,
                     16  # Changed from 20 to 16
                 )

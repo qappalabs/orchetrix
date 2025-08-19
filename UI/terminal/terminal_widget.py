@@ -421,7 +421,7 @@ class UnifiedTerminalWidget(QTextEdit):
                 return logs_info['logs_viewer'].header.containers
 
             # Fallback: Get containers directly from Kubernetes API
-            from utils.kubernetes_client import get_kubernetes_client
+            from Utils.kubernetes_client import get_kubernetes_client
             kube_client = get_kubernetes_client()
 
             if kube_client and kube_client.v1:

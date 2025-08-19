@@ -9,13 +9,13 @@ icon_path = os.path.abspath(os.path.join('icons', 'logoIcon.ico'))
 def collect_icons():
     """Collect all icon files from the icons directory"""
     icon_files = []
-    icons_dir = Path('icons')
+    icons_dir = Path('Icons')
     
     if icons_dir.exists():
         # Get all icon file types
         for ext in ['*.svg', '*.png', '*.ico', '*.jpg', '*.jpeg', '*.gif']:
             for icon_file in icons_dir.glob(ext):
-                icon_files.append((str(icon_file), 'icons'))
+                icon_files.append((str(icon_file), 'Icons'))
         
         print(f"Found {len(icon_files)} icon files to include")
     else:
@@ -28,7 +28,7 @@ def collect_ui_files():
     ui_files = []
     
     # Collect any additional UI files if they exist
-    ui_dirs = ['images', 'logos', 'styles']
+    ui_dirs = ['Images', 'logos', 'styles']
     for ui_dir in ui_dirs:
         ui_path = Path(ui_dir)
         if ui_path.exists():
@@ -52,8 +52,8 @@ def collect_data_files():
     
     # Add directories that exist
     directories_to_check = [
-        ('icons', 'icons'),
-        ('images', 'images'), 
+        ('Icons', 'Icons'),
+        ('Images', 'Images'), 
         ('logos', 'logos'),
         ('UI', 'UI'),
         ('Pages', 'Pages'),

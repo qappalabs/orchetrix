@@ -54,7 +54,7 @@ class SSHTerminalWidget(UnifiedTerminalWidget):
     def init_ssh_session(self):
         """Initialize the SSH session to the pod."""
         try:
-            from utils.kubernetes_client import KubernetesPodSSH
+            from Utils.kubernetes_client import KubernetesPodSSH
 
             self.ssh_session = KubernetesPodSSH(self.pod_name, self.namespace)
 
@@ -286,7 +286,8 @@ class SSHTerminalWidget(UnifiedTerminalWidget):
                     if success:
                         self.waiting_for_output = True
                         return
-                except:
+                except Exception as e:
+                    logging.debug(f"Clear command '{cmd}' failed: {e}")
                     continue
             # If all fail, do local clear
             self.clear_output()
@@ -332,8 +333,8 @@ class SSHTerminalWidget(UnifiedTerminalWidget):
                     if self.ssh_session:
                         self.ssh_session.send_command('\x03')
                         self.waiting_for_output = False
-                except:
-                    pass
+                except Exception as e:
+                    logging.debug(f"Error sending Ctrl+C: {e}")
                 self._clear_all_pending_input()
                 event.accept()
                 return
@@ -341,8 +342,8 @@ class SSHTerminalWidget(UnifiedTerminalWidget):
                 try:
                     if self.ssh_session:
                         self.ssh_session.send_command('\x04')
-                except:
-                    pass
+                except Exception as e:
+                    logging.debug(f"Error sending Ctrl+D: {e}")
                 self._clear_all_pending_input()
                 event.accept()
                 return
@@ -390,8 +391,8 @@ class SSHTerminalWidget(UnifiedTerminalWidget):
             try:
                 if self.ssh_session:
                     self.ssh_session.send_command('\t')
-            except:
-                pass
+            except Exception as e:
+                logging.debug(f"Error sending tab: {e}")
             event.accept()
             return
 

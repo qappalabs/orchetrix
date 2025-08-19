@@ -7,7 +7,7 @@ from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor
 
 from Base_Components.base_components import SortableTableWidgetItem
-from Base_Components.base_resource_page import BaseResourcePage
+from Base_Components.base_resource_page import BaseResourcePage, StandardResourceColumns, ResourcePageHelpers
 from UI.Styles import AppColors, AppStyles
 
 class ConfigMapsPage(BaseResourcePage):

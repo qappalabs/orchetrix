@@ -5,7 +5,7 @@ Split from AppsChartPage.py for better architecture
 
 import logging
 from PyQt6.QtCore import QThread, pyqtSignal
-from utils.kubernetes_client import get_kubernetes_client
+from Utils.kubernetes_client import get_kubernetes_client
 from kubernetes.client.rest import ApiException
 
 

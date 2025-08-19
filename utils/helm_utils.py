@@ -23,8 +23,8 @@
 # from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QCoreApplication
 # from PyQt6.QtGui import QFont
 # from UI.Styles import AppColors
-# from utils.kubernetes_client import get_kubernetes_client
-# from utils.helm_client import HelmClient
+# from Utils.kubernetes_client import get_kubernetes_client
+# from Utils.helm_client import HelmClient
 
 # # --- Helper functions ---
 

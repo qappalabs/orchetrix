@@ -44,8 +44,8 @@ class SidebarToggleButton(QToolButton):
 
         try:
             from UI.Icons import resource_path  # Import the resource_path function
-            back_icon_path = resource_path("icons/back.svg")
-            forward_icon_path = resource_path("icons/forward.svg")
+            back_icon_path = resource_path("Icons/back.svg")
+            forward_icon_path = resource_path("Icons/forward.svg")
 
             self.expanded_icon = QIcon(back_icon_path)
             self.collapsed_icon = QIcon(forward_icon_path)
@@ -170,7 +170,7 @@ class NavIconButton(QToolButton):
                 coming_soon_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
                 # Load update icon
-                update_pixmap = QPixmap("icons/update_icon.svg")
+                update_pixmap = QPixmap("Icons/update_icon.svg")
                 if not update_pixmap.isNull():
                     coming_soon_label.setPixmap(update_pixmap.scaled(15, 15, Qt.AspectRatioMode.KeepAspectRatio))
                 else:

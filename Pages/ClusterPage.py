@@ -8,7 +8,7 @@ import datetime
 import logging
 
 from UI.Styles import AppStyles, AppColors
-from utils.cluster_connector import get_cluster_connector
+from Utils.cluster_connector import get_cluster_connector
 
 class BarChart(QWidget):
     def __init__(self, color="#ff0000", title="", unit=""):
@@ -572,8 +572,12 @@ class ResourceStatusWidget(QWidget):
                 return f"{memory_value/1024:.2f} GB"
             else:
                 return f"{memory_value/(1024*1024):.2f} TB"
-        except:
+        except (TypeError, ValueError, ZeroDivisionError) as e:
+            logging.debug(f"Error formatting memory value: {e}")
             return f"{memory_value:.2f} MB"
+        except Exception as e:
+            logging.error(f"Unexpected error formatting memory value: {e}")
+            return "Unknown"
         
     def sizeHint(self):
         return QSize(170, 300)
@@ -830,16 +834,22 @@ class ClusterPage(QWidget):
         self.charts_layout = QStackedLayout(self.charts_container)
         self.charts_layout.setContentsMargins(0, 16, 0, 0)
         
-        # Initialize charts
+        # Initialize charts with better sizing
         self.cpu_chart = BarChart(color="#ff0000", title="CPU Usage", unit="%")
         self.memory_chart = BarChart(color="#00ffff", title="Memory Usage", unit="%")
+        
+        # Set minimum size to ensure charts are visible
+        self.cpu_chart.setMinimumSize(400, 300)
+        self.memory_chart.setMinimumSize(400, 300)
         
         # Add charts to stacked layout
         self.charts_layout.addWidget(self.cpu_chart)
         self.charts_layout.addWidget(self.memory_chart)
         
-        # Set CPU chart as current
+        # Set CPU chart as current and ensure it's visible
         self.charts_layout.setCurrentWidget(self.cpu_chart)
+        self.cpu_chart.show()
+        logging.info("ClusterPage: Charts initialized and CPU chart set as current")
         
         main_layout.addWidget(self.charts_container)
 
@@ -875,15 +885,21 @@ class ClusterPage(QWidget):
         self.cpu_btn.setStyleSheet(AppStyles.CLUSTER_ACTIVE_BTN_STYLE)
         self.memory_btn.setStyleSheet(AppStyles.CLUSTER_INACTIVE_BTN_STYLE)
         
-        if hasattr(self, 'charts_layout') and self.charts_layout:
+        if hasattr(self, 'charts_layout') and self.charts_layout and hasattr(self, 'cpu_chart'):
             self.charts_layout.setCurrentWidget(self.cpu_chart)
+            self.cpu_chart.show()
+            self.cpu_chart.update()
+            logging.info("ClusterPage: Switched to CPU chart")
 
     def show_memory_chart(self):
         self.memory_btn.setStyleSheet(AppStyles.CLUSTER_ACTIVE_BTN_STYLE)
         self.cpu_btn.setStyleSheet(AppStyles.CLUSTER_INACTIVE_BTN_STYLE)
         
-        if hasattr(self, 'charts_layout') and self.charts_layout:
+        if hasattr(self, 'charts_layout') and self.charts_layout and hasattr(self, 'memory_chart'):
             self.charts_layout.setCurrentWidget(self.memory_chart)
+            self.memory_chart.show()
+            self.memory_chart.update()
+            logging.info("ClusterPage: Switched to Memory chart")
     
     def create_status_panel(self):
         container = QWidget()
@@ -1011,7 +1027,7 @@ class ClusterPage(QWidget):
                     logging.error("ClusterPage: cpu_status widget not found")
                 
                 # Update CPU chart with proper cleanup
-                if hasattr(self, 'cpu_chart'):
+                if hasattr(self, 'cpu_chart') and self.cpu_chart:
                     # Add usage data (allow duplicate values to build up chart)
                     self.cpu_history.append(usage)
                     # Limit to max 8 points
@@ -1020,6 +1036,8 @@ class ClusterPage(QWidget):
                     
                     timestamps = cpu.get("timestamps", self._generate_time_points(len(self.cpu_history)))
                     self.cpu_chart.update_data(self.cpu_history.copy(), timestamps)
+                    # Force repaint to ensure chart is visible
+                    self.cpu_chart.repaint()
                     logging.info(f"ClusterPage: CPU chart updated successfully with {len(self.cpu_history)} points")
                 else:
                     logging.error("ClusterPage: cpu_chart widget not found")
@@ -1051,6 +1069,8 @@ class ClusterPage(QWidget):
                     
                     timestamps = memory.get("timestamps", self._generate_time_points(len(self.memory_history)))
                     self.memory_chart.update_data(self.memory_history.copy(), timestamps)
+                    # Force repaint to ensure chart is visible
+                    self.memory_chart.repaint()
                     logging.info(f"ClusterPage: Memory chart updated successfully with {len(self.memory_history)} points")
                 else:
                     logging.error("ClusterPage: memory_chart widget not found")

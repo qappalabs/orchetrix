@@ -9,7 +9,9 @@ import logging
 from Base_Components.base_components import SortableTableWidgetItem
 from Base_Components.base_resource_page import BaseResourcePage
 from UI.Styles import AppStyles, AppColors, AppConstants
-from utils.thread_manager import get_thread_manager
+from Utils.thread_manager import get_thread_manager
+
+from UI.Icons import resource_path
 
 class EventsPage(BaseResourcePage):
     """
@@ -93,40 +95,23 @@ class EventsPage(BaseResourcePage):
         # FIXED: Ensure proper column resize behavior and dragging
         header.setSectionsMovable(False)  # Disable moving columns but allow resizing
         header.setMinimumSectionSize(50)  # Minimum width for resizing
+        header.setStretchLastSection(False)  # We'll manually control stretching
 
-        # Set column resize modes and widths
-        for col_index in range(self.table.columnCount()):
-            if col_index == 0:  # Hide checkbox column completely
-                header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Fixed)
-                self.table.setColumnWidth(col_index, 0)
-                self.table.setColumnHidden(col_index, True)
-            elif col_index == 2:  # FIXED: Message column - make it interactive and resizable
-                header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Interactive)
-                self.table.setColumnWidth(col_index, 300)  # Start with reasonable width
-            elif col_index == self.table.columnCount() - 1:  # Action column - FIXED: Tighter spacing
-                header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Fixed)
-                self.table.setColumnWidth(col_index, 50)  # Increased from 30 to give more space on right
-            else:  # All other columns - FIXED: Enable proper interactive resizing
-                header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Interactive)
+        # Simple column configuration for better performance
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        
+        # Hide first column (checkbox)
+        self.table.setColumnHidden(0, True)
+        
+        # Set last column as stretch to fill remaining space
+        header.setSectionResizeMode(self.table.columnCount() - 2, QHeaderView.ResizeMode.Stretch)
 
-        # Set initial widths for interactive columns
-        column_widths = {
-            1: 80,   # Type
-            2: 300,  # Message - increased width
-            3: 100,  # Namespace
-            4: 150,  # Involved object
-            5: 120,  # Source
-            6: 60,   # Count
-            7: 80,   # Age
-            8: 100,  # Last Seen
-        }
-
-        for col, width in column_widths.items():
-            if col < self.table.columnCount():
-                self.table.setColumnWidth(col, width)
-
-        # FIXED: Ensure the header properly handles the hidden first column
-        header.setSectionHidden(0, True)
+        # Simple width setting - message column will stretch automatically
+        widths = [0, 80, 0, 100, 150, 120, 60, 80, 100, 50]
+        for i, width in enumerate(widths):
+            if i < self.table.columnCount() and width > 0:
+                self.table.setColumnWidth(i, width)
+    
     def _handle_scroll(self, value):
         """FIXED: Re-enable scroll handling for pagination"""
         # Use base class scroll handling which includes pagination
@@ -337,9 +322,10 @@ class EventsPage(BaseResourcePage):
         button = QToolButton()
 
         # Use custom SVG icon
-        icon = QIcon("icons/Moreaction_Button.svg")
+        moreaction_icon = resource_path("Icons/Moreaction_Button.svg")
+        icon = QIcon(moreaction_icon)
         button.setIcon(icon)
-        button.setIconSize(QSize(12, 12))  # Even smaller icon
+        button.setIconSize(QSize(AppConstants.SIZES["ICON_SIZE"], AppConstants.SIZES["ICON_SIZE"]))  # Even smaller icon
 
         # Very compact button styling
         button.setStyleSheet(f"""

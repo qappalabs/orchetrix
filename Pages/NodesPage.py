@@ -14,9 +14,9 @@ from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QLinearGradient, QPainter
 from UI.Styles import AppStyles, AppColors, AppConstants
 from Base_Components.base_components import SortableTableWidgetItem
 from Base_Components.base_resource_page import BaseResourcePage
-from utils.cluster_connector import get_cluster_connector
-from utils.debounced_updater import get_debounced_updater
-from utils.performance_config import get_performance_config
+from Utils.cluster_connector import get_cluster_connector
+from Utils.debounced_updater import get_debounced_updater
+from Utils.performance_config import get_performance_config
 from UI.Icons import resource_path
 import datetime
 import re

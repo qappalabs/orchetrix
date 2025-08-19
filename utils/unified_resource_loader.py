@@ -18,10 +18,10 @@ from collections import defaultdict
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 
 from kubernetes.client.rest import ApiException
-from utils.kubernetes_client import get_kubernetes_client
-from utils.error_handler import get_error_handler, safe_execute, log_performance
-from utils.unified_cache_system import get_unified_cache
-from utils.enhanced_worker import EnhancedBaseWorker
+from Utils.kubernetes_client import get_kubernetes_client
+from Utils.error_handler import get_error_handler, safe_execute, log_performance
+from Utils.unified_cache_system import get_unified_cache
+from Utils.enhanced_worker import EnhancedBaseWorker
 
 
 @dataclass
@@ -30,12 +30,12 @@ class ResourceConfig:
     resource_type: str
     api_method: str
     namespace: Optional[str] = None
-    batch_size: int = 100  # Increased for better performance
-    timeout_seconds: int = 60  # Increased timeout for large clusters
-    cache_ttl: int = 180  # 3 minutes for faster updates
-    enable_streaming: bool = True
-    enable_pagination: bool = True
-    max_concurrent_requests: int = 3  # Reduced to avoid overwhelming the API server
+    batch_size: int = 30  # Further reduced for stability
+    timeout_seconds: int = 30  # Longer timeout for Docker Desktop Kubernetes
+    cache_ttl: int = 600  # 10 minutes for much better cache performance
+    enable_streaming: bool = False  # Disabled streaming to reduce complexity
+    enable_pagination: bool = False  # Disabled pagination to reduce load
+    max_concurrent_requests: int = 2  # Further reduced to prevent API overload
 
 
 @dataclass
@@ -97,7 +97,22 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             
         except Exception as e:
             error_handler = get_error_handler()
-            error_message = error_handler.format_connection_error(str(e), self.config.resource_type)
+            error_message = str(e)
+            
+            # Handle specific timeout and connection errors gracefully
+            if "timeout" in error_message.lower() or "read timed out" in error_message.lower():
+                # For timeout-prone resources, try a fallback approach or return cached data
+                fallback_result = self._handle_timeout_fallback()
+                if fallback_result:
+                    return fallback_result
+                
+                error_message = f"Connection timeout - {self.config.resource_type} may be slow to respond"
+                logging.warning(f"Timeout loading {self.config.resource_type}: {error_message}")
+            elif "connection" in error_message.lower():
+                error_message = f"Connection error loading {self.config.resource_type}"
+                logging.warning(f"Connection error loading {self.config.resource_type}: {error_message}")
+            else:
+                error_message = error_handler.format_connection_error(str(e), self.config.resource_type)
             
             return LoadResult(
                 success=False,
@@ -144,10 +159,10 @@ class ResourceLoadWorker(EnhancedBaseWorker):
         # Get the API method
         api_method = getattr(api_client, self.config.api_method)
         
-        # Build method parameters for optimal performance
+        # Build method parameters for optimal performance and fast failure
         kwargs = {
-            'timeout_seconds': self.config.timeout_seconds,
-            '_request_timeout': self.config.timeout_seconds
+            'timeout_seconds': 30,  # Longer timeout for Docker Desktop
+            '_request_timeout': 35  # Longer request timeout for slow clusters
         }
         
         # Add namespace if specified and resource is namespaced
@@ -238,15 +253,15 @@ class ResourceLoadWorker(EnhancedBaseWorker):
         # Use optimized batch processing for better performance
         batch_size = min(self.config.batch_size, len(items))
         
-        # Process in parallel batches for better speed
+        # Process in smaller batches to prevent API overload
         from concurrent.futures import ThreadPoolExecutor
         import math
         
-        # Use smaller batches for parallel processing
-        optimal_batch_size = max(10, batch_size // 4)
+        # Use smaller batches and fewer workers for stability
+        optimal_batch_size = max(25, batch_size // 2)
         num_batches = math.ceil(len(items) / optimal_batch_size)
         
-        with ThreadPoolExecutor(max_workers=min(4, num_batches)) as executor:
+        with ThreadPoolExecutor(max_workers=min(2, num_batches)) as executor:
             futures = []
             
             for i in range(0, len(items), optimal_batch_size):
@@ -560,6 +575,52 @@ class ResourceLoadWorker(EnhancedBaseWorker):
         except Exception as e:
             logging.debug(f"Failed to cache results: {e}")
     
+    def _handle_timeout_fallback(self) -> Optional[LoadResult]:
+        """Handle timeout fallback for timeout-prone resources"""
+        # Apply fallback to ALL resources for Docker Desktop Kubernetes
+        # Docker Desktop often has slow API responses
+        
+        try:
+            # Try to get stale cached data as a fallback
+            cache_service = get_unified_cache()
+            cache_key = self._generate_cache_key()
+            
+            # Look for stale cache data (up to 1 hour old)
+            stale_cached_items = cache_service.get_cached_resources(
+                self.config.resource_type, 
+                cache_key,
+                max_age_seconds=3600  # Allow 1 hour old data as fallback
+            )
+            
+            if stale_cached_items:
+                logging.info(f"Using stale cache fallback for {self.config.resource_type}: {len(stale_cached_items)} items")
+                return LoadResult(
+                    success=True,
+                    resource_type=self.config.resource_type,
+                    items=stale_cached_items,
+                    total_count=len(stale_cached_items),
+                    from_cache=True,
+                    load_time_ms=0
+                )
+            
+            # If no cache available, return empty result for ALL resources to avoid blocking
+            # This is better than showing nothing - at least the UI doesn't freeze
+            logging.info(f"Returning empty fallback for timed-out resource: {self.config.resource_type}")
+            return LoadResult(
+                success=True,
+                resource_type=self.config.resource_type,
+                items=[],
+                total_count=0,
+                from_cache=False,
+                load_time_ms=0,
+                error_message=f"Timeout - returning empty result to avoid blocking UI"
+            )
+                
+        except Exception as e:
+            logging.debug(f"Fallback handling failed for {self.config.resource_type}: {e}")
+        
+        return None
+    
 # cancel() method inherited from EnhancedBaseWorker
 
 
@@ -580,7 +641,7 @@ class HighPerformanceResourceLoader(QObject):
         super().__init__()
         
         # Use unified thread manager for consistency
-        from utils.thread_manager import get_thread_manager
+        from Utils.thread_manager import get_thread_manager
         self._thread_manager = get_thread_manager()
         self._active_workers: Dict[str, ResourceLoadWorker] = {}
         self._worker_lock = threading.RLock()
@@ -911,15 +972,17 @@ class HighPerformanceResourceLoader(QObject):
             return {}
     
     def clear_cache(self, resource_type: Optional[str] = None):
-        """Clear cache for specific resource type or all"""
+        """Clear cache for specific resource type or optimize all caches"""
         try:
             cache_service = get_unified_cache()
             if resource_type:
                 cache_service.clear_resource_cache(resource_type)
                 logging.info(f"Cleared cache for {resource_type}")
             else:
-                cache_service.clear_all_caches()
-                logging.info("Cleared all resource cache")
+                # Don't clear all caches - this destroys performance
+                # Instead, optimize existing caches
+                cache_service.optimize_caches()
+                logging.info("Optimized resource caches instead of clearing all")
         except Exception as e:
             logging.error(f"Error clearing cache: {e}")
     

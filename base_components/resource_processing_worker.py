@@ -9,8 +9,8 @@ import logging
 import time
 from datetime import datetime, timezone
 import threading
-from utils.unified_cache_system import get_unified_cache
-from utils.data_formatters import format_age
+from Utils.unified_cache_system import get_unified_cache
+from Utils.data_formatters import format_age
 
 
 class ResourceProcessingWorker(QThread):
@@ -44,7 +44,7 @@ class ResourceProcessingWorker(QThread):
         self.processed_count = 0
         
         # Cache for processed data - use unified cache system
-        from utils.unified_cache_system import get_unified_cache
+        from Utils.unified_cache_system import get_unified_cache
         unified_cache = get_unified_cache()
         self.cache = unified_cache._formatted_data_cache
         
@@ -164,7 +164,11 @@ class ResourceProcessingWorker(QThread):
                 import hashlib
                 resource_str = str(sorted(resource.items()))
                 return hashlib.md5(resource_str.encode()).hexdigest()[:16]
-        except:
+        except (KeyError, TypeError, AttributeError) as e:
+            logging.debug(f"Could not generate resource ID from metadata: {e}")
+            return str(hash(str(resource)))
+        except Exception as e:
+            logging.error(f"Unexpected error generating resource ID: {e}")
             return str(hash(str(resource)))
     
     def cancel(self):
@@ -301,7 +305,11 @@ class PodProcessingWorker(ResourceProcessingWorker):
             total_count = len(container_statuses)
             
             return f"{ready_count}/{total_count}"
-        except:
+        except (KeyError, TypeError, AttributeError) as e:
+            logging.debug(f"Could not calculate ready status: {e}")
+            return "0/0"
+        except Exception as e:
+            logging.error(f"Unexpected error calculating ready status: {e}")
             return "0/0"
     
     def _calculate_restarts(self, status: Dict) -> int:
@@ -309,7 +317,11 @@ class PodProcessingWorker(ResourceProcessingWorker):
         try:
             container_statuses = status.get("containerStatuses", [])
             return sum(cs.get("restartCount", 0) for cs in container_statuses)
-        except:
+        except (KeyError, TypeError, AttributeError) as e:
+            logging.debug(f"Could not calculate restart count: {e}")
+            return 0
+        except Exception as e:
+            logging.error(f"Unexpected error calculating restart count: {e}")
             return 0
     
     def _count_containers(self, spec: Dict) -> str:
@@ -323,7 +335,11 @@ class PodProcessingWorker(ResourceProcessingWorker):
                 return f"{len(containers)}+{len(init_containers)}"
             else:
                 return str(len(containers))
-        except:
+        except (KeyError, TypeError, AttributeError) as e:
+            logging.debug(f"Could not count containers: {e}")
+            return "0"
+        except Exception as e:
+            logging.error(f"Unexpected error counting containers: {e}")
             return "0"
     
     def _calculate_cpu_requests(self, spec: Dict) -> str:
@@ -348,7 +364,11 @@ class PodProcessingWorker(ResourceProcessingWorker):
             else:
                 return f"{total_cpu_millicores}m"
                 
-        except:
+        except (KeyError, TypeError, AttributeError, ValueError) as e:
+            logging.debug(f"Could not calculate CPU requests: {e}")
+            return "0"
+        except Exception as e:
+            logging.error(f"Unexpected error calculating CPU requests: {e}")
             return "0"
     
     def _calculate_memory_requests(self, spec: Dict) -> str:
@@ -382,7 +402,11 @@ class PodProcessingWorker(ResourceProcessingWorker):
             else:
                 return "0"
                 
-        except:
+        except (KeyError, TypeError, AttributeError, ValueError) as e:
+            logging.debug(f"Could not calculate memory requests: {e}")
+            return "0"
+        except Exception as e:
+            logging.error(f"Unexpected error calculating memory requests: {e}")
             return "0"
     
     def _calculate_age(self, creation_timestamp) -> str:
@@ -467,7 +491,11 @@ class EventProcessingWorker(ResourceProcessingWorker):
             kind = involved_object.get("kind", "")
             name = involved_object.get("name", "")
             return f"{kind}/{name}" if kind and name else "Unknown"
-        except:
+        except (KeyError, TypeError, AttributeError) as e:
+            logging.debug(f"Could not format event object: {e}")
+            return "Unknown"
+        except Exception as e:
+            logging.error(f"Unexpected error formatting event object: {e}")
             return "Unknown"
     
     def _format_source(self, source: Dict) -> str:
@@ -483,7 +511,11 @@ class EventProcessingWorker(ResourceProcessingWorker):
                 return host
             else:
                 return "Unknown"
-        except:
+        except (KeyError, TypeError, AttributeError) as e:
+            logging.debug(f"Could not format event source: {e}")
+            return "Unknown"
+        except Exception as e:
+            logging.error(f"Unexpected error formatting event source: {e}")
             return "Unknown"
     
     def _format_timestamp(self, timestamp) -> str:
@@ -498,7 +530,11 @@ class EventProcessingWorker(ResourceProcessingWorker):
                 dt = timestamp
             
             return dt.strftime("%Y-%m-%d %H:%M:%S")
-        except:
+        except (ValueError, TypeError, AttributeError) as e:
+            logging.debug(f"Could not format timestamp: {e}")
+            return ""
+        except Exception as e:
+            logging.error(f"Unexpected error formatting timestamp: {e}")
             return ""
 
 
@@ -544,7 +580,11 @@ class DeploymentProcessingWorker(ResourceProcessingWorker):
             desired = status.get("replicas", 0)
             ready = status.get("readyReplicas", 0)
             return f"{ready}/{desired}"
-        except:
+        except (KeyError, TypeError, AttributeError) as e:
+            logging.debug(f"Could not calculate deployment replicas: {e}")
+            return "0/0"
+        except Exception as e:
+            logging.error(f"Unexpected error calculating deployment replicas: {e}")
             return "0/0"
     
     def _get_strategy(self, spec: Dict) -> str:
@@ -552,7 +592,11 @@ class DeploymentProcessingWorker(ResourceProcessingWorker):
         try:
             strategy = spec.get("strategy", {})
             return strategy.get("type", "RollingUpdate")
-        except:
+        except (KeyError, TypeError, AttributeError) as e:
+            logging.debug(f"Could not get strategy: {e}")
+            return "Unknown"
+        except Exception as e:
+            logging.error(f"Unexpected error getting strategy: {e}")
             return "Unknown"
     
     def _format_conditions(self, conditions: List[Dict]) -> str:
@@ -567,7 +611,11 @@ class DeploymentProcessingWorker(ResourceProcessingWorker):
             status = latest_condition.get("status", "")
             
             return f"{condition_type}: {status}"
-        except:
+        except (KeyError, TypeError, AttributeError, IndexError) as e:
+            logging.debug(f"Could not format conditions: {e}")
+            return "Unknown"
+        except Exception as e:
+            logging.error(f"Unexpected error formatting conditions: {e}")
             return "Unknown"
 
 

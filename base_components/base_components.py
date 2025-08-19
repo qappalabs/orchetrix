@@ -336,8 +336,8 @@ class BaseTablePage(QWidget):
         checkbox = QCheckBox()
         
         # Get resolved icon paths using the resource_path function
-        unchecked_icon_path = resource_path("icons/check_box_unchecked.svg")
-        checked_icon_path = resource_path("icons/check_box_checked.svg")
+        unchecked_icon_path = resource_path("Icons/check_box_unchecked.svg")
+        checked_icon_path = resource_path("Icons/check_box_checked.svg")
         
         # Verify icons exist, use fallback if needed
         if not os.path.exists(unchecked_icon_path):
@@ -418,8 +418,8 @@ class BaseTablePage(QWidget):
         checkbox = QCheckBox()
         
         # Get resolved icon paths
-        unchecked_icon_path = resource_path("icons/check_box_unchecked.svg")
-        checked_icon_path = resource_path("icons/check_box_checked.svg")
+        unchecked_icon_path = resource_path("Icons/check_box_unchecked.svg")
+        checked_icon_path = resource_path("Icons/check_box_checked.svg")
         
         # Verify icons exist, use fallback if needed
         if not os.path.exists(unchecked_icon_path):
@@ -500,7 +500,7 @@ class BaseTablePage(QWidget):
         button = QToolButton()
 
         # Use custom SVG icon instead of text
-        icon = resource_path("icons/Moreaction_Button.svg")
+        icon = resource_path("Icons/Moreaction_Button.svg")
         button.setIcon(QIcon(icon))
         button.setIconSize(QSize(AppConstants.SIZES["ICON_SIZE"], AppConstants.SIZES["ICON_SIZE"]))
 
@@ -524,13 +524,13 @@ class BaseTablePage(QWidget):
         actions  = []
         # Only show "View Logs" for pods
         if self.resource_type == "pods":
-            actions.append({"text": "View Logs", "icon": "icons/logs.png", "dangerous": False})
-            actions.append({"text": "SSH", "icon": "icons/terminal.png", "dangerous": False})
+            actions.append({"text": "View Logs", "icon": "Icons/logs.png", "dangerous": False})
+            actions.append({"text": "SSH", "icon": "Icons/terminal.png", "dangerous": False})
 
         # Add default actions
         actions.extend([
-            {"text": "Edit", "icon": "icons/edit.png", "dangerous": False},
-            {"text": "Delete", "icon": "icons/delete.png", "dangerous": True}
+            {"text": "Edit", "icon": "Icons/edit.png", "dangerous": False},
+            {"text": "Delete", "icon": "Icons/delete.png", "dangerous": True}
         ])
 
         # Add actions to menu

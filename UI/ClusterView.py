@@ -9,7 +9,7 @@ from .DetailManager import DetailManager
 from UI.Sidebar import Sidebar
 from UI.Styles import AppColors
 from UI.TerminalPanel import TerminalPanel
-from utils.cluster_connector import get_cluster_connector
+from Utils.cluster_connector import get_cluster_connector
 from UI.DetailPageComponent import DetailPageComponent as DetailPage
 
 # Import all page classes (required for PyInstaller compatibility)
@@ -44,7 +44,7 @@ from Pages.Config.ValidatingWebhookConfigsPage import ValidatingWebhookConfigsPa
 
 # Network pages
 from Pages.NetWork.ServicesPage import ServicesPage
-from Pages.NetWork.EndpointesPage import EndpointsPage
+from Pages.NetWork.EndpointsPage import EndpointsPage
 from Pages.NetWork.IngressesPage import IngressesPage
 from Pages.NetWork.IngressClassesPage import IngressClassesPage
 from Pages.NetWork.NetworkPoliciesPage import NetworkPoliciesPage
@@ -60,7 +60,7 @@ from Pages.AccessControl.ServiceAccountsPage import ServiceAccountsPage
 from Pages.AccessControl.ClusterRolesPage import ClusterRolesPage
 from Pages.AccessControl.RolesPage import RolesPage
 from Pages.AccessControl.ClusterRoleBindingsPage import ClusterRoleBindingsPage
-from Pages.AccessControl.RoleBinidingsPage import RoleBindingsPage
+from Pages.AccessControl.RoleBindingsPage import RoleBindingsPage
 
 # Helm pages
 # from Pages.Helm.ChartsPage import ChartsPage
@@ -518,8 +518,8 @@ class ClusterView(QWidget):
     def _refresh_page_async(self, page, page_name: str, delay_ms: int = 500):
         """Refresh a page asynchronously without blocking UI"""
         try:
-            from utils.thread_manager import get_thread_manager
-            from utils.enhanced_worker import EnhancedBaseWorker
+            from Utils.thread_manager import get_thread_manager
+            from Utils.enhanced_worker import EnhancedBaseWorker
             
             # Create a worker for the refresh operation (only for delay, not Qt operations)
             class PageRefreshWorker(EnhancedBaseWorker):

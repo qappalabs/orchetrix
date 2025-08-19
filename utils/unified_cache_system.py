@@ -253,7 +253,8 @@ class HighPerformanceCache:
             self._current_memory_usage = 0
             self.stats = CacheStats()
             
-        logging.info("Cache cleared")
+        # Reduce logging during shutdown to avoid spam
+        logging.debug("Cache cleared")
     
     def get_stats(self) -> Dict[str, Any]:
         """Get cache statistics"""

@@ -15,9 +15,9 @@ from typing import List, Dict, Any, Optional
 from .base_resource_page import BaseResourcePage
 from .virtualized_table_model import VirtualizedResourceModel
 from .virtual_scroll_table import VirtualScrollTable
-from utils.unified_resource_loader import get_unified_resource_loader
+from Utils.unified_resource_loader import get_unified_resource_loader
 from .resource_processing_worker import create_processing_worker
-from utils.thread_manager import get_thread_manager
+from Utils.thread_manager import get_thread_manager
 
 
 class PaginationControls(QFrame):

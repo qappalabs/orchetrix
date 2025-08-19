@@ -152,7 +152,7 @@ class SearchWidget(QFrame):
 
         # Previous button with icon
         self.prev_button = QPushButton()
-        prev_icon = resource_path("icons/Yaml_uparrow.svg")
+        prev_icon = resource_path("Icons/Yaml_uparrow.svg")
         self.prev_button.setIcon(QIcon(prev_icon))
         self.prev_button.setIconSize(QSize(14, 14))
         self.prev_button.setFixedSize(24, 24)
@@ -162,7 +162,7 @@ class SearchWidget(QFrame):
 
         # Next button with icon
         self.next_button = QPushButton()
-        next_icon =resource_path("icons/Yaml_downarrow.svg")
+        next_icon =resource_path("Icons/Yaml_downarrow.svg")
         self.next_button.setIcon(QIcon(next_icon))
         self.next_button.setIconSize(QSize(14, 14))
         self.next_button.setFixedSize(24, 24)
@@ -172,7 +172,7 @@ class SearchWidget(QFrame):
 
         # Case sensitive toggle with icon
         self.case_button = QPushButton()
-        case_icon = resource_path("icons/Yaml_Casesensitive.svg")
+        case_icon = resource_path("Icons/Yaml_Casesensitive.svg")
         self.case_button.setIcon(QIcon(case_icon))
         self.case_button.setIconSize(QSize(14, 14))
         self.case_button.setFixedSize(24, 24)
@@ -183,7 +183,7 @@ class SearchWidget(QFrame):
 
         # Close button with icon
         self.close_button = QPushButton()
-        close_icon = resource_path("icons/close.svg")
+        close_icon = resource_path("Icons/close.svg")
         self.close_button.setIcon(QIcon(close_icon))
         self.close_button.setIconSize(QSize(12, 12))
         self.close_button.setFixedSize(18, 18)

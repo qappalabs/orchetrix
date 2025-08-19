@@ -21,7 +21,7 @@
 # from Base_Components.base_components import SortableTableWidgetItem
 # from Base_Components.base_resource_page import BaseResourcePage
 # from UI.Styles import AppColors, AppStyles
-# from utils.helm_utils import ChartInstallDialog, install_helm_chart
+# from Utils.helm_utils import ChartInstallDialog, install_helm_chart
 
 
 # class ChartDataThread(QThread):

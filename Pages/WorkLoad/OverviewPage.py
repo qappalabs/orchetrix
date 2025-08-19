@@ -10,9 +10,9 @@ from PyQt6.QtGui import QFont
 from PyQt6.QtCore import Qt, QSize, QTimer, pyqtSignal, QObject
 
 from UI.Styles import AppStyles, AppColors
-from utils.kubernetes_client import get_kubernetes_client
-from utils.enhanced_worker import EnhancedBaseWorker
-from utils.thread_manager import get_thread_manager
+from Utils.kubernetes_client import get_kubernetes_client
+from Utils.enhanced_worker import EnhancedBaseWorker
+from Utils.thread_manager import get_thread_manager
 from kubernetes.client.rest import ApiException
 import logging
 
@@ -345,6 +345,8 @@ class OverviewPage(QWidget):
         self.kube_client = None
         self.refresh_timer = None
         self._initialization_complete = False
+        self._is_loading = False  # Prevent duplicate loading
+        self._loading_resources = set()  # Track which resources are being loaded
         
         try:
             self.setup_ui()
@@ -393,8 +395,8 @@ class OverviewPage(QWidget):
         if self.thread() == QApplication.instance().thread():
             self.refresh_timer = QTimer(self)  # Set parent to ensure proper cleanup
             self.refresh_timer.timeout.connect(self.refresh_data)
-            # Refresh every 30 seconds for better data freshness
-            self.refresh_timer.start(30000)
+            # Refresh every 2 minutes to reduce load on slow Docker Desktop
+            self.refresh_timer.start(120000)
         else:
             logging.warning("OverviewPage: Timer setup called from non-main thread")
 
@@ -515,52 +517,66 @@ class OverviewPage(QWidget):
             self.show_connection_error("Failed to initialize Kubernetes client")
 
     def fetch_kubernetes_data(self):
-        """Fetch actual Kubernetes data using async workers."""
+        """Fetch actual Kubernetes data using simple direct loading."""
         try:
             logging.info("OverviewPage: fetch_kubernetes_data called")
             
+            # Simple check to prevent duplicate loading
+            if self._is_loading:
+                logging.info("OverviewPage: Already loading, skipping duplicate call")
+                return
+            
+            self._is_loading = True
+            
             if not self.kube_client:
-                logging.warning("OverviewPage: Kubernetes client not initialized, trying to reinitialize")
                 if not self.initialize_kube_client():
                     self.show_connection_error("Kubernetes client not initialized")
+                    self._is_loading = False
                     return
 
             if not hasattr(self.kube_client, 'current_cluster') or not self.kube_client.current_cluster:
-                logging.warning("OverviewPage: No active cluster context")
                 self.show_connection_error("No active cluster context")
+                self._is_loading = False
                 return
 
-            # Check if basic API clients are available
             if not hasattr(self.kube_client, 'v1') or not self.kube_client.v1:
-                logging.warning("OverviewPage: Kubernetes API client not available")
                 self.show_connection_error("Kubernetes API client not available")
+                self._is_loading = False
                 return
 
             logging.info(f"OverviewPage: Loading data for {len(self.metric_cards)} resource types")
             
-            # Load data asynchronously for each resource type
+            # Load data directly for faster response
             for resource_type in self.metric_cards.keys():
                 try:
-                    logging.info(f"OverviewPage: Loading {resource_type}")
-                    self.load_resource_async(resource_type)
+                    self._load_resource_direct(resource_type)
                 except Exception as e:
                     logging.error(f"Error loading {resource_type}: {e}")
                     self.handle_resource_error(resource_type, str(e))
+            
+            self._is_loading = False
                     
         except Exception as e:
             logging.error(f"Error in fetch_kubernetes_data: {e}")
             self.show_connection_error(f"Error loading data: {str(e)}")
+            self._is_loading = False
 
     def load_resource_async(self, resource_type):
         """Load a specific resource type asynchronously"""
         try:
+            # Check if this resource is already being loaded
+            if resource_type in self._loading_resources:
+                logging.info(f"OverviewPage: {resource_type} already being loaded, skipping")
+                return
+                
+            self._loading_resources.add(resource_type)
             logging.info(f"OverviewPage: Creating worker for {resource_type}")
             worker = OverviewResourceWorker(resource_type, self.kube_client)
             
             # Set up callbacks
             worker.connect_callbacks(
-                lambda data, rtype=resource_type: self.update_card_data(rtype, data),
-                lambda error, rtype=resource_type: self.handle_resource_error(rtype, error)
+                lambda data, rtype=resource_type: self._handle_resource_completed(rtype, data, False),
+                lambda error, rtype=resource_type: self._handle_resource_completed(rtype, error, True)
             )
             
             # Submit to thread manager with proper worker_id
@@ -578,25 +594,95 @@ class OverviewPage(QWidget):
                 
         except Exception as e:
             logging.error(f"Error creating worker for {resource_type}: {e}, trying direct load")
+            self._loading_resources.discard(resource_type)
             # Fallback: try direct synchronous loading
             self._load_resource_direct(resource_type)
     
     def _load_resource_direct(self, resource_type):
-        """Direct synchronous loading as fallback"""
+        """Direct synchronous loading - optimized for speed"""
         try:
-            logging.info(f"OverviewPage: Direct loading {resource_type}")
-            worker = OverviewResourceWorker(resource_type, self.kube_client)
-            result = worker.execute()
-            if result is not None:
-                logging.info(f"OverviewPage: Direct load successful for {resource_type}: {result}")
-                self.update_card_data(resource_type, result)
-            else:
-                logging.warning(f"OverviewPage: Direct load returned None for {resource_type}")
-                self.handle_resource_error(resource_type, "No data returned")
+            if not self.kube_client:
+                self.handle_resource_error(resource_type, "No Kubernetes client")
+                return
+                
+            running_count = 0
+            total_count = 0
+            
+            # Direct API calls for faster loading
+            if resource_type == "pods":
+                items = self.kube_client.v1.list_pod_for_all_namespaces()
+                total_count = len(items.items)
+                running_count = sum(1 for pod in items.items if pod.status and pod.status.phase == "Running")
+                
+            elif resource_type == "deployments":
+                items = self.kube_client.apps_v1.list_deployment_for_all_namespaces()
+                total_count = len(items.items)
+                running_count = sum(1 for dep in items.items 
+                                  if dep.status and 
+                                  (dep.status.available_replicas or 0) == (dep.status.replicas or 0) and 
+                                  (dep.status.replicas or 0) > 0)
+                                  
+            elif resource_type == "daemonsets":
+                items = self.kube_client.apps_v1.list_daemon_set_for_all_namespaces()
+                total_count = len(items.items)
+                running_count = sum(1 for ds in items.items 
+                                  if ds.status and 
+                                  (ds.status.number_ready or 0) == (ds.status.desired_number_scheduled or 0))
+                                  
+            elif resource_type == "statefulsets":
+                items = self.kube_client.apps_v1.list_stateful_set_for_all_namespaces()
+                total_count = len(items.items)
+                running_count = sum(1 for ss in items.items 
+                                  if ss.status and 
+                                  (ss.status.ready_replicas or 0) == (ss.status.replicas or 0) and 
+                                  (ss.status.replicas or 0) > 0)
+                                  
+            elif resource_type == "replicasets":
+                items = self.kube_client.apps_v1.list_replica_set_for_all_namespaces()
+                # Filter out zero-replica replicasets
+                active_items = [rs for rs in items.items if (rs.status and rs.status.replicas or 0) > 0]
+                total_count = len(active_items)
+                running_count = sum(1 for rs in active_items 
+                                  if rs.status and 
+                                  (rs.status.ready_replicas or 0) == (rs.status.replicas or 0))
+                                  
+            elif resource_type == "jobs":
+                items = self.kube_client.batch_v1.list_job_for_all_namespaces()
+                total_count = len(items.items)
+                running_count = sum(1 for job in items.items 
+                                  if job.status and (job.status.succeeded or 0) > 0)
+                                  
+            elif resource_type == "cronjobs":
+                try:
+                    items = self.kube_client.batch_v1.list_cron_job_for_all_namespaces()
+                except AttributeError:
+                    # Fallback to beta API
+                    items = self.kube_client.batch_v1beta1.list_cron_job_for_all_namespaces()
+                total_count = len(items.items)
+                running_count = sum(1 for cj in items.items 
+                                  if not (cj.spec and cj.spec.suspend))
+                                  
+            logging.info(f"OverviewPage: Successfully loaded {resource_type}: {running_count}/{total_count}")
+            self.update_card_data(resource_type, (running_count, total_count))
+            
         except Exception as e:
             logging.error(f"OverviewPage: Direct load failed for {resource_type}: {e}")
             self.handle_resource_error(resource_type, str(e))
         
+    def _handle_resource_completed(self, resource_type, data_or_error, is_error):
+        """Handle resource loading completion and cleanup loading state"""
+        # Remove from loading set
+        self._loading_resources.discard(resource_type)
+        
+        # Check if all resources are done loading
+        if not self._loading_resources:
+            self._is_loading = False
+        
+        if is_error:
+            self.handle_resource_error(resource_type, data_or_error)
+        else:
+            self.update_card_data(resource_type, data_or_error)
+    
     def update_card_data(self, resource_type, data):
         """Update card with loaded data"""
         if resource_type in self.metric_cards:
@@ -623,7 +709,7 @@ class OverviewPage(QWidget):
     def initialize_kube_client(self):
         """Initialize or update the Kubernetes client."""
         try:
-            from utils.kubernetes_client import get_kubernetes_client
+            from Utils.kubernetes_client import get_kubernetes_client
             self.kube_client = get_kubernetes_client()
             if self.kube_client and hasattr(self.kube_client, 'current_cluster'):
                 logging.info(f"OverviewPage: Kubernetes client initialized for cluster: {self.kube_client.current_cluster}")
@@ -650,8 +736,12 @@ class OverviewPage(QWidget):
     def _force_load_all_data(self):
         """Force load all data types directly"""
         logging.info("OverviewPage: Force loading all data types")
-        for resource_type in self.metric_cards.keys():
-            self._load_resource_direct(resource_type)
+        
+        # Reset loading state first
+        self._is_loading = False
+        
+        # Load data directly for immediate response
+        self.fetch_kubernetes_data()
 
     def cleanup(self):
         """Cleanup when page is being destroyed."""

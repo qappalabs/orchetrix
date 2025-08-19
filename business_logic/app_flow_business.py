@@ -66,25 +66,25 @@ class AppFlowBusinessLogic:
         """Initialize Kubernetes resource icons mapping"""
         return {
             ResourceType.INGRESS: K8sIconInfo(
-                ResourceType.INGRESS, "icons/ingress.png", "#E91E63", "#4A1628"
+                ResourceType.INGRESS, "Icons/ingress.png", "#E91E63", "#4A1628"
             ),
             ResourceType.SERVICE: K8sIconInfo(
-                ResourceType.SERVICE, "icons/service.png", "#28a745", "#1e4d2b"
+                ResourceType.SERVICE, "Icons/service.png", "#28a745", "#1e4d2b"
             ),
             ResourceType.DEPLOYMENT: K8sIconInfo(
-                ResourceType.DEPLOYMENT, "icons/deployment.png", "#007acc", "#1e3a5f"
+                ResourceType.DEPLOYMENT, "Icons/deployment.png", "#007acc", "#1e3a5f"
             ),
             ResourceType.POD: K8sIconInfo(
-                ResourceType.POD, "icons/pod.png", "#4CAF50", "#2E7D32"
+                ResourceType.POD, "Icons/pod.png", "#4CAF50", "#2E7D32"
             ),
             ResourceType.CONFIGMAP: K8sIconInfo(
-                ResourceType.CONFIGMAP, "icons/configmap.png", "#4CAF50", "#2E7D32"
+                ResourceType.CONFIGMAP, "Icons/configmap.png", "#4CAF50", "#2E7D32"
             ),
             ResourceType.SECRET: K8sIconInfo(
-                ResourceType.SECRET, "icons/secret.png", "#FF9800", "#F57C00"
+                ResourceType.SECRET, "Icons/secret.png", "#FF9800", "#F57C00"
             ),
             ResourceType.PVC: K8sIconInfo(
-                ResourceType.PVC, "icons/pvc.png", "#9C27B0", "#6A1B9A"
+                ResourceType.PVC, "Icons/pvc.png", "#9C27B0", "#6A1B9A"
             )
         }
     
@@ -225,7 +225,7 @@ class AppFlowBusinessLogic:
             layers[ResourceType.CONFIGMAP] = config_resources
         
         # Layout constants for horizontal arrangement - optimized for enhanced boxes with external text
-        LAYER_SPACING_X = 220  # Horizontal spacing between layers (adjusted for enhanced boxes)
+        LAYER_SPACING_X = 300  # Increased horizontal spacing for longer arrows between layers
         ITEM_SPACING_Y = 60    # Reduced vertical spacing between items for pods
         START_X = 50
         START_Y = 50

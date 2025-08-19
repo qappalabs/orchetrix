@@ -11,7 +11,7 @@ from PyQt6.QtGui import QColor
 from Base_Components.base_components import SortableTableWidgetItem
 from Base_Components.base_resource_page import BaseResourcePage
 from UI.Styles import AppStyles, AppColors
-from utils.kubernetes_client import get_kubernetes_client
+from Utils.kubernetes_client import get_kubernetes_client
 from kubernetes.client.rest import ApiException
 from kubernetes import client
 import datetime

@@ -12,8 +12,8 @@ from Base_Components.base_resource_page import BaseResourcePage
 from UI.Styles import AppColors, AppStyles
 from UI.Icons import resource_path
 
-from utils.port_forward_manager import get_port_forward_manager, PortForwardConfig
-from utils.port_forward_dialog import PortForwardDialog, ActivePortForwardsDialog
+from Utils.port_forward_manager import get_port_forward_manager, PortForwardConfig
+from Utils.port_forward_dialog import PortForwardDialog, ActivePortForwardsDialog
 
 class StatusLabel(QWidget):
     """Widget that displays a status with consistent styling and background handling."""

@@ -193,12 +193,12 @@ class UnifiedTerminalHeader(QWidget):
 
         # Create buttons
         buttons = [
-            ("icons/terminal_add.svg", "New Terminal", self.add_new_tab),
-            ("icons/terminal_refresh.svg", "Refresh Terminal / Refresh Logs", self.refresh_terminal),
-            ("icons/terminal_download.svg", "Download Terminal Output / Download Logs", self.download_terminal_output),
+            ("Icons/terminal_add.svg", "New Terminal", self.add_new_tab),
+            ("Icons/terminal_refresh.svg", "Refresh Terminal / Refresh Logs", self.refresh_terminal),
+            ("Icons/terminal_download.svg", "Download Terminal Output / Download Logs", self.download_terminal_output),
             ("💾", "Save File", self.save_current_file),
-            ("icons/terminal_up_down.svg", "Maximize/Restore Terminal", self.toggle_maximize),
-            ("icons/terminal_close.svg", "Hide Terminal Panel", self.hide_terminal)
+            ("Icons/terminal_up_down.svg", "Maximize/Restore Terminal", self.toggle_maximize),
+            ("Icons/terminal_close.svg", "Hide Terminal Panel", self.hide_terminal)
         ]
         
         self.new_tab_btn, self.refresh_btn, self.download_btn, self.save_btn, self.maximize_btn, self.close_btn = [
@@ -458,7 +458,7 @@ class UnifiedTerminalHeader(QWidget):
         self.edit_mode = False
         self.current_file = None
         self.save_btn.hide()
-        self.refresh_btn.setIcon(QIcon(resource_path("icons/terminal_refresh.svg")))
+        self.refresh_btn.setIcon(QIcon(resource_path("Icons/terminal_refresh.svg")))
         self.refresh_btn.setToolTip("Refresh Terminal")
         if self._active_terminal_widget():
             self._active_terminal_widget().exit_edit_mode()
@@ -529,7 +529,7 @@ class UnifiedTerminalHeader(QWidget):
         """Toggle terminal maximize/restore state."""
         if hasattr(self.parent_terminal, 'toggle_maximize'):
             self.parent_terminal.toggle_maximize()
-            self.maximize_btn.setIcon(QIcon(resource_path("icons/terminal_up_down.svg")))
+            self.maximize_btn.setIcon(QIcon(resource_path("Icons/terminal_up_down.svg")))
             self.maximize_btn.setToolTip("Restore Terminal" if self.parent_terminal.is_maximized else "Maximize Terminal")
 
     def hide_terminal(self):

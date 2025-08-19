@@ -20,14 +20,14 @@ from PyQt6.QtGui import QFont, QPen, QBrush, QColor, QPainter, QPixmap, QIcon, Q
 
 from UI.Styles import AppStyles, AppColors
 from UI.Icons import resource_path
-from business_logic.app_flow_business import (
+from Business_Logic.app_flow_business import (
     AppFlowBusinessLogic, ResourceType, GraphLayout, ResourceInfo, ConnectionInfo
 )
 
 # Import modular components from the same package
 from .deployment_analyzer import DeploymentAnalyzer
-from utils.unified_resource_loader import get_unified_resource_loader
-from utils.data_formatters import format_age, truncate_string
+from Utils.unified_resource_loader import get_unified_resource_loader
+from Utils.data_formatters import format_age, truncate_string
 from .app_flow_analyzer import AppFlowAnalyzer
 
 
@@ -846,7 +846,7 @@ class AppsPage(QWidget):
         
         # Export button with dropdown menu
         self.export_btn = QToolButton()
-        export_icon_path = resource_path("icons/terminal_download.svg")
+        export_icon_path = resource_path("Icons/terminal_download.svg")
         if os.path.exists(export_icon_path):
             self.export_btn.setIcon(QIcon(export_icon_path))
         else:
@@ -896,14 +896,14 @@ class AppsPage(QWidget):
         
         # Add export actions
         export_image_action = QAction("Export as Image", self)
-        image_icon_path = resource_path("icons/export_to_image.svg")
+        image_icon_path = resource_path("Icons/export_to_image.svg")
         if os.path.exists(image_icon_path):
             export_image_action.setIcon(QIcon(image_icon_path))
         export_image_action.triggered.connect(self.export_as_image_dialog)
         export_menu.addAction(export_image_action)
         
         export_pdf_action = QAction("Export as PDF", self)
-        pdf_icon_path = resource_path("icons/export_to_pdf.svg")
+        pdf_icon_path = resource_path("Icons/export_to_pdf.svg")
         if os.path.exists(pdf_icon_path):
             export_pdf_action.setIcon(QIcon(pdf_icon_path))
         export_pdf_action.triggered.connect(self.export_as_pdf_dialog)
@@ -1395,7 +1395,7 @@ class AppsPage(QWidget):
         }
         
         icon_name = icon_mapping.get(resource_type, "workloads.png")
-        return os.path.join("icons", icon_name)
+        return os.path.join("Icons", icon_name)
     
     def get_pod_icon_path(self, status: str) -> str:
         """Get appropriate pod icon based on status"""
@@ -1418,7 +1418,7 @@ class AppsPage(QWidget):
             # Pending, ContainerCreating, etc.
             icon_name = os.path.join("k8s_chart_icon", "pod_pending.svg")
         
-        return os.path.join("icons", icon_name)
+        return os.path.join("Icons", icon_name)
     
     def draw_horizontal_connection(self, from_pos: tuple, to_pos: tuple, connection_type: str):
         """Draw enhanced horizontal connection between resources"""
@@ -1592,10 +1592,7 @@ class AppsPage(QWidget):
     def export_as_image(self, file_path: str, format_type: str):
         """Export enhanced graph as image with full details (PNG/JPEG)"""
         try:
-            # Create enhanced export version with full names
-            self.create_export_version_of_graph()
-            
-            # Get scene bounding rect
+            # Export the current display directly without modification
             scene_rect = self.diagram_scene.itemsBoundingRect()
             
             # Ensure scene has content
@@ -1605,7 +1602,7 @@ class AppsPage(QWidget):
             # Create high-quality pixmap with extra margins
             margin = 60
             pixmap = QPixmap(int(scene_rect.width() + margin*2), int(scene_rect.height() + margin*2))
-            pixmap.fill(QColor("#ffffff"))  # Use white background for export
+            pixmap.fill(QColor("#1e1e1e"))  # Use dark background matching app display
             
             # Render scene to pixmap with enhanced quality
             painter = QPainter()
@@ -1633,9 +1630,6 @@ class AppsPage(QWidget):
                 
         except Exception as e:
             raise Exception(f"Export failed: {str(e)}")
-        finally:
-            # Restore original view after export
-            self.restore_original_graph()
     
     def export_as_pdf(self, file_path: str):
         """Export graph as PDF"""
@@ -1643,8 +1637,7 @@ class AppsPage(QWidget):
             from PyQt6.QtPrintSupport import QPrinter
             from PyQt6.QtGui import QPageSize, QPageLayout
             
-            # Create enhanced export version with full names
-            self.create_export_version_of_graph()
+            # Export the current display directly without modification
             
             # Get scene bounding rect with padding to prevent clipping
             scene_rect = self.diagram_scene.itemsBoundingRect()
@@ -1682,6 +1675,9 @@ class AppsPage(QWidget):
                     # Convert page rect to QRectF for proper rendering
                     page_rect = QRectF(printer.pageRect(QPrinter.Unit.DevicePixel))
                     
+                    # Fill page with white background for PDF
+                    painter.fillRect(page_rect, QColor("#ffffff"))
+                    
                     # Add title heading to PDF
                     painter.setPen(QColor("#000000"))
                     painter.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
@@ -1692,8 +1688,14 @@ class AppsPage(QWidget):
                     # Adjust page rect to account for title space
                     adjusted_page_rect = QRectF(page_rect.x(), page_rect.y() + 60, page_rect.width(), page_rect.height() - 60)
                     
+                    # Temporarily adjust text colors for PDF visibility
+                    self.adjust_text_colors_for_pdf(True)
+                    
                     # Render the diagram
                     self.diagram_scene.render(painter, adjusted_page_rect, scene_rect)
+                    
+                    # Restore original text colors
+                    self.adjust_text_colors_for_pdf(False)
                     
                     # Add timestamp at bottom
                     painter.setFont(QFont("Segoe UI", 10))
@@ -1707,22 +1709,24 @@ class AppsPage(QWidget):
                 
         except Exception as e:
             raise Exception(f"PDF export failed: {str(e)}")
-        finally:
-            # Restore original view after export
-            self.restore_original_graph()
+    
+    def adjust_text_colors_for_pdf(self, for_pdf: bool):
+        """Temporarily adjust text colors for better PDF visibility"""
+        try:
+            for item in self.diagram_scene.items():
+                if hasattr(item, 'setDefaultTextColor'):
+                    if for_pdf:
+                        # Set to black for PDF visibility
+                        item.setDefaultTextColor(QColor("#000000"))
+                    else:
+                        # Restore to white for app display
+                        item.setDefaultTextColor(QColor("#ffffff"))
+        except Exception as e:
+            logging.warning(f"Error adjusting text colors: {e}")
     
     def create_export_version_of_graph(self):
-        """Create export version with full names and enhanced details"""
-        # Store original state
-        self.original_scene_items = []
-        for item in self.diagram_scene.items():
-            if hasattr(item, 'data') and item.data(0):
-                self.original_scene_items.append((item, item.data(0)))
-        
-        # Clear and redraw with full details for export
-        if self.current_app_flow_data:
-            processed_data = self.business_logic.process_app_flow_data(self.current_app_flow_data)
-            self.create_export_horizontal_diagram(processed_data)
+        """No longer needed - we export the current display directly"""
+        pass
     
     def create_export_horizontal_diagram(self, processed_data):
         """Create horizontal diagram optimized for export with full names"""
@@ -1887,8 +1891,8 @@ class AppsPage(QWidget):
     
     def add_export_metadata_to_image(self, painter: QPainter, width: int, height: int):
         """Add metadata information to exported image"""
-        # Add title and timestamp - Use dark color for PDF visibility
-        painter.setPen(QColor("#000000"))  # Changed to black for PDF visibility
+        # Add title and timestamp - Use white color for dark background visibility
+        painter.setPen(QColor("#ffffff"))  # White text for dark background
         painter.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
         
         # Use deployment name instead of namespace in title
@@ -1915,10 +1919,8 @@ class AppsPage(QWidget):
             painter.drawText(width - 200, height - 20, resource_info)
     
     def restore_original_graph(self):
-        """Restore the original graph after export"""
-        if self.current_app_flow_data:
-            processed_data = self.business_logic.process_app_flow_data(self.current_app_flow_data)
-            self.create_horizontal_app_flow_diagram(processed_data)
+        """No longer needed - we export the current display directly"""
+        pass
 
     def enhanced_wheel_event(self, event):
         """Enhanced wheel event for smooth zooming"""

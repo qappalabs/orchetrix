@@ -13,8 +13,8 @@ from Base_Components.base_resource_page import BaseResourcePage
 from UI.Styles import AppColors, AppStyles
 from kubernetes import client
 from kubernetes.client.rest import ApiException
-from utils.port_forward_manager import get_port_forward_manager, PortForwardConfig
-from utils.port_forward_dialog import PortForwardDialog, ActivePortForwardsDialog
+from Utils.port_forward_manager import get_port_forward_manager, PortForwardConfig
+from Utils.port_forward_dialog import PortForwardDialog, ActivePortForwardsDialog
 from UI.Icons import resource_path
 
 class StatusLabel(QWidget):
@@ -50,7 +50,7 @@ class ServicesPage(BaseResourcePage):
         super().__init__(parent)
         self.resource_type = "services"
         # Use managed kubernetes client instead of direct client instantiation
-        from utils.kubernetes_client import get_kubernetes_client
+        from Utils.kubernetes_client import get_kubernetes_client
         managed_client = get_kubernetes_client()
         self.kube_client = managed_client.v1 if managed_client else None
         self.port_manager = get_port_forward_manager()

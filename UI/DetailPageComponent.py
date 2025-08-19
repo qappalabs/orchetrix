@@ -20,7 +20,7 @@ import tempfile
 import os
 
 # Import Kubernetes client
-from utils.kubernetes_client import get_kubernetes_client
+from Utils.kubernetes_client import get_kubernetes_client
 
 # Import section components
 from .detail_sections.detailpage_overviewsection import DetailPageOverviewSection
@@ -30,7 +30,7 @@ from .detail_sections.detailpage_eventssection import DetailPageEventsSection
 
 from UI.Styles import AppStyles, AppColors
 from PyQt6.QtWidgets import QPushButton, QFrame
-# from utils.helm_utils import ChartInstallDialog, install_helm_chart
+# from Utils.helm_utils import ChartInstallDialog, install_helm_chart
 
 
 class DetailPageComponent(QWidget):
@@ -112,7 +112,7 @@ class DetailPageComponent(QWidget):
 
         # Back/Close button - FIXED: Added icon and proper styling
         self.back_button = QPushButton()
-        self.back_button.setIcon(QIcon(resource_path("icons/Detailpage_Close.svg")))
+        self.back_button.setIcon(QIcon(resource_path("Icons/Detailpage_Close.svg")))
         self.back_button.setIconSize(QSize(20, 20))
         self.back_button.setFixedSize(40, 40)
         self.back_button.setCursor(Qt.CursorShape.PointingHandCursor)  # Hand cursor on hover

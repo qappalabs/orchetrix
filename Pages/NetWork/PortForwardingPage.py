@@ -12,8 +12,8 @@ from PyQt6.QtCore import QSize
 from Base_Components.base_components import SortableTableWidgetItem
 from Base_Components.base_resource_page import BaseResourcePage
 from UI.Styles import AppColors, AppStyles
-from utils.port_forward_manager import get_port_forward_manager, PortForwardConfig
-from utils.port_forward_dialog import PortForwardDialog, ActivePortForwardsDialog
+from Utils.port_forward_manager import get_port_forward_manager, PortForwardConfig
+from Utils.port_forward_dialog import PortForwardDialog, ActivePortForwardsDialog
 from functools import partial
 import time
 from UI.Icons import resource_path
@@ -324,7 +324,7 @@ class PortForwardingPage(BaseResourcePage):
         from PyQt6.QtWidgets import QToolButton
         
         button = QToolButton()
-        icon = resource_path("icons/Moreaction_Button.svg")
+        icon = resource_path("Icons/Moreaction_Button.svg")
         button.setIcon(QIcon(icon))
         button.setIconSize(QSize(16, 16))
         button.setText("")
@@ -345,14 +345,14 @@ class PortForwardingPage(BaseResourcePage):
         
         if resource:
             if resource['status'] == 'active':
-                actions.append({"text": "Open in Browser", "icon": "icons/web.png", "dangerous": False})
-                actions.append({"text": "Copy URL", "icon": "icons/copy.png", "dangerous": False})
-                actions.append({"text": "Restart", "icon": "icons/refresh.png", "dangerous": False})
+                actions.append({"text": "Open in Browser", "icon": "Icons/web.png", "dangerous": False})
+                actions.append({"text": "Copy URL", "icon": "Icons/copy.png", "dangerous": False})
+                actions.append({"text": "Restart", "icon": "Icons/refresh.png", "dangerous": False})
             elif resource['status'] in ['inactive', 'error']:
-                actions.append({"text": "Restart", "icon": "icons/refresh.png", "dangerous": False})
+                actions.append({"text": "Restart", "icon": "Icons/refresh.png", "dangerous": False})
             
-            actions.append({"text": "Stop", "icon": "icons/stop.png", "dangerous": True})
-            actions.append({"text": "Delete", "icon": "icons/delete.png", "dangerous": True})
+            actions.append({"text": "Stop", "icon": "Icons/stop.png", "dangerous": True})
+            actions.append({"text": "Delete", "icon": "Icons/delete.png", "dangerous": True})
 
         # Add actions to menu
         for action_info in actions:

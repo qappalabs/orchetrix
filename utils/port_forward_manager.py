@@ -13,9 +13,9 @@ from dataclasses import dataclass
 from PyQt6.QtCore import QObject, pyqtSignal, QThread, QTimer
 from kubernetes import client
 from kubernetes.stream import stream
-from utils.kubernetes_client import get_kubernetes_client
-from utils.enhanced_worker import EnhancedBaseWorker
-from utils.thread_manager import get_thread_manager
+from Utils.kubernetes_client import get_kubernetes_client
+from Utils.enhanced_worker import EnhancedBaseWorker
+from Utils.thread_manager import get_thread_manager
 
 
 @dataclass
@@ -122,13 +122,17 @@ class KubernetesPortForwarder:
         finally:
             try:
                 client_socket.close()
-            except:
-                pass
+            except (OSError, socket.error) as e:
+                logging.debug(f"Error closing client socket: {e}")
+            except Exception as e:
+                logging.error(f"Unexpected error closing client socket: {e}")
             if pod_stream:
                 try:
                     pod_stream.close()
-                except:
-                    pass
+                except (AttributeError, OSError) as e:
+                    logging.debug(f"Error closing pod stream: {e}")
+                except Exception as e:
+                    logging.error(f"Unexpected error closing pod stream: {e}")
     
     def _resolve_target(self):
         """Resolve target pod and port"""
@@ -219,8 +223,10 @@ class KubernetesPortForwarder:
         if self.server_socket:
             try:
                 self.server_socket.close()
-            except:
-                pass
+            except (OSError, socket.error) as e:
+                logging.debug(f"Error closing server socket: {e}")
+            except Exception as e:
+                logging.error(f"Unexpected error closing server socket: {e}")
 
 
 class SimplePortForwarder:
@@ -300,8 +306,10 @@ Connection: close
         if self.server_socket:
             try:
                 self.server_socket.close()
-            except:
-                pass
+            except (OSError, socket.error) as e:
+                logging.debug(f"Error closing server socket: {e}")
+            except Exception as e:
+                logging.error(f"Unexpected error closing server socket: {e}")
 
 
 class PortForwardWorker(EnhancedBaseWorker):

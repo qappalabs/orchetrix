@@ -21,12 +21,12 @@ from .virtual_scroll_table import VirtualScrollTable
 
 from Base_Components.base_components import BaseTablePage
 from UI.Styles import AppStyles, AppColors
-from utils.unified_resource_loader import get_unified_resource_loader, LoadResult
-from utils.data_formatters import format_age, parse_memory_value, format_percentage, truncate_string
-from utils.error_handler import get_error_handler, safe_execute, error_handler
-from utils.enhanced_worker import EnhancedBaseWorker
-from utils.thread_manager import get_thread_manager
-from utils.kubernetes_client import get_kubernetes_client
+from Utils.unified_resource_loader import get_unified_resource_loader, LoadResult
+from Utils.data_formatters import format_age, parse_memory_value, format_percentage, truncate_string
+from Utils.error_handler import get_error_handler, safe_execute, error_handler
+from Utils.enhanced_worker import EnhancedBaseWorker
+from Utils.thread_manager import get_thread_manager
+from Utils.kubernetes_client import get_kubernetes_client
 from log_handler import method_logger, class_logger
 
 # Constants for performance tuning - optimized values
@@ -35,11 +35,8 @@ SCROLL_DEBOUNCE_MS = 50   # Reduced debounce for more responsive scrolling
 SEARCH_DEBOUNCE_MS = 200  # Reduced debounce for faster search
 CACHE_TTL_SECONDS = 600   # Increased cache time for better performance
 
-# Import new performance components  
-from utils.unified_cache_system import get_unified_cache, clear_all_unified_caches
-from utils.search_index import get_search_index
-
-from .resource_processing_worker import create_processing_worker
+# Import performance components  
+from Utils.unified_cache_system import get_unified_cache
 
 @class_logger(log_level=logging.INFO, exclude_methods=['__init__', 'clear_table', 'update_table_row', 'load_more_complete', 'all_items_loaded_signal', 'force_load_data'])
 class BaseResourcePage(BaseTablePage):
@@ -74,7 +71,7 @@ class BaseResourcePage(BaseTablePage):
         self.is_showing_skeleton = False
 
         # Use unified cache system
-        from utils.unified_cache_system import get_unified_cache
+        from Utils.unified_cache_system import get_unified_cache
         self._cache_manager = get_unified_cache()
         
         # Use specific caches for different data types  
@@ -83,6 +80,7 @@ class BaseResourcePage(BaseTablePage):
         self._formatted_cache = self._cache_manager._formatted_data_cache
         
         self._shutting_down = False
+        
         
         # Thread safety
         import threading
@@ -97,16 +95,9 @@ class BaseResourcePage(BaseTablePage):
         
         # Debouncing timers
         # Use unified debounced updater instead of individual timers
-        from utils.debounced_updater import get_debounced_updater
+        from Utils.debounced_updater import get_debounced_updater
         self._debounced_updater = get_debounced_updater()
         
-        # Progressive rendering
-        self._render_timer = QTimer()
-        self._render_timer.timeout.connect(self._render_next_batch)
-        self._render_queue = []
-        
-        # Search index for efficient search
-        self._search_index = None
 
         self.kube_client = get_kubernetes_client()
         self._load_more_indicator_widget = None
@@ -114,9 +105,6 @@ class BaseResourcePage(BaseTablePage):
         self._message_widget_container = None
         self._table_stack = None
         
-        # Background processing
-        self._processing_worker = None
-        self._progress_dialog = None
         
         # Track if data has been loaded at least once
         self._initial_load_done = False
@@ -124,14 +112,15 @@ class BaseResourcePage(BaseTablePage):
     def showEvent(self, event):
         """Override showEvent to automatically load data when page becomes visible"""
         super().showEvent(event)
-        # Only auto-load if we haven't loaded data yet and it's not already loading
-        if not self._initial_load_done and not self.is_loading_initial and not self.resources:
-            QTimer.singleShot(100, self._auto_load_data)
+        # Always try to load data when page becomes visible if we don't have current data
+        if not self.is_loading_initial and (not self.resources or not self._initial_load_done):
+            QTimer.singleShot(50, self._auto_load_data)  # Faster response
 
     def _auto_load_data(self):
         """Auto-load data when page is shown"""
-        if hasattr(self, 'resource_type') and self.resource_type:
-            logging.info(f"Auto-loading data for {self.__class__.__name__}")
+        if hasattr(self, 'resource_type') and self.resource_type and not self.is_loading_initial:
+            logging.debug(f"Auto-loading data for {self.__class__.__name__}")  # Reduced to debug
+            self._initial_load_done = True  # Mark as done to prevent repeated attempts
             self.load_data()
 
     def setup_ui(self, title, headers, sortable_columns=None):
@@ -272,130 +261,6 @@ class BaseResourcePage(BaseTablePage):
                 self.resources = []
             self.resources.extend(new_resources)
     
-    # Background processing methods
-    def process_data_in_background(self, raw_data: List[Dict], show_progress: bool = True):
-        """Process resource data in background thread to prevent UI blocking"""
-        if self._processing_worker and self._processing_worker.isRunning():
-            logging.warning("Background processing already in progress")
-            return False
-        
-        # Show progress dialog if requested
-        if show_progress:
-            self._show_progress_dialog("Processing data...")
-        
-        # Create processing worker
-        self._processing_worker = create_processing_worker(
-            self.resource_type or "resource", 
-            raw_data
-        )
-        
-        # Connect signals
-        self._processing_worker.data_processed.connect(self._on_processing_complete)
-        self._processing_worker.error_occurred.connect(self._on_processing_error)
-        if show_progress:
-            self._processing_worker.progress_updated.connect(self._on_processing_progress)
-        self._processing_worker.processing_finished.connect(self._hide_progress_dialog)
-        
-        # Start processing
-        self._processing_worker.start()
-        
-        return True
-    
-    def _process_single_resource(self, raw_resource: Dict) -> Dict:
-        """Process a single resource item - this method is now handled by ResourceProcessingWorker"""
-        # This method is kept for compatibility but processing is now handled by the worker
-        # Individual resource pages can provide custom processing through the worker
-        return raw_resource
-    
-    def _on_processing_progress(self, progress: int, message: str):
-        """Handle processing progress updates (runs in UI thread)"""
-        if self._progress_dialog:
-            self._progress_dialog.setValue(progress)
-            self._progress_dialog.setLabelText(message)
-    
-    def _on_processing_complete(self, processed_data: List[Dict]):
-        """Handle completed processing (runs in UI thread)"""
-        try:
-            # Hide progress dialog
-            self._hide_progress_dialog()
-            
-            # Update resources safely
-            self.set_resources_safely(processed_data)
-            
-            # Update UI
-            self._update_table_from_processed_data()
-            
-            # Update count
-            if hasattr(self, 'items_count'):
-                self.items_count.setText(f"{len(processed_data)} items")
-            
-            logging.info(f"Background processing completed: {len(processed_data)} items processed")
-            
-        except Exception as e:
-            logging.error(f"Error in _on_processing_complete: {e}")
-            self._on_processing_error(f"Failed to update UI: {e}")
-    
-    def _on_processing_error(self, error_message: str):
-        """Handle processing errors (runs in UI thread)"""
-        # Hide progress dialog
-        self._hide_progress_dialog()
-        
-        # Show error message
-        from PyQt6.QtWidgets import QMessageBox
-        QMessageBox.critical(
-            self, 
-            "Processing Error", 
-            f"Failed to process data:\n{error_message}"
-        )
-        
-        logging.error(f"Background processing error: {error_message}")
-    
-    def _show_progress_dialog(self, message: str):
-        """Show progress dialog for background processing"""
-        from PyQt6.QtWidgets import QProgressDialog
-        from PyQt6.QtCore import Qt
-        
-        if not self._progress_dialog:
-            self._progress_dialog = QProgressDialog(self)
-            self._progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
-            self._progress_dialog.setMinimumDuration(500)  # Show after 500ms
-            self._progress_dialog.setCancelButton(None)  # No cancel for now
-        
-        self._progress_dialog.setLabelText(message)
-        self._progress_dialog.setRange(0, 100)
-        self._progress_dialog.setValue(0)
-        self._progress_dialog.show()
-    
-    def _hide_progress_dialog(self):
-        """Hide progress dialog"""
-        if self._progress_dialog:
-            self._progress_dialog.hide()
-            self._progress_dialog.deleteLater()
-            self._progress_dialog = None
-    
-    def _update_table_from_processed_data(self):
-        """Update table with processed data - to be implemented by subclasses"""
-        # Default implementation using populate_resource_row
-        if hasattr(self, 'populate_resource_row') and hasattr(self, 'table'):
-            try:
-                self.table.setRowCount(0)  # Clear existing rows
-                resources = self.get_resources_safely()
-                
-                self.table.setRowCount(len(resources))
-                for row, resource in enumerate(resources):
-                    self.populate_resource_row(row, resource)
-                
-                logging.debug(f"Table updated with {len(resources)} rows")
-                
-            except Exception as e:
-                logging.error(f"Error updating table: {e}")
-    
-    def stop_background_processing(self):
-        """Stop any ongoing background processing"""
-        if self._processing_worker and self._processing_worker.isRunning():
-            self._processing_worker.cancel()
-            self._processing_worker.wait(3000)  # Wait up to 3 seconds
-        self._hide_progress_dialog()
 
     def _create_title_and_count(self, layout, title_text):
         """Create title and count labels"""
@@ -469,18 +334,23 @@ class BaseResourcePage(BaseTablePage):
     
     def _handle_delete_selected(self):
         """Base implementation for delete selected functionality"""
-        selected_items = self._get_selected_resources()
-        if not selected_items:
+        # Enhanced debugging for selection
+        logging.debug(f"_handle_delete_selected called. Selected items: {len(self.selected_items) if hasattr(self, 'selected_items') else 'No selected_items attribute'}")
+        logging.debug(f"Selected items content: {list(self.selected_items) if hasattr(self, 'selected_items') else 'N/A'}")
+        
+        if not self.selected_items:
             QMessageBox.information(self, "No Selection", 
-                                    "Please select resources to delete.")
+                                    "Please select resources to delete by checking the checkboxes in the first column.")
             return
         
         # Confirmation dialog
-        if not self._confirm_deletion(selected_items):
+        if not self._confirm_deletion(list(self.selected_items)):
+            logging.debug("User cancelled deletion in confirmation dialog")
             return
             
-        # Start deletion process
-        self._start_deletion_process(selected_items)
+        # Start deletion process (confirmation already done)
+        logging.debug("Starting deletion process after confirmation")
+        self._start_deletion_process(list(self.selected_items))
     
     def _get_selected_resources(self):
         """Get currently selected resources - to be implemented by subclasses"""
@@ -512,10 +382,13 @@ class BaseResourcePage(BaseTablePage):
         return reply == QMessageBox.StandardButton.Yes
     
     def _start_deletion_process(self, selected_items):
-        """Start the deletion process - to be implemented by subclasses"""
-        # Default implementation
-        if hasattr(self, 'delete_selected_resources'):
-            self.delete_selected_resources()
+        """Start the deletion process - bypasses confirmation since it's already confirmed"""
+        # Default implementation - skip confirmation dialog since we already confirmed
+        if hasattr(self, '_perform_deletion_without_confirmation'):
+            self._perform_deletion_without_confirmation()
+        elif hasattr(self, 'delete_selected_resources'):
+            # Call delete_selected_resources but bypass the confirmation
+            self._delete_selected_resources_no_confirm()
         else:
             QMessageBox.information(
                 self, 
@@ -573,7 +446,7 @@ class BaseResourcePage(BaseTablePage):
         # Apply consistent styling with proper icon
         import os
         from UI.Icons import resource_path
-        down_arrow_icon = resource_path("icons/down_btn.svg")
+        down_arrow_icon = resource_path("Icons/down_btn.svg")
         
         combo_style = getattr(AppStyles, 'NAMESPACE_DROPDOWN',
             f"""QComboBox {{
@@ -625,7 +498,7 @@ class BaseResourcePage(BaseTablePage):
         )
 
     def _perform_search(self):
-        """Perform efficient indexed search"""
+        """Perform fast linear search"""
         search_text = self.search_bar.text().strip()
         logging.debug(f"Performing search for: '{search_text}', resources count: {len(self.resources)}")
         
@@ -634,82 +507,23 @@ class BaseResourcePage(BaseTablePage):
             self._display_resources(self.resources)
             return
         
-        # Use indexed search for better performance with large datasets
-        if self._search_index and len(self.resources) > 100:
-            self._perform_indexed_search(search_text)
-        else:
-            # Fallback to linear search for smaller datasets
-            self._filter_resources_linear(search_text.lower())
+        # Always use fast linear search - simpler and faster for most cases
+        self._filter_resources_linear(search_text.lower())
 
-    def _perform_indexed_search(self, search_text):
-        """Perform search using search index for large datasets"""
-        try:
-            search_results = self._search_index.search(search_text, max_results=1000)
-            
-            # Extract resources from search results
-            filtered_resources = [result.resource for result in search_results]
-            
-            logging.debug(f"Indexed search returned {len(filtered_resources)} results")
-            self._display_resources(filtered_resources)
-            
-        except Exception as e:
-            logging.warning(f"Indexed search failed, falling back to linear search: {e}")
-            self._filter_resources_linear(search_text.lower())
 
     def _filter_resources_linear(self, search_text):
-        """Linear search fallback for smaller datasets or index failures"""
+        """Fast simple search"""
         if not search_text:
             self._display_resources(self.resources)
             return
         
-        filtered_resources = []
-        for resource in self.resources:
-            # Search in name, namespace, and other relevant fields
-            if (search_text in resource.get("name", "").lower() or
-                search_text in resource.get("namespace", "").lower() or
-                search_text in str(resource.get("status", "")).lower()):
-                filtered_resources.append(resource)
+        # Simple fast search - no indexing overhead
+        search_lower = search_text.lower()
+        filtered = [r for r in self.resources 
+                   if search_lower in r.get("name", "").lower() 
+                   or search_lower in r.get("namespace", "").lower()]
         
-        self._display_resources(filtered_resources)
-        
-    def _update_search_index(self):
-        """Update search index when resources change"""
-        if not self.resource_type or not self.resources:
-            return
-        
-        try:
-            # Get or create search index for this resource type
-            self._search_index = get_search_index(self.resource_type)
-            
-            # Define searchable fields based on resource type
-            searchable_fields = self._get_searchable_fields()
-            
-            # Build index
-            self._search_index.build_index(self.resources, searchable_fields)
-            
-            logging.debug(f"Search index updated for {len(self.resources)} {self.resource_type} resources")
-            
-        except Exception as e:
-            logging.error(f"Failed to update search index: {e}")
-            self._search_index = None
-    
-    def _get_searchable_fields(self) -> List[str]:
-        """Get list of searchable fields for the resource type"""
-        # Base searchable fields that most resources have
-        base_fields = ["name", "namespace", "status"]
-        
-        # Add resource-specific fields
-        if self.resource_type == "events":
-            return base_fields + ["raw_data.message", "raw_data.reason", "raw_data.type"]
-        elif self.resource_type == "pods":
-            return base_fields + ["node", "raw_data.spec.containers.*.name"]
-        elif self.resource_type == "services":
-            return base_fields + ["raw_data.spec.type", "raw_data.spec.ports.*.port"]
-        elif self.resource_type == "deployments":
-            return base_fields + ["raw_data.spec.strategy.type"]
-        else:
-            # Generic searchable fields
-            return base_fields
+        self._display_resources(filtered)
 
     def _on_namespace_changed(self, namespace):
         """Handle namespace filter changes"""
@@ -779,12 +593,13 @@ class BaseResourcePage(BaseTablePage):
                 return
             
             # Process the optimized result format
-            resources = result.items
+            resources = result.items or []
             
             # Replace resources (unified loader loads all at once for better performance)
             self.resources = resources
             self.all_data_loaded = True  # Unified loader loads everything efficiently
             
+            # Always display resources, even if empty
             self._display_resources(self.resources)
             self._update_items_count()
             
@@ -864,48 +679,23 @@ class BaseResourcePage(BaseTablePage):
         self._show_error_message(error_message)
 
     def _display_resources(self, resources):
-        """Display resources in the table"""
+        """Display resources in the table with optimized handling for large datasets"""
         if not resources:
             self._show_empty_message()
             return
         
         self._table_stack.setCurrentWidget(self.table)
-        self.clear_table()
         
         # Clear previous selections when displaying new data
         self.selected_items.clear()
         
-        # Update search index for large datasets
+        # Log performance info for large datasets
         if len(resources) > 100:
-            self._update_search_index()
+            logging.info(f"Displaying {len(resources)} resources (large dataset optimization active)")
         
-        # Use progressive rendering for large datasets with optimized threshold
-        if len(resources) > 250:  # Optimized threshold for better performance
-            self._render_queue = resources.copy()
-            self._render_timer.start(5)  # Optimized timer interval for smooth rendering
-        else:
-            # Render directly for smaller datasets (much faster)
-            self._render_resources_batch(resources)
+        # Optimized rendering for all datasets
+        self._render_resources_batch(resources)
 
-    def _render_next_batch(self):
-        """Render next batch of resources progressively"""
-        if not self._render_queue:
-            self._render_timer.stop()
-            return
-        
-        # Use optimized batch size for best performance/responsiveness balance
-        batch_size = min(100, len(self._render_queue))  # Balanced batch size for smooth rendering
-        batch = self._render_queue[:batch_size]
-        self._render_queue = self._render_queue[batch_size:]
-        
-        self._render_resources_batch(batch, append=True)
-        
-        # Process UI events every few batches to maintain responsiveness
-        if len(self._render_queue) % 200 == 0:
-            QApplication.processEvents()
-        
-        if not self._render_queue:
-            self._render_timer.stop()
 
     def _render_resources_batch(self, resources, append=False):
         """Render a batch of resources to the table with optimized performance"""
@@ -924,20 +714,37 @@ class BaseResourcePage(BaseTablePage):
         total_rows = start_row + len(resources)
         self.table.setRowCount(total_rows)
         
-        # Render in larger batches with less frequent UI updates
-        batch_size = 50  # Larger batch size for better performance
-        for i in range(0, len(resources), batch_size):
-            batch = resources[i:i + batch_size]
-            
-            for j, resource in enumerate(batch):
-                row = start_row + i + j
-                # Call the correct method name - check both variations for compatibility
-                if hasattr(self, 'populate_resource_row'):
-                    self.populate_resource_row(row, resource)
-                else:
-                    self._populate_resource_row(row, resource)
-            
-            # Process events less frequently to reduce overhead
+        # Handle large datasets efficiently
+        if len(resources) > 500:
+            # For large datasets, render only visible items
+            batch_size = 100  # Larger batches for better performance with large data
+            for i in range(0, min(200, len(resources)), batch_size):  # Limit initial render to 200 items
+                batch = resources[i:i + batch_size]
+                
+                for j, resource in enumerate(batch):
+                    row = start_row + i + j
+                    if hasattr(self, 'populate_resource_row'):
+                        self.populate_resource_row(row, resource)
+                    else:
+                        self._populate_resource_row(row, resource)
+                
+                # Process events every other batch for large datasets
+                if i % (batch_size * 2) == 0:
+                    QApplication.processEvents()
+        else:
+            # For smaller datasets, render normally in batches
+            batch_size = 50
+            for i in range(0, len(resources), batch_size):
+                batch = resources[i:i + batch_size]
+                
+                for j, resource in enumerate(batch):
+                    row = start_row + i + j
+                    if hasattr(self, 'populate_resource_row'):
+                        self.populate_resource_row(row, resource)
+                    else:
+                        self._populate_resource_row(row, resource)
+                
+                # Process events less frequently to reduce overhead
             if i % (batch_size * 2) == 0:
                 QApplication.processEvents()
         
@@ -1120,6 +927,45 @@ class BaseResourcePage(BaseTablePage):
             QMessageBox.critical(self, "Delete Error", f"Failed to start deletion process: {str(e)}")
             logging.error(f"Error starting batch delete thread: {e}")
 
+    def _delete_selected_resources_no_confirm(self):
+        """Delete selected resources without confirmation dialog (confirmation already done)"""
+        if hasattr(self, 'delete_thread') and self.delete_thread and self.delete_thread.isRunning():
+            self.delete_thread.wait(300)
+        
+        # Enhanced debugging for selection
+        logging.info(f"Delete selected (no confirm) called. Selected items: {len(self.selected_items)}")
+        logging.info(f"Selected items content: {list(self.selected_items)}")
+        
+        if not self.selected_items:
+            # This should not happen since we already checked, but log it
+            logging.warning("No selected items in _delete_selected_resources_no_confirm - this should not happen")
+            return
+
+        count = len(self.selected_items)
+        resources_list = list(self.selected_items)
+
+        progress = QProgressDialog(f"Deleting {count} {self.resource_type}...", "Cancel", 0, count, self)
+        progress.setWindowTitle("Deleting Resources")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setAutoClose(False)
+        progress.setValue(0)
+        progress.show()  # Ensure dialog is visible immediately
+        
+        # Process events to ensure UI responsiveness
+        QApplication.processEvents()
+
+        try:
+            self.batch_delete_thread = BatchResourceDeleterThread(self.resource_type, resources_list)
+            self.batch_delete_thread.batch_delete_progress.connect(lambda current, total: progress.setValue(current))
+            self.batch_delete_thread.batch_delete_completed.connect(
+                lambda success, errors: self.on_batch_delete_completed(success, errors, progress))
+            self.batch_delete_thread.start()
+        except Exception as e:
+            progress.close()
+            QMessageBox.critical(self, "Delete Error", f"Failed to start deletion process: {str(e)}")
+            logging.error(f"Error starting batch delete thread: {e}")
+
     def on_batch_delete_completed(self, success_list, error_list, progress_dialog):
         """Handle batch delete completion"""
         try:
@@ -1150,8 +996,8 @@ class BaseResourcePage(BaseTablePage):
             # Still try to refresh data even if there was an error
             try:
                 self.force_load_data()
-            except:
-                pass
+            except Exception as e:
+                logging.error(f"Failed to refresh data after resource modification: {e}")
 
     def delete_resource(self, resource_name, resource_namespace):
         """Delete a single resource"""
@@ -1185,15 +1031,6 @@ class BaseResourcePage(BaseTablePage):
         """Cleanup timers and threads"""
         self._shutting_down = True
         
-        # Stop timers
-        # Stop render timer with safety checks
-        if hasattr(self, '_render_timer'):
-            try:
-                if self._render_timer is not None and self._render_timer.isActive():
-                    self._render_timer.stop()
-            except RuntimeError:
-                # QTimer was already deleted by Qt - this is fine during shutdown
-                pass
         if hasattr(self, '_debounced_updater'):
             self._debounced_updater.cancel_update('search_' + self.__class__.__name__)
             self._debounced_updater.cancel_update('scroll_' + self.__class__.__name__)
@@ -1311,7 +1148,7 @@ class BaseResourcePage(BaseTablePage):
             QCheckBox::indicator:checked {
                 background-color: #0078d4;
                 border-color: #0078d4;
-                image: url(icons/check.svg);
+                image: url(Icons/check.svg);
             }
             QCheckBox::indicator:hover {
                 border-color: #0078d4;
@@ -1539,7 +1376,7 @@ class BaseResourcePage(BaseTablePage):
 
         # Use custom SVG icon
         try:
-            icon_path = resource_path("icons/Moreaction_Button.svg")
+            icon_path = resource_path("Icons/Moreaction_Button.svg")
             if os.path.exists(icon_path):
                 button.setIcon(QIcon(icon_path))
                 button.setIconSize(QSize(16, 16))
@@ -1554,7 +1391,8 @@ class BaseResourcePage(BaseTablePage):
         try:
             from UI.Styles import AppStyles
             button.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE)
-        except:
+        except (ImportError, AttributeError) as e:
+            logging.debug(f"Could not load AppStyles for button: {e}")
             # Fallback styling
             button.setStyleSheet("""
                 QToolButton {
@@ -1576,7 +1414,8 @@ class BaseResourcePage(BaseTablePage):
         try:
             from UI.Styles import AppStyles
             menu.setStyleSheet(AppStyles.MENU_STYLE)
-        except:
+        except (ImportError, AttributeError) as e:
+            logging.debug(f"Could not load AppStyles for menu: {e}")
             # Fallback menu styling
             menu.setStyleSheet("""
                 QMenu {
@@ -1605,23 +1444,23 @@ class BaseResourcePage(BaseTablePage):
         # Resource-specific actions based on resource type
         if hasattr(self, 'resource_type') and self.resource_type == "pods":
             actions.extend([
-                {"text": "View Logs", "icon": "icons/logs.png", "dangerous": False},
-                {"text": "SSH", "icon": "icons/terminal.png", "dangerous": False}
+                {"text": "View Logs", "icon": "Icons/logs.png", "dangerous": False},
+                {"text": "SSH", "icon": "Icons/terminal.png", "dangerous": False}
             ])
         elif hasattr(self, 'resource_type') and self.resource_type == "services":
             # Check if service has ports for port forwarding
             if row < len(self.resources) and self.resources:
                 service_resource = self.resources[row]
                 if self._has_service_ports(service_resource):
-                    actions.append({"text": "Port Forward", "icon": "icons/network.png", "dangerous": False})
+                    actions.append({"text": "Port Forward", "icon": "Icons/network.png", "dangerous": False})
         elif hasattr(self, 'resource_type') and self.resource_type == "nodes":
             # Node-specific actions
-            actions.append({"text": "View Metrics", "icon": "icons/chart.png", "dangerous": False})
+            actions.append({"text": "View Metrics", "icon": "Icons/chart.png", "dangerous": False})
         
         # Standard actions for all resources
         actions.extend([
-            {"text": "Edit", "icon": "icons/edit.png", "dangerous": False},
-            {"text": "Delete", "icon": "icons/delete.png", "dangerous": True}
+            {"text": "Edit", "icon": "Icons/edit.png", "dangerous": False},
+            {"text": "Delete", "icon": "Icons/delete.png", "dangerous": True}
         ])
 
         # Add actions to menu with OLD WORKING PATTERN - only pass row index
@@ -1631,8 +1470,10 @@ class BaseResourcePage(BaseTablePage):
                 if "icon" in action_info:
                     try:
                         action.setIcon(QIcon(resource_path(action_info["icon"])))
-                    except:
-                        pass  # Icon loading failed, continue without icon
+                    except (OSError, FileNotFoundError) as e:
+                        logging.debug(f"Icon loading failed for {action_info['icon']}: {e}")
+                    except Exception as e:
+                        logging.error(f"Unexpected error loading icon {action_info['icon']}: {e}")
                 if action_info.get("dangerous", False):
                     action.setProperty("dangerous", True)
                 
@@ -1655,7 +1496,11 @@ class BaseResourcePage(BaseTablePage):
             raw_data = service_resource["raw_data"]
             ports = raw_data.get("spec", {}).get("ports", [])
             return len(ports) > 0
-        except:
+        except (KeyError, TypeError, AttributeError) as e:
+            logging.debug(f"Could not check port forward availability: {e}")
+            return False
+        except Exception as e:
+            logging.error(f"Unexpected error checking port forward availability: {e}")
             return False
 
     def _create_action_container(self, row, action_button):
@@ -1950,14 +1795,6 @@ class BaseResourcePage(BaseTablePage):
                     # QTimer was already deleted by Qt - this is fine during shutdown
                     pass
             
-            # Stop background processing
-            if hasattr(self, '_processing_worker') and self._processing_worker:
-                if self._processing_worker.isRunning():
-                    self._processing_worker.cancel()
-                    self._processing_worker.wait(3000)
-            
-            # Hide progress dialog
-            self._hide_progress_dialog()
             
             # Cleanup threads
             self.cleanup_timers_and_threads()
@@ -1986,12 +1823,88 @@ def create_base_resource_page(resource_type, title, headers, parent=None):
 
 
 # Export all classes for backward compatibility
+# Helper classes for eliminating duplication across resource pages
+class StandardResourceColumns:
+    """Standard column definitions that can be reused across resource pages"""
+    NAME = {"name": "Name", "key": "name", "width": 200}
+    NAMESPACE = {"name": "Namespace", "key": "namespace", "width": 120}
+    AGE = {"name": "Age", "key": "age", "width": 100}
+    READY = {"name": "Ready", "key": "ready", "width": 80}
+    STATUS = {"name": "Status", "key": "status", "width": 100}
+    LABELS = {"name": "Labels", "key": "labels", "width": 250}
+    # Resource-specific columns
+    RESTARTS = {"name": "Restarts", "key": "restarts", "width": 80}
+    NODE = {"name": "Node", "key": "node", "width": 150}
+    IP = {"name": "IP", "key": "ip", "width": 120}
+    TYPE = {"name": "Type", "key": "type", "width": 120}
+    CLUSTER_IP = {"name": "Cluster-IP", "key": "cluster_ip", "width": 130}
+    PORTS = {"name": "Port(s)", "key": "ports", "width": 150}
+
+
+class ResourcePageHelpers:
+    """Helper methods for resource pages to reduce duplication"""
+    
+    @staticmethod
+    def extract_standard_field(resource: Dict[str, Any], field_key: str) -> str:
+        """Extract common field values from Kubernetes resources"""
+        try:
+            if field_key == "name":
+                return resource.get("metadata", {}).get("name", "")
+            elif field_key == "namespace":
+                return resource.get("metadata", {}).get("namespace", "default")
+            elif field_key == "labels":
+                labels = resource.get("metadata", {}).get("labels", {})
+                return ", ".join([f"{k}={v}" for k, v in labels.items()]) if labels else ""
+            elif field_key == "node":
+                return resource.get("spec", {}).get("nodeName", "")
+            elif field_key == "ip":
+                return resource.get("status", {}).get("podIP", "") or resource.get("spec", {}).get("clusterIP", "")
+            elif field_key == "type":
+                return resource.get("spec", {}).get("type", "") or resource.get("type", "")
+            elif field_key == "ports":
+                ports = resource.get("spec", {}).get("ports", [])
+                if ports:
+                    return ", ".join([f"{p.get('port', '')}/{p.get('protocol', 'TCP')}" for p in ports])
+                return ""
+            else:
+                return ""
+        except Exception:
+            return ""
+    
+    @staticmethod
+    def setup_standard_table(table_widget, columns):
+        """Setup table with standard configuration"""
+        try:
+            if not table_widget or not columns:
+                return
+                
+            table_widget.setColumnCount(len(columns))
+            headers = [col["name"] for col in columns]
+            table_widget.setHorizontalHeaderLabels(headers)
+            
+            # Set column widths
+            for i, col in enumerate(columns):
+                if "width" in col:
+                    table_widget.setColumnWidth(i, col["width"])
+                    
+            # Standard table properties
+            table_widget.setAlternatingRowColors(True)
+            table_widget.setSelectionBehavior(table_widget.SelectionBehavior.SelectRows)
+            table_widget.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+            table_widget.setSortingEnabled(True)
+            
+        except Exception as e:
+            logging.error(f"Error setting up standard table: {e}")
+
+
 __all__ = [
     'ResourceDeleterThread', 
     'BatchResourceDeleterThread',
     'VirtualScrollTable',
     'BaseResourcePage',
     'create_base_resource_page',
+    'StandardResourceColumns',
+    'ResourcePageHelpers',
     'BATCH_SIZE',
     'SCROLL_DEBOUNCE_MS',
     'SEARCH_DEBOUNCE_MS',

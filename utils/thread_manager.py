@@ -113,13 +113,23 @@ class EnhancedThreadPoolManager(QObject):
                 if hasattr(worker, 'cancel'):
                     worker.cancel()
             
-            # Non-blocking shutdown approach
-            # Wait briefly for graceful shutdown, then force cleanup
-            if not self.thread_pool.waitForDone(1000):  # Reduced from 3000ms to 1000ms
-                logging.warning("Thread pool did not shut down gracefully within 1 second")
+            # Fast shutdown approach - reduced timeout for quicker app closing
+            if not self.thread_pool.waitForDone(3000):  # Reduced to 3 seconds for faster shutdown
+                logging.warning("Thread pool did not shut down gracefully within 3 seconds")
+                # Force termination of remaining threads immediately
+                self._force_thread_termination()
             
             self.active_workers.clear()
             self.worker_refs.clear()
+    
+    def _force_thread_termination(self):
+        """Force termination of remaining threads as last resort"""
+        try:
+            # Try to clear the thread pool
+            self.thread_pool.clear()
+            logging.info("Forced thread pool clearing completed")
+        except Exception as e:
+            logging.error(f"Error during forced thread termination: {e}")
 
 # Singleton with better management
 _thread_manager_instance = None

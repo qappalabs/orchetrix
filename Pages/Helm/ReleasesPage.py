@@ -1298,8 +1298,8 @@
         
 #         # Add actions with icons
 #         actions = [
-#             {"text": "Upgrade", "icon": "icons/edit.png", "dangerous": False},
-#             {"text": "Delete", "icon": "icons/delete.png", "dangerous": True}
+#             {"text": "Upgrade", "icon": "Icons/edit.png", "dangerous": False},
+#             {"text": "Delete", "icon": "Icons/delete.png", "dangerous": True}
 #         ]
         
 #         # Add actions to menu

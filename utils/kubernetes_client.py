@@ -10,9 +10,9 @@ from dataclasses import dataclass
 from PyQt6.QtCore import QObject, pyqtSignal
 
 # Import the new service architecture
-from services.kubernetes.kubernetes_service import get_kubernetes_service, KubeCluster
-from utils.enhanced_worker import EnhancedBaseWorker
-from utils.thread_manager import get_thread_manager
+from Services.kubernetes.kubernetes_service import get_kubernetes_service, KubeCluster
+from Utils.enhanced_worker import EnhancedBaseWorker
+from Utils.thread_manager import get_thread_manager
 
 
 class ResourceUpdateWorker(EnhancedBaseWorker):

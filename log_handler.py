@@ -298,8 +298,12 @@ def class_logger(
                     # Skip property objects
                     if isinstance(attr, property):
                         continue
-            except:
-                pass
+            except (AttributeError, TypeError) as e:
+                logging.debug(f"Error checking attribute {attr_name}: {e}")
+                continue
+            except Exception as e:
+                logging.error(f"Unexpected error checking attribute {attr_name}: {e}")
+                continue
             
             # Apply the method logger decorator
             decorated_method = method_logger(log_level=log_level, **decorator_kwargs)(attr)

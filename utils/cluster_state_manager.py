@@ -1,6 +1,6 @@
 from PyQt6.QtCore import QObject, pyqtSignal
 from enum import Enum
-from utils.enhanced_worker import EnhancedBaseWorker
+from Utils.enhanced_worker import EnhancedBaseWorker
 import threading
 import logging
 import time
@@ -22,7 +22,7 @@ class ClusterConnectionWorker(EnhancedBaseWorker):
         
     def execute(self):
         try:
-            from utils.kubernetes_client import get_kubernetes_client
+            from Utils.kubernetes_client import get_kubernetes_client
             
             start_time = time.time()
             
@@ -170,7 +170,7 @@ class ClusterStateManager(QObject):
                 if self.current_cluster == cluster_name and cluster_state == ClusterState.CONNECTED:
                     # Verify the connection is actually working before allowing switch
                     try:
-                        from utils.kubernetes_client import get_kubernetes_client
+                        from Utils.kubernetes_client import get_kubernetes_client
                         kube_client = get_kubernetes_client()
                         if kube_client:
                             # Quick connectivity test
@@ -209,7 +209,7 @@ class ClusterStateManager(QObject):
     def _connect_to_cluster(self, cluster_name: str):
         """Connect to cluster with improved error handling"""
         try:
-            from utils.thread_manager import get_thread_manager
+            from Utils.thread_manager import get_thread_manager
             
             worker = ClusterConnectionWorker(cluster_name)
             worker.signals.finished.connect(lambda result: self._handle_connection_result(cluster_name, result))
@@ -337,7 +337,7 @@ class ClusterStateManager(QObject):
                     
                 # Reset kubernetes client
                 try:
-                    from utils.kubernetes_client import get_kubernetes_client
+                    from Utils.kubernetes_client import get_kubernetes_client
                     kube_client = get_kubernetes_client()
                     if kube_client and hasattr(kube_client, 'current_cluster') and kube_client.current_cluster == cluster_name:
                         kube_client.current_cluster = None

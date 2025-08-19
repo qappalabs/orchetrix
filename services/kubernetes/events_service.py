@@ -258,7 +258,11 @@ class KubernetesEventsService:
             else:
                 return f"{diff.seconds // 60}m"
                 
-        except:
+        except (ValueError, TypeError, AttributeError) as e:
+            logging.debug(f"Error calculating event age: {e}")
+            return "Unknown"
+        except Exception as e:
+            logging.error(f"Unexpected error calculating event age: {e}")
             return "Unknown"
     
     def get_event_summary(self, cluster_name: str) -> Dict[str, Any]:

@@ -7,7 +7,7 @@ import logging
 from PyQt6.QtCore import QThread, pyqtSignal
 from kubernetes import client
 from kubernetes.client.rest import ApiException
-from utils.kubernetes_client import get_kubernetes_client
+from Utils.kubernetes_client import get_kubernetes_client
 
 
 class ResourceDeleterThread(QThread):

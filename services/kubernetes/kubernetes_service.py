@@ -11,12 +11,12 @@ from dataclasses import dataclass
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer, QThreadPool
 
 from .api_service import get_kubernetes_api_service, reset_kubernetes_api_service
-from utils.unified_cache_system import get_unified_cache
+from Utils.unified_cache_system import get_unified_cache
 from .log_service import create_kubernetes_log_service
 from .metrics_service import create_kubernetes_metrics_service
 from .events_service import create_kubernetes_events_service
-from utils.thread_manager import get_thread_manager
-from utils.enhanced_worker import EnhancedBaseWorker
+from Utils.thread_manager import get_thread_manager
+from Utils.enhanced_worker import EnhancedBaseWorker
 
 
 @dataclass
@@ -110,6 +110,14 @@ class KubernetesService(QObject):
     
     def _setup_timers(self):
         """Setup polling timers"""
+        # Ensure timers are created on main thread
+        from PyQt6.QtWidgets import QApplication
+        if self.thread() != QApplication.instance().thread():
+            logging.warning("KubernetesService timers being created from non-main thread - deferring to main thread")
+            from PyQt6.QtCore import QMetaObject
+            QMetaObject.invokeMethod(self, "_setup_timers_on_main_thread", Qt.ConnectionType.QueuedConnection)
+            return
+        
         # Metrics polling timer
         self.metrics_timer = QTimer(self)
         self.metrics_timer.timeout.connect(self._poll_metrics_async)
@@ -122,6 +130,10 @@ class KubernetesService(QObject):
         self.cache_cleanup_timer = QTimer(self)
         self.cache_cleanup_timer.timeout.connect(self._periodic_cache_cleanup)
         self.cache_cleanup_timer.start(60000)  # Cleanup every minute
+    
+    def _setup_timers_on_main_thread(self):
+        """Setup timers on main thread - called via QMetaObject.invokeMethod"""
+        self._setup_timers()
     
     def connect_to_cluster(self, cluster_name: str, context: str = None) -> bool:
         """Connect to a Kubernetes cluster"""
@@ -190,18 +202,23 @@ class KubernetesService(QObject):
             return
         
         # Start metrics polling
-        if not self.metrics_timer.isActive():
+        if hasattr(self, 'metrics_timer') and self.metrics_timer and not self.metrics_timer.isActive():
             self.metrics_timer.start(metrics_interval)
             logging.debug(f"Started metrics polling every {metrics_interval}ms")
         
         # Start issues polling
-        if not self.issues_timer.isActive():
+        if hasattr(self, 'issues_timer') and self.issues_timer and not self.issues_timer.isActive():
             self.issues_timer.start(issues_interval)
             logging.debug(f"Started issues polling every {issues_interval}ms")
     
     def stop_polling(self):
         """Stop all polling timers"""
-        timers = [self.metrics_timer, self.issues_timer]
+        timers = []
+        if hasattr(self, 'metrics_timer') and self.metrics_timer:
+            timers.append(self.metrics_timer)
+        if hasattr(self, 'issues_timer') and self.issues_timer:
+            timers.append(self.issues_timer)
+            
         for timer in timers:
             if timer and hasattr(timer, 'isActive') and timer.isActive():
                 timer.stop()
@@ -388,14 +405,15 @@ class KubernetesService(QObject):
             self.stop_polling()
             
             # Stop cache cleanup timer
-            if hasattr(self, 'cache_cleanup_timer'):
+            if hasattr(self, 'cache_cleanup_timer') and self.cache_cleanup_timer:
                 self.cache_cleanup_timer.stop()
             
             # Cleanup services
             self.log_service.cleanup()
             self.metrics_service.cleanup()
             self.events_service.cleanup()
-            self.cache_service.clear_all_caches()
+            # Skip cache clearing during shutdown - let natural cleanup handle this
+            # self.cache_service.clear_all_caches()  # Disabled to avoid performance hit during shutdown
             self.api_service.cleanup()
             
             # Clear active workers

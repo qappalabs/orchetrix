@@ -6,8 +6,8 @@ from PyQt6.QtCore import Qt, QObject, pyqtSignal, QPoint, QSize, QTimer
 from PyQt6.QtGui import QColor, QPainter, QIcon, QMouseEvent, QFont, QPixmap # Added QPixmap
 
 from UI.Styles import AppColors, AppStyles, AppConstants
-from utils.kubernetes_client import get_kubernetes_client
-from utils.cluster_connector import get_cluster_connector
+from Utils.kubernetes_client import get_kubernetes_client
+from Utils.cluster_connector import get_cluster_connector
 import logging
 from collections import defaultdict
 from log_handler import method_logger, class_logger
@@ -165,7 +165,7 @@ class OrchestrixGUI(QMainWindow):
         self.cluster_connector = get_cluster_connector()
 
         try:
-            from utils.cluster_state_manager import get_cluster_state_manager
+            from Utils.cluster_state_manager import get_cluster_state_manager
             self.cluster_state_manager = get_cluster_state_manager()
             logging.info("Cluster state manager initialized in HomePage")
             
@@ -219,11 +219,11 @@ class OrchestrixGUI(QMainWindow):
         self.update_content_view("Browse All")
         QTimer.singleShot(100, self.load_kubernetes_clusters)
         
-        # Set up periodic cluster status refresh (every 30 seconds)
+        # Set up periodic cluster status refresh (every 5 minutes for Docker Desktop)
         self.cluster_refresh_timer = QTimer()
         self.cluster_refresh_timer.timeout.connect(self.refresh_cluster_status)
-        self.cluster_refresh_timer.start(30000)  # 30 seconds
-        logging.info("HomePage: Set up periodic cluster status refresh (30s interval)")
+        self.cluster_refresh_timer.start(300000)  # 5 minutes - much less aggressive
+        logging.info("HomePage: Set up periodic cluster status refresh (5min interval)")
 
     def _connect_signals(self):
         """Connect signals with error handling"""
@@ -454,7 +454,7 @@ class OrchestrixGUI(QMainWindow):
             # FIXED: Check actual cluster state instead of just cluster.status
             actual_status = "available"
             if self.cluster_state_manager:
-                from utils.cluster_state_manager import ClusterState
+                from Utils.cluster_state_manager import ClusterState
                 cluster_state = self.cluster_state_manager.get_cluster_state(cluster.name)
                 
                 if cluster_state == ClusterState.CONNECTED:
@@ -500,7 +500,7 @@ class OrchestrixGUI(QMainWindow):
     def _on_cluster_state_changed(self, cluster_name, state):
         """Handle cluster state changes from cluster state manager"""
         try:
-            from utils.cluster_state_manager import ClusterState
+            from Utils.cluster_state_manager import ClusterState
             
             # Update status in all data views
             status_mapping = {
@@ -608,7 +608,7 @@ class OrchestrixGUI(QMainWindow):
                 
                 # Check if cluster is actually connected via state manager
                 if self.cluster_state_manager:
-                    from utils.cluster_state_manager import ClusterState
+                    from Utils.cluster_state_manager import ClusterState
                     actual_state = self.cluster_state_manager.get_cluster_state(cluster_name)
                     
                     if actual_state == ClusterState.CONNECTED:
@@ -732,7 +732,7 @@ class OrchestrixGUI(QMainWindow):
             # Load and color the cluster icon
             try:
                 cluster_color = self.get_cluster_color(name)
-                colored_pixmap = self.create_colored_icon("icons/Cluster_Logo.svg", cluster_color, icon_size)
+                colored_pixmap = self.create_colored_icon("Icons/Cluster_Logo.svg", cluster_color, icon_size)
 
                 if not colored_pixmap.isNull():
                     cluster_icon_label.setPixmap(colored_pixmap)
@@ -753,7 +753,7 @@ class OrchestrixGUI(QMainWindow):
         if original_data and 'cluster_data' in original_data:
             pin_btn = QPushButton()
             pin_btn.setFixedSize(20, 20)
-            pin_icon_path = resource_path("icons/pin.svg") if name not in self.pinned_items else resource_path("icons/unpin.svg")
+            pin_icon_path = resource_path("Icons/pin.svg") if name not in self.pinned_items else resource_path("Icons/unpin.svg")
             pin_btn.setIcon(QIcon(pin_icon_path))
             pin_btn.setIconSize(QSize(16, 16))
             pin_btn.setStyleSheet("""
@@ -866,7 +866,7 @@ class OrchestrixGUI(QMainWindow):
         action_layout.setSpacing(0)
         action_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         menu_btn = QToolButton()
-        icon = QIcon(resource_path("icons/Moreaction_Button.svg"))
+        icon = QIcon(resource_path("Icons/Moreaction_Button.svg"))
         menu_btn.setIcon(icon)
         menu_btn.setIconSize(QSize(AppConstants.SIZES["ICON_SIZE"], AppConstants.SIZES["ICON_SIZE"]))
         menu_btn.setText("")
@@ -1111,7 +1111,7 @@ class OrchestrixGUI(QMainWindow):
         
         # FIXED: Check actual cluster state before proceeding
         if self.cluster_state_manager:
-            from utils.cluster_state_manager import ClusterState
+            from Utils.cluster_state_manager import ClusterState
             actual_state = self.cluster_state_manager.get_cluster_state(cluster_name)
             
             # If already connected, go directly to cluster view
@@ -1192,10 +1192,10 @@ class OrchestrixGUI(QMainWindow):
         self.sidebar_layout.setContentsMargins(0, 0, 0, 0)
         self.sidebar_layout.setSpacing(2)
         sidebar_options = [
-            {"text": "Browse All", "icon": "🔍", "icon_path": "icons/browse.svg", "action": lambda: self.update_content_view("Browse All")},
-            {"text": "General", "icon": "⚙️", "icon_path": "icons/settings.svg", "action": lambda: self.update_content_view("General")},
-            {"text": "All Clusters", "icon": "🔄", "icon_path": "icons/clusters.svg", "action": lambda: self.update_content_view("All Clusters")},
-            {"text": "Web Links", "icon": "🔗", "icon_path": "icons/links.svg", "action": lambda: self.update_content_view("Web Links")}
+            {"text": "Browse All", "icon": "🔍", "icon_path": "Icons/browse.svg", "action": lambda: self.update_content_view("Browse All")},
+            {"text": "General", "icon": "⚙️", "icon_path": "Icons/settings.svg", "action": lambda: self.update_content_view("General")},
+            {"text": "All Clusters", "icon": "🔄", "icon_path": "Icons/clusters.svg", "action": lambda: self.update_content_view("All Clusters")},
+            {"text": "Web Links", "icon": "🔗", "icon_path": "Icons/links.svg", "action": lambda: self.update_content_view("Web Links")}
         ]
         self.sidebar_buttons = []
         for option in sidebar_options:
@@ -1313,7 +1313,7 @@ class OrchestrixGUI(QMainWindow):
                         if isinstance(child_widget, QPushButton) and hasattr(child_widget, 'setIcon'): # Check if it's the pin button
                             # Check the actual name again to be super sure it's a pin button for this item
                             # This logic assumes the pin button is a direct child and identifiable
-                            current_pin_icon_path = resource_path("icons/pin.svg") if name not in self.pinned_items else resource_path("icons/unpin.svg")
+                            current_pin_icon_path = resource_path("Icons/pin.svg") if name not in self.pinned_items else resource_path("Icons/unpin.svg")
                             child_widget.setIcon(QIcon(current_pin_icon_path))
                             break # Found and updated the pin button
 

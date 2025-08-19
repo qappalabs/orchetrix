@@ -46,13 +46,13 @@ try:
     from UI.TitleBar import TitleBar
     from UI.ClusterView import ClusterView, LoadingOverlay
     from UI.Styles import AppColors, AppStyles
-    from utils.cluster_connector import get_cluster_connector
+    from Utils.cluster_connector import get_cluster_connector
     from UI.DetailPageComponent import DetailPageComponent
     from UI.detail_sections.detailpage_yamlsection import DetailPageYAMLSection
 
-    from utils.cluster_state_manager import get_cluster_state_manager, ClusterState
-    from utils.thread_manager import get_thread_manager, shutdown_thread_manager
-    from utils.error_handler import get_error_handler, ResourceCleaner, error_handler
+    from Utils.cluster_state_manager import get_cluster_state_manager, ClusterState
+    from Utils.thread_manager import get_thread_manager, shutdown_thread_manager
+    from Utils.error_handler import get_error_handler, ResourceCleaner, error_handler
 
 
     logging.info("All modules imported successfully")
@@ -99,14 +99,14 @@ def initialize_resources():
         base_path = sys._MEIPASS
         logging.info(f"Running as PyInstaller bundle from: {base_path}")
 
-        resource_dirs = ['icons', 'images', 'logos']
+        resource_dirs = ['Icons', 'Images', 'logos']
         for dir_name in resource_dirs:
             dir_path = os.path.join(base_path, dir_name)
             if os.path.exists(dir_path):
                 files = os.listdir(dir_path)[:10]
                 logging.info(f"✓ Directory {dir_name} found with items: {files}")
 
-                if dir_name == 'icons':
+                if dir_name == 'Icons':
                     critical_icons = ['logoIcon.png', 'home.svg', 'browse.svg']
                     for icon in critical_icons:
                         if os.path.exists(os.path.join(dir_path, icon)):
@@ -136,11 +136,11 @@ class MainWindow(QMainWindow):
         self._cleanup_timer.start(30000)  # Cleanup every 30 seconds
 
         # Set application icon
-        icon_path = resource_path("icons/logoIcon.ico")
+        icon_path = resource_path("Icons/logoIcon.ico")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
         else:
-            png_path = resource_path("icons/logoIcon.png")
+            png_path = resource_path("Icons/logoIcon.png")
             if os.path.exists(png_path):
                 self.setWindowIcon(QIcon(png_path))
 
@@ -191,14 +191,15 @@ class MainWindow(QMainWindow):
             except Exception as cache_error:
                 logging.debug(f"Could not cleanup age cache: {cache_error}")
             
-            # Cleanup service caches
+            # Optimize service caches instead of clearing them all
             try:
-                from utils.unified_cache_system import get_unified_cache
+                from Utils.unified_cache_system import get_unified_cache
                 cache_service = get_unified_cache()
-                if hasattr(cache_service, 'clear_all_caches'):
-                    cache_service.clear_all_caches()
+                if hasattr(cache_service, 'optimize_caches'):
+                    cache_service.optimize_caches()
+                    logging.debug("Optimized caches instead of clearing")
             except Exception as service_error:
-                logging.debug(f"Could not cleanup service caches: {service_error}")
+                logging.debug(f"Could not optimize service caches: {service_error}")
                     
         except Exception as e:
             logging.error(f"Error during periodic cleanup: {e}")
@@ -826,8 +827,8 @@ def main():
     app.setStyleSheet(AppStyles.GLOBAL_PLATFORM_OVERRIDE_STYLE)
     
     # Set application icon
-    icon_path_ico = resource_path("icons/logoIcon.ico")
-    icon_path_png = resource_path("icons/logoIcon.png")
+    icon_path_ico = resource_path("Icons/logoIcon.ico")
+    icon_path_png = resource_path("Icons/logoIcon.png")
     if os.path.exists(icon_path_ico):
         app.setWindowIcon(QIcon(icon_path_ico))
         logging.info(f"Application icon set from: {icon_path_ico}")

@@ -31,7 +31,7 @@ class VirtualizedResourceModel(QAbstractTableModel):
         self._cache_misses = 0
         
         # Use unified cache system
-        from utils.unified_cache_system import get_unified_cache
+        from Utils.unified_cache_system import get_unified_cache
         self._cache_manager = get_unified_cache()
         
         # Use unified caches for formatted data and colors  
@@ -318,5 +318,5 @@ class VirtualizedResourceModel(QAbstractTableModel):
         try:
             self.clear_cache()
             logging.debug(f"VirtualizedResourceModel destroyed, cleaned up caches")
-        except:
-            pass
+        except Exception as e:
+            logging.debug(f"Error during VirtualizedResourceModel cleanup: {e}")

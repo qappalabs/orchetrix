@@ -13,10 +13,10 @@ from datetime import datetime, timezone
 
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 
-from utils.kubernetes_client import get_kubernetes_client
-from utils.enhanced_worker import EnhancedBaseWorker
-from utils.thread_manager import get_thread_manager
-from utils.unified_resource_loader import get_unified_resource_loader
+from Utils.kubernetes_client import get_kubernetes_client
+from Utils.enhanced_worker import EnhancedBaseWorker
+from Utils.thread_manager import get_thread_manager
+from Utils.unified_resource_loader import get_unified_resource_loader
 from log_handler import method_logger, class_logger
 
 
@@ -188,7 +188,7 @@ class EnhancedClusterConnector(QObject):
         
         # Data management
         # Use unified cache system instead of custom DataCache
-        from utils.unified_cache_system import get_unified_cache
+        from Utils.unified_cache_system import get_unified_cache
         self._cache = get_unified_cache()
         
         # Polling management
@@ -212,15 +212,27 @@ class EnhancedClusterConnector(QObject):
     
     def _setup_timers(self):
         """Initialize and configure timers"""
+        # Ensure timers are created on main thread
+        from PyQt6.QtWidgets import QApplication
+        if self.thread() != QApplication.instance().thread():
+            logging.warning("ClusterConnector timers being created from non-main thread - deferring to main thread")
+            from PyQt6.QtCore import QMetaObject
+            QMetaObject.invokeMethod(self, "_setup_timers_on_main_thread", Qt.ConnectionType.QueuedConnection)
+            return
+        
         # Metrics polling timer
         self._metrics_timer.timeout.connect(self._poll_metrics)
         
         # Issues polling timer  
         self._issues_timer.timeout.connect(self._poll_issues)
         
-        # Cache cleanup timer
+        # Cache cleanup timer - reduced frequency for better performance
         self._cleanup_timer.timeout.connect(self._cleanup_cache)
-        self._cleanup_timer.start(60000)  # Cleanup every minute
+        self._cleanup_timer.start(300000)  # Cleanup every 5 minutes instead of 1 minute
+    
+    def _setup_timers_on_main_thread(self):
+        """Setup timers on main thread - called via QMetaObject.invokeMethod"""
+        self._setup_timers()
     
     def _connect_client_signals(self):
         """Connect to Kubernetes client signals"""
@@ -246,7 +258,7 @@ class EnhancedClusterConnector(QObject):
     def _connect_resource_loader_signals(self):
         """Connect to unified resource loader signals"""
         try:
-            from utils.unified_resource_loader import get_unified_resource_loader
+            from Utils.unified_resource_loader import get_unified_resource_loader
             unified_loader = get_unified_resource_loader()
             
             # Connect to resource loading completion signal
@@ -547,15 +559,19 @@ class EnhancedClusterConnector(QObject):
                 return
             
             self._polling_active = True
-            self._metrics_timer.start(5000)   # Poll metrics every 5 seconds
-            self._issues_timer.start(10000)   # Poll issues every 10 seconds
+            if hasattr(self, '_metrics_timer') and self._metrics_timer:
+                self._metrics_timer.start(5000)   # Poll metrics every 5 seconds
+            if hasattr(self, '_issues_timer') and self._issues_timer:
+                self._issues_timer.start(10000)   # Poll issues every 10 seconds
     
     def _stop_polling(self) -> None:
         """Stop all polling"""
         with self._polling_lock:
             self._polling_active = False
-            self._metrics_timer.stop()
-            self._issues_timer.stop()
+            if hasattr(self, '_metrics_timer') and self._metrics_timer:
+                self._metrics_timer.stop()
+            if hasattr(self, '_issues_timer') and self._issues_timer:
+                self._issues_timer.stop()
     
     def _poll_metrics(self) -> None:
         """Poll for cluster metrics"""
@@ -663,6 +679,32 @@ class EnhancedClusterConnector(QObject):
             logging.error(error_msg)
             self.error_occurred.emit("nodes", error_msg)
     
+    def load_metrics(self):
+        """Load cluster metrics data"""
+        try:
+            if hasattr(self.kube_client, 'get_cluster_metrics_async'):
+                logging.info("Loading cluster metrics...")
+                self.kube_client.get_cluster_metrics_async()
+            else:
+                logging.warning("Kubernetes client does not support metrics loading")
+        except Exception as e:
+            error_msg = f"Failed to load metrics: {e}"
+            logging.error(error_msg)
+            self.error_occurred.emit("metrics", error_msg)
+    
+    def load_issues(self):
+        """Load cluster issues data"""
+        try:
+            if hasattr(self.kube_client, 'get_cluster_issues_async'):
+                logging.info("Loading cluster issues...")
+                self.kube_client.get_cluster_issues_async()
+            else:
+                logging.warning("Kubernetes client does not support issues loading")
+        except Exception as e:
+            error_msg = f"Failed to load issues: {e}"
+            logging.error(error_msg)
+            self.error_occurred.emit("issues", error_msg)
+    
     def get_cached_data(self, cluster_name: str) -> Dict[str, Any]:
         """Get cached data for a cluster"""
         cached_data = {}
@@ -707,7 +749,8 @@ class EnhancedClusterConnector(QObject):
         
         # Stop polling
         self._stop_polling()
-        self._cleanup_timer.stop()
+        if hasattr(self, '_cleanup_timer') and self._cleanup_timer:
+            self._cleanup_timer.stop()
         
         # Cancel active workers
         with self._workers_lock:
@@ -716,9 +759,10 @@ class EnhancedClusterConnector(QObject):
                     worker.cancel()
             self._active_workers.clear()
         
-        # Clear cache
-        # Clear all caches using unified cache system
-        self._cache.clear_all_caches()
+        # Skip cache clearing during shutdown to avoid performance hit
+        # Caches will be cleaned up naturally when the application shuts down
+        # if hasattr(self, '_current_cluster') and self._current_cluster:
+        #     self._cache.clear_resource_cache(f'cluster_{self._current_cluster}')
         
         # Reset state
         with self._state_lock:

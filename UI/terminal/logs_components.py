@@ -153,7 +153,7 @@ class LogsHeaderWidget(QWidget):
     def load_containers(self):
         """Load available containers for the pod."""
         try:
-            from utils.kubernetes_client import get_kubernetes_client
+            from Utils.kubernetes_client import get_kubernetes_client
             kube_client = get_kubernetes_client()
 
             if kube_client and kube_client.v1:
@@ -222,7 +222,7 @@ class LogsStreamWorker(QThread):
     def run(self):
         """Run the log streaming."""
         try:
-            from utils.kubernetes_client import get_kubernetes_client
+            from Utils.kubernetes_client import get_kubernetes_client
             self._kube_client = get_kubernetes_client()
 
             if not self._kube_client or not self._kube_client.v1:
@@ -278,8 +278,8 @@ class LogsStreamWorker(QThread):
                         try:
                             timestamp = parts[0].split('T')[1][:8]  # Extract time part
                             log_line = parts[1]
-                        except:
-                            pass
+                        except (IndexError, ValueError) as e:
+                            logging.debug(f"Error parsing log timestamp: {e}")
 
                 self.log_received.emit(log_line, timestamp)
 
@@ -323,8 +323,8 @@ class LogsStreamWorker(QThread):
                                 try:
                                     timestamp = parts[0].split('T')[1][:8]
                                     log_line = parts[1]
-                                except:
-                                    pass
+                                except (IndexError, ValueError) as e:
+                                    logging.debug(f"Error parsing log timestamp: {e}")
 
                         self.log_received.emit(log_line, timestamp)
 

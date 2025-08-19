@@ -15,7 +15,7 @@ The analyzer discovers and maps relationships between:
 """
 
 from PyQt6.QtCore import QThread, pyqtSignal
-from utils.kubernetes_client import get_kubernetes_client
+from Utils.kubernetes_client import get_kubernetes_client
 from kubernetes.client.rest import ApiException
 import logging
 
@@ -32,11 +32,17 @@ class AppFlowAnalyzer(QThread):
         self.resource_name = resource_name
         
         # Handle namespace and resource name extraction
-        if namespace == "All Namespaces" and "(" in self.resource_name and ")" in self.resource_name:
-            # Extract namespace from resource name format: "resource-name (namespace)"
-            parts = self.resource_name.split(" (")
-            self.resource_name = parts[0]
-            self.namespace = parts[1].rstrip(")")
+        if namespace == "All Namespaces":
+            if "(" in self.resource_name and ")" in self.resource_name:
+                # Extract namespace from resource name format: "resource-name (namespace)"
+                parts = self.resource_name.split(" (")
+                self.resource_name = parts[0]
+                self.namespace = parts[1].rstrip(")")
+            else:
+                # For "All Namespaces" without namespace suffix, we need to find the actual namespace
+                # This is an error case - we cannot proceed without knowing the specific namespace
+                self.namespace = None
+                self.resource_name = self.resource_name
         else:
             # Use provided namespace and clean resource name
             self.namespace = namespace
@@ -51,6 +57,16 @@ class AppFlowAnalyzer(QThread):
             if not self.kube_client:
                 self.error_occurred.emit("Kubernetes client not initialized")
                 return
+            
+            # If namespace is None (All Namespaces without suffix), find the actual namespace
+            if self.namespace is None:
+                self.progress_updated.emit(f"Finding namespace for {self.resource_name}...")
+                actual_namespace = self._find_resource_namespace()
+                if not actual_namespace:
+                    self.error_occurred.emit(f"Could not find {self.workload_type} '{self.resource_name}' in any namespace")
+                    return
+                self.namespace = actual_namespace
+                logging.info(f"Found {self.resource_name} in namespace: {self.namespace}")
                 
             self.progress_updated.emit(f"Analyzing {self.resource_name}...")
             
@@ -94,6 +110,43 @@ class AppFlowAnalyzer(QThread):
             
         except Exception as e:
             self.error_occurred.emit(f"Analysis failed: {str(e)}")
+    
+    def _find_resource_namespace(self):
+        """Find the namespace where the resource exists when 'All Namespaces' is selected"""
+        try:
+            if self.workload_type == "deployments":
+                resources = self.kube_client.apps_v1.list_deployment_for_all_namespaces()
+            elif self.workload_type == "statefulsets":
+                resources = self.kube_client.apps_v1.list_stateful_set_for_all_namespaces()
+            elif self.workload_type == "daemonsets":
+                resources = self.kube_client.apps_v1.list_daemon_set_for_all_namespaces()
+            elif self.workload_type == "pods":
+                resources = self.kube_client.v1.list_pod_for_all_namespaces()
+            elif self.workload_type == "replicasets":
+                resources = self.kube_client.apps_v1.list_replica_set_for_all_namespaces()
+            elif self.workload_type == "jobs":
+                resources = self.kube_client.batch_v1.list_job_for_all_namespaces()
+            elif self.workload_type == "cronjobs":
+                resources = self.kube_client.batch_v1.list_cron_job_for_all_namespaces()
+            elif self.workload_type == "replicationcontrollers":
+                resources = self.kube_client.v1.list_replication_controller_for_all_namespaces()
+            else:
+                logging.error(f"Unsupported workload type for namespace search: {self.workload_type}")
+                return None
+            
+            # Search for the resource by name
+            for resource in resources.items:
+                if resource.metadata.name == self.resource_name:
+                    return resource.metadata.namespace
+            
+            return None
+            
+        except ApiException as e:
+            logging.error(f"API error finding namespace for {self.resource_name}: {e.reason}")
+            return None
+        except Exception as e:
+            logging.error(f"Failed to find namespace for {self.resource_name}: {e}")
+            return None
     
     def _get_main_resource(self):
         """Get the main resource object"""
