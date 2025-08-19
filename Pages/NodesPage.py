@@ -537,6 +537,31 @@ class NodesPage(BaseResourcePage):
         if hasattr(self, 'items_count') and self.items_count:
             self.items_count.setText(f"{len(resources)} items")
     
+    def _render_resources_batch(self, resources, append=False):
+        """Override base class to use our custom populate_table method"""
+        if not resources:
+            return
+            
+        if not append:
+            # Use our custom populate_table method instead of the base class method
+            self.populate_table(resources)
+        else:
+            # For append operations, still use our method but preserve existing rows
+            # This is less common but we need to handle it
+            existing_count = self.table.rowCount()
+            new_total = existing_count + len(resources)
+            self.table.setRowCount(new_total)
+            
+            # Populate only the new rows
+            for i, resource in enumerate(resources):
+                row = existing_count + i
+                self.populate_resource_row_optimized(row, resource)
+                
+        # Update items count
+        if hasattr(self, 'items_count') and self.items_count:
+            total_count = len(resources) if not append else self.table.rowCount()
+            self.items_count.setText(f"{total_count} items")
+    
     def _perform_global_search(self, search_text):
         """Override to perform node-specific search"""
         try:
@@ -620,6 +645,27 @@ class NodesPage(BaseResourcePage):
     def populate_resource_row(self, row, resource):
         """Fallback method for compatibility - redirects to optimized version"""
         return self.populate_resource_row_optimized(row, resource)
+    
+    def _populate_resource_row(self, row, resource):
+        """Base class method override - redirects to optimized version"""
+        return self.populate_resource_row_optimized(row, resource)
+
+    def clear_table(self):
+        """Override base class clear_table to ensure proper widget cleanup"""
+        if not self.table:
+            return
+            
+        # Clear all cell widgets first
+        for row in range(self.table.rowCount()):
+            for col in range(self.table.columnCount()):
+                widget = self.table.cellWidget(row, col)
+                if widget:
+                    widget.setParent(None)
+                    widget.deleteLater()
+        
+        # Clear contents and reset row count
+        self.table.clearContents()
+        self.table.setRowCount(0)
 
     def populate_table(self, resources_to_populate):
         """Populate table with resource data - heavily optimized for performance"""
@@ -633,17 +679,19 @@ class NodesPage(BaseResourcePage):
         self.table.setUpdatesEnabled(False)
         
         # Clear and resize table efficiently - also clear all cell widgets
-        self.table.clearContents()
-        
-        # Clear all cell widgets explicitly
-        for row in range(self.table.rowCount()):
+        # First clear all cell widgets explicitly to prevent orphaned widgets
+        old_row_count = self.table.rowCount()
+        for row in range(old_row_count):
             for col in range(self.table.columnCount()):
                 widget = self.table.cellWidget(row, col)
                 if widget:
                     widget.setParent(None)
                     widget.deleteLater()
         
-        self.table.setRowCount(len(resources_to_populate))
+        # Clear table contents and reset row count
+        self.table.clearContents()
+        self.table.setRowCount(0)  # Reset to 0 first
+        self.table.setRowCount(len(resources_to_populate))  # Then set to new count
         
         # Use batched rendering for better performance with large datasets
         batch_size = self.perf_config.get('table_batch_size', 25)  # Use performance config
@@ -665,16 +713,18 @@ class NodesPage(BaseResourcePage):
         self.table.setUpdatesEnabled(True)
         self.table.setSortingEnabled(True)
         
-        # Force a single repaint
+        # Force a proper repaint and update
+        self.table.viewport().update()
         self.table.update()
+        
+        # Process any pending events to ensure widgets are properly displayed
+        QApplication.processEvents()
 
     def populate_resource_row_optimized(self, row, resource):
         """Highly optimized row population - minimizes widget creation"""
         self.table.setRowHeight(row, 40)
         
         node_name = resource.get("name", "unknown")
-        logging.info(f"NodesPage: Populating row {row} for node {node_name}")
-        
         # Skip creating complex widgets during initial population for speed
         # Create simple checkbox container
         checkbox_container = self._create_checkbox_container(row, node_name)
@@ -699,7 +749,6 @@ class NodesPage(BaseResourcePage):
             self.table.setItem(row, cell_col, item)
         
         # Create status and action widgets - defer complex styling
-        logging.info(f"NodesPage: Creating status and action widgets for row {row}")
         self._create_status_and_action_widgets_fast(row, resource, len(display_values))
     
     def _calculate_display_values_fast(self, resource):
@@ -781,8 +830,6 @@ class NodesPage(BaseResourcePage):
         node_name = resource.get("name", "unknown")
         status = resource.get("status", "Unknown")
         
-        logging.info(f"NodesPage: _create_status_and_action_widgets_fast called for row {row}, node {node_name}, status {status}")
-        
         # Status goes in column 9 (Conditions column)
         status_col = 9
         
@@ -790,9 +837,10 @@ class NodesPage(BaseResourcePage):
         color = AppColors.STATUS_ACTIVE if status.lower() == "ready" else AppColors.STATUS_DISCONNECTED
         status_widget = StatusLabel(status, color)
         status_widget.clicked.connect(lambda r=row: self.table.selectRow(r))
-        self.table.setCellWidget(row, status_col, status_widget)
-        logging.info(f"NodesPage: Status widget created for row {row}, column {status_col}")
         
+        # Ensure the widget is properly initialized before setting
+        status_widget.show()
+        self.table.setCellWidget(row, status_col, status_widget)
         # Use base class action button implementation with proper styling
         action_button = self._create_action_button(row, node_name)
         action_button.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE +
@@ -810,10 +858,15 @@ class NodesPage(BaseResourcePage):
         action_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         action_layout.addWidget(action_button)
         
+        # Ensure the container is properly initialized before setting
+        action_container.show()
+        
         # Action button goes in column 10 (last column)
         action_col = 10
         self.table.setCellWidget(row, action_col, action_container)
-        logging.info(f"NodesPage: Action widget created for row {row}, column {action_col}")
+        # Ensure the table cell is properly updated
+        self.table.viewport().update(self.table.visualRect(self.table.model().index(row, status_col)))
+        self.table.viewport().update(self.table.visualRect(self.table.model().index(row, action_col)))
         
         # Store raw data for potential use
         if "raw_data" not in resource:
