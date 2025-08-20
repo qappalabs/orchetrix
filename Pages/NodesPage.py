@@ -781,12 +781,18 @@ class NodesPage(BaseResourcePage):
         
         # Disk data
         disk_usage = resource.get("disk_usage")
-        if disk_usage is not None:
-            display_disk = f"Cluster ({disk_usage:.1f}%)"
+        if disk_usage is not None and disk_usage >= 0:
+            display_disk = f"Node ({disk_usage:.1f}%)"
             disk_util = disk_usage
         else:
-            display_disk = "N/A"
-            disk_util = 0
+            # Try to get disk capacity info as fallback
+            disk_capacity = resource.get("disk_capacity", "")
+            if disk_capacity and disk_capacity != "":
+                display_disk = f"{disk_capacity} (0%)"
+                disk_util = 0
+            else:
+                display_disk = "N/A"
+                disk_util = 0
         
         # Other data
         taints = resource.get("taints", "0")

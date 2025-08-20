@@ -925,6 +925,28 @@ class ResourceLoadWorker(EnhancedBaseWorker):
                 'disk_capacity': status.capacity.get('ephemeral-storage', ''),
                 'pods_capacity': status.capacity.get('pods', ''),
             })
+        
+        # Try to populate actual usage metrics from metrics service
+        try:
+            kube_client = get_kubernetes_client()
+            if hasattr(kube_client, 'get_node_metrics'):
+                node_metrics = kube_client.get_node_metrics(processed_item['name'])
+                if node_metrics:
+                    # Extract usage percentages from metrics
+                    if 'cpu' in node_metrics:
+                        processed_item['cpu_usage'] = node_metrics['cpu'].get('usage', 0)
+                    if 'memory' in node_metrics:
+                        processed_item['memory_usage'] = node_metrics['memory'].get('usage', 0)
+                    if 'disk' in node_metrics:
+                        processed_item['disk_usage'] = node_metrics['disk'].get('usage', 0)
+                        
+                    logging.debug(f"Populated metrics for node {processed_item['name']}: "
+                                f"CPU {processed_item.get('cpu_usage', 0):.1f}%, "
+                                f"Memory {processed_item.get('memory_usage', 0):.1f}%, "
+                                f"Disk {processed_item.get('disk_usage', 0):.1f}%")
+        except Exception as e:
+            logging.debug(f"Could not fetch metrics for node {processed_item['name']}: {e}")
+            # Keep the defaults (None values)
     
     def _add_service_fields(self, processed_item: Dict[str, Any], service: Any):
         """Add service-specific fields efficiently"""

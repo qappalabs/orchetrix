@@ -51,6 +51,8 @@ class KubernetesMetricsService:
             pods_capacity_total = 0
             cpu_allocatable_cores = 0
             memory_allocatable_bytes = 0
+            disk_total_bytes = 0
+            disk_allocatable_bytes = 0
             
             for node in nodes_list.items:
                 if node.status and node.status.capacity:
@@ -76,6 +78,16 @@ class KubernetesMetricsService:
                     
                     # Pod capacity
                     pods_capacity_total += int(node.status.capacity.get('pods', '110'))
+                    
+                    # Disk capacity and allocatable (ephemeral-storage)
+                    disk_capacity = self._parse_memory_value(node.status.capacity.get('ephemeral-storage', '0Ki'))
+                    disk_total_bytes += disk_capacity
+                    
+                    if node.status.allocatable:
+                        disk_allocatable = self._parse_memory_value(node.status.allocatable.get('ephemeral-storage', '0Ki'))
+                        disk_allocatable_bytes += disk_allocatable
+                    else:
+                        disk_allocatable_bytes += disk_capacity
             
             # Get actual pod resource usage
             pods_list = self.api_service.v1.list_pod_for_all_namespaces()
@@ -85,6 +97,8 @@ class KubernetesMetricsService:
             memory_requests_total = 0
             cpu_limits_total = 0
             memory_limits_total = 0
+            disk_requests_total = 0
+            disk_limits_total = 0
             running_pods_count = 0
             
             for pod in pods_list.items:
@@ -102,6 +116,10 @@ class KubernetesMetricsService:
                                     
                                     memory_request = container.resources.requests.get('memory', '0')
                                     memory_requests_total += self._parse_memory_value(memory_request)
+                                    
+                                    # Disk/storage requests
+                                    disk_request = container.resources.requests.get('ephemeral-storage', '0')
+                                    disk_requests_total += self._parse_memory_value(disk_request)
                                 
                                 # CPU limits
                                 if container.resources.limits:
@@ -110,16 +128,22 @@ class KubernetesMetricsService:
                                     
                                     memory_limit = container.resources.limits.get('memory', '0')
                                     memory_limits_total += self._parse_memory_value(memory_limit)
+                                    
+                                    # Disk/storage limits
+                                    disk_limit = container.resources.limits.get('ephemeral-storage', '0')
+                                    disk_limits_total += self._parse_memory_value(disk_limit)
             
             # Calculate usage percentages based on requests vs capacity
             cpu_usage_percent = (cpu_requests_total / cpu_total_cores * 100) if cpu_total_cores > 0 else 0
             memory_usage_percent = (memory_requests_total / memory_total_bytes * 100) if memory_total_bytes > 0 else 0
             pods_usage_percent = (running_pods_count / pods_capacity_total * 100) if pods_capacity_total > 0 else 0
+            disk_usage_percent = (disk_requests_total / disk_total_bytes * 100) if disk_total_bytes > 0 else 0
             
             # Ensure values are reasonable
             cpu_usage_percent = min(cpu_usage_percent, 100)
             memory_usage_percent = min(memory_usage_percent, 100)
             pods_usage_percent = min(pods_usage_percent, 100)
+            disk_usage_percent = min(disk_usage_percent, 100)
             
             metrics = {
                 "cpu": {
@@ -140,10 +164,17 @@ class KubernetesMetricsService:
                     "usage": round(pods_usage_percent, 2),
                     "count": running_pods_count,
                     "capacity": pods_capacity_total
+                },
+                "disk": {
+                    "usage": round(disk_usage_percent, 2),
+                    "requests": round(disk_requests_total / (1024**3), 2),  # Convert to GB
+                    "limits": round(disk_limits_total / (1024**3), 2),      # Convert to GB
+                    "allocatable": round(disk_allocatable_bytes / (1024**3), 2),  # Convert to GB
+                    "capacity": round(disk_total_bytes / (1024**3), 2)     # Convert to GB
                 }
             }
             
-            logging.info(f"Calculated real cluster metrics: CPU {cpu_usage_percent:.1f}%, Memory {memory_usage_percent:.1f}%, Pods {pods_usage_percent:.1f}%")
+            logging.info(f"Calculated real cluster metrics: CPU {cpu_usage_percent:.1f}%, Memory {memory_usage_percent:.1f}%, Pods {pods_usage_percent:.1f}%, Disk {disk_usage_percent:.1f}%")
             return metrics
             
         except Exception as e:
@@ -211,7 +242,8 @@ class KubernetesMetricsService:
         return {
             "cpu": {"usage": 0, "requests": 0, "limits": 0, "allocatable": 0, "capacity": 1},
             "memory": {"usage": 0, "requests": 0, "limits": 0, "allocatable": 0, "capacity": 1024},
-            "pods": {"usage": 0, "count": 0, "capacity": 100}
+            "pods": {"usage": 0, "count": 0, "capacity": 100},
+            "disk": {"usage": 0, "requests": 0, "limits": 0, "allocatable": 0, "capacity": 100}
         }
     
     def get_node_metrics(self, node_name: str) -> Optional[Dict[str, Any]]:
@@ -225,14 +257,17 @@ class KubernetesMetricsService:
             # Parse node capacity and allocatable resources
             cpu_capacity = self._parse_cpu_value(node.status.capacity.get('cpu', '0'))
             memory_capacity = self._parse_memory_value(node.status.capacity.get('memory', '0Ki'))
+            disk_capacity = self._parse_memory_value(node.status.capacity.get('ephemeral-storage', '0Ki'))
             pods_capacity = int(node.status.capacity.get('pods', '110'))
             
             cpu_allocatable = cpu_capacity
             memory_allocatable = memory_capacity
+            disk_allocatable = disk_capacity
             
             if node.status.allocatable:
                 cpu_allocatable = self._parse_cpu_value(node.status.allocatable.get('cpu', '0'))
                 memory_allocatable = self._parse_memory_value(node.status.allocatable.get('memory', '0Ki'))
+                disk_allocatable = self._parse_memory_value(node.status.allocatable.get('ephemeral-storage', '0Ki'))
             
             # Get pods running on this node
             pods_list = self.api_service.v1.list_pod_for_all_namespaces(
@@ -241,6 +276,7 @@ class KubernetesMetricsService:
             
             cpu_requests = 0
             memory_requests = 0
+            disk_requests = 0
             running_pods = 0
             
             for pod in pods_list.items:
@@ -252,11 +288,13 @@ class KubernetesMetricsService:
                             if container.resources and container.resources.requests:
                                 cpu_requests += self._parse_cpu_value(container.resources.requests.get('cpu', '0'))
                                 memory_requests += self._parse_memory_value(container.resources.requests.get('memory', '0'))
+                                disk_requests += self._parse_memory_value(container.resources.requests.get('ephemeral-storage', '0'))
             
             # Calculate usage percentages
             cpu_usage_percent = (cpu_requests / cpu_capacity * 100) if cpu_capacity > 0 else 0
             memory_usage_percent = (memory_requests / memory_capacity * 100) if memory_capacity > 0 else 0
             pods_usage_percent = (running_pods / pods_capacity * 100) if pods_capacity > 0 else 0
+            disk_usage_percent = (disk_requests / disk_capacity * 100) if disk_capacity > 0 else 0
             
             return {
                 "name": node_name,
@@ -276,6 +314,12 @@ class KubernetesMetricsService:
                     "usage": round(pods_usage_percent, 2),
                     "count": running_pods,
                     "capacity": pods_capacity
+                },
+                "disk": {
+                    "usage": round(disk_usage_percent, 2),
+                    "requests": round(disk_requests / (1024**3), 2),  # Convert to GB
+                    "capacity": round(disk_capacity / (1024**3), 2),
+                    "allocatable": round(disk_allocatable / (1024**3), 2)
                 }
             }
             
