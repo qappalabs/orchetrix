@@ -49,10 +49,6 @@ class ServicesPage(BaseResourcePage):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.resource_type = "services"
-        # Use managed kubernetes client instead of direct client instantiation
-        from Utils.kubernetes_client import get_kubernetes_client
-        managed_client = get_kubernetes_client()
-        self.kube_client = managed_client.v1 if managed_client else None
         self.port_manager = get_port_forward_manager()
         self.setup_page_ui()
         

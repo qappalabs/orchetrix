@@ -981,50 +981,79 @@ class ResourceLoadWorker(EnhancedBaseWorker):
     
     def _add_service_fields(self, processed_item: Dict[str, Any], service: Any):
         """Add service-specific fields efficiently"""
-        spec = service.spec
-        status = service.status
-        
-        # Basic service info
-        service_type = spec.type if spec else 'ClusterIP'
-        cluster_ip = spec.cluster_ip if spec else '<none>'
-        
-        # Port information
-        ports = []
-        if spec and spec.ports:
-            for port in spec.ports:
-                port_str = f"{port.port}/{port.protocol or 'TCP'}"
-                if hasattr(port, 'target_port') and port.target_port:
-                    port_str += f"→{port.target_port}"
-                ports.append(port_str)
-        port_text = ", ".join(ports) if ports else "<none>"
-        
-        # External IPs
-        external_ips = []
-        if spec and spec.external_ips:
-            external_ips.extend(spec.external_ips)
-        
-        # Load balancer IPs
-        if status and status.load_balancer and status.load_balancer.ingress:
-            for ingress in status.load_balancer.ingress:
-                if hasattr(ingress, 'ip') and ingress.ip:
-                    external_ips.append(ingress.ip)
-                elif hasattr(ingress, 'hostname') and ingress.hostname:
-                    external_ips.append(ingress.hostname)
-        
-        external_ip_text = ", ".join(external_ips) if external_ips else "<none>"
-        
-        # Selector information
-        selector = spec.selector if spec and spec.selector else {}
-        selector_text = ", ".join([f"{k}={v}" for k, v in selector.items()]) if selector else "<none>"
-        
-        processed_item.update({
-            'type': service_type,
-            'cluster_ip': cluster_ip,
-            'external_ip': external_ip_text,
-            'ports': len(spec.ports) if spec and spec.ports else 0,
-            'port_text': port_text,
-            'selector': selector_text,
-        })
+        try:
+            spec = getattr(service, 'spec', None)
+            status = getattr(service, 'status', None)
+            
+            # Basic service info with safe attribute access
+            service_type = getattr(spec, 'type', 'ClusterIP') if spec else 'ClusterIP'
+            cluster_ip = getattr(spec, 'cluster_ip', '<none>') if spec else '<none>'
+            
+            # Port information with robust attribute access
+            ports = []
+            if spec and hasattr(spec, 'ports') and spec.ports:
+                for port in spec.ports:
+                    try:
+                        port_num = getattr(port, 'port', '')
+                        protocol = getattr(port, 'protocol', 'TCP')
+                        port_str = f"{port_num}/{protocol}"
+                        
+                        # Try different target port attribute names
+                        target_port = getattr(port, 'target_port', None) or getattr(port, 'targetPort', None)
+                        if target_port:
+                            port_str += f"→{target_port}"
+                        ports.append(port_str)
+                    except Exception as e:
+                        logging.debug(f"Error processing port: {e}")
+                        continue
+            port_text = ", ".join(ports) if ports else "<none>"
+            
+            # External IPs with safe access
+            external_ips = []
+            if spec and hasattr(spec, 'external_ips') and spec.external_ips:
+                external_ips.extend(spec.external_ips)
+            
+            # Load balancer IPs with safe access
+            if status and hasattr(status, 'load_balancer') and status.load_balancer:
+                if hasattr(status.load_balancer, 'ingress') and status.load_balancer.ingress:
+                    for ingress in status.load_balancer.ingress:
+                        try:
+                            ip = getattr(ingress, 'ip', None)
+                            hostname = getattr(ingress, 'hostname', None)
+                            if ip:
+                                external_ips.append(ip)
+                            elif hostname:
+                                external_ips.append(hostname)
+                        except Exception as e:
+                            logging.debug(f"Error processing ingress: {e}")
+                            continue
+            
+            external_ip_text = ", ".join(external_ips) if external_ips else "<none>"
+            
+            # Selector information with safe access
+            selector = getattr(spec, 'selector', {}) if spec else {}
+            selector_text = ", ".join([f"{k}={v}" for k, v in selector.items()]) if selector else "<none>"
+            
+            processed_item.update({
+                'type': service_type,
+                'cluster_ip': cluster_ip,
+                'external_ip': external_ip_text,
+                'ports': len(spec.ports) if spec and hasattr(spec, 'ports') and spec.ports else 0,
+                'port_text': port_text,
+                'selector': selector_text,
+            })
+            
+        except Exception as e:
+            logging.error(f"Error processing service fields: {e}")
+            # Set safe defaults if processing fails
+            processed_item.update({
+                'type': 'Unknown',
+                'cluster_ip': '<error>',
+                'external_ip': '<error>',
+                'ports': 0,
+                'port_text': '<error>',
+                'selector': '<error>',
+            })
     
     def _add_configmap_fields(self, processed_item: Dict[str, Any], configmap: Any):
         """Add configmap-specific fields efficiently"""
