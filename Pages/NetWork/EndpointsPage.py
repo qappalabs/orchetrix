@@ -75,7 +75,7 @@ class EndpointsPage(BaseResourcePage):
 
     def populate_resource_row(self, row, resource):
         """
-        Populate a single row with Endpoint data
+        Populate a single row with real Endpoint data from Kubernetes cluster
         """
         # Set row height
         self.table.setRowHeight(row, 40)
@@ -86,11 +86,40 @@ class EndpointsPage(BaseResourcePage):
         checkbox_container.setStyleSheet(AppStyles.CHECKBOX_STYLE)
         self.table.setCellWidget(row, 0, checkbox_container)
         
-        # Prepare data columns
+        # Extract real endpoint data from raw_data
+        raw_data = resource.get("raw_data", {})
+        subsets = raw_data.get("subsets", [])
+        
+        # Parse endpoints from subsets
+        endpoint_addresses = []
+        for subset in subsets:
+            addresses = subset.get("addresses", [])
+            ports = subset.get("ports", [])
+            
+            for address in addresses:
+                ip = address.get("ip", "")
+                if ports:
+                    for port in ports:
+                        port_num = port.get("port", "")
+                        endpoint_addresses.append(f"{ip}:{port_num}")
+                else:
+                    endpoint_addresses.append(ip)
+        
+        # Format endpoints display
+        if endpoint_addresses:
+            # Limit display to first 3 endpoints to avoid overcrowding
+            if len(endpoint_addresses) > 3:
+                endpoints_text = ", ".join(endpoint_addresses[:3]) + f" (+{len(endpoint_addresses)-3} more)"
+            else:
+                endpoints_text = ", ".join(endpoint_addresses)
+        else:
+            endpoints_text = "<none>"
+        
+        # Prepare data columns with real cluster data
         columns = [
             resource["name"],
             resource["namespace"],
-            resource.get("endpoints", "<none>"),
+            endpoints_text,
             resource["age"]
         ]
         
@@ -121,22 +150,9 @@ class EndpointsPage(BaseResourcePage):
             self.table.setItem(row, cell_col, item)
         
         
-        action_button = self._create_action_button(row, resource["name"])
-        action_button.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE +
-    """
-    QToolButton::menu-indicator { image: none; width: 0px; }
-    """)
-        
-        # Create action container with proper styling
-        action_container = QWidget()
-        action_container.setFixedWidth(AppConstants.SIZES["ACTION_WIDTH"])
-        action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
-        action_layout = QHBoxLayout(action_container)
-        action_layout.setContentsMargins(0, 0, 0, 0)
-        action_layout.setSpacing(0)
-        action_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        action_layout.addWidget(action_button)
-        
+        # Create and add action button
+        action_button = self._create_action_button(row, resource["name"], resource["namespace"])
+        action_container = self._create_action_container(row, action_button)
         self.table.setCellWidget(row, len(columns) + 1, action_container)
 
     def handle_row_click(self, row, column):
@@ -164,5 +180,5 @@ class EndpointsPage(BaseResourcePage):
                     parent = parent.parent()
                 
                 if parent and hasattr(parent, 'detail_manager'):
-                    # Always use "endpoint" (singular) for the resource type
-                    parent.detail_manager.show_detail("endpoints", resource_name, namespace)
+                    # Use singular form for detail manager
+                    parent.detail_manager.show_detail("endpoint", resource_name, namespace)
