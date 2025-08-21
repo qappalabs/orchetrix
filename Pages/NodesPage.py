@@ -83,7 +83,7 @@ class GraphWidget(QFrame):
         self.node_name = "None"
         self.utilization_data = {}
         self._last_update_time = 0
-        self._update_interval = 10.0  # 10 seconds
+        self._update_interval = 5.0  # 5 seconds for real-time updates
         self._is_updating = False
 
         self.setMinimumHeight(120)
@@ -113,10 +113,10 @@ class GraphWidget(QFrame):
         layout.addLayout(header_layout)
         layout.addStretch()
 
-        # Much longer timer interval for better performance  
+        # Real-time timer interval for better user experience  
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_data)
-        self.timer.start(45000)  # 45 seconds to reduce CPU usage
+        self.timer.start(5000)  # 5 seconds for real-time updates
 
     def generate_utilization_data(self, nodes_data):
         """Generate utilization data for nodes - optimized for performance"""
@@ -178,8 +178,18 @@ class GraphWidget(QFrame):
             self.current_value = round(self.utilization_data[node_name], 1)
             self.value_label.setText(f"{self.current_value}{self.unit}")
             logging.debug(f"Set {self.title} value: {self.current_value}{self.unit}")
+            
+            # Force immediate graph update with current data
+            self.update_data()
+            
+            # Start/restart the timer for real-time updates
+            self.timer.start(5000)
         else:
             logging.debug(f"No utilization data found for {node_name} in {self.title}")
+            # Reset to show no selection
+            self.current_value = 0
+            self.value_label.setText(f"0{self.unit}")
+            self.timer.stop()
 
     def update_data(self):
         """Update the chart data - only use real cluster data"""
@@ -351,6 +361,9 @@ class NodesPage(BaseResourcePage):
         # Connect double-click to show detail page
         self.table.cellDoubleClicked.connect(self.handle_row_double_click)
         
+        # Connect single-click to update graphs
+        self.table.cellClicked.connect(self.handle_row_click)
+        
         # Configure column widths
         self.configure_columns()
         
@@ -441,18 +454,26 @@ class NodesPage(BaseResourcePage):
 
     def _debounced_update_nodes(self, nodes_data):
         """Debounced wrapper for update_nodes to prevent excessive updates"""
-        self.debounced_updater.schedule_update(
-            "nodes_update", 
-            self.update_nodes, 
-            300,  # 300ms delay
-            nodes_data
-        )
+        # Only debounce if we haven't loaded data yet, otherwise update immediately
+        if not self.has_loaded_data:
+            self.debounced_updater.schedule_update(
+                "nodes_update", 
+                self.update_nodes, 
+                300,  # 300ms delay
+                nodes_data
+            )
+        else:
+            # If we already have data, update immediately to avoid loading flicker
+            self.update_nodes(nodes_data)
 
     def update_nodes(self, nodes_data):
         """Update with real node data from the cluster - optimized for speed"""
         logging.info(f"NodesPage: update_nodes() called with {len(nodes_data) if nodes_data else 0} nodes")
         
-        self.is_loading = False
+        # Only set loading to False if this is initial load or we don't have data yet
+        if not self.has_loaded_data or not nodes_data:
+            self.is_loading = False
+        
         self.is_showing_skeleton = False
         
         if hasattr(self, 'skeleton_timer') and self.skeleton_timer.isActive():
@@ -484,6 +505,10 @@ class NodesPage(BaseResourcePage):
             self._update_graphs_async(nodes_data)
             self._graphs_initialized = True
         
+        # If there's a selected node, update its graphs immediately for real-time feel
+        if hasattr(self, 'selected_row') and self.selected_row >= 0:
+            QTimer.singleShot(50, lambda: self._update_selected_node_graphs())
+        
         # Check if we're in search mode and apply search filter
         if self._is_searching and self._current_search_query:
             self._filter_nodes_by_search(self._current_search_query)
@@ -501,6 +526,29 @@ class NodesPage(BaseResourcePage):
             self.disk_graph.generate_utilization_data(nodes_data)
         except Exception as e:
             logging.error(f"Error updating graphs: {e}")
+    
+    def _update_selected_node_graphs(self):
+        """Update graphs for the currently selected node with latest data"""
+        try:
+            if (hasattr(self, 'selected_row') and self.selected_row >= 0 and 
+                self.selected_row < self.table.rowCount()):
+                
+                node_name_item = self.table.item(self.selected_row, 1)
+                if node_name_item:
+                    node_name = node_name_item.text()
+                    
+                    # Find the node data
+                    for node in self.nodes_data:
+                        if node.get("name") == node_name:
+                            # Force update graphs with new data - bypass throttling
+                            for graph in [self.cpu_graph, self.mem_graph, self.disk_graph]:
+                                graph._last_update_time = 0  # Reset throttling
+                                graph._is_updating = False
+                                graph.generate_utilization_data(self.nodes_data)
+                                graph.set_selected_node(node, node_name)
+                            break
+        except Exception as e:
+            logging.error(f"Error updating selected node graphs: {e}")
     
     def _display_resources(self, resources):
         """Override to use nodes-specific table population"""
@@ -941,6 +989,9 @@ class NodesPage(BaseResourcePage):
         if column != self.table.columnCount() - 1:  # Skip action column
             self.table.selectRow(row)
             self.select_node_for_graphs(row)
+            
+            # Provide immediate real-time update feedback
+            QTimer.singleShot(100, lambda: self._update_selected_node_graphs())
     
     def handle_row_double_click(self, row, column):
         """Handle double-click to show node detail page"""

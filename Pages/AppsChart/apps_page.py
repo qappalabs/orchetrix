@@ -1469,14 +1469,14 @@ class AppsPage(QWidget):
             to_point_x = to_x                   # Left edge of to icon
             to_point_y = to_center_y            # Center Y of to icon
         
-        # Color mapping for connection types with improved colors
+        # Color mapping for connection types with neutral colors (avoiding status colors)
         color_map = {
-            "ingress_to_service": "#E91E63",
-            "service_to_deployment": "#28a745", 
-            "deployment_to_pod": "#007acc",
-            "pod_to_config": "#4CAF50",
-            "pod_to_secret": "#FF9800",
-            "pod_to_pvc": "#9C27B0"
+            "ingress_to_service": "#2196F3",
+            "service_to_deployment": "#607D8B", 
+            "deployment_to_pod": "#3F51B5",
+            "pod_to_config": "#795548",
+            "pod_to_secret": "#9E9E9E",
+            "pod_to_pvc": "#673AB7"
         }
         
         color = color_map.get(connection_type, "#666666")
