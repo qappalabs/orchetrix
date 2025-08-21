@@ -13,7 +13,7 @@ from Base_Components.base_components import SortableTableWidgetItem
 from Base_Components.base_resource_page import BaseResourcePage
 from UI.Styles import AppColors, AppStyles
 from Utils.port_forward_manager import get_port_forward_manager, PortForwardConfig
-from Utils.port_forward_dialog import PortForwardDialog, ActivePortForwardsDialog
+from Utils.port_forward_dialog import ActivePortForwardsDialog
 from functools import partial
 import time
 from UI.Icons import resource_path
@@ -92,26 +92,6 @@ class PortForwardingPage(BaseResourcePage):
     def _add_management_buttons(self):
         """Add port forwarding management buttons"""
         
-        # Create Port Forward button
-        create_btn = QPushButton("Create Port Forward")
-        create_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: #ffffff;
-                border: none;
-                border-radius: 4px;
-                padding: 5px 10px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-            QPushButton:pressed {
-                background-color: #3d8b40;
-            }
-        """)
-        create_btn.clicked.connect(self.show_create_port_forward_dialog)
-        
         # Stop All button
         stop_all_btn = QPushButton("Stop All")
         stop_all_btn.setStyleSheet("""
@@ -139,8 +119,7 @@ class PortForwardingPage(BaseResourcePage):
                 for j in range(item.layout().count()):
                     widget = item.layout().itemAt(j).widget()
                     if isinstance(widget, QPushButton) and widget.text() == "Refresh":
-                        # Insert buttons before refresh
-                        item.layout().insertWidget(item.layout().count() - 1, create_btn)
+                        # Insert button before refresh
                         item.layout().insertWidget(item.layout().count() - 1, stop_all_btn)
                         break
     
@@ -182,12 +161,15 @@ class PortForwardingPage(BaseResourcePage):
         QTimer.singleShot(100, self._ensure_full_width_utilization)
 
     def load_data(self, load_more=False):
-        """Load port forwarding data - override to use real data"""
+        """Load port forwarding data - override to use real data and prevent base class resource loading"""
         if hasattr(self, 'is_loading') and self.is_loading:
             return
             
         self.is_loading = True
         self.selected_items.clear()
+        
+        # Prevent base class from trying to load 'portforwarding' as a Kubernetes resource
+        # by overriding the method completely
         
         # Get real port forwards from manager
         port_forwards = self.port_manager.get_port_forwards()
@@ -226,6 +208,24 @@ class PortForwardingPage(BaseResourcePage):
         self.items_count.setText(f"{len(self.resources)} items")
         
         self.is_loading = False
+    
+    def force_load_data(self):
+        """Override base class method to prevent unified resource loading"""
+        # Don't call super() - this prevents the base class from trying to load
+        # 'portforwarding' as a Kubernetes resource which causes the error
+        self.load_data()
+        
+    def _on_unified_loading_complete(self, resource_type: str, result):
+        """Override to prevent processing of 'portforwarding' resource type"""
+        # Only process if it's not our fake resource type
+        if resource_type != 'portforwarding':
+            super()._on_unified_loading_complete(resource_type, result)
+    
+    def _on_unified_loading_error(self, resource_type: str, error_message: str):
+        """Override to prevent error handling for 'portforwarding' resource type"""
+        # Only process if it's not our fake resource type
+        if resource_type != 'portforwarding':
+            super()._on_unified_loading_error(resource_type, error_message)
 
     def populate_resource_row(self, row, resource):
         """Populate a single row with port forward data"""
@@ -457,14 +457,6 @@ class PortForwardingPage(BaseResourcePage):
         if reply == QMessageBox.StandardButton.Yes:
             self._stop_port_forward(key)
 
-    def show_create_port_forward_dialog(self):
-        """Show dialog to create new port forward"""
-        # This could be enhanced to show a resource selector
-        QMessageBox.information(
-            self, "Create Port Forward",
-            "To create port forwards, navigate to the Pods or Services page "
-            "and use the 'Port Forward' action on specific resources."
-        )
 
     def stop_all_port_forwards(self):
         """Stop all active port forwards"""
