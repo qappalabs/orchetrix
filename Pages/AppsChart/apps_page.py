@@ -778,9 +778,12 @@ class AppsPage(QWidget):
             # Get appropriate icon path for the new status
             new_icon_path = self.get_pod_icon_path(new_status)
             
+            # Use resource_path to resolve the icon path for packaged apps
+            resolved_new_icon_path = resource_path(new_icon_path) if new_icon_path else None
+            
             # Update the pod icon if it's a pixmap item
-            if hasattr(pod_item, 'setPixmap') and os.path.exists(new_icon_path):
-                pixmap = QPixmap(new_icon_path)
+            if hasattr(pod_item, 'setPixmap') and resolved_new_icon_path and os.path.exists(resolved_new_icon_path):
+                pixmap = QPixmap(resolved_new_icon_path)
                 if not pixmap.isNull():
                     # Scale to standard icon size
                     scaled_pixmap = pixmap.scaled(40, 40, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
@@ -1185,8 +1188,11 @@ class AppsPage(QWidget):
         icon_path = self.get_resource_icon_path(resource.resource_type, resource.status)
         icon_item = None
         
-        if icon_path and os.path.exists(icon_path):
-            pixmap = QPixmap(icon_path)
+        # Use resource_path to resolve the icon path for packaged apps
+        resolved_icon_path = resource_path(icon_path) if icon_path else None
+        
+        if resolved_icon_path and os.path.exists(resolved_icon_path):
+            pixmap = QPixmap(resolved_icon_path)
             if not pixmap.isNull():
                 # Scale icon consistently
                 scaled_pixmap = pixmap.scaled(icon_width, icon_height, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
@@ -1857,8 +1863,11 @@ class AppsPage(QWidget):
         icon_path = self.get_resource_icon_path(resource.resource_type, resource.status)
         icon_item = None
         
-        if icon_path and os.path.exists(icon_path):
-            pixmap = QPixmap(icon_path)
+        # Use resource_path to resolve the icon path for packaged apps
+        resolved_icon_path = resource_path(icon_path) if icon_path else None
+        
+        if resolved_icon_path and os.path.exists(resolved_icon_path):
+            pixmap = QPixmap(resolved_icon_path)
             if not pixmap.isNull():
                 # Scale icon for export
                 scaled_pixmap = pixmap.scaled(icon_width, icon_height, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
