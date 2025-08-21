@@ -191,7 +191,13 @@ class PaginatedResourcePage(BaseResourcePage):
             self.has_more_data = True
             self.resources.clear()
             self.filtered_resources.clear()
-            self.table.clear()
+            # Clear table contents but preserve headers
+            if hasattr(self.table, 'clearContents'):
+                self.table.clearContents()
+            elif hasattr(self.table, 'setRowCount'):
+                self.table.setRowCount(0)
+            else:
+                self.table.clear()
         
         self._start_data_loading(load_more)
     

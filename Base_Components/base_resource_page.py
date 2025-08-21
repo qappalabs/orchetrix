@@ -964,6 +964,10 @@ class BaseResourcePage(BaseTablePage):
             self._show_empty_message()
             return
         
+        # Hide any empty message overlay when showing data
+        if hasattr(self, '_empty_overlay'):
+            self._empty_overlay.hide()
+        
         self._table_stack.setCurrentWidget(self.table)
         
         # Clear previous selections when displaying new data
@@ -1067,45 +1071,93 @@ class BaseResourcePage(BaseTablePage):
         self.items_count.setText(f"{count} items")
 
     def _show_empty_message(self):
-        """Show empty state message in center of table section while keeping headers visible"""
-        # Keep table headers visible - don't clear the table completely
+        """Show empty state message in center of table area while keeping headers visible"""
+        # Keep table headers visible - clear rows but keep headers
         if self.table:
             self.table.setRowCount(0)  # Just clear rows, keep headers
             self.table.show()  # Ensure table is visible
         
-        # Clear and setup the message container
-        self._clear_message_container()
-        
-        # Create centered empty message with app theme styling
-        empty_title = QLabel("No resources found")
-        empty_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        empty_title.setStyleSheet("color: #ffffff; font-size: 20px; font-weight: bold; background-color: transparent; margin: 8px;")
-        
-        empty_subtitle = QLabel("Connect to a cluster or check your filters")
-        empty_subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)  
-        empty_subtitle.setStyleSheet("color: #9ca3af; font-size: 14px; background-color: transparent; margin: 4px;")
-        
-        # Add widgets to message container
-        self._message_widget_container.layout().addWidget(empty_title)
-        self._message_widget_container.layout().addWidget(empty_subtitle)
-        
-        # Show the message overlay but keep table visible in background
+        # Make sure table is showing
         self._table_stack.setCurrentWidget(self.table)
         
-        # Switch to message container view
-        self._table_stack.setCurrentWidget(self._message_widget_container)
+        # Create an overlay widget on top of the table
+        if not hasattr(self, '_empty_overlay'):
+            from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel
+            from PyQt6.QtCore import Qt
+            
+            # Create overlay widget
+            self._empty_overlay = QWidget(self.table)
+            self._empty_overlay.setStyleSheet("background-color: rgba(0, 0, 0, 0);")  # Transparent background
+            
+            # Create layout for overlay
+            overlay_layout = QVBoxLayout(self._empty_overlay)
+            overlay_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            overlay_layout.setContentsMargins(20, 20, 20, 20)
+            
+            # Create empty message labels
+            self._empty_title = QLabel("No resources found")
+            self._empty_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._empty_title.setStyleSheet("color: #ffffff; font-size: 20px; font-weight: bold; background-color: transparent; margin: 8px;")
+            
+            self._empty_subtitle = QLabel("Connect to a cluster or check your filters")
+            self._empty_subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._empty_subtitle.setStyleSheet("color: #9ca3af; font-size: 14px; background-color: transparent; margin: 4px;")
+            
+            overlay_layout.addWidget(self._empty_title)
+            overlay_layout.addWidget(self._empty_subtitle)
+        
+        # Position the overlay to cover the table content area (below headers)
+        self._position_empty_overlay()
+        
+        # Show the overlay
+        self._empty_overlay.show()
+        self._empty_overlay.raise_()
+        
+        # Install event filter to handle table resize
+        if not hasattr(self, '_table_event_filter_installed'):
+            self.table.installEventFilter(self)
+            self._table_event_filter_installed = True
+            
+    def _position_empty_overlay(self):
+        """Position the empty message overlay correctly"""
+        if hasattr(self, '_empty_overlay') and hasattr(self.table, 'horizontalHeader'):
+            header_height = self.table.horizontalHeader().height()
+            table_rect = self.table.rect()  # Use rect() instead of geometry() for relative positioning
+            self._empty_overlay.setGeometry(0, header_height, table_rect.width(), table_rect.height() - header_height)
+    
+    def eventFilter(self, obj, event):
+        """Handle events for repositioning overlay on resize"""
+        if obj == self.table and event.type() == event.Type.Resize:
+            if hasattr(self, '_empty_overlay') and self._empty_overlay.isVisible():
+                self._position_empty_overlay()
+        return super().eventFilter(obj, event)
 
     def _show_error_message(self, message):
-        """Show error message"""
-        self._clear_message_container()
-        
-        error_label = QLabel(f"Error: {message}")
-        error_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        error_label.setStyleSheet("color: #ef4444; font-size: 16px;")
-        error_label.setWordWrap(True)
-        
-        self._message_widget_container.layout().addWidget(error_label)
-        self._table_stack.setCurrentWidget(self._message_widget_container)
+        """Show error message while keeping table headers visible"""
+        if self.table:
+            self.table.setRowCount(0)  # Clear rows, keep headers
+            self.table.show()  # Ensure table is visible
+            
+            # Add a single row with error message spanning all columns
+            self.table.setRowCount(1)
+            column_count = self.table.columnCount()
+            
+            # Create error message widget
+            error_label = QLabel(f"Error: {message}")
+            error_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            error_label.setStyleSheet("color: #ef4444; font-size: 16px; font-weight: bold; background-color: transparent; padding: 20px;")
+            error_label.setWordWrap(True)
+            
+            # Set the message widget to span all columns in the first row
+            self.table.setCellWidget(0, 0, error_label)
+            if column_count > 1:
+                self.table.setSpan(0, 0, 1, column_count)
+            
+            # Set appropriate row height to make message visible
+            self.table.setRowHeight(0, 80)
+            
+            # Make sure the table is the current widget
+            self._table_stack.setCurrentWidget(self.table)
 
     def _clear_message_container(self):
         """Clear the message container"""
@@ -1362,8 +1414,13 @@ class BaseResourcePage(BaseTablePage):
                 # For QTableWidget
                 self.table.setRowCount(0)
             elif hasattr(self.table, 'clear'):
-                # For other table widgets
-                self.table.clear()
+                # For other table widgets - preserve headers by only clearing contents
+                if hasattr(self.table, 'clearContents'):
+                    self.table.clearContents()
+                elif hasattr(self.table, 'setRowCount'):
+                    self.table.setRowCount(0)
+                else:
+                    self.table.clear()
             
             # DO NOT clear self.resources array - this was causing action button failures!
             # The resources array must persist so action buttons can reference resource data
