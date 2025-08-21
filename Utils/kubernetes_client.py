@@ -116,6 +116,31 @@ class KubernetesClient(QObject):
         return self.service.api_service.autoscaling_v1
     
     @property
+    def policy_v1(self):
+        """Access to PolicyV1Api - backward compatibility"""
+        return self.service.api_service.policy_v1
+    
+    @property
+    def admissionregistration_v1(self):
+        """Access to AdmissionregistrationV1Api - backward compatibility"""
+        return self.service.api_service.admissionregistration_v1
+    
+    @property
+    def node_v1(self):
+        """Access to NodeV1Api - backward compatibility"""
+        return self.service.api_service.node_v1
+    
+    @property
+    def coordination_v1(self):
+        """Access to CoordinationV1Api - backward compatibility"""
+        return self.service.api_service.coordination_v1
+    
+    @property
+    def scheduling_v1(self):
+        """Access to SchedulingV1Api - backward compatibility"""
+        return self.service.api_service.scheduling_v1
+    
+    @property
     def apiextensions_v1(self):
         """Access to ApiextensionsV1Api - backward compatibility"""
         return self.service.api_service.apiextensions_v1

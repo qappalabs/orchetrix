@@ -410,6 +410,14 @@ class SearchResourceLoadWorker(EnhancedBaseWorker):
 class ResourceLoadWorker(EnhancedBaseWorker):
     """High-performance worker for loading Kubernetes resources"""
     
+    # Shared constant for cluster-scoped resources to avoid duplication
+    CLUSTER_SCOPED_RESOURCES = {
+        'nodes', 'namespaces', 'persistentvolumes', 'storageclasses',
+        'ingressclasses', 'clusterroles', 'clusterrolebindings',
+        'customresourcedefinitions', 'priorityclasses', 'runtimeclasses',
+        'validatingwebhookconfigurations', 'mutatingwebhookconfigurations'
+    }
+    
     def __init__(self, config: ResourceConfig, loader_instance):
         super().__init__(f"resource_load_{config.resource_type}")
         self.config = config
@@ -550,13 +558,7 @@ class ResourceLoadWorker(EnhancedBaseWorker):
         }
         
         # Handle cluster scoped vs namespaced resources
-        cluster_scoped_resources = {
-            'nodes', 'namespaces', 'persistentvolumes', 'storageclasses',
-            'ingressclasses', 'clusterroles', 'clusterrolebindings',
-            'customresourcedefinitions'
-        }
-        
-        is_cluster_scoped = self.config.resource_type in cluster_scoped_resources
+        is_cluster_scoped = self.config.resource_type in self.CLUSTER_SCOPED_RESOURCES
         
         # Handle "All Namespaces" case efficiently
         if not self.config.namespace and not is_cluster_scoped:
@@ -659,6 +661,7 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             'pods': kube_client.v1,
             'nodes': kube_client.v1,
             'services': kube_client.v1,
+            'serviceaccounts': kube_client.v1,
             'configmaps': kube_client.v1,
             'secrets': kube_client.v1,
             'namespaces': kube_client.v1,
@@ -666,6 +669,9 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             'endpoints': kube_client.v1,
             'persistentvolumes': kube_client.v1,
             'persistentvolumeclaims': kube_client.v1,
+            'replicationcontrollers': kube_client.v1,
+            'resourcequotas': kube_client.v1,
+            'limitranges': kube_client.v1,
             
             # Apps v1 resources
             'deployments': kube_client.apps_v1,
@@ -690,10 +696,27 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             'rolebindings': kube_client.rbac_v1,
             'clusterroles': kube_client.rbac_v1,
             'clusterrolebindings': kube_client.rbac_v1,
-            
-            # Custom Resources
-            'customresourcedefinitions': kube_client.apiextensions_v1,
         }
+        
+        # For new API clients that might not be available in older instances,
+        # use fallbacks to prevent application crashes
+        try:
+            if self.config.resource_type == 'horizontalpodautoscalers':
+                return getattr(kube_client, 'autoscaling_v1', kube_client.v1)
+            elif self.config.resource_type == 'poddisruptionbudgets':
+                return getattr(kube_client, 'policy_v1', kube_client.v1)
+            elif self.config.resource_type in ['validatingwebhookconfigurations', 'mutatingwebhookconfigurations']:
+                return getattr(kube_client, 'admissionregistration_v1', kube_client.v1)
+            elif self.config.resource_type == 'runtimeclasses':
+                return getattr(kube_client, 'node_v1', kube_client.v1)
+            elif self.config.resource_type == 'leases':
+                return getattr(kube_client, 'coordination_v1', kube_client.v1)
+            elif self.config.resource_type == 'priorityclasses':
+                return getattr(kube_client, 'scheduling_v1', kube_client.v1)
+            elif self.config.resource_type == 'customresourcedefinitions':
+                return getattr(kube_client, 'apiextensions_v1', kube_client.v1)
+        except AttributeError:
+            pass
         
         return api_mapping.get(self.config.resource_type, kube_client.v1)
     
@@ -829,6 +852,14 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             self._add_node_fields(processed_item, item)
         elif resource_type == 'services':
             self._add_service_fields(processed_item, item)
+        elif resource_type == 'configmaps':
+            self._add_configmap_fields(processed_item, item)
+        elif resource_type == 'secrets':
+            self._add_secret_fields(processed_item, item)
+        elif resource_type == 'leases':
+            self._add_lease_fields(processed_item, item)
+        elif resource_type == 'priorityclasses':
+            self._add_priorityclass_fields(processed_item, item)
         elif resource_type in ['deployments', 'replicasets', 'statefulsets', 'daemonsets']:
             self._add_workload_fields(processed_item, item)
     
@@ -953,11 +984,104 @@ class ResourceLoadWorker(EnhancedBaseWorker):
         spec = service.spec
         status = service.status
         
+        # Basic service info
+        service_type = spec.type if spec else 'ClusterIP'
+        cluster_ip = spec.cluster_ip if spec else '<none>'
+        
+        # Port information
+        ports = []
+        if spec and spec.ports:
+            for port in spec.ports:
+                port_str = f"{port.port}/{port.protocol or 'TCP'}"
+                if hasattr(port, 'target_port') and port.target_port:
+                    port_str += f"→{port.target_port}"
+                ports.append(port_str)
+        port_text = ", ".join(ports) if ports else "<none>"
+        
+        # External IPs
+        external_ips = []
+        if spec and spec.external_ips:
+            external_ips.extend(spec.external_ips)
+        
+        # Load balancer IPs
+        if status and status.load_balancer and status.load_balancer.ingress:
+            for ingress in status.load_balancer.ingress:
+                if hasattr(ingress, 'ip') and ingress.ip:
+                    external_ips.append(ingress.ip)
+                elif hasattr(ingress, 'hostname') and ingress.hostname:
+                    external_ips.append(ingress.hostname)
+        
+        external_ip_text = ", ".join(external_ips) if external_ips else "<none>"
+        
+        # Selector information
+        selector = spec.selector if spec and spec.selector else {}
+        selector_text = ", ".join([f"{k}={v}" for k, v in selector.items()]) if selector else "<none>"
+        
         processed_item.update({
-            'type': spec.type if spec else 'Unknown',
-            'cluster_ip': spec.cluster_ip if spec else None,
-            'external_ip': self._get_service_external_ip(spec, status),
+            'type': service_type,
+            'cluster_ip': cluster_ip,
+            'external_ip': external_ip_text,
             'ports': len(spec.ports) if spec and spec.ports else 0,
+            'port_text': port_text,
+            'selector': selector_text,
+        })
+    
+    def _add_configmap_fields(self, processed_item: Dict[str, Any], configmap: Any):
+        """Add configmap-specific fields efficiently"""
+        data = configmap.data
+        binary_data = configmap.binary_data
+        
+        # Get keys from both data and binaryData
+        keys = []
+        if data:
+            keys.extend(data.keys())
+        if binary_data:
+            keys.extend(binary_data.keys())
+        
+        processed_item.update({
+            'keys': ', '.join(keys) if keys else '<none>',
+            'data_keys_count': len(keys),
+        })
+    
+    def _add_secret_fields(self, processed_item: Dict[str, Any], secret: Any):
+        """Add secret-specific fields efficiently"""
+        data = secret.data
+        
+        # Get keys but don't display values for security
+        keys = list(data.keys()) if data else []
+        
+        processed_item.update({
+            'keys': ', '.join(keys) if keys else '<none>',
+            'data_keys_count': len(keys),
+            'type': secret.type if secret.type else 'Opaque',
+        })
+    
+    def _add_lease_fields(self, processed_item: Dict[str, Any], lease: Any):
+        """Add lease-specific fields efficiently"""
+        spec = lease.spec
+        
+        holder_identity = '<none>'
+        lease_duration_seconds = 0
+        
+        if spec:
+            holder_identity = spec.holder_identity if spec.holder_identity else '<none>'
+            lease_duration_seconds = spec.lease_duration_seconds if spec.lease_duration_seconds else 0
+        
+        processed_item.update({
+            'holder': holder_identity,
+            'lease_duration': f"{lease_duration_seconds}s",
+        })
+    
+    def _add_priorityclass_fields(self, processed_item: Dict[str, Any], priority_class: Any):
+        """Add priority class-specific fields efficiently"""
+        value = priority_class.value if priority_class.value is not None else 0
+        global_default = priority_class.global_default if priority_class.global_default is not None else False
+        description = priority_class.description if priority_class.description else ""
+        
+        processed_item.update({
+            'value': str(value),
+            'global_default': str(global_default).lower(),
+            'description': description,
         })
     
     def _add_workload_fields(self, processed_item: Dict[str, Any], workload: Any):
@@ -1023,8 +1147,8 @@ class ResourceLoadWorker(EnhancedBaseWorker):
     
     def _get_service_external_ip(self, spec, status) -> Optional[str]:
         """Get service external IP efficiently"""
-        if spec and spec.external_i_ps:
-            return ', '.join(spec.external_i_ps)
+        if spec and spec.external_ips:
+            return ', '.join(spec.external_ips)
         
         if spec and spec.type == 'LoadBalancer' and status and status.load_balancer:
             if status.load_balancer.ingress:
@@ -1196,6 +1320,7 @@ class HighPerformanceResourceLoader(QObject):
             'pods': 'list_pod_for_all_namespaces',
             'nodes': 'list_node',
             'services': 'list_service_for_all_namespaces',
+            'serviceaccounts': 'list_service_account_for_all_namespaces',
             'configmaps': 'list_config_map_for_all_namespaces',
             'secrets': 'list_secret_for_all_namespaces',
             'namespaces': 'list_namespace',
@@ -1203,10 +1328,13 @@ class HighPerformanceResourceLoader(QObject):
             'endpoints': 'list_endpoints_for_all_namespaces',
             'persistentvolumes': 'list_persistent_volume',
             'persistentvolumeclaims': 'list_persistent_volume_claim_for_all_namespaces',
+            'resourcequotas': 'list_resource_quota_for_all_namespaces',
+            'limitranges': 'list_limit_range_for_all_namespaces',
             
             # Apps v1 resources
             'deployments': 'list_deployment_for_all_namespaces',
             'replicasets': 'list_replica_set_for_all_namespaces',
+            'replicationcontrollers': 'list_replication_controller_for_all_namespaces',
             'daemonsets': 'list_daemon_set_for_all_namespaces',
             'statefulsets': 'list_stateful_set_for_all_namespaces',
             
@@ -1228,9 +1356,37 @@ class HighPerformanceResourceLoader(QObject):
             'clusterroles': 'list_cluster_role',
             'clusterrolebindings': 'list_cluster_role_binding',
             
+            # Autoscaling v1 resources
+            'horizontalpodautoscalers': 'list_horizontal_pod_autoscaler_for_all_namespaces',
+            
+            # Policy v1 resources
+            'poddisruptionbudgets': 'list_namespaced_pod_disruption_budget',
+            
+            # Admission registration v1 resources
+            'validatingwebhookconfigurations': 'list_validating_webhook_configuration',
+            'mutatingwebhookconfigurations': 'list_mutating_webhook_configuration',
+            
+            # Node v1 resources
+            'runtimeclasses': 'list_runtime_class',
+            
+            # Coordination v1 resources
+            'leases': 'list_lease_for_all_namespaces',
+            
+            # Scheduling v1 resources
+            'priorityclasses': 'list_priority_class',
+            
             # Custom Resources
             'customresourcedefinitions': 'list_custom_resource_definition',
         }
+        
+        # For Config resources that might need special handling
+        if resource_type in ['poddisruptionbudgets', 'horizontalpodautoscalers', 
+                           'validatingwebhookconfigurations', 'mutatingwebhookconfigurations',
+                           'runtimeclasses', 'leases', 'priorityclasses']:
+            # If the resource type isn't in the mapping, fall back to a safe default
+            if resource_type not in method_mapping:
+                logging.warning(f"API method for {resource_type} not found, using fallback")
+                return 'list_pod_for_all_namespaces'
         
         return method_mapping.get(resource_type, 'list_pod_for_all_namespaces')
     
@@ -1240,15 +1396,19 @@ class HighPerformanceResourceLoader(QObject):
             # Core v1 resources
             'pods': 'list_namespaced_pod',
             'services': 'list_namespaced_service',
+            'serviceaccounts': 'list_namespaced_service_account',
             'configmaps': 'list_namespaced_config_map',
             'secrets': 'list_namespaced_secret',
             'events': 'list_namespaced_event',
             'endpoints': 'list_namespaced_endpoints',
             'persistentvolumeclaims': 'list_namespaced_persistent_volume_claim',
+            'resourcequotas': 'list_namespaced_resource_quota',
+            'limitranges': 'list_namespaced_limit_range',
             
             # Apps v1 resources
             'deployments': 'list_namespaced_deployment',
             'replicasets': 'list_namespaced_replica_set',
+            'replicationcontrollers': 'list_namespaced_replication_controller',
             'daemonsets': 'list_namespaced_daemon_set',
             'statefulsets': 'list_namespaced_stateful_set',
             
@@ -1263,16 +1423,19 @@ class HighPerformanceResourceLoader(QObject):
             # RBAC v1 resources
             'roles': 'list_namespaced_role',
             'rolebindings': 'list_namespaced_role_binding',
+            
+            # Autoscaling v1 resources
+            'horizontalpodautoscalers': 'list_namespaced_horizontal_pod_autoscaler',
+            
+            # Policy v1 resources
+            'poddisruptionbudgets': 'list_namespaced_pod_disruption_budget',
+            
+            # Coordination v1 resources
+            'leases': 'list_namespaced_lease',
         }
         
         # For cluster-scoped resources, return the original all-namespaces method
-        cluster_scoped_resources = {
-            'nodes', 'namespaces', 'persistentvolumes', 'storageclasses',
-            'ingressclasses', 'clusterroles', 'clusterrolebindings',
-            'customresourcedefinitions'
-        }
-        
-        if resource_type in cluster_scoped_resources:
+        if resource_type in ResourceLoadWorker.CLUSTER_SCOPED_RESOURCES:
             return self._get_api_method(resource_type)
         
         return namespaced_method_mapping.get(resource_type, 'list_namespaced_pod')

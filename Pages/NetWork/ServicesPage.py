@@ -150,30 +150,47 @@ class ServicesPage(BaseResourcePage):
         checkbox_container.setStyleSheet(AppStyles.CHECKBOX_STYLE)
         self.table.setCellWidget(row, 0, checkbox_container)
         
-        spec = resource.get("raw_data", {}).get("spec", {})
-        service_type = spec.get("type", "ClusterIP")
-        cluster_ip = spec.get("clusterIP", "<none>")
+        # Use processed fields from the unified resource loader, with fallback to raw_data
+        service_type = resource.get("type")
+        cluster_ip = resource.get("cluster_ip")
+        port_text = resource.get("port_text")
+        external_ip_text = resource.get("external_ip")
+        selector_text = resource.get("selector")
         
-        ports = spec.get("ports", [])
-        port_strs = []
-        for port in ports:
-            port_str = f"{port.get('port')}/{port.get('protocol', 'TCP')}"
-            if 'targetPort' in port:
-                port_str += f"→{port.get('targetPort')}"
-            port_strs.append(port_str)
-        port_text = ", ".join(port_strs) if port_strs else "<none>"
+        # Fallback to raw_data if processed fields are not available
+        if not service_type or not cluster_ip:
+            spec = resource.get("raw_data", {}).get("spec", {})
+            if spec:
+                service_type = spec.get("type", "ClusterIP")
+                cluster_ip = spec.get("clusterIP", "<none>")
+                
+                ports = spec.get("ports", [])
+                port_strs = []
+                for port in ports:
+                    port_str = f"{port.get('port')}/{port.get('protocol', 'TCP')}"
+                    if 'targetPort' in port:
+                        port_str += f"→{port.get('targetPort')}"
+                    port_strs.append(port_str)
+                port_text = ", ".join(port_strs) if port_strs else "<none>"
+                
+                external_ips = spec.get("externalIPs", [])
+                lb_status = resource.get("raw_data", {}).get("status", {}).get("loadBalancer", {}).get("ingress", [])
+                for lb in lb_status:
+                    if "ip" in lb:
+                        external_ips.append(lb["ip"])
+                    elif "hostname" in lb:
+                        external_ips.append(lb["hostname"])
+                external_ip_text = ", ".join(external_ips) if external_ips else "<none>"
+                
+                selector = spec.get("selector", {})
+                selector_text = ", ".join([f"{k}={v}" for k, v in selector.items()]) if selector else "<none>"
         
-        external_ips = spec.get("externalIPs", [])
-        lb_status = resource.get("raw_data", {}).get("status", {}).get("loadBalancer", {}).get("ingress", [])
-        for lb in lb_status:
-            if "ip" in lb:
-                external_ips.append(lb["ip"])
-            elif "hostname" in lb:
-                external_ips.append(lb["hostname"])
-        external_ip_text = ", ".join(external_ips) if external_ips else "<none>"
-        
-        selector = spec.get("selector", {})
-        selector_text = ", ".join([f"{k}={v}" for k, v in selector.items()]) if selector else "<none>"
+        # Ensure we have default values
+        service_type = service_type or "ClusterIP"
+        cluster_ip = cluster_ip or "<none>"
+        port_text = port_text or "<none>"
+        external_ip_text = external_ip_text or "<none>"
+        selector_text = selector_text or "<none>"
         
         status = self.determine_service_status(resource)
         
