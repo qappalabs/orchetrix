@@ -38,6 +38,71 @@ class DetailManager(QObject):
 
         # Lazy initialization flag
         self._is_initialized = False
+        
+        # Resource type conversion mappings
+        self._resource_type_mappings = {
+            # Core v1 resources
+            'pods': 'pod',
+            'services': 'service', 
+            'serviceaccounts': 'serviceaccount',
+            'configmaps': 'configmap',
+            'secrets': 'secret',
+            'nodes': 'node',
+            'namespaces': 'namespace',
+            'events': 'event',
+            'endpoints': 'endpoint',
+            'persistentvolumes': 'persistentvolume',
+            'persistentvolumeclaims': 'persistentvolumeclaim',
+            'replicationcontrollers': 'replicationcontroller',
+            'resourcequotas': 'resourcequota',
+            'limitranges': 'limitrange',
+            
+            # Apps v1 resources
+            'deployments': 'deployment',
+            'replicasets': 'replicaset', 
+            'daemonsets': 'daemonset',
+            'statefulsets': 'statefulset',
+            
+            # Networking v1 resources
+            'ingresses': 'ingress',
+            'networkpolicies': 'networkpolicy',
+            'ingressclasses': 'ingressclass',
+            
+            # Storage v1 resources
+            'storageclasses': 'storageclass',
+            
+            # Batch v1 resources
+            'jobs': 'job',
+            'cronjobs': 'cronjob',
+            
+            # RBAC v1 resources
+            'roles': 'role',
+            'rolebindings': 'rolebinding',
+            'clusterroles': 'clusterrole', 
+            'clusterrolebindings': 'clusterrolebinding',
+            
+            # Autoscaling v1 resources
+            'horizontalpodautoscalers': 'horizontalpodautoscaler',
+            
+            # Policy v1 resources
+            'poddisruptionbudgets': 'poddisruptionbudget',
+            
+            # Admission registration v1 resources
+            'validatingwebhookconfigurations': 'validatingwebhookconfiguration',
+            'mutatingwebhookconfigurations': 'mutatingwebhookconfiguration',
+            
+            # Node v1 resources
+            'runtimeclasses': 'runtimeclass',
+            
+            # Coordination v1 resources
+            'leases': 'lease',
+            
+            # Scheduling v1 resources
+            'priorityclasses': 'priorityclass',
+            
+            # Custom Resources
+            'customresourcedefinitions': 'customresourcedefinition',
+        }
 
     def _ensure_detail_page(self) -> DetailPageComponent:
         """Lazy initialization of detail page for better startup performance"""
@@ -73,12 +138,29 @@ class DetailManager(QObject):
                 self._cached_height = new_height
                 if self._detail_page:
                     self._detail_page.setFixedHeight(new_height)
+    
+    def _convert_to_singular(self, resource_type: str) -> str:
+        """Convert plural resource type to singular using accurate mappings"""
+        # Use the mapping if available, otherwise fallback to simple logic
+        singular = self._resource_type_mappings.get(resource_type.lower())
+        if singular:
+            return singular
+        
+        # Fallback: simple conversion (better than rstrip('s'))
+        if resource_type.endswith('ies'):
+            return resource_type[:-3] + 'y'  # e.g., 'policies' -> 'policy'
+        elif resource_type.endswith('ses'):
+            return resource_type[:-2]        # e.g., 'classes' -> 'class' 
+        elif resource_type.endswith('s'):
+            return resource_type[:-1]        # e.g., 'services' -> 'service'
+        else:
+            return resource_type             # already singular
 
     def show_detail(self, resource_type: str, resource_name: str,
                     namespace: Optional[str] = None, raw_data: Optional[Dict[str, Any]] = None) -> None:
         """Show detail view for the specified resource with optimized performance"""
         # Convert plural resource type to singular for API compatibility
-        resource_type_singular = resource_type.rstrip('s') if resource_type.endswith('s') else resource_type
+        resource_type_singular = self._convert_to_singular(resource_type)
         
         # Ensure detail page is created
         detail_page = self._ensure_detail_page()

@@ -632,6 +632,72 @@ class KubernetesClient(QObject):
             elif resource_type.lower() == "persistentvolumeclaim":
                 if namespace:
                     resource_detail = self.v1.read_namespaced_persistent_volume_claim(name=resource_name, namespace=namespace)
+            elif resource_type.lower() == "serviceaccount":
+                if namespace:
+                    resource_detail = self.v1.read_namespaced_service_account(name=resource_name, namespace=namespace)
+            elif resource_type.lower() == "replicaset":
+                if namespace:
+                    resource_detail = self.apps_v1.read_namespaced_replica_set(name=resource_name, namespace=namespace)
+            elif resource_type.lower() == "daemonset":
+                if namespace:
+                    resource_detail = self.apps_v1.read_namespaced_daemon_set(name=resource_name, namespace=namespace)
+            elif resource_type.lower() == "statefulset":
+                if namespace:
+                    resource_detail = self.apps_v1.read_namespaced_stateful_set(name=resource_name, namespace=namespace)
+            elif resource_type.lower() == "job":
+                if namespace:
+                    resource_detail = self.batch_v1.read_namespaced_job(name=resource_name, namespace=namespace)
+            elif resource_type.lower() == "cronjob":
+                if namespace:
+                    resource_detail = self.batch_v1.read_namespaced_cron_job(name=resource_name, namespace=namespace)
+            elif resource_type.lower() == "horizontalpodautoscaler":
+                if namespace:
+                    resource_detail = self.autoscaling_v1.read_namespaced_horizontal_pod_autoscaler(name=resource_name, namespace=namespace)
+            elif resource_type.lower() == "networkpolicy":
+                if namespace:
+                    resource_detail = self.networking_v1.read_namespaced_network_policy(name=resource_name, namespace=namespace)
+            elif resource_type.lower() == "storageclass":
+                resource_detail = self.storage_v1.read_storage_class(name=resource_name)
+            elif resource_type.lower() == "role":
+                if namespace:
+                    resource_detail = self.rbac_v1.read_namespaced_role(name=resource_name, namespace=namespace)
+            elif resource_type.lower() == "rolebinding":
+                if namespace:
+                    resource_detail = self.rbac_v1.read_namespaced_role_binding(name=resource_name, namespace=namespace)
+            elif resource_type.lower() == "clusterrole":
+                resource_detail = self.rbac_v1.read_cluster_role(name=resource_name)
+            elif resource_type.lower() == "clusterrolebinding":
+                resource_detail = self.rbac_v1.read_cluster_role_binding(name=resource_name)
+            elif resource_type.lower() == "replicationcontroller":
+                if namespace:
+                    resource_detail = self.v1.read_namespaced_replication_controller(name=resource_name, namespace=namespace)
+            elif resource_type.lower() == "resourcequota":
+                if namespace:
+                    resource_detail = self.v1.read_namespaced_resource_quota(name=resource_name, namespace=namespace)
+            elif resource_type.lower() == "limitrange":
+                if namespace:
+                    resource_detail = self.v1.read_namespaced_limit_range(name=resource_name, namespace=namespace)
+            elif resource_type.lower() == "endpoint":
+                if namespace:
+                    resource_detail = self.v1.read_namespaced_endpoints(name=resource_name, namespace=namespace)
+            elif resource_type.lower() == "poddisruptionbudget":
+                if namespace:
+                    resource_detail = self.policy_v1.read_namespaced_pod_disruption_budget(name=resource_name, namespace=namespace)
+            elif resource_type.lower() == "priorityclass":
+                resource_detail = self.scheduling_v1.read_priority_class(name=resource_name)
+            elif resource_type.lower() == "runtimeclass":
+                resource_detail = self.node_v1.read_runtime_class(name=resource_name)
+            elif resource_type.lower() == "lease":
+                if namespace:
+                    resource_detail = self.coordination_v1.read_namespaced_lease(name=resource_name, namespace=namespace)
+            elif resource_type.lower() == "validatingwebhookconfiguration":
+                resource_detail = self.admissionregistration_v1.read_validating_webhook_configuration(name=resource_name)
+            elif resource_type.lower() == "mutatingwebhookconfiguration":
+                resource_detail = self.admissionregistration_v1.read_mutating_webhook_configuration(name=resource_name)
+            elif resource_type.lower() == "customresourcedefinition":
+                resource_detail = self.apiextensions_v1.read_custom_resource_definition(name=resource_name)
+            elif resource_type.lower() == "ingressclass":
+                resource_detail = self.networking_v1.read_ingress_class(name=resource_name)
             
             if resource_detail:
                 # Convert to dictionary format for compatibility
