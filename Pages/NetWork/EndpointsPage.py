@@ -2,12 +2,13 @@
 Dynamic implementation of the Endpoints page with live Kubernetes data.
 """
 
-from PyQt6.QtWidgets import QHeaderView, QPushButton
+from PyQt6.QtWidgets import QHeaderView, QPushButton, QWidget, QHBoxLayout
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor
 
 from Base_Components.base_components import SortableTableWidgetItem
 from Base_Components.base_resource_page import BaseResourcePage
+from UI.Styles import AppStyles, AppConstants
 
 class EndpointsPage(BaseResourcePage):
     """
@@ -82,6 +83,7 @@ class EndpointsPage(BaseResourcePage):
         # Create checkbox for row selection
         resource_name = resource["name"]
         checkbox_container = self._create_checkbox_container(row, resource_name)
+        checkbox_container.setStyleSheet(AppStyles.CHECKBOX_STYLE)
         self.table.setCellWidget(row, 0, checkbox_container)
         
         # Prepare data columns
@@ -118,9 +120,6 @@ class EndpointsPage(BaseResourcePage):
             # Add item to table
             self.table.setItem(row, cell_col, item)
         
-        # Create and add action button using base class method with proper styling
-        from PyQt6.QtWidgets import QWidget, QHBoxLayout
-        from UI.Styles import AppStyles, AppConstants
         
         action_button = self._create_action_button(row, resource["name"])
         action_button.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE +

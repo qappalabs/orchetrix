@@ -339,15 +339,6 @@ class BaseTablePage(QWidget):
         unchecked_icon_path = resource_path("Icons/check_box_unchecked.svg")
         checked_icon_path = resource_path("Icons/check_box_checked.svg")
         
-        # Verify icons exist, use fallback if needed
-        if not os.path.exists(unchecked_icon_path):
-            logging.warning(f"Unchecked icon not found: {unchecked_icon_path}")
-            unchecked_icon_path = self._create_fallback_checkbox_icon(False)
-        
-        if not os.path.exists(checked_icon_path):
-            logging.warning(f"Checked icon not found: {checked_icon_path}")
-            checked_icon_path = self._create_fallback_checkbox_icon(True)
-        
         # Create stylesheet with resolved paths
         checkbox_style = f"""
             QCheckBox {{
@@ -420,13 +411,6 @@ class BaseTablePage(QWidget):
         # Get resolved icon paths
         unchecked_icon_path = resource_path("Icons/check_box_unchecked.svg")
         checked_icon_path = resource_path("Icons/check_box_checked.svg")
-        
-        # Verify icons exist, use fallback if needed
-        if not os.path.exists(unchecked_icon_path):
-            unchecked_icon_path = self._create_fallback_checkbox_icon(False)
-        
-        if not os.path.exists(checked_icon_path):
-            checked_icon_path = self._create_fallback_checkbox_icon(True)
         
         # Apply consistent styling with resolved paths
         select_all_style = f"""
