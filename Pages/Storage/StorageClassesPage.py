@@ -18,6 +18,7 @@ class StorageClassesPage(BaseResourcePage):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.resource_type = "storageclasses"  # Set resource type for kubectl
+        self.has_namespace_column = False  # StorageClasses are cluster-level resources
         self.setup_page_ui()
         
     def setup_page_ui(self):

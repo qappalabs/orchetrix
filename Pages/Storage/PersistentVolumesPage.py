@@ -6,40 +6,10 @@ from PyQt6.QtWidgets import (QHeaderView, QWidget, QLabel, QHBoxLayout)
 from PyQt6.QtCore import Qt,pyqtSignal, QTimer
 from PyQt6.QtGui import QColor
 
-from Base_Components.base_components import SortableTableWidgetItem
+from Base_Components.base_components import SortableTableWidgetItem, StatusLabel
 from Base_Components.base_resource_page import BaseResourcePage
 from UI.Styles import AppStyles, AppColors
 
-class StatusLabel(QWidget):
-    """Widget that displays a status with consistent styling and background handling."""
-    clicked = pyqtSignal()
-    
-    def __init__(self, status_text, color=None, parent=None):
-        super().__init__(parent)
-        
-        # Create layout
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        # Create label
-        self.label = QLabel(status_text)
-        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        # Set color if provided, otherwise use default color
-        if color:
-            self.label.setStyleSheet(f"color: {QColor(color).name()}; background-color: transparent;")
-        
-        # Add label to layout
-        layout.addWidget(self.label)
-        
-        # Make sure this widget has a transparent background
-        self.setStyleSheet("background-color: transparent;")
-    
-    def mousePressEvent(self, event):
-        """Emit clicked signal when widget is clicked"""
-        self.clicked.emit()
-        super().mousePressEvent(event)
 
 class PersistentVolumesPage(BaseResourcePage):
     """
@@ -49,6 +19,7 @@ class PersistentVolumesPage(BaseResourcePage):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.resource_type = "persistentvolumes"  # Set resource type for kubectl
+        self.has_namespace_column = False  # PersistentVolumes are cluster-level resources
         self.setup_page_ui()
         
     def setup_page_ui(self):

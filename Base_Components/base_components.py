@@ -597,3 +597,58 @@ class BaseTablePage(QWidget):
         empty_layout.addWidget(content_widget, 0, Qt.AlignmentFlag.AlignCenter)
 
         return empty_widget
+
+
+class StatusLabel(QWidget):
+    """
+    Shared widget that displays a status with consistent styling and background handling.
+    This component replaces all duplicate StatusLabel classes across resource pages.
+    
+    Features:
+    - Consistent styling across all resource pages
+    - Clickable functionality with signal emission
+    - Transparent background for table integration
+    - Customizable color support
+    """
+    clicked = pyqtSignal()
+    
+    def __init__(self, status_text, color=None, parent=None):
+        super().__init__(parent)
+        
+        # Create layout
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # Create label
+        self.label = QLabel(status_text)
+        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # Set color if provided, otherwise use default color
+        if color:
+            self.label.setStyleSheet(f"color: {QColor(color).name()}; background-color: transparent;")
+        else:
+            # Use default styling from AppColors
+            self.label.setStyleSheet("background-color: transparent;")
+        
+        # Add label to layout
+        layout.addWidget(self.label)
+        
+        # Make sure this widget has a transparent background
+        self.setStyleSheet("background-color: transparent;")
+    
+    def setText(self, text):
+        """Update the status text"""
+        self.label.setText(text)
+    
+    def setColor(self, color):
+        """Update the status color"""
+        if color:
+            self.label.setStyleSheet(f"color: {QColor(color).name()}; background-color: transparent;")
+        else:
+            self.label.setStyleSheet("background-color: transparent;")
+    
+    def mousePressEvent(self, event):
+        """Emit clicked signal when widget is clicked"""
+        self.clicked.emit()
+        super().mousePressEvent(event)

@@ -146,7 +146,12 @@ class PaginatedResourcePage(BaseResourcePage):
     
     def __init__(self, resource_type: str, columns: List[str], namespace_scoped: bool = True):
         # Initialize with pagination settings
-        super().__init__(resource_type, columns, namespace_scoped)
+        super().__init__()
+        
+        # Set resource properties
+        self.resource_type = resource_type
+        self.columns = columns
+        self.namespace_scoped = namespace_scoped
         
         # Pagination state
         self.continue_token = None
@@ -159,8 +164,10 @@ class PaginatedResourcePage(BaseResourcePage):
         self.data_worker = None
         self.processing_worker = None
         
-        # Setup pagination UI
-        self.setup_pagination_ui()
+        # Resource storage
+        self.filtered_resources = []
+        
+        # Note: setup_pagination_ui() should be called after base UI is set up by child class
         
         logging.info(f"PaginatedResourcePage initialized for {resource_type} with {len(columns)} columns")
     
@@ -168,7 +175,10 @@ class PaginatedResourcePage(BaseResourcePage):
         """Setup pagination-specific UI elements"""
         # Add pagination controls to the bottom
         self.pagination_controls = PaginationControls(self)
-        self.main_layout.addWidget(self.pagination_controls)
+        
+        # Add to the widget's layout (which was set up by BaseResourcePage.setup_ui)
+        if self.layout():
+            self.layout().addWidget(self.pagination_controls)
         
         # Connect pagination signals
         self.pagination_controls.load_more_requested.connect(self.load_more_data)
@@ -189,15 +199,26 @@ class PaginatedResourcePage(BaseResourcePage):
             self.continue_token = None
             self.total_loaded = 0
             self.has_more_data = True
-            self.resources.clear()
-            self.filtered_resources.clear()
-            # Clear table contents but preserve headers
-            if hasattr(self.table, 'clearContents'):
-                self.table.clearContents()
-            elif hasattr(self.table, 'setRowCount'):
-                self.table.setRowCount(0)
+            
+            # Clear resource arrays safely
+            if hasattr(self, 'resources'):
+                self.resources.clear()
             else:
-                self.table.clear()
+                self.resources = []
+                
+            if hasattr(self, 'filtered_resources'):
+                self.filtered_resources.clear()
+            else:
+                self.filtered_resources = []
+                
+            # Clear table contents but preserve headers
+            if hasattr(self, 'table') and self.table:
+                if hasattr(self.table, 'clearContents'):
+                    self.table.clearContents()
+                elif hasattr(self.table, 'setRowCount'):
+                    self.table.setRowCount(0)
+                else:
+                    self.table.clear()
         
         self._start_data_loading(load_more)
     

@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTimer
 from PyQt6.QtGui import QColor
 
-from Base_Components.base_components import SortableTableWidgetItem
+from Base_Components.base_components import SortableTableWidgetItem, StatusLabel
 from Base_Components.base_resource_page import BaseResourcePage
 from UI.Styles import AppStyles, AppColors
 from Utils.kubernetes_client import get_kubernetes_client
@@ -17,29 +17,6 @@ from kubernetes import client
 import datetime
 import logging
 
-class StatusLabel(QWidget):
-    """Widget that displays a status with consistent styling and background handling."""
-    clicked = pyqtSignal()
-
-    def __init__(self, status_text, color=None, parent=None):
-        super().__init__(parent)
-
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        self.label = QLabel(status_text)
-        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        if color:
-            self.label.setStyleSheet(f"color: {QColor(color).name()}; background-color: transparent;")
-
-        layout.addWidget(self.label)
-        self.setStyleSheet("background-color: transparent;")
-
-    def mousePressEvent(self, event):
-        self.clicked.emit()
-        super().mousePressEvent(event)
 
 class NamespaceOperationThread(QThread):
     """Thread for performing namespace operations asynchronously"""
@@ -113,6 +90,7 @@ class NamespacesPage(BaseResourcePage):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.resource_type = "namespaces"
+        self.has_namespace_column = False  # Namespaces are cluster-level resources
         self.kube_client = get_kubernetes_client()
         self.operation_thread = None
         self.setup_page_ui()

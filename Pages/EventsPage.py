@@ -15,28 +15,28 @@ from UI.Icons import resource_path
 
 class EventsPage(BaseResourcePage):
     """
-    Displays Kubernetes events with live data and resource operations.
-    Simplified version without pagination/lazy loading and checkboxes.
+    Displays Kubernetes events with optimized performance for handling large datasets.
+    Uses BaseResourcePage with enhanced search and performance optimizations.
     """
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.resource_type = "events"
 
-        # FIXED: Enable pagination for events to prevent loading massive datasets
-        self.items_per_page = 100  # Load 100 events at a time
-        self.all_data_loaded = False
-
         self.setup_page_ui()
 
     def setup_page_ui(self):
         """Set up the main UI elements for the Events page"""
-        # Define headers - include proper header for checkbox column even though it's hidden
+        # Define headers for events
         headers = ["✓", "Type", "Message", "Namespace", "Involved Object", "Source", "Count", "Age", "Last Seen", ""]
         sortable_columns = {1, 3, 4, 6, 7, 8}  # Type, Namespace, Involved Object, Count, Age, Last Seen
 
-        # Create base UI - this will add a checkbox column at index 0
-        layout = super().setup_ui("Events", headers, sortable_columns)
+        # Create base UI
+        layout = self.setup_ui("Events", headers, sortable_columns)
+        
+        # Enable pagination for events (optional - can be removed if not needed)
+        # Uncomment the line below to add pagination controls to Events page:
+        # self.enable_pagination_controls(page_size=50)
 
         # Ensure proper header visibility and styling
         header = self.table.horizontalHeader()

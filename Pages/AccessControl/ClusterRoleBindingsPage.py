@@ -18,6 +18,7 @@ class ClusterRoleBindingsPage(BaseResourcePage):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.resource_type = "clusterrolebindings"  # Set resource type for kubectl
+        self.has_namespace_column = False  # ClusterRoleBindings are cluster-level resources
         self.setup_page_ui()
         
     def setup_page_ui(self):

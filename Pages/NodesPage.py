@@ -12,7 +12,7 @@ from PyQt6.QtCore import Qt, QTimer, QRect, QRectF, pyqtSignal, QSize
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QLinearGradient, QPainterPath, QBrush, QCursor
 
 from UI.Styles import AppStyles, AppColors, AppConstants
-from Base_Components.base_components import SortableTableWidgetItem
+from Base_Components.base_components import SortableTableWidgetItem, StatusLabel
 from Base_Components.base_resource_page import BaseResourcePage
 from Utils.cluster_connector import get_cluster_connector
 from Utils.debounced_updater import get_debounced_updater
@@ -40,32 +40,6 @@ class CustomHeaderStyle(QProxyStyle):
                 return
         super().drawControl(element, option, painter, widget)
 
-#------------------------------------------------------------------
-# StatusLabel - Same implementation as in PodsPage
-#------------------------------------------------------------------
-class StatusLabel(QWidget):
-    """Widget that displays a status with consistent styling and background handling."""
-    clicked = pyqtSignal()
-    
-    def __init__(self, status_text, color=None, parent=None):
-        super().__init__(parent)
-        
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        self.label = QLabel(status_text)
-        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        if color:
-            self.label.setStyleSheet(f"color: {QColor(color).name()}; background-color: transparent;")
-        
-        layout.addWidget(self.label)
-        self.setStyleSheet("background-color: transparent;")
-    
-    def mousePressEvent(self, event):
-        self.clicked.emit()
-        super().mousePressEvent(event)
 
 #------------------------------------------------------------------
 # Optimized GraphWidget
@@ -292,6 +266,7 @@ class NodesPage(BaseResourcePage):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.resource_type = "nodes"
+        self.has_namespace_column = False  # Nodes are cluster-level resources
         self.selected_row = -1
         self.has_loaded_data = False
         self.is_loading = False
@@ -320,6 +295,33 @@ class NodesPage(BaseResourcePage):
         
         # Set up UI
         self.setup_page_ui()
+        
+        # Optional: Enable pagination controls for large node lists
+        # Uncomment the line below to add pagination controls:
+        # self.enable_pagination_controls(page_size=25)
+    
+    def cleanup_on_destroy(self):
+        """Override base cleanup to handle NodesPage-specific resources"""
+        try:
+            # Stop NodesPage-specific timers
+            if hasattr(self, '_graph_update_timer'):
+                self._graph_update_timer.stop()
+                self._graph_update_timer.deleteLater()
+            
+            # Disconnect cluster connector signals
+            if hasattr(self, 'cluster_connector') and self.cluster_connector:
+                try:
+                    self.cluster_connector.node_data_loaded.disconnect(self._debounced_update_nodes)
+                except TypeError:
+                    pass  # Signal was not connected
+            
+            # Call parent cleanup
+            super().cleanup_on_destroy()
+            
+        except Exception as e:
+            logging.error(f"Error in NodesPage cleanup: {e}")
+            # Still call parent cleanup even if our cleanup fails
+            super().cleanup_on_destroy()
         
     def setup_page_ui(self):
         """Set up the main UI elements for the Nodes page"""
@@ -377,8 +379,8 @@ class NodesPage(BaseResourcePage):
         self.table.hideColumn(0)
         header = self.table.horizontalHeader()
         
-        # Use responsive column sizing
-        QTimer.singleShot(100, self._setup_responsive_columns)
+        # Setup responsive column sizing immediately - no need for timer delay
+        self._setup_responsive_columns()
     
     def _setup_responsive_columns(self):
         """Setup responsive column sizing for nodes table"""
@@ -441,7 +443,8 @@ class NodesPage(BaseResourcePage):
                 
                 self.table.setColumnWidth(col_index, max(width, min_width))
         
-        QTimer.singleShot(50, self._ensure_full_width_utilization)
+        # Ensure full width utilization immediately after column setup
+        self._ensure_full_width_utilization()
 
     def show_no_data_message(self):
         """Show no data message using base class implementation"""
@@ -474,10 +477,7 @@ class NodesPage(BaseResourcePage):
         """Update with real node data from the cluster - optimized for speed"""
         logging.info(f"NodesPage: update_nodes() called with {len(nodes_data) if nodes_data else 0} nodes")
         
-        # Only set loading to False if this is initial load or we don't have data yet
-        if not self.has_loaded_data or not nodes_data:
-            self.is_loading = False
-        
+        self.is_loading = False
         self.is_showing_skeleton = False
         
         if hasattr(self, 'skeleton_timer') and self.skeleton_timer.isActive():
@@ -487,7 +487,6 @@ class NodesPage(BaseResourcePage):
             logging.warning("NodesPage: No nodes data received")
             self.nodes_data = []
             self.resources = []
-            # Only clear search state when no data is available AND not currently searching
             if not getattr(self, '_is_searching', False):
                 self._is_searching = False
                 self._current_search_query = None
@@ -495,24 +494,17 @@ class NodesPage(BaseResourcePage):
             self.items_count.setText("0 items")
             return
         
-        logging.info(f"NodesPage: Processing {len(nodes_data)} nodes")
-        
-        # Store the data
+        # Store the data and cache timestamp for performance
         self.nodes_data = nodes_data
         self.resources = nodes_data
+        import time
+        self._last_load_time = time.time()
         self.has_loaded_data = True
         
-        # Update graphs asynchronously to avoid blocking UI
-        QTimer.singleShot(10, lambda: self._update_graphs_async(nodes_data))
-        
-        # Also update graphs immediately if this is the first load
+        # Simplified graph updates - only update on first load
         if not hasattr(self, '_graphs_initialized'):
             self._update_graphs_async(nodes_data)
             self._graphs_initialized = True
-        
-        # If there's a selected node, update its graphs immediately for real-time feel
-        if hasattr(self, 'selected_row') and self.selected_row >= 0:
-            QTimer.singleShot(50, lambda: self._update_selected_node_graphs())
         
         # Check if we're in search mode and apply search filter
         if self._is_searching and self._current_search_query:
@@ -522,6 +514,19 @@ class NodesPage(BaseResourcePage):
             # Populate table with optimized method
             self.populate_table(nodes_data)
             self.items_count.setText(f"{len(nodes_data)} items")
+    
+    def _batch_update_graphs(self, nodes_data):
+        """Batch update all graphs to avoid timer cascades"""
+        try:
+            # Update main graphs
+            self._update_graphs_async(nodes_data)
+            
+            # Update selected node graphs if applicable
+            if hasattr(self, 'selected_row') and self.selected_row >= 0:
+                self._update_selected_node_graphs()
+                
+        except Exception as e:
+            logging.error(f"Error in batch graph update: {e}")
     
     def _update_graphs_async(self, nodes_data):
         """Update graphs asynchronously to avoid blocking UI"""
@@ -755,21 +760,21 @@ class NodesPage(BaseResourcePage):
         self.table.setRowCount(0)  # Reset to 0 first
         self.table.setRowCount(len(resources_to_populate))  # Then set to new count
         
-        # Use batched rendering for better performance with large datasets
-        batch_size = self.perf_config.get('table_batch_size', 25)  # Use performance config
+        # Use larger batches for better performance
+        batch_size = 50  # Increased batch size
         total_items = len(resources_to_populate)
         
+        # Process all items in larger batches with minimal event processing
         for start_idx in range(0, total_items, batch_size):
             end_idx = min(start_idx + batch_size, total_items)
-            batch = resources_to_populate[start_idx:end_idx]
             
-            # Populate batch
-            for i, resource in enumerate(batch):
-                actual_row = start_idx + i
-                self.populate_resource_row_optimized(actual_row, resource)
+            # Populate batch without individual processing
+            for i in range(start_idx, end_idx):
+                self.populate_resource_row_optimized(i, resources_to_populate[i])
             
-            # Process events every batch to keep UI responsive
-            QApplication.processEvents()
+            # Process events only between larger batches
+            if end_idx < total_items:
+                QApplication.processEvents()
         
         # Re-enable updates and sorting
         self.table.setUpdatesEnabled(True)
@@ -1004,8 +1009,8 @@ class NodesPage(BaseResourcePage):
             self.table.selectRow(row)
             self.select_node_for_graphs(row)
             
-            # Provide immediate real-time update feedback
-            QTimer.singleShot(100, lambda: self._update_selected_node_graphs())
+            # Update selected node graphs immediately - they're already throttled internally
+            self._update_selected_node_graphs()
     
     def handle_row_double_click(self, row, column):
         """Handle double-click to show node detail page"""
@@ -1027,12 +1032,21 @@ class NodesPage(BaseResourcePage):
                     parent.detail_manager.show_detail(resource_type, resource_name, None)
             
     def load_data(self, load_more=False):
-        """Override to fetch node data from cluster connector"""
+        """Override to fetch node data from cluster connector with performance optimization"""
         logging.info(f"NodesPage: load_data() called, is_loading={self.is_loading}")
         
         if self.is_loading:
+            logging.debug("NodesPage: Already loading, skipping")
             return
-            
+        
+        # Check if we have cached data and it's recent (for performance)
+        if hasattr(self, '_last_load_time') and hasattr(self, 'resources'):
+            import time
+            if self.resources and (time.time() - self._last_load_time) < 10:  # Reduced to 10 second cache
+                logging.info("NodesPage: Using cached node data for performance")
+                self._display_resources(self.resources)
+                return
+        
         self.is_loading = True
         
         if hasattr(self, 'cluster_connector') and self.cluster_connector:

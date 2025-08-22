@@ -18,6 +18,7 @@ from typing import List, Any, Dict
 # Import optimized unified components
 from .resource_deleters import ResourceDeleterThread, BatchResourceDeleterThread
 from .virtual_scroll_table import VirtualScrollTable
+from .resource_processing_worker import ResourceProcessingWorker, create_processing_worker
 
 from Base_Components.base_components import BaseTablePage
 from UI.Styles import AppStyles, AppColors
@@ -27,6 +28,8 @@ from Utils.error_handler import get_error_handler, safe_execute, error_handler
 from Utils.enhanced_worker import EnhancedBaseWorker
 from Utils.thread_manager import get_thread_manager
 from Utils.kubernetes_client import get_kubernetes_client
+from Utils.performance_config import get_performance_config
+from Utils.performance_optimizer import get_performance_profiler, MemoryMonitor
 from log_handler import method_logger, class_logger
 
 # Constants for performance tuning - optimized values
@@ -37,6 +40,7 @@ CACHE_TTL_SECONDS = 600   # Increased cache time for better performance
 
 # Import performance components  
 from Utils.unified_cache_system import get_unified_cache
+from Utils.search_index import get_search_index, SearchResult
 
 @class_logger(log_level=logging.INFO, exclude_methods=['__init__', 'clear_table', 'update_table_row', 'load_more_complete', 'all_items_loaded_signal', 'force_load_data'])
 class BaseResourcePage(BaseTablePage):
@@ -51,7 +55,12 @@ class BaseResourcePage(BaseTablePage):
         super().__init__(parent)
         self.resource_type = None
         self.resources = []
-        self.namespace_filter = "default"  # Start with default namespace, will be updated when namespaces are loaded
+        
+        # Initialize namespace from shared state for persistence
+        from Utils.namespace_state import get_namespace_state
+        namespace_state = get_namespace_state()
+        self.namespace_filter = namespace_state.get_current_namespace()
+        
         self.search_bar = None
         self.namespace_combo = None
 
@@ -59,14 +68,30 @@ class BaseResourcePage(BaseTablePage):
         self.delete_thread = None
         self.batch_delete_thread = None
 
-        # Performance optimizations
+        # Initialize performance optimization
+        self.perf_config = get_performance_config()
+        self.performance_profiler = get_performance_profiler()
+        
+        # Initialize search index for enhanced search capabilities
+        self.search_index = None
+        self.searchable_fields = []
+        
+        # Optional pagination support
+        self.enable_pagination = False
+        self.pagination_controls = None
+        
+        # Namespace support - set to False for cluster-level resources
+        self.has_namespace_column = True  # Default to True, pages can override
+        
+        # Performance optimizations with dynamic configuration
         self.is_loading_initial = False
         self.is_loading_more = False
         self.all_data_loaded = False
         self.current_continue_token = None
-        self.items_per_page = 100  # Increased for better performance
+        self.items_per_page = self.perf_config.get("table_batch_size", 25)  # Use performance-optimized batch size
         self.selected_items = set()
         self.reload_on_show = True
+        self.virtual_scroll_threshold = self.perf_config.get("virtual_scroll_threshold", 100)
 
         self.is_showing_skeleton = False
 
@@ -501,59 +526,66 @@ class BaseResourcePage(BaseTablePage):
             }""")
         self.search_bar.setStyleSheet(search_style)
         
-        # Namespace combo with label
-        namespace_label = QLabel("Namespace:")
-        namespace_label.setStyleSheet("color: #ffffff; font-size: 12px; font-weight: normal;")
-        namespace_label.setMinimumWidth(70)
-        
-        self.namespace_combo = QComboBox()
-        # Start with loading indicator, will be populated dynamically
-        self.namespace_combo.addItem("Loading namespaces...")
-        self.namespace_combo.currentTextChanged.connect(self._on_namespace_changed)
-        self.namespace_combo.setFixedWidth(150)
-        self.namespace_combo.setFixedHeight(32)
-        
-        # Apply consistent styling with proper icon
-        import os
-        from UI.Icons import resource_path
-        down_arrow_icon = resource_path("Icons/down_btn.svg")
-        
-        combo_style = getattr(AppStyles, 'NAMESPACE_DROPDOWN',
-            f"""QComboBox {{
-                background-color: #2d2d2d;
-                color: #ffffff;
-                border: 1px solid #3d3d3d;
-                border-radius: 4px;
-                padding: 6px 12px;
-                font-size: 12px;
-            }}
-            QComboBox:hover {{
-                border-color: #4d4d4d;
-                background-color: #353535;
-            }}
-            QComboBox::drop-down {{
-                border: none;
-                width: 20px;
-                subcontrol-origin: padding;
-                subcontrol-position: top right;
-            }}
-            QComboBox::down-arrow {{
-                image: url({down_arrow_icon.replace(os.sep, '/')});
-                width: 12px;
-                height: 12px;
-                margin-right: 4px;
-            }}
-            QComboBox::down-arrow:hover {{
-                opacity: 0.8;
-            }}""")
-        self.namespace_combo.setStyleSheet(combo_style)
+        # Namespace combo with label (only for resources that have namespace columns)
+        if self.has_namespace_column:
+            namespace_label = QLabel("Namespace:")
+            namespace_label.setStyleSheet("color: #ffffff; font-size: 12px; font-weight: normal;")
+            namespace_label.setMinimumWidth(70)
+            
+            self.namespace_combo = QComboBox()
+            # Start with loading indicator, will be populated dynamically
+            self.namespace_combo.addItem("Loading namespaces...")
+            self.namespace_combo.currentTextChanged.connect(self._on_namespace_changed)
+            self.namespace_combo.setFixedWidth(150)
+            self.namespace_combo.setFixedHeight(32)
+        else:
+            # For cluster-level resources, set namespace_combo to None
+            self.namespace_combo = None
         
         # Add widgets to layout with proper spacing
         filters_layout.addWidget(search_label)
         filters_layout.addWidget(self.search_bar)
-        filters_layout.addSpacing(16)  # Add space between search and namespace
-        filters_layout.addWidget(namespace_label)
-        filters_layout.addWidget(self.namespace_combo)
+        
+        # Only add namespace controls if this resource has namespace column
+        if self.has_namespace_column and self.namespace_combo:
+            # Apply consistent styling with proper icon
+            import os
+            from UI.Icons import resource_path
+            down_arrow_icon = resource_path("Icons/down_btn.svg")
+            
+            combo_style = getattr(AppStyles, 'NAMESPACE_DROPDOWN',
+                f"""QComboBox {{
+                    background-color: #2d2d2d;
+                    color: #ffffff;
+                    border: 1px solid #3d3d3d;
+                    border-radius: 4px;
+                    padding: 6px 12px;
+                    font-size: 12px;
+                }}
+                QComboBox:hover {{
+                    border-color: #4d4d4d;
+                    background-color: #353535;
+                }}
+                QComboBox::drop-down {{
+                    border: none;
+                    width: 20px;
+                    subcontrol-origin: padding;
+                    subcontrol-position: top right;
+                }}
+                QComboBox::down-arrow {{
+                    image: url({down_arrow_icon.replace(os.sep, '/')});
+                    width: 12px;
+                    height: 12px;
+                    margin-right: 4px;
+                }}
+                QComboBox::down-arrow:hover {{
+                    opacity: 0.8;
+                }}""")
+            self.namespace_combo.setStyleSheet(combo_style)
+            
+            filters_layout.addSpacing(16)  # Add space between search and namespace
+            filters_layout.addWidget(namespace_label)
+            filters_layout.addWidget(self.namespace_combo)
         
         # Add the filters layout directly to header layout
         header_layout.addLayout(filters_layout)
@@ -709,6 +741,17 @@ class BaseResourcePage(BaseTablePage):
             self._display_resources(self.resources)
             return
         
+        # Try enhanced indexed search first if available
+        if self.search_index and len(self.resources) >= 50:  # Use index for larger datasets
+            try:
+                search_results = self._perform_indexed_search(search_text)
+                if search_results is not None:
+                    filtered = [result.resource for result in search_results]
+                    self._display_resources(filtered)
+                    return
+            except Exception as e:
+                logging.debug(f"Indexed search failed, falling back to linear: {e}")
+        
         # Simple fast search - no indexing overhead
         search_lower = search_text.lower()
         filtered = [r for r in self.resources 
@@ -716,6 +759,120 @@ class BaseResourcePage(BaseTablePage):
                    or search_lower in r.get("namespace", "").lower()]
         
         self._display_resources(filtered)
+    
+    def _initialize_search_index(self):
+        """Initialize search index for enhanced search capabilities"""
+        try:
+            if not self.resource_type:
+                return
+            
+            # Get search index for this resource type
+            self.search_index = get_search_index(self.resource_type)
+            
+            # Define searchable fields based on resource type
+            self.searchable_fields = self._get_searchable_fields()
+            
+            # Build index if we have resources
+            if self.resources and self.searchable_fields:
+                self.search_index.build_index(self.resources, self.searchable_fields)
+                logging.debug(f"Search index initialized for {self.resource_type} with {len(self.resources)} resources")
+                
+        except Exception as e:
+            logging.error(f"Failed to initialize search index: {e}")
+            self.search_index = None
+    
+    def _get_searchable_fields(self):
+        """Get searchable fields for the current resource type"""
+        # Common fields for all resources
+        common_fields = ['name', 'namespace', 'status']
+        
+        # Resource-specific fields
+        type_specific_fields = {
+            'pods': ['status', 'containers', 'node', 'labels'],
+            'nodes': ['status', 'nodeInfo.osImage', 'nodeInfo.architecture', 'labels'],
+            'services': ['type', 'ports', 'selector', 'labels'],
+            'deployments': ['replicas', 'strategy.type', 'labels'],
+            'events': ['type', 'reason', 'message', 'source'],
+            'namespaces': ['status', 'labels'],
+            'configmaps': ['data', 'labels'],
+            'secrets': ['type', 'labels'],
+            'persistentvolumes': ['status', 'spec.capacity', 'spec.accessModes'],
+            'persistentvolumeclaims': ['status', 'spec.accessModes', 'spec.resources'],
+            'ingress': ['rules', 'tls', 'labels'],
+            'networkpolicies': ['policyTypes', 'podSelector', 'labels']
+        }
+        
+        fields = common_fields.copy()
+        if self.resource_type in type_specific_fields:
+            fields.extend(type_specific_fields[self.resource_type])
+        
+        return fields
+    
+    def _perform_indexed_search(self, search_text):
+        """Perform enhanced indexed search"""
+        try:
+            if not self.search_index:
+                return None
+            
+            # Perform search with the index
+            search_results = self.search_index.search(search_text, max_results=1000)
+            
+            if search_results:
+                logging.debug(f"Indexed search found {len(search_results)} results for '{search_text}'")
+            
+            return search_results
+            
+        except Exception as e:
+            logging.error(f"Indexed search failed: {e}")
+            return None
+    
+    def _update_search_index(self):
+        """Update search index with current resources"""
+        try:
+            if self.search_index and self.searchable_fields and self.resources:
+                self.search_index.build_index(self.resources, self.searchable_fields)
+                logging.debug(f"Search index updated with {len(self.resources)} resources")
+        except Exception as e:
+            logging.debug(f"Failed to update search index: {e}")
+    
+    def _optimize_resource_display(self, resources, max_items=None):
+        """Optimize resource display for performance"""
+        if not resources:
+            return resources
+        
+        # Limit resources to prevent UI overload
+        if max_items and len(resources) > max_items:
+            logging.info(f"Limiting display to {max_items} resources out of {len(resources)} for performance")
+            return resources[:max_items]
+        
+        return resources
+    
+    def enable_pagination_controls(self, page_size=100):
+        """Enable pagination controls for this resource page"""
+        try:
+            self.enable_pagination = True
+            
+            # Import pagination controls
+            from .paginated_resource_page import PaginationControls
+            
+            # Create pagination controls
+            self.pagination_controls = PaginationControls(self)
+            
+            # Add to layout if it exists
+            if self.layout():
+                self.layout().addWidget(self.pagination_controls)
+            
+            # Connect signals for pagination
+            if hasattr(self.pagination_controls, 'load_more_requested'):
+                self.pagination_controls.load_more_requested.connect(self.load_data)
+            if hasattr(self.pagination_controls, 'refresh_requested'):
+                self.pagination_controls.refresh_requested.connect(self.force_load_data)
+            
+            logging.info(f"Pagination enabled for {self.resource_type} with page size {page_size}")
+            
+        except Exception as e:
+            logging.error(f"Failed to enable pagination: {e}")
+            self.enable_pagination = False
 
     def _load_namespaces_async(self):
         """Load available namespaces dynamically with minimal startup impact"""
@@ -781,15 +938,28 @@ class BaseResourcePage(BaseTablePage):
                 if namespace:  # Ensure namespace is not empty
                     self.namespace_combo.addItem(namespace)
             
-            # Set default selection to "default" namespace if available
-            default_index = self.namespace_combo.findText("default")
-            if default_index >= 0:
-                self.namespace_combo.setCurrentIndex(default_index)
-                self.namespace_filter = "default"
+            # Set selection based on shared namespace state for persistence
+            from Utils.namespace_state import get_namespace_state
+            namespace_state = get_namespace_state()
+            current_namespace = namespace_state.get_current_namespace()
+            
+            # Try to find the current namespace in the dropdown
+            current_index = self.namespace_combo.findText(current_namespace)
+            if current_index >= 0:
+                self.namespace_combo.setCurrentIndex(current_index)
+                self.namespace_filter = current_namespace
             else:
-                # If no default namespace, use "All Namespaces"
-                self.namespace_combo.setCurrentIndex(0)
-                self.namespace_filter = "All Namespaces"
+                # Fallback to default namespace if available
+                default_index = self.namespace_combo.findText("default")
+                if default_index >= 0:
+                    self.namespace_combo.setCurrentIndex(default_index)
+                    self.namespace_filter = "default"
+                    namespace_state.set_current_namespace("default")
+                else:
+                    # If no default namespace, use "All Namespaces"
+                    self.namespace_combo.setCurrentIndex(0)
+                    self.namespace_filter = "All Namespaces"
+                    namespace_state.set_current_namespace("All Namespaces")
                 
             logging.info(f"Loaded {len(namespaces)} namespaces into dropdown")
             
@@ -802,11 +972,17 @@ class BaseResourcePage(BaseTablePage):
         self._load_namespaces_async()
 
     def _on_namespace_changed(self, namespace):
-        """Handle namespace filter changes"""
+        """Handle namespace filter changes and persist across pages"""
         if namespace == "Loading namespaces...":
             return  # Ignore the loading placeholder
-            
+        
         self.namespace_filter = namespace
+        
+        # Persist namespace selection across pages
+        from Utils.namespace_state import get_namespace_state
+        namespace_state = get_namespace_state()
+        namespace_state.set_current_namespace(namespace)
+        
         self.force_load_data()
 
     def _handle_scroll(self, value):
@@ -879,8 +1055,12 @@ class BaseResourcePage(BaseTablePage):
             self.resources = resources
             self.all_data_loaded = True  # Unified loader loads everything efficiently
             
-            # Always display resources, even if empty
-            self._display_resources(self.resources)
+            # Use background processing for large datasets to prevent UI blocking
+            if len(resources) > 200:  # Use background processing for large datasets
+                self._process_resources_in_background(resources)
+            else:
+                # Always display resources, even if empty (small datasets can be processed immediately)
+                self._display_resources(self.resources)
             self._update_items_count()
             
             self.is_loading_initial = False
@@ -918,40 +1098,36 @@ class BaseResourcePage(BaseTablePage):
         
         self.load_more_complete.emit()
 
+    @error_handler(context="processing loaded resources", show_dialog=False)
     def _on_resources_loaded(self, result):
-        """Handle loaded resources"""
-        try:
-            resources, resource_type, next_token = result
-            
-            if continue_token := getattr(self.loading_thread, 'continue_token', None):
-                # Append to existing resources
-                self.resources.extend(resources)
-            else:
-                # Replace resources
-                self.resources = resources
-            
-            self.current_continue_token = next_token
-            self.all_data_loaded = not next_token
-            
-            self._display_resources(self.resources)
-            self._update_items_count()
-            
-            self.is_loading_initial = False
-            self.is_loading_more = False
-            self._initial_load_done = True
-            
-            if self.all_data_loaded:
-                self.all_items_loaded_signal.emit()
-            
-            self.load_more_complete.emit()
-            
-        except Exception as e:
-            logging.error(f"Error processing loaded resources: {e}")
-            self._on_loading_error(e)
+        """Handle loaded resources with standardized error handling"""
+        resources, resource_type, next_token = result
+        
+        if continue_token := getattr(self.loading_thread, 'continue_token', None):
+            # Append to existing resources
+            self.resources.extend(resources)
+        else:
+            # Replace resources
+            self.resources = resources
+        
+        self.current_continue_token = next_token
+        self.all_data_loaded = not next_token
+        
+        self._display_resources(self.resources)
+        self._update_items_count()
+        
+        self.is_loading_initial = False
+        self.is_loading_more = False
+        self._initial_load_done = True
+        
+        if self.all_data_loaded:
+            self.all_items_loaded_signal.emit()
+        
+        self.load_more_complete.emit()
 
+    @error_handler(context="resource loading", show_dialog=True)
     def _on_loading_error(self, error):
-        """Handle loading errors"""
-        logging.error(f"Error loading {self.resource_type}: {error}")
+        """Handle loading errors with standardized error handling"""
         self.is_loading_initial = False
         self.is_loading_more = False
         
@@ -959,10 +1135,25 @@ class BaseResourcePage(BaseTablePage):
         self._show_error_message(error_message)
 
     def _display_resources(self, resources):
-        """Display resources in the table with optimized handling for large datasets"""
+        """Display resources in the table with performance optimization"""
         if not resources:
             self._show_empty_message()
             return
+        
+        # Store resources for search index
+        self.resources = resources
+        
+        # Initialize or update search index for enhanced search capabilities
+        if not self.search_index:
+            self._initialize_search_index()
+        else:
+            self._update_search_index()
+        
+        # Apply performance optimization before display
+        optimized_resources = self._optimize_resource_display(
+            resources, 
+            max_items=self.perf_config.get("max_cached_resources", 1000)
+        )
         
         # Hide any empty message overlay when showing data
         if hasattr(self, '_empty_overlay'):
@@ -973,13 +1164,73 @@ class BaseResourcePage(BaseTablePage):
         # Clear previous selections when displaying new data
         self.selected_items.clear()
         
-        # Log performance info for large datasets
+        # Log performance info with optimization details
         if len(resources) > 100:
-            logging.info(f"Displaying {len(resources)} resources (large dataset optimization active)")
+            logging.info(f"Displaying {len(optimized_resources)}/{len(resources)} resources (performance optimized)")
         
-        # Optimized rendering for all datasets
-        self._render_resources_batch(resources)
+        # Use performance-optimized rendering
+        self._render_resources_optimized(optimized_resources)
 
+    def _render_resources_optimized(self, resources):
+        """Render resources with performance optimization"""
+        try:
+            # Use performance config to determine rendering strategy
+            if len(resources) > self.virtual_scroll_threshold:
+                # Use virtual scrolling for very large datasets
+                if hasattr(self, 'table') and hasattr(self.table, 'set_data'):
+                    self.table.set_data(resources)
+                else:
+                    # Fallback to batch rendering with performance optimization
+                    self._render_resources_batch_optimized(resources)
+            else:
+                # Use regular batch rendering for smaller datasets
+                self._render_resources_batch(resources)
+                
+        except Exception as e:
+            logging.error(f"Error in optimized rendering: {e}")
+            # Fallback to regular batch rendering
+            self._render_resources_batch(resources)
+
+    def _render_resources_batch_optimized(self, resources):
+        """Performance-optimized batch rendering"""
+        try:
+            # Use performance config for optimal batch size
+            batch_size = self.perf_config.get_render_batch_size()
+            total_batches = (len(resources) + batch_size - 1) // batch_size
+            
+            logging.info(f"Rendering {len(resources)} resources in {total_batches} optimized batches")
+            
+            # Clear table efficiently
+            self.clear_table()
+            
+            # Process in optimized batches
+            for i in range(0, len(resources), batch_size):
+                batch = resources[i:i + batch_size]
+                self._render_single_batch_optimized(batch, i == 0)
+                
+                # Allow UI updates between batches
+                QApplication.processEvents()
+                
+        except Exception as e:
+            logging.error(f"Error in optimized batch rendering: {e}")
+            # Fallback to regular rendering
+            self._render_resources_batch(resources)
+
+    def _render_single_batch_optimized(self, batch_resources, is_first_batch):
+        """Render a single batch with performance optimization"""
+        try:
+            # Use performance optimization for widget creation
+            self.performance_optimizer.optimize_widget_creation(True)
+            
+            # Render the batch
+            for resource in batch_resources:
+                self.populate_table([resource])
+            
+            # Reset optimization
+            self.performance_optimizer.optimize_widget_creation(False)
+            
+        except Exception as e:
+            logging.error(f"Error rendering optimized batch: {e}")
 
     def _render_resources_batch(self, resources, append=False):
         """Render a batch of resources to the table with optimized performance"""
@@ -1134,6 +1385,23 @@ class BaseResourcePage(BaseTablePage):
 
     def _show_error_message(self, message):
         """Show error message while keeping table headers visible"""
+        # Use standardized error handling for logging and user notification
+        from Utils.error_handler import get_error_handler
+        error_handler = get_error_handler()
+        
+        # Handle error with context for better user experience
+        try:
+            # Create a proper exception for the error handler
+            error_exception = Exception(message)
+            error_handler.handle_error(
+                error_exception, 
+                context=f"loading {self.resource_type} resources",
+                show_dialog=False  # Don't show dialog for display errors
+            )
+        except Exception:
+            # Fallback to basic logging if error handler fails
+            logging.error(f"Error loading {self.resource_type}: {message}")
+        
         if self.table:
             self.table.setRowCount(0)  # Clear rows, keep headers
             self.table.show()  # Ensure table is visible
@@ -1142,7 +1410,7 @@ class BaseResourcePage(BaseTablePage):
             self.table.setRowCount(1)
             column_count = self.table.columnCount()
             
-            # Create error message widget
+            # Create error message widget with standardized styling
             error_label = QLabel(f"Error: {message}")
             error_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             error_label.setStyleSheet("color: #ef4444; font-size: 16px; font-weight: bold; background-color: transparent; padding: 20px;")
@@ -1390,19 +1658,189 @@ class BaseResourcePage(BaseTablePage):
             QMessageBox.critical(self, "Deletion Failed", message)
 
     def cleanup_timers_and_threads(self):
-        """Cleanup timers and threads"""
+        """Cleanup timers, threads, and signal connections"""
         self._shutting_down = True
+        
+        # Disconnect signals to prevent memory leaks
+        self._disconnect_signals()
         
         if hasattr(self, '_debounced_updater'):
             self._debounced_updater.cancel_update('search_' + self.__class__.__name__)
             self._debounced_updater.cancel_update('scroll_' + self.__class__.__name__)
         
-        # Stop threads
-        for thread in [self.loading_thread, self.delete_thread, self.batch_delete_thread]:
+        # Stop threads including background processing worker
+        threads_to_stop = [self.loading_thread, self.delete_thread, self.batch_delete_thread]
+        if hasattr(self, 'processing_worker') and self.processing_worker:
+            threads_to_stop.append(self.processing_worker)
+        
+        for thread in threads_to_stop:
             if thread and thread.isRunning():
                 if hasattr(thread, 'cancel'):
                     thread.cancel()
                 thread.wait(1000)
+
+    def _disconnect_signals(self):
+        """Disconnect all signal connections to prevent memory leaks"""
+        try:
+            # Disconnect unified loader signals if they were connected
+            if hasattr(self, '_signals_connected') and self._signals_connected:
+                from Utils.unified_resource_loader import get_unified_resource_loader
+                unified_loader = get_unified_resource_loader()
+                
+                # Safely disconnect signals
+                try:
+                    unified_loader.loading_completed.disconnect(self._on_unified_resources_loaded)
+                except TypeError:
+                    # Signal was not connected, ignore
+                    pass
+                
+                try:
+                    unified_loader.loading_error.disconnect(self._on_unified_loading_error)
+                except TypeError:
+                    # Signal was not connected, ignore
+                    pass
+                
+                self._signals_connected = False
+                logging.debug(f"Disconnected signals for {self.__class__.__name__}")
+            
+            # Disconnect search-related signals if they exist
+            if hasattr(self, 'search_box') and self.search_box:
+                try:
+                    self.search_box.textChanged.disconnect()
+                except TypeError:
+                    pass
+            
+            # Disconnect namespace filter signals if they exist
+            if hasattr(self, 'namespace_filter_combo') and self.namespace_filter_combo:
+                try:
+                    self.namespace_filter_combo.currentTextChanged.disconnect()
+                except TypeError:
+                    pass
+                    
+        except Exception as e:
+            logging.error(f"Error disconnecting signals in {self.__class__.__name__}: {e}")
+
+    def _process_resources_in_background(self, resources):
+        """Process large datasets in background to prevent UI blocking"""
+        try:
+            logging.info(f"Starting background processing for {len(resources)} {self.resource_type} resources")
+            
+            # Create processing worker for this resource type
+            self.processing_worker = create_processing_worker(self.resource_type, resources)
+            
+            # Connect signals for progress and completion
+            self.processing_worker.data_processed.connect(self._on_background_processing_complete)
+            self.processing_worker.progress_updated.connect(self._on_background_processing_progress)
+            self.processing_worker.error_occurred.connect(self._on_background_processing_error)
+            self.processing_worker.processing_finished.connect(self._on_background_processing_finished)
+            
+            # Show progress indicator
+            self._show_processing_indicator("Processing resources...")
+            
+            # Start processing
+            self.processing_worker.start()
+            
+        except Exception as e:
+            logging.error(f"Error starting background processing: {e}")
+            # Fallback to synchronous processing
+            self._display_resources(resources)
+    
+    def _on_background_processing_complete(self, processed_resources):
+        """Handle completion of background processing"""
+        try:
+            logging.info(f"Background processing completed for {len(processed_resources)} resources")
+            
+            # Update resources with processed data
+            self.resources = processed_resources
+            
+            # Display the processed resources
+            self._display_resources(self.resources)
+            
+        except Exception as e:
+            logging.error(f"Error handling background processing completion: {e}")
+    
+    def _on_background_processing_progress(self, percentage, message):
+        """Handle background processing progress updates"""
+        try:
+            if hasattr(self, 'progress_indicator') and self.progress_indicator:
+                self.progress_indicator.setValue(percentage)
+                if hasattr(self.progress_indicator, 'setLabelText'):
+                    self.progress_indicator.setLabelText(f"{message} ({percentage}%)")
+        except Exception as e:
+            logging.debug(f"Error updating progress: {e}")
+    
+    def _on_background_processing_error(self, error_message):
+        """Handle background processing errors"""
+        try:
+            logging.error(f"Background processing error: {error_message}")
+            # Hide progress indicator
+            self._hide_processing_indicator()
+            # Fallback to displaying original resources
+            self._display_resources(self.resources)
+        except Exception as e:
+            logging.error(f"Error handling background processing error: {e}")
+    
+    def _on_background_processing_finished(self):
+        """Handle background processing finished signal"""
+        try:
+            # Hide progress indicator
+            self._hide_processing_indicator()
+            
+            # Clean up worker
+            if hasattr(self, 'processing_worker') and self.processing_worker:
+                self.processing_worker.quit()
+                self.processing_worker.wait()
+                self.processing_worker.deleteLater()
+                self.processing_worker = None
+                
+        except Exception as e:
+            logging.error(f"Error cleaning up background processing: {e}")
+    
+    def _show_processing_indicator(self, message):
+        """Show processing progress indicator"""
+        try:
+            if not hasattr(self, 'progress_indicator') or not self.progress_indicator:
+                from PyQt6.QtWidgets import QProgressDialog
+                self.progress_indicator = QProgressDialog(message, "Cancel", 0, 100, self)
+                self.progress_indicator.setWindowModality(Qt.WindowModality.WindowModal)
+                self.progress_indicator.setWindowTitle("Processing Resources")
+                self.progress_indicator.canceled.connect(self._cancel_background_processing)
+            
+            self.progress_indicator.show()
+            self.progress_indicator.setValue(0)
+            
+        except Exception as e:
+            logging.error(f"Error showing processing indicator: {e}")
+    
+    def _hide_processing_indicator(self):
+        """Hide processing progress indicator"""
+        try:
+            if hasattr(self, 'progress_indicator') and self.progress_indicator:
+                self.progress_indicator.hide()
+                self.progress_indicator.deleteLater()
+                self.progress_indicator = None
+        except Exception as e:
+            logging.error(f"Error hiding processing indicator: {e}")
+    
+    def _cancel_background_processing(self):
+        """Cancel background processing"""
+        try:
+            if hasattr(self, 'processing_worker') and self.processing_worker:
+                self.processing_worker.cancel()
+                logging.info("Background processing cancelled by user")
+            self._hide_processing_indicator()
+        except Exception as e:
+            logging.error(f"Error cancelling background processing: {e}")
+
+    def closeEvent(self, event):
+        """Handle widget close event with proper cleanup"""
+        try:
+            logging.debug(f"Closing {self.__class__.__name__}, performing cleanup")
+            self.cleanup_on_destroy()
+            event.accept()
+        except Exception as e:
+            logging.error(f"Error during close event cleanup: {e}")
+            event.accept()  # Accept anyway to prevent hanging
 
     def clear_table(self):
         """Clear UI table display only - DO NOT clear resources data array"""
@@ -2145,39 +2583,53 @@ class BaseResourcePage(BaseTablePage):
         except Exception as e:
             logging.error(f"Error in BaseResourcePage destructor: {e}")
 
+    @error_handler(context="resource cleanup", show_dialog=False)
     def cleanup_on_destroy(self):
         """Explicit cleanup method that can be called before destruction"""
-        try:
-            self._shutting_down = True
-            
-            # Stop all timers
-            if hasattr(self, '_debounced_updater'):
-                self._debounced_updater.cancel_update('search_' + self.__class__.__name__)
-                self._debounced_updater.cancel_update('scroll_' + self.__class__.__name__)
-            if hasattr(self, '_render_timer'):
-                try:
-                    if self._render_timer is not None and self._render_timer.isActive():
-                        self._render_timer.stop()
-                except RuntimeError:
-                    # QTimer was already deleted by Qt - this is fine during shutdown
-                    pass
-            
-            
-            # Cleanup threads
-            self.cleanup_timers_and_threads()
-            
-            # Clear cache references (bounded caches will handle memory cleanup)
-            if hasattr(self, '_data_cache'):
-                self._data_cache.clear()
-            if hasattr(self, '_age_cache'):
-                self._age_cache.clear()
-            if hasattr(self, '_formatted_cache'):
-                self._formatted_cache.clear()
-                
-            logging.debug(f"Cleanup completed for {self.__class__.__name__}")
-            
-        except Exception as e:
-            logging.error(f"Error in cleanup_on_destroy: {e}")
+        self._shutting_down = True
+        
+        # Use standardized resource cleaner
+        from Utils.error_handler import ResourceCleaner
+        
+        # Collect timers for cleanup
+        timers_to_cleanup = []
+        if hasattr(self, '_debounced_updater'):
+            self._debounced_updater.cancel_update('search_' + self.__class__.__name__)
+            self._debounced_updater.cancel_update('scroll_' + self.__class__.__name__)
+        if hasattr(self, '_render_timer') and self._render_timer:
+            timers_to_cleanup.append(self._render_timer)
+        
+        # Use standardized timer cleanup
+        ResourceCleaner.cleanup_timers(timers_to_cleanup)
+        
+        # Collect threads for cleanup
+        threads_to_cleanup = []
+        if hasattr(self, 'loading_thread') and self.loading_thread:
+            threads_to_cleanup.append(self.loading_thread)
+        if hasattr(self, 'delete_thread') and self.delete_thread:
+            threads_to_cleanup.append(self.delete_thread)
+        if hasattr(self, 'batch_delete_thread') and self.batch_delete_thread:
+            threads_to_cleanup.append(self.batch_delete_thread)
+        
+        # Use standardized thread cleanup
+        ResourceCleaner.cleanup_threads(threads_to_cleanup)
+        
+        # Clear cache references (bounded caches will handle memory cleanup)
+        if hasattr(self, '_data_cache'):
+            self._data_cache.clear()
+        if hasattr(self, '_age_cache'):
+            self._age_cache.clear()
+        if hasattr(self, '_formatted_cache'):
+            self._formatted_cache.clear()
+        
+        # Clear search index if present
+        if hasattr(self, 'search_index') and self.search_index:
+            self.search_index.clear()
+        
+        # Force garbage collection using standardized method
+        ResourceCleaner.force_garbage_collection()
+        
+        logging.debug(f"Cleanup completed for {self.__class__.__name__}")
 
 
 # Factory function for creating resource pages

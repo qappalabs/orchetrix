@@ -7,44 +7,14 @@ from PyQt6.QtWidgets import QHeaderView, QPushButton, QLabel, QWidget, QHBoxLayo
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QColor
 
-from Base_Components.base_components import SortableTableWidgetItem
+from Base_Components.base_components import SortableTableWidgetItem, StatusLabel
 from Base_Components.base_resource_page import BaseResourcePage
+from Base_Components.virtual_scroll_table import VirtualScrollTable
 from UI.Styles import AppColors, AppStyles
 from UI.Icons import resource_path
 
 from Utils.port_forward_manager import get_port_forward_manager, PortForwardConfig
 from Utils.port_forward_dialog import PortForwardDialog, ActivePortForwardsDialog
-
-class StatusLabel(QWidget):
-    """Widget that displays a status with consistent styling and background handling."""
-    clicked = pyqtSignal()
-    
-    def __init__(self, status_text, color=None, parent=None):
-        super().__init__(parent)
-        
-        # Create layout
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        # Create label
-        self.label = QLabel(status_text)
-        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        # Set color if provided, otherwise use default color
-        if color:
-            self.label.setStyleSheet(f"color: {QColor(color).name()}; background-color: transparent;")
-        
-        # Add label to layout
-        layout.addWidget(self.label)
-        
-        # Make sure this widget has a transparent background
-        self.setStyleSheet("background-color: transparent;")
-    
-    def mousePressEvent(self, event):
-        """Emit clicked signal when widget is clicked"""
-        self.clicked.emit()
-        super().mousePressEvent(event)
 
 class PodsPage(BaseResourcePage):
     """
@@ -55,7 +25,13 @@ class PodsPage(BaseResourcePage):
         super().__init__(parent)
         self.resource_type = "pods"
         self.port_manager = get_port_forward_manager()
+        self.virtual_scroll_threshold = 100  # Enable virtual scrolling for 100+ pods
+        self.virtual_table = None
         self.setup_page_ui()
+        
+        # Optional: Enable pagination controls for large pod lists
+        # Uncomment the line below to add pagination controls:
+        # self.enable_pagination_controls(page_size=50)
         
         # Connect to port forward manager signals
         self.port_manager.port_forward_started.connect(self.on_port_forward_started)
@@ -591,3 +567,81 @@ class PodsPage(BaseResourcePage):
                 logging.warning("Detail page not found or not properly initialized")
         except Exception as e:
             logging.error(f"Error triggering edit mode: {e}")
+    
+    def _check_enable_virtual_scrolling(self, resources_count):
+        """Enable virtual scrolling for large datasets"""
+        try:
+            if resources_count >= self.virtual_scroll_threshold and not self.virtual_table:
+                logging.info(f"Enabling virtual scrolling for {resources_count} pods")
+                self._enable_virtual_scrolling()
+            elif resources_count < self.virtual_scroll_threshold and self.virtual_table:
+                logging.info(f"Disabling virtual scrolling for {resources_count} pods")
+                self._disable_virtual_scrolling()
+        except Exception as e:
+            logging.error(f"Error managing virtual scrolling: {e}")
+    
+    def _enable_virtual_scrolling(self):
+        """Enable virtual scrolling table"""
+        try:
+            if self.table and not self.virtual_table:
+                # Create virtual scroll table with the same headers
+                headers = ["", "Name", "Namespace", "Containers", "Restarts", "Controlled By", "Node", "QoS", "Age", "Status", ""]
+                self.virtual_table = VirtualScrollTable(headers, parent=self)
+                
+                # Replace the current table with virtual scroll table
+                if hasattr(self, 'layout'):
+                    layout = self.layout()
+                    # Find and replace the table widget
+                    for i in range(layout.count()):
+                        item = layout.itemAt(i)
+                        if item and item.widget() == self.table:
+                            layout.removeWidget(self.table)
+                            self.table.hide()
+                            layout.insertWidget(i, self.virtual_table)
+                            break
+                
+                logging.info("Virtual scrolling enabled for PodsPage")
+        except Exception as e:
+            logging.error(f"Error enabling virtual scrolling: {e}")
+    
+    def _disable_virtual_scrolling(self):
+        """Disable virtual scrolling table"""
+        try:
+            if self.virtual_table and self.table:
+                # Restore original table
+                if hasattr(self, 'layout'):
+                    layout = self.layout()
+                    # Find and replace the virtual table with original table
+                    for i in range(layout.count()):
+                        item = layout.itemAt(i)
+                        if item and item.widget() == self.virtual_table:
+                            layout.removeWidget(self.virtual_table)
+                            self.virtual_table.hide()
+                            layout.insertWidget(i, self.table)
+                            self.table.show()
+                            break
+                
+                self.virtual_table.deleteLater()
+                self.virtual_table = None
+                logging.info("Virtual scrolling disabled for PodsPage")
+        except Exception as e:
+            logging.error(f"Error disabling virtual scrolling: {e}")
+    
+    def populate_table(self, resources_to_populate):
+        """Override to check for virtual scrolling before populating"""
+        try:
+            # Check if we need to enable/disable virtual scrolling
+            self._check_enable_virtual_scrolling(len(resources_to_populate))
+            
+            # Use virtual table if enabled, otherwise use regular table
+            if self.virtual_table:
+                # Convert resources to virtual table format and populate
+                self.virtual_table.set_data(resources_to_populate)
+            else:
+                # Use the original populate_table logic
+                super().populate_table(resources_to_populate)
+                
+        except Exception as e:
+            logging.error(f"Error in PodsPage populate_table: {e}")
+            # Fallback to regular table population
+            super().populate_table(resources_to_populate)
