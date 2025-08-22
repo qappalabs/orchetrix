@@ -183,7 +183,7 @@ class SearchResourceLoadWorker(EnhancedBaseWorker):
     def _load_from_single_namespace_with_search(self) -> List[Any]:
         """Load from single namespace for search"""
         kube_client = get_kubernetes_client()
-        api_client = self.loader._get_api_client(kube_client)
+        api_client = self._get_api_client(kube_client)
         
         # Get the correct namespaced API method
         namespaced_method_name = self.loader._get_namespaced_api_method(self.config.resource_type)
@@ -210,7 +210,7 @@ class SearchResourceLoadWorker(EnhancedBaseWorker):
             
             # Search in all namespaces (not limited to 20 for search)
             kube_client = get_kubernetes_client()
-            api_client = self.loader._get_api_client(kube_client)
+            api_client = self._get_api_client(kube_client)
             namespaced_method_name = self.loader._get_namespaced_api_method(self.config.resource_type)
             api_method = getattr(api_client, namespaced_method_name)
             
@@ -325,48 +325,53 @@ class SearchResourceLoadWorker(EnhancedBaseWorker):
         return processed_items
     
     def _process_single_search_item(self, item: Any) -> Optional[Dict[str, Any]]:
-        """Process a single search result item (simplified for speed)"""
+        """Process a single search result item with full data consistency"""
         try:
-            # Extract basic fields efficiently
+            # Extract common fields efficiently (same as regular processing)
             metadata = item.metadata
             name = metadata.name
             namespace = getattr(metadata, 'namespace', None)
             creation_timestamp = metadata.creation_timestamp
             
-            # Basic age calculation
-            age = "Unknown"
-            if creation_timestamp:
-                try:
-                    import datetime
-                    if hasattr(creation_timestamp, 'replace'):
-                        created_time = creation_timestamp.replace(tzinfo=datetime.timezone.utc)
-                    else:
-                        created_time = datetime.datetime.fromisoformat(str(creation_timestamp).replace('Z', '+00:00'))
-                    
-                    now = datetime.datetime.now(datetime.timezone.utc)
-                    diff = now - created_time
-                    
-                    if diff.days > 0:
-                        age = f"{diff.days}d"
-                    elif diff.seconds > 3600:
-                        age = f"{diff.seconds // 3600}h"
-                    else:
-                        age = f"{diff.seconds // 60}m"
-                except Exception:
-                    pass
+            # Use the same age calculation as regular processing for consistency
+            age = self._format_age_fast(creation_timestamp)
             
-            # Build basic resource data
+            # Build complete resource data (matching regular processing structure)
             resource_data = {
                 'name': name,
-                'namespace': namespace or '',
+                'namespace': namespace,
                 'age': age,
-                'created': creation_timestamp.isoformat() if creation_timestamp else None,
+                'created': creation_timestamp,  # Keep as timestamp object for consistency
+                'labels': metadata.labels or {},
+                'annotations': metadata.annotations or {},
                 'resource_type': self.config.resource_type,
+                'uid': metadata.uid,
                 'search_matched': True  # Mark as search result
             }
             
-            # Add resource-specific fields efficiently
-            self._add_basic_resource_fields(resource_data, item)
+            # Add complete resource-specific fields using the same method as regular processing
+            self._add_resource_specific_fields(resource_data, item)
+            
+            # Add raw_data for UI components that need detailed information
+            # Serialize the raw Kubernetes object for components that need it
+            try:
+                kube_client = get_kubernetes_client()
+                if hasattr(kube_client, 'v1') and hasattr(kube_client.v1, 'api_client'):
+                    resource_data['raw_data'] = kube_client.v1.api_client.sanitize_for_serialization(item)
+                else:
+                    # Fallback: create a basic raw_data structure
+                    resource_data['raw_data'] = {
+                        'metadata': {
+                            'name': name,
+                            'namespace': namespace,
+                            'labels': metadata.labels,
+                            'annotations': metadata.annotations,
+                            'creation_timestamp': str(creation_timestamp) if creation_timestamp else None
+                        }
+                    }
+            except Exception as e:
+                logging.debug(f"Error serializing raw data: {e}")
+                resource_data['raw_data'] = {}
             
             return resource_data
             
@@ -374,37 +379,342 @@ class SearchResourceLoadWorker(EnhancedBaseWorker):
             logging.debug(f"Error processing single search item: {e}")
             return None
     
-    def _add_basic_resource_fields(self, processed_item: Dict[str, Any], item: Any):
-        """Add basic resource-specific fields for search results"""
-        try:
-            # Add status and basic info based on resource type
-            if self.config.resource_type == 'pods':
-                if hasattr(item, 'status') and item.status:
-                    processed_item['status'] = item.status.phase or 'Unknown'
-                    if item.status.container_statuses:
-                        ready_containers = sum(1 for cs in item.status.container_statuses if cs.ready)
-                        total_containers = len(item.status.container_statuses)
-                        processed_item['ready'] = f"{ready_containers}/{total_containers}"
-                
-            elif self.config.resource_type in ['deployments', 'replicasets', 'daemonsets', 'statefulsets']:
-                if hasattr(item, 'status') and item.status:
-                    replicas = getattr(item.status, 'replicas', 0) or 0
-                    ready_replicas = getattr(item.status, 'ready_replicas', 0) or 0
-                    processed_item['ready'] = f"{ready_replicas}/{replicas}"
-                    processed_item['status'] = 'Ready' if ready_replicas == replicas and replicas > 0 else 'Not Ready'
-                
-            elif self.config.resource_type == 'services':
-                if hasattr(item, 'spec') and item.spec:
-                    processed_item['type'] = item.spec.type or 'Unknown'
-                    processed_item['cluster_ip'] = item.spec.cluster_ip or 'None'
-            
-        except Exception as e:
-            logging.debug(f"Error adding basic resource fields: {e}")
-    
     def _generate_cache_key(self) -> str:
         """Generate cache key for search results"""
         namespace_key = self.config.namespace or "all_namespaces"
         return f"{self.config.resource_type}_{namespace_key}"
+    
+    def _get_api_client(self, kube_client):
+        """Get the appropriate API client for the resource type"""
+        api_mapping = {
+            # Core v1 resources
+            'pods': kube_client.v1,
+            'nodes': kube_client.v1,
+            'services': kube_client.v1,
+            'serviceaccounts': kube_client.v1,
+            'configmaps': kube_client.v1,
+            'secrets': kube_client.v1,
+            'namespaces': kube_client.v1,
+            'events': kube_client.v1,
+            'endpoints': kube_client.v1,
+            'persistentvolumes': kube_client.v1,
+            'persistentvolumeclaims': kube_client.v1,
+            'replicationcontrollers': kube_client.v1,
+            'resourcequotas': kube_client.v1,
+            'limitranges': kube_client.v1,
+            
+            # Apps v1 resources
+            'deployments': kube_client.apps_v1,
+            'replicasets': kube_client.apps_v1,
+            'daemonsets': kube_client.apps_v1,
+            'statefulsets': kube_client.apps_v1,
+            
+            # Networking v1 resources  
+            'ingresses': kube_client.networking_v1,
+            'networkpolicies': kube_client.networking_v1,
+            'ingressclasses': kube_client.networking_v1,
+            
+            # Storage v1 resources
+            'storageclasses': kube_client.storage_v1,
+            
+            # Batch v1 resources
+            'jobs': kube_client.batch_v1,
+            'cronjobs': kube_client.batch_v1,
+            
+            # RBAC v1 resources
+            'roles': kube_client.rbac_v1,
+            'rolebindings': kube_client.rbac_v1,
+            'clusterroles': kube_client.rbac_v1,
+            'clusterrolebindings': kube_client.rbac_v1,
+        }
+        
+        # For new API clients that might not be available in older instances,
+        # use fallbacks to prevent application crashes
+        try:
+            if self.config.resource_type == 'horizontalpodautoscalers':
+                return getattr(kube_client, 'autoscaling_v1', kube_client.v1)
+            elif self.config.resource_type == 'poddisruptionbudgets':
+                return getattr(kube_client, 'policy_v1', kube_client.v1)
+            elif self.config.resource_type in ['validatingwebhookconfigurations', 'mutatingwebhookconfigurations']:
+                return getattr(kube_client, 'admissionregistration_v1', kube_client.v1)
+            elif self.config.resource_type == 'runtimeclasses':
+                return getattr(kube_client, 'node_v1', kube_client.v1)
+            elif self.config.resource_type == 'leases':
+                return getattr(kube_client, 'coordination_v1', kube_client.v1)
+            elif self.config.resource_type == 'priorityclasses':
+                return getattr(kube_client, 'scheduling_v1', kube_client.v1)
+            elif self.config.resource_type == 'customresourcedefinitions':
+                return getattr(kube_client, 'apiextensions_v1', kube_client.v1)
+        except AttributeError:
+            pass
+        
+        return api_mapping.get(self.config.resource_type, kube_client.v1)
+    
+    def _format_age_fast(self, creation_timestamp) -> str:
+        """Fast age calculation with caching (same as ResourceLoadWorker)"""
+        if not creation_timestamp:
+            return 'Unknown'
+        
+        try:
+            from datetime import datetime, timezone
+            if hasattr(creation_timestamp, 'timestamp'):
+                created = datetime.fromtimestamp(creation_timestamp.timestamp(), tz=timezone.utc)
+            else:
+                created = creation_timestamp
+            
+            now = datetime.now(timezone.utc)
+            age_delta = now - created
+            
+            days = age_delta.days
+            hours = age_delta.seconds // 3600
+            minutes = (age_delta.seconds % 3600) // 60
+            
+            if days > 0:
+                return f"{days}d"
+            elif hours > 0:
+                return f"{hours}h"
+            else:
+                return f"{minutes}m"
+                
+        except Exception:
+            return 'Unknown'
+    
+    def _add_resource_specific_fields(self, processed_item: Dict[str, Any], item: Any):
+        """Add resource-specific fields efficiently (same as ResourceLoadWorker)"""
+        resource_type = self.config.resource_type
+        
+        if resource_type == 'pods':
+            self._add_pod_fields(processed_item, item)
+        elif resource_type == 'nodes':
+            self._add_node_fields(processed_item, item)
+        elif resource_type == 'services':
+            self._add_service_fields(processed_item, item)
+        elif resource_type == 'configmaps':
+            self._add_configmap_fields(processed_item, item)
+        elif resource_type == 'secrets':
+            self._add_secret_fields(processed_item, item)
+        elif resource_type == 'leases':
+            self._add_lease_fields(processed_item, item)
+        elif resource_type == 'priorityclasses':
+            self._add_priorityclass_fields(processed_item, item)
+        elif resource_type in ['deployments', 'replicasets', 'statefulsets', 'daemonsets']:
+            self._add_workload_fields(processed_item, item)
+    
+    def _add_pod_fields(self, processed_item: Dict[str, Any], pod: Any):
+        """Add pod-specific fields efficiently"""
+        status = pod.status
+        spec = pod.spec
+        
+        # Enhanced status determination with more detail
+        pod_status = 'Unknown'
+        if status:
+            pod_status = status.phase or 'Unknown'
+            
+            # Check for more specific container states
+            if status.container_statuses:
+                for cs in status.container_statuses:
+                    if cs.state:
+                        if cs.state.waiting:
+                            reason = cs.state.waiting.reason
+                            if reason in ("CrashLoopBackOff", "ImagePullBackOff", "ErrImagePull"):
+                                pod_status = reason
+                                break
+                        elif cs.state.terminated:
+                            if cs.state.terminated.exit_code != 0:
+                                pod_status = "Error"
+                                break
+        
+        processed_item.update({
+            'status': pod_status,
+            'ready': self._get_pod_ready_status(status),
+            'restarts': self._get_pod_restart_count(status),
+            'node_name': spec.node_name if spec else None,
+            'host_ip': status.host_ip if status else None,
+            'pod_ip': status.pod_ip if status else None,
+            'containers': len(spec.containers) if spec and spec.containers else 0,
+            'init_containers': len(spec.init_containers) if spec and spec.init_containers else 0,
+        })
+    
+    def _add_node_fields(self, processed_item: Dict[str, Any], node: Any):
+        """Add node-specific fields efficiently"""
+        status = node.status
+        
+        # Get node status efficiently
+        node_status = 'Unknown'
+        if status and status.conditions:
+            for condition in status.conditions:
+                if condition.type == 'Ready':
+                    node_status = 'Ready' if condition.status == 'True' else 'NotReady'
+                    break
+        
+        # Get node roles efficiently
+        roles = []
+        if node.metadata.labels:
+            for label_key in node.metadata.labels:
+                if 'node-role.kubernetes.io/' in label_key:
+                    role = label_key.replace('node-role.kubernetes.io/', '')
+                    if role:
+                        roles.append(role)
+        
+        # Get taints count
+        taints_count = 0
+        if node.spec and node.spec.taints:
+            taints_count = len(node.spec.taints)
+        
+        processed_item.update({
+            'status': node_status,
+            'roles': roles if roles else ['<none>'],
+            'version': status.node_info.kubelet_version if status and status.node_info else 'Unknown',
+            'os': status.node_info.operating_system if status and status.node_info else 'Unknown',
+            'kernel': status.node_info.kernel_version if status and status.node_info else 'Unknown',
+            'taints': str(taints_count),
+        })
+        
+        # Add capacity information
+        if status and status.capacity:
+            processed_item.update({
+                'cpu_capacity': status.capacity.get('cpu', ''),
+                'memory_capacity': status.capacity.get('memory', ''),
+                'disk_capacity': status.capacity.get('ephemeral-storage', ''),
+                'pods_capacity': status.capacity.get('pods', ''),
+            })
+    
+    def _add_service_fields(self, processed_item: Dict[str, Any], service: Any):
+        """Add service-specific fields efficiently"""
+        try:
+            spec = getattr(service, 'spec', None)
+            
+            # Basic service info with safe attribute access
+            service_type = getattr(spec, 'type', 'ClusterIP') if spec else 'ClusterIP'
+            cluster_ip = getattr(spec, 'cluster_ip', '<none>') if spec else '<none>'
+            
+            # Port information with robust attribute access
+            ports = []
+            if spec and hasattr(spec, 'ports') and spec.ports:
+                for port in spec.ports:
+                    try:
+                        port_num = getattr(port, 'port', '')
+                        protocol = getattr(port, 'protocol', 'TCP')
+                        port_str = f"{port_num}/{protocol}"
+                        ports.append(port_str)
+                    except Exception as e:
+                        logging.debug(f"Error processing port: {e}")
+                        continue
+            port_text = ", ".join(ports) if ports else "<none>"
+            
+            # Selector information with safe access
+            selector = getattr(spec, 'selector', {}) if spec else {}
+            selector_text = ", ".join([f"{k}={v}" for k, v in selector.items()]) if selector else "<none>"
+            
+            processed_item.update({
+                'type': service_type,
+                'cluster_ip': cluster_ip,
+                'external_ip': '<none>',
+                'ports': len(spec.ports) if spec and hasattr(spec, 'ports') and spec.ports else 0,
+                'port_text': port_text,
+                'selector': selector_text,
+            })
+            
+        except Exception as e:
+            logging.error(f"Error processing service fields: {e}")
+            processed_item.update({
+                'type': 'Unknown',
+                'cluster_ip': '<error>',
+                'external_ip': '<error>',
+                'ports': 0,
+                'port_text': '<error>',
+                'selector': '<error>',
+            })
+    
+    def _add_configmap_fields(self, processed_item: Dict[str, Any], configmap: Any):
+        """Add configmap-specific fields efficiently"""
+        data = configmap.data
+        binary_data = configmap.binary_data
+        
+        # Get keys from both data and binaryData
+        keys = []
+        if data:
+            keys.extend(data.keys())
+        if binary_data:
+            keys.extend(binary_data.keys())
+        
+        processed_item.update({
+            'keys': ', '.join(keys) if keys else '<none>',
+            'data_keys_count': len(keys),
+        })
+    
+    def _add_secret_fields(self, processed_item: Dict[str, Any], secret: Any):
+        """Add secret-specific fields efficiently"""
+        data = secret.data
+        
+        # Get keys but don't display values for security
+        keys = list(data.keys()) if data else []
+        
+        processed_item.update({
+            'keys': ', '.join(keys) if keys else '<none>',
+            'data_keys_count': len(keys),
+            'type': secret.type if secret.type else 'Opaque',
+        })
+    
+    def _add_lease_fields(self, processed_item: Dict[str, Any], lease: Any):
+        """Add lease-specific fields efficiently"""
+        spec = lease.spec
+        
+        holder_identity = '<none>'
+        lease_duration_seconds = 0
+        
+        if spec:
+            holder_identity = spec.holder_identity if spec.holder_identity else '<none>'
+            lease_duration_seconds = spec.lease_duration_seconds if spec.lease_duration_seconds else 0
+        
+        processed_item.update({
+            'holder': holder_identity,
+            'lease_duration': f"{lease_duration_seconds}s",
+        })
+    
+    def _add_priorityclass_fields(self, processed_item: Dict[str, Any], priority_class: Any):
+        """Add priority class-specific fields efficiently"""
+        value = priority_class.value if priority_class.value is not None else 0
+        global_default = priority_class.global_default if priority_class.global_default is not None else False
+        description = priority_class.description if priority_class.description else ""
+        
+        processed_item.update({
+            'value': str(value),
+            'global_default': str(global_default).lower(),
+            'description': description,
+        })
+    
+    def _add_workload_fields(self, processed_item: Dict[str, Any], workload: Any):
+        """Add workload-specific fields efficiently"""
+        spec = workload.spec
+        status = workload.status
+        
+        # Get replicas info
+        replicas = getattr(spec, 'replicas', 1) if spec else 1
+        ready_replicas = getattr(status, 'ready_replicas', 0) if status else 0
+        
+        processed_item.update({
+            'replicas': f"{ready_replicas}/{replicas}",
+            'ready_replicas': ready_replicas,
+            'total_replicas': replicas,
+        })
+    
+    def _get_pod_ready_status(self, status) -> str:
+        """Get pod ready status efficiently"""
+        if not status or not status.container_statuses:
+            return '0/0'
+        
+        ready_count = sum(1 for cs in status.container_statuses if cs.ready)
+        total_count = len(status.container_statuses)
+        
+        return f"{ready_count}/{total_count}"
+    
+    def _get_pod_restart_count(self, status) -> int:
+        """Get pod restart count efficiently"""
+        if not status or not status.container_statuses:
+            return 0
+        
+        return sum(cs.restart_count for cs in status.container_statuses if cs.restart_count)
 
 
 class ResourceLoadWorker(EnhancedBaseWorker):
@@ -1495,14 +1805,46 @@ class HighPerformanceResourceLoader(QObject):
         
         operation_id = f"search_{resource_type}_{int(time.time())}"
         
+        # Emit loading started signal for search
+        self.loading_started.emit(resource_type)
+        
         # Create and submit search worker
         worker = SearchResourceLoadWorker(config, self, search_query)
+        
+        # Connect worker signals to emit search results through main loader signals
+        worker.signals.finished.connect(
+            lambda result: self._handle_search_completion_success(result, resource_type, namespace, operation_id)
+        )
+        worker.signals.error.connect(
+            lambda error: self._handle_search_completion_error(error, resource_type, namespace, operation_id)
+        )
         
         # Submit to thread manager
         thread_manager = get_thread_manager()
         thread_manager.submit_worker(operation_id, worker)
         
         return operation_id
+    
+    def _handle_search_completion_success(self, result: LoadResult, resource_type: str, namespace: Optional[str], operation_id: str):
+        """Handle successful search completion"""
+        try:
+            # Emit the search results through the main loader signals
+            self.loading_completed.emit(resource_type, result)
+            logging.info(
+                f"Search completed: found {result.total_count} {resource_type} "
+                f"in {result.load_time_ms:.1f}ms "
+                f"({'cached' if result.from_cache else 'fresh'})"
+            )
+        except Exception as e:
+            logging.error(f"Error emitting search completion signal: {e}")
+    
+    def _handle_search_completion_error(self, error_message: str, resource_type: str, namespace: Optional[str], operation_id: str):
+        """Handle error in search completion"""
+        try:
+            self.loading_error.emit(resource_type, error_message)
+            logging.error(f"Search failed for {resource_type}: {error_message}")
+        except Exception as e:
+            logging.error(f"Error emitting search error signal: {e}")
 
     @log_performance
     def load_resources_async(
