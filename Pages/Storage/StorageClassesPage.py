@@ -48,11 +48,11 @@ class StorageClassesPage(BaseResourcePage):
         
         # Column specifications with optimized default widths
         column_specs = [
-            (0, 40, "fixed"),        # Checkbox
-            (1, 140, "interactive"), # Name
-            (2, 90, "interactive"),  # Provisioner
-            (3, 80, "interactive"),  # Reclaim Policy
-            (4, 70, "interactive"),  # Default
+            (0, 100, "fixed"),        # Checkbox
+            (1, 240, "interactive"), # Name
+            (2, 120, "interactive"),  # Provisioner
+            (3, 120, "interactive"),  # Reclaim Policy
+            (4, 100, "interactive"),  # Default
             (5, 60, "interactive"),  # Age
             (6, 80, "stretch"),      # Status - stretch to fill remaining space
             (7, 40, "fixed")        # Actions

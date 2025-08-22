@@ -6,7 +6,7 @@ Uses QTableView with VirtualizedResourceModel for optimal performance
 import logging
 from PyQt6.QtWidgets import (
     QTableView, QVBoxLayout, QWidget, QHeaderView, QAbstractItemView,
-    QStyledItemDelegate, QApplication
+    QStyledItemDelegate, QApplication, QStyle
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QModelIndex, QTimer
 from PyQt6.QtGui import QColor, QPainter, QFont
@@ -24,7 +24,7 @@ class HighPerformanceDelegate(QStyledItemDelegate):
     
     def paint(self, painter: QPainter, option, index: QModelIndex):
         """Optimized paint method"""
-        if option.state & QApplication.State.State_Selected:
+        if option.state & QStyle.StateFlag.State_Selected:
             # Custom selection color
             painter.fillRect(option.rect, QColor(227, 242, 253))
         
@@ -79,12 +79,13 @@ class VirtualScrollTable(QTableView):
         self.setShowGrid(True)
         self.setGridStyle(Qt.PenStyle.DotLine)
         
-        # Connect selection changes
-        self.selectionModel().selectionChanged.connect(self._on_selection_changed)
-        self.doubleClicked.connect(self._on_double_clicked)
-        
-        # Initialize with empty model
+        # Initialize with empty model first
         self.set_resource_data([], self.headers)
+        
+        # Connect selection changes after model is set
+        if self.selectionModel():
+            self.selectionModel().selectionChanged.connect(self._on_selection_changed)
+        self.doubleClicked.connect(self._on_double_clicked)
         
         logging.info(f"VirtualScrollTable initialized with {len(headers)} columns: {headers}")
     
@@ -159,6 +160,11 @@ class VirtualScrollTable(QTableView):
             
             # Connect model signals
             self._model.data_changed_custom.connect(self.data_changed.emit)
+            
+            # Connect selection model signals after setting model
+            if self.selectionModel() and not hasattr(self, '_selection_connected'):
+                self.selectionModel().selectionChanged.connect(self._on_selection_changed)
+                self._selection_connected = True
             
             # Apply responsive column sizing
             QTimer.singleShot(100, self._adjust_columns_to_screen)  # Delay to ensure proper widget size
@@ -343,10 +349,18 @@ class VirtualScrollTable(QTableView):
     def cleanup(self):
         """Cleanup resources"""
         try:
-            if self._model:
+            # Check if the widget still exists before cleanup
+            if hasattr(self, '_model') and self._model:
                 self._model.clear_cache()
-            self.clearSelection()
+            
+            # Safely clear selection
+            if hasattr(self, 'clearSelection'):
+                self.clearSelection()
+                
             logging.debug("VirtualScrollTable cleanup completed")
+        except RuntimeError:
+            # Widget was already deleted - this is expected during shutdown
+            logging.debug("VirtualScrollTable already deleted during cleanup")
         except Exception as e:
             logging.error(f"Error in VirtualScrollTable cleanup: {e}")
     
@@ -354,5 +368,8 @@ class VirtualScrollTable(QTableView):
         """Destructor to ensure cleanup"""
         try:
             self.cleanup()
+        except RuntimeError:
+            # Widget already deleted - normal during shutdown
+            pass
         except Exception as e:
             logging.debug(f"Error in VirtualScrollTable destructor: {e}")

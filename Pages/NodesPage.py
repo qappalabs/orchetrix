@@ -3,8 +3,7 @@ Corrected implementation of the Nodes page with performance improvements and pro
 """
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
-    QLabel, QHeaderView, QToolButton, QMenu, QCheckBox, QFrame, 
+    QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem, QLabel, QHeaderView, QToolButton, QMenu, QCheckBox, QFrame, 
     QGraphicsDropShadowEffect, QSizePolicy, QStyleOptionButton, QStyle, QStyleOptionHeader,
     QApplication, QPushButton, QProxyStyle
 )
@@ -264,9 +263,16 @@ class NodesPage(BaseResourcePage):
     """
     
     def __init__(self, parent=None):
+        # Define columns for nodes table to match original layout
+        node_columns = ["", "Name", "CPU", "Memory", "Disk", "Taints", "Roles", "Version", "Age", "Conditions", ""]
+        
+        # Initialize parent class
         super().__init__(parent)
+        
         self.resource_type = "nodes"
+        self.columns = node_columns
         self.has_namespace_column = False  # Nodes are cluster-level resources
+        
         self.selected_row = -1
         self._selected_node_name = None
         self._is_double_clicking = False
@@ -288,19 +294,12 @@ class NodesPage(BaseResourcePage):
                 logging.error(f"Error connecting to cluster connector signals: {e}")
                 self.cluster_connector = None
         
-        # Initialize data structure
-        self.nodes_data = []
-        
         # Initialize search state
         self._is_searching = False
         self._current_search_query = None
         
         # Set up UI
         self.setup_page_ui()
-        
-        # Optional: Enable pagination controls for large node lists
-        # Uncomment the line below to add pagination controls:
-        # self.enable_pagination_controls(page_size=25)
     
     def cleanup_on_destroy(self):
         """Override base cleanup to handle NodesPage-specific resources"""
@@ -314,16 +313,23 @@ class NodesPage(BaseResourcePage):
             if hasattr(self, 'cluster_connector') and self.cluster_connector:
                 try:
                     self.cluster_connector.node_data_loaded.disconnect(self._debounced_update_nodes)
-                except TypeError:
-                    pass  # Signal was not connected
+                except (TypeError, RuntimeError):
+                    pass  # Signal was not connected or object deleted
             
             # Call parent cleanup
             super().cleanup_on_destroy()
             
+        except RuntimeError:
+            # Widget already deleted - this is expected during shutdown
+            logging.debug("NodesPage already deleted during cleanup")
         except Exception as e:
-            logging.error(f"Error in NodesPage cleanup: {e}")
+            logging.error(f"Error disconnecting signals in NodesPage: {e}")
             # Still call parent cleanup even if our cleanup fails
-            super().cleanup_on_destroy()
+            try:
+                super().cleanup_on_destroy()
+            except RuntimeError:
+                # Parent also deleted
+                pass
         
     def setup_page_ui(self):
         """Set up the main UI elements for the Nodes page"""
@@ -370,19 +376,34 @@ class NodesPage(BaseResourcePage):
         
         # Configure column widths
         self.configure_columns()
-        
-        # No need for custom no-data widget - use base class implementation
 
     def configure_columns(self):
         """Configure column widths for responsive screen utilization"""
         if not self.table:
             return
-            
-        self.table.hideColumn(0)
-        header = self.table.horizontalHeader()
         
-        # Setup responsive column sizing immediately - no need for timer delay
-        self._setup_responsive_columns()
+        # Use QTimer to delay column configuration until table is ready
+        QTimer.singleShot(100, self._apply_column_configuration)
+    
+    def _apply_column_configuration(self):
+        """Apply column configuration after table is ready"""
+        try:
+            if not hasattr(self.table, 'horizontalHeader'):
+                return
+            
+            header = self.table.horizontalHeader()
+            if not header:
+                return
+            
+            # Hide only checkbox column, keep actions column visible
+            self.table.setColumnHidden(0, True)   # Checkbox column
+            # Actions column (column 10) should remain visible
+            
+            # Set up responsive sizing for the remaining columns
+            self._setup_responsive_columns()
+            
+        except Exception as e:
+            logging.error(f"Error applying column configuration: {e}")
     
     def _setup_responsive_columns(self):
         """Setup responsive column sizing for nodes table"""
@@ -426,12 +447,12 @@ class NodesPage(BaseResourcePage):
             normal_extra = remaining_space / normal_columns if normal_columns > 0 else 0
         
         for col_index, default_width, min_width, col_type in column_config:
-            if col_index >= self.table.columnCount():
+            if col_index >= len(self.columns):
                 continue
                 
             if col_type == "fixed":
                 header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Fixed)
-                self.table.setColumnWidth(col_index, min_width)
+                header.resizeSection(col_index, min_width)
             elif col_type == "stretch":
                 header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Stretch)
             else:
@@ -443,7 +464,7 @@ class NodesPage(BaseResourcePage):
                 else:  # compact
                     width = min_width
                 
-                self.table.setColumnWidth(col_index, max(width, min_width))
+                header.resizeSection(col_index, max(width, min_width))
         
         # Ensure full width utilization immediately after column setup
         self._ensure_full_width_utilization()
@@ -463,7 +484,6 @@ class NodesPage(BaseResourcePage):
 
     def _debounced_update_nodes(self, nodes_data):
         """Debounced wrapper for update_nodes to prevent excessive updates"""
-        # Only debounce if we haven't loaded data yet, otherwise update immediately
         if not self.has_loaded_data:
             self.debounced_updater.schedule_update(
                 "nodes_update", 
@@ -472,7 +492,6 @@ class NodesPage(BaseResourcePage):
                 nodes_data
             )
         else:
-            # If we already have data, update immediately to avoid loading flicker
             self.update_nodes(nodes_data)
 
     def update_nodes(self, nodes_data):
@@ -503,8 +522,8 @@ class NodesPage(BaseResourcePage):
         self._last_load_time = time.time()
         self.has_loaded_data = True
         
-        # Simplified graph updates - only update on first load
-        if not hasattr(self, '_graphs_initialized'):
+        # Optimized graph updates - only update when data changes significantly
+        if not hasattr(self, '_graphs_initialized') or self._should_update_graphs(nodes_data):
             self._update_graphs_async(nodes_data)
             self._graphs_initialized = True
         
@@ -516,6 +535,108 @@ class NodesPage(BaseResourcePage):
             # Populate table with optimized method
             self.populate_table(nodes_data)
             self.items_count.setText(f"{len(nodes_data)} items")
+    
+    def _should_update_graphs(self, new_nodes_data):
+        """Determine if graphs should be updated based on data changes"""
+        if not hasattr(self, '_last_nodes_hash'):
+            return True
+        
+        # Simple hash of node count and first few node names for change detection
+        try:
+            new_hash = hash(str(len(new_nodes_data)) + str([n.get('name', '') for n in new_nodes_data[:3]]))
+            if new_hash != self._last_nodes_hash:
+                self._last_nodes_hash = new_hash
+                return True
+        except Exception:
+            pass
+        return False
+    
+    def _format_cpu_display(self, node):
+        """Format CPU information for display"""
+        try:
+            cpu_capacity = node.get("cpu_capacity", "")
+            cpu_usage = node.get("cpu_usage")
+            
+            if cpu_usage is not None and cpu_capacity:
+                return f"{cpu_capacity} ({cpu_usage:.1f}%)"
+            elif cpu_capacity:
+                return cpu_capacity
+            else:
+                return "N/A"
+        except Exception as e:
+            logging.debug(f"Error formatting CPU display: {e}")
+            return "N/A"
+    
+    def _format_memory_display(self, node):
+        """Format memory information for display"""
+        try:
+            memory_capacity = node.get("memory_capacity", "")
+            memory_usage = node.get("memory_usage")
+            
+            if memory_usage is not None and memory_capacity:
+                return f"{memory_capacity} ({memory_usage:.1f}%)"
+            elif memory_capacity:
+                return memory_capacity
+            else:
+                return "N/A"
+        except Exception as e:
+            logging.debug(f"Error formatting memory display: {e}")
+            return "N/A"
+    
+    def _format_disk_display(self, node):
+        """Format disk information for display"""
+        try:
+            disk_capacity = node.get("disk_capacity", "")
+            disk_usage = node.get("disk_usage")
+            
+            if disk_usage is not None and disk_capacity:
+                return f"{disk_capacity} ({disk_usage:.1f}%)"
+            elif disk_capacity:
+                return disk_capacity
+            else:
+                return "N/A"
+        except Exception as e:
+            logging.debug(f"Error formatting disk display: {e}")
+            return "N/A"
+    
+    def _format_taints_display(self, node):
+        """Format taints information for display"""
+        try:
+            taints = node.get("taints", [])
+            if isinstance(taints, list) and taints:
+                return str(len(taints))
+            else:
+                return "0"
+        except Exception as e:
+            logging.debug(f"Error formatting taints display: {e}")
+            return "0"
+    
+    def _format_conditions_display(self, node):
+        """Format conditions information for display"""
+        try:
+            conditions = node.get("conditions", [])
+            if isinstance(conditions, list) and conditions:
+                # Find Ready condition status
+                for condition in conditions:
+                    if condition.get("type") == "Ready":
+                        return condition.get("status", "Unknown")
+                # If no Ready condition, show general status
+                return node.get("status", "Unknown")
+            else:
+                return node.get("status", "Unknown")
+        except Exception as e:
+            logging.debug(f"Error formatting conditions display: {e}")
+            return "Unknown"
+    
+    def _enable_graphs_lazy(self):
+        """Enable graph updates with lazy loading - only when user interacts"""
+        if not hasattr(self, '_graphs_enabled'):
+            # Enable graphs but don't populate until selection
+            self.cpu_graph.setEnabled(True)
+            self.mem_graph.setEnabled(True)
+            self.disk_graph.setEnabled(True)
+            self._graphs_enabled = True
+            logging.debug("Graphs enabled with lazy loading")
     
     def _batch_update_graphs(self, nodes_data):
         """Batch update all graphs to avoid timer cascades"""
@@ -726,7 +847,7 @@ class NodesPage(BaseResourcePage):
             
         # Clear all cell widgets first
         for row in range(self.table.rowCount()):
-            for col in range(self.table.columnCount()):
+            for col in range(len(self.columns)):
                 widget = self.table.cellWidget(row, col)
                 if widget:
                     widget.setParent(None)
@@ -751,7 +872,7 @@ class NodesPage(BaseResourcePage):
         # First clear all cell widgets explicitly to prevent orphaned widgets
         old_row_count = self.table.rowCount()
         for row in range(old_row_count):
-            for col in range(self.table.columnCount()):
+            for col in range(len(self.columns)):
                 widget = self.table.cellWidget(row, col)
                 if widget:
                     widget.setParent(None)
@@ -994,20 +1115,24 @@ class NodesPage(BaseResourcePage):
             
         self.table.selectRow(row)
         
-        # Only update graphs if this is a different node
-        # Force update graphs with current data first - bypass throttling
-        for graph in [self.cpu_graph, self.mem_graph, self.disk_graph]:
-            # Temporarily reset throttling to force immediate update
-            old_time = graph._last_update_time
-            graph._last_update_time = 0
-            graph._is_updating = False
-            graph.generate_utilization_data(self.nodes_data)
-            graph._last_update_time = old_time
-        
-        # Then set the selected node
-        self.cpu_graph.set_selected_node(node_data, node_name)
-        self.mem_graph.set_selected_node(node_data, node_name)
-        self.disk_graph.set_selected_node(node_data, node_name)
+        # Optimized graph updates - only update if data has changed significantly
+        if self._should_update_graphs_for_node(node_data):
+            # Force update graphs with current data first - bypass throttling
+            for graph in [self.cpu_graph, self.mem_graph, self.disk_graph]:
+                # Temporarily reset throttling to force immediate update
+                old_time = getattr(graph, '_last_update_time', 0)
+                if hasattr(graph, '_last_update_time'):
+                    graph._last_update_time = 0
+                if hasattr(graph, '_is_updating'):
+                    graph._is_updating = False
+                graph.generate_utilization_data(self.nodes_data)
+                if hasattr(graph, '_last_update_time'):
+                    graph._last_update_time = old_time
+            
+            # Then set the selected node
+            self.cpu_graph.set_selected_node(node_data, node_name)
+            self.mem_graph.set_selected_node(node_data, node_name)
+            self.disk_graph.set_selected_node(node_data, node_name)
         
         # Log for debugging
         logging.info(f"Selected node: {node_name}")
@@ -1015,13 +1140,26 @@ class NodesPage(BaseResourcePage):
         logging.debug(f"Memory utilization data: {self.mem_graph.utilization_data.get(node_name, 'Not found')}")
         logging.debug(f"Disk utilization data: {self.disk_graph.utilization_data.get(node_name, 'Not found')}")
     
+    def _should_update_graphs_for_node(self, node_data):
+        """Determine if graphs should be updated for node selection"""
+        # Only update if significant time has passed or node data changed
+        import time
+        current_time = time.time()
+        last_update = getattr(self, '_last_graph_update_time', 0)
+        
+        # Update graphs at most every 5 seconds for performance
+        if current_time - last_update > 5.0:
+            self._last_graph_update_time = current_time
+            return True
+        return False
+    
     def handle_row_click(self, row, column):
         if column != self.table.columnCount() - 1:  # Skip action column
             # Check if this is part of a double-click sequence
             if not getattr(self, '_is_double_clicking', False):
                 self.table.selectRow(row)
                 self.select_node_for_graphs(row)
-    
+
     def handle_row_double_click(self, row, column):
         """Handle double-click to show node detail page"""
         if column != self.table.columnCount() - 1:  # Skip action column

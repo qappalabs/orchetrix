@@ -76,6 +76,15 @@ class KubernetesService(QObject):
         self.current_cluster = None
         self._shutting_down = False
         
+        # Connection health and backoff management
+        self._connection_healthy = True
+        self._last_successful_request = 0
+        self._consecutive_failures = 0
+        self._backoff_multiplier = 1.0
+        self._base_retry_delay = 1.0  # Base delay in seconds
+        self._max_retry_delay = 60.0  # Maximum delay in seconds
+        self._max_consecutive_failures = 5
+        
         # Initialize services
         self._init_services()
         
@@ -89,6 +98,70 @@ class KubernetesService(QObject):
         self._setup_timers()
         
         logging.info("KubernetesService initialized with modular architecture")
+    
+    def _should_retry_request(self) -> bool:
+        """Check if we should retry requests based on backoff logic"""
+        if self._consecutive_failures >= self._max_consecutive_failures:
+            logging.warning(f"Max consecutive failures reached ({self._max_consecutive_failures}), skipping request")
+            return False
+        
+        import time
+        current_time = time.time()
+        
+        # Calculate backoff delay
+        delay = min(
+            self._base_retry_delay * (self._backoff_multiplier ** self._consecutive_failures),
+            self._max_retry_delay
+        )
+        
+        # Check if enough time has passed since last failure
+        time_since_last_attempt = current_time - getattr(self, '_last_attempt_time', 0)
+        
+        if time_since_last_attempt < delay:
+            logging.debug(f"Backoff active: {delay - time_since_last_attempt:.1f}s remaining")
+            return False
+            
+        self._last_attempt_time = current_time
+        return True
+    
+    def _record_success(self):
+        """Record successful request - reset backoff"""
+        import time
+        self._connection_healthy = True
+        self._last_successful_request = time.time()
+        self._consecutive_failures = 0
+        self._backoff_multiplier = 1.0
+        
+        if not self._connection_healthy:
+            logging.info("Connection restored - backoff reset")
+    
+    def _record_failure(self, error: Exception):
+        """Record failed request - increase backoff"""
+        import time
+        self._connection_healthy = False
+        self._consecutive_failures += 1
+        self._backoff_multiplier = min(self._backoff_multiplier * 2, 8.0)  # Max 8x backoff
+        
+        delay = min(
+            self._base_retry_delay * (self._backoff_multiplier ** self._consecutive_failures),
+            self._max_retry_delay
+        )
+        
+        logging.warning(f"Request failed ({self._consecutive_failures}/{self._max_consecutive_failures}): {error}. Next retry in {delay:.1f}s")
+    
+    def _execute_with_backoff(self, operation_name: str, operation_func, *args, **kwargs):
+        """Execute operation with backoff and error handling"""
+        if not self._should_retry_request():
+            return None
+        
+        try:
+            result = operation_func(*args, **kwargs)
+            self._record_success()
+            return result
+        except Exception as e:
+            self._record_failure(e)
+            # Re-raise for caller to handle
+            raise
     
     def _init_services(self):
         """Initialize all service dependencies"""
@@ -290,18 +363,38 @@ class KubernetesService(QObject):
     # Public API methods
     
     def get_cluster_metrics(self, cluster_name: str = None) -> Optional[Dict[str, Any]]:
-        """Get cluster metrics (synchronous)"""
+        """Get cluster metrics (synchronous) with backoff"""
         cluster = cluster_name or self.current_cluster
         if not cluster:
             return None
-        return self.metrics_service.get_cluster_metrics(cluster)
+        
+        # Use backoff for metrics collection
+        try:
+            return self._execute_with_backoff(
+                "get_cluster_metrics",
+                self.metrics_service.get_cluster_metrics,
+                cluster
+            )
+        except Exception as e:
+            logging.warning(f"Cluster metrics collection failed: {e}")
+            return None
     
     def get_cluster_issues(self, cluster_name: str = None) -> List[Dict[str, Any]]:
-        """Get cluster issues (synchronous)"""
+        """Get cluster issues (synchronous) with backoff"""
         cluster = cluster_name or self.current_cluster
         if not cluster:
             return []
-        return self.events_service.get_cluster_issues(cluster)
+        
+        # Use backoff for issues collection
+        try:
+            return self._execute_with_backoff(
+                "get_cluster_issues", 
+                self.events_service.get_cluster_issues,
+                cluster
+            )
+        except Exception as e:
+            logging.warning(f"Cluster issues collection failed: {e}")
+            return []
     
     def get_pod_logs(self, pod_name: str, namespace: str, container: str = None, 
                      tail_lines: int = 100) -> Optional[str]:

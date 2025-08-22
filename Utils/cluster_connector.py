@@ -191,12 +191,21 @@ class EnhancedClusterConnector(QObject):
         from Utils.unified_cache_system import get_unified_cache
         self._cache = get_unified_cache()
         
-        # Polling management
+        # Polling management with load detection
         self._polling_active = False
         self._polling_lock = threading.RLock()
         self._metrics_timer = QTimer()
         self._issues_timer = QTimer()
         self._cleanup_timer = QTimer()
+        
+        # Load detection for dynamic polling
+        self._cluster_load_level = "normal"  # normal, heavy, critical
+        self._last_poll_times = {"metrics": 0, "issues": 0}
+        self._poll_intervals = {
+            "normal": {"metrics": 30000, "issues": 60000},    # 30s/60s for normal load
+            "heavy": {"metrics": 60000, "issues": 120000},    # 60s/120s for heavy load  
+            "critical": {"metrics": 120000, "issues": 300000} # 120s/300s for critical load
+        }
         
         # Shutdown management
         self._shutting_down = False
@@ -553,16 +562,23 @@ class EnhancedClusterConnector(QObject):
             return "Unknown"
     
     def _start_polling(self) -> None:
-        """Start polling for metrics and issues"""
+        """Start polling for metrics and issues with adaptive intervals"""
         with self._polling_lock:
             if self._polling_active or self._shutting_down:
                 return
             
             self._polling_active = True
+            
+            # Start with appropriate intervals based on current load level
+            current_intervals = self._poll_intervals[self._cluster_load_level]
+            
             if hasattr(self, '_metrics_timer') and self._metrics_timer:
-                self._metrics_timer.start(5000)   # Poll metrics every 5 seconds
+                self._metrics_timer.start(current_intervals["metrics"])
+                logging.info(f"Started metrics polling every {current_intervals['metrics']}ms ({self._cluster_load_level} load)")
+                
             if hasattr(self, '_issues_timer') and self._issues_timer:
-                self._issues_timer.start(10000)   # Poll issues every 10 seconds
+                self._issues_timer.start(current_intervals["issues"])  
+                logging.info(f"Started issues polling every {current_intervals['issues']}ms ({self._cluster_load_level} load)")
     
     def _stop_polling(self) -> None:
         """Stop all polling"""
@@ -574,24 +590,100 @@ class EnhancedClusterConnector(QObject):
                 self._issues_timer.stop()
     
     def _poll_metrics(self) -> None:
-        """Poll for cluster metrics"""
+        """Poll for cluster metrics with load detection"""
         if self._shutting_down or not self.current_cluster:
             return
         
         try:
+            start_time = time.time()
             self.kube_client.get_cluster_metrics_async()
+            poll_time = (time.time() - start_time) * 1000
+            
+            # Update load level based on polling performance
+            self._update_load_level("metrics", poll_time)
+            
         except Exception as e:
             logging.warning(f"Error polling metrics: {e}")
+            # Increase polling interval on errors
+            self._adjust_polling_on_error("metrics")
     
     def _poll_issues(self) -> None:
-        """Poll for cluster issues"""
+        """Poll for cluster issues with load detection"""
         if self._shutting_down or not self.current_cluster:
             return
         
         try:
+            start_time = time.time()
             self.kube_client.get_cluster_issues_async()
+            poll_time = (time.time() - start_time) * 1000
+            
+            # Update load level based on polling performance
+            self._update_load_level("issues", poll_time)
+            
         except Exception as e:
             logging.warning(f"Error polling issues: {e}")
+            # Increase polling interval on errors
+            self._adjust_polling_on_error("issues")
+    
+    def _update_load_level(self, poll_type: str, poll_time_ms: float):
+        """Update cluster load level based on polling performance"""
+        self._last_poll_times[poll_type] = poll_time_ms
+        
+        # Calculate average poll time
+        avg_poll_time = sum(self._last_poll_times.values()) / len(self._last_poll_times)
+        
+        # Determine load level based on response times
+        old_level = self._cluster_load_level
+        
+        if avg_poll_time > 5000:  # > 5 seconds indicates critical load
+            new_level = "critical"
+        elif avg_poll_time > 2000:  # > 2 seconds indicates heavy load
+            new_level = "heavy"
+        else:
+            new_level = "normal"
+        
+        # Update load level and adjust polling if needed
+        if new_level != old_level:
+            self._cluster_load_level = new_level
+            self._adjust_polling_intervals()
+            logging.info(f"Cluster load level changed from {old_level} to {new_level} (avg poll time: {avg_poll_time:.1f}ms)")
+    
+    def _adjust_polling_intervals(self):
+        """Adjust polling intervals based on current load level"""
+        if not self._polling_active:
+            return
+            
+        current_intervals = self._poll_intervals[self._cluster_load_level]
+        
+        with self._polling_lock:
+            # Update metrics timer
+            if hasattr(self, '_metrics_timer') and self._metrics_timer and self._metrics_timer.isActive():
+                self._metrics_timer.setInterval(current_intervals["metrics"])
+            
+            # Update issues timer
+            if hasattr(self, '_issues_timer') and self._issues_timer and self._issues_timer.isActive():
+                self._issues_timer.setInterval(current_intervals["issues"])
+        
+        logging.debug(f"Adjusted polling intervals to {current_intervals} for {self._cluster_load_level} load")
+    
+    def _adjust_polling_on_error(self, poll_type: str):
+        """Adjust polling interval when errors occur"""
+        try:
+            # Temporarily increase the specific timer interval on errors
+            if poll_type == "metrics" and hasattr(self, '_metrics_timer') and self._metrics_timer:
+                current_interval = self._metrics_timer.interval()
+                new_interval = min(current_interval * 2, 300000)  # Max 5 minutes
+                self._metrics_timer.setInterval(new_interval)
+                logging.debug(f"Increased metrics polling interval to {new_interval}ms due to error")
+                
+            elif poll_type == "issues" and hasattr(self, '_issues_timer') and self._issues_timer:
+                current_interval = self._issues_timer.interval()
+                new_interval = min(current_interval * 2, 600000)  # Max 10 minutes
+                self._issues_timer.setInterval(new_interval)
+                logging.debug(f"Increased issues polling interval to {new_interval}ms due to error")
+                
+        except Exception as e:
+            logging.error(f"Error adjusting polling on error: {e}")
     
     def _handle_cluster_info(self, info: Dict) -> None:
         """Handle cluster info updates from client"""

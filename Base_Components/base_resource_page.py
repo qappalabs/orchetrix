@@ -56,8 +56,9 @@ class BaseResourcePage(BaseTablePage):
         self.resource_type = None
         self.resources = []
         
-        # Always start with default namespace
+        # Always start with default namespace - ensure it's never empty
         self.namespace_filter = "default"
+        self._last_loaded_namespace = None  # Track what was actually loaded
         
         self.search_bar = None
         self.namespace_combo = None
@@ -204,9 +205,33 @@ class BaseResourcePage(BaseTablePage):
                 self._auto_load_data()  # No delay
 
     def _auto_load_data(self):
-        """Auto-load data when page is shown"""
+        """Auto-load data when page is shown - ensure default namespace is used initially"""
         if hasattr(self, 'resource_type') and self.resource_type and not self.is_loading_initial:
             self._initial_load_done = True  # Mark as done to prevent repeated attempts
+            
+            # Ensure we have a proper namespace filter before loading
+            if not hasattr(self, 'namespace_filter') or not self.namespace_filter:
+                self.namespace_filter = "default"
+                
+            # Update shared namespace state to ensure consistency
+            try:
+                from Utils.namespace_state import get_namespace_state
+                namespace_state = get_namespace_state()
+                current_namespace = namespace_state.get_current_namespace()
+                
+                # If shared state is valid, use it; otherwise stick with our default
+                if current_namespace and current_namespace.strip() != "" and current_namespace != "All Namespaces":
+                    self.namespace_filter = current_namespace
+                else:
+                    # Force global state to match our default
+                    namespace_state.set_current_namespace("default")
+                    
+            except Exception as e:
+                logging.debug(f"Could not sync namespace state: {e}")
+                # Fallback to default
+                self.namespace_filter = "default"
+            
+            logging.info(f"Auto-loading {self.resource_type} with initial namespace: {self.namespace_filter}")
             self.load_data()
 
     def setup_ui(self, title, headers, sortable_columns=None):
@@ -919,13 +944,19 @@ class BaseResourcePage(BaseTablePage):
             if not self.namespace_combo:
                 return
             
+            # Temporarily disconnect signal to prevent spurious events
+            self.namespace_combo.currentTextChanged.disconnect(self._on_namespace_changed)
+            
             # Clear existing items and show error state
             self.namespace_combo.clear()
             self.namespace_combo.addItem(f"Error: {error_message}")
             self.namespace_combo.setEnabled(False)
             
-            # Set namespace filter to empty to prevent data loading with invalid namespace
-            self.namespace_filter = ""
+            # Reconnect signal
+            self.namespace_combo.currentTextChanged.connect(self._on_namespace_changed)
+            
+            # Set namespace filter to default to prevent data loading with invalid namespace
+            self.namespace_filter = "default"
             
             logging.error(f"Namespace loading failed - showing error state: {error_message}")
             
@@ -942,6 +973,9 @@ class BaseResourcePage(BaseTablePage):
             if not namespaces:
                 self._on_namespace_loading_error("No namespaces found in cluster")
                 return
+            
+            # Temporarily disconnect signal to prevent spurious events during update
+            self.namespace_combo.currentTextChanged.disconnect(self._on_namespace_changed)
             
             # Clear existing items
             self.namespace_combo.clear()
@@ -978,9 +1012,19 @@ class BaseResourcePage(BaseTablePage):
             namespace_state = get_namespace_state()
             namespace_state.set_current_namespace(selected_namespace)
             
+            # Reconnect signal after all dropdown updates are complete
+            self.namespace_combo.currentTextChanged.connect(self._on_namespace_changed)
+            
             # Load data immediately with the correct namespace filter
-            if not self.resources or not hasattr(self, '_initial_load_done'):
+            # Always reload if namespace changed or if this is initial load
+            should_reload = (not hasattr(self, '_initial_load_done') or 
+                           not self.resources or
+                           getattr(self, '_last_loaded_namespace', None) != selected_namespace)
+            
+            if should_reload:
                 self._initial_load_done = True
+                self._last_loaded_namespace = selected_namespace
+                logging.info(f"Loading {self.resource_type} data for namespace: {selected_namespace}")
                 self.load_data()
             
         except Exception as e:
@@ -996,6 +1040,18 @@ class BaseResourcePage(BaseTablePage):
         if namespace == "Loading namespaces...":
             return  # Ignore the loading placeholder
         
+        # Validate namespace - never allow empty or None
+        if not namespace or namespace.strip() == "":
+            namespace = "default"
+            logging.warning("Empty namespace in dropdown change, forcing to 'default'")
+        
+        # Check if namespace actually changed to avoid unnecessary reloads
+        if hasattr(self, 'namespace_filter') and self.namespace_filter == namespace:
+            logging.debug(f"Namespace unchanged ({namespace}), skipping reload")
+            return
+        
+        # Store the validated namespace
+        old_namespace = getattr(self, 'namespace_filter', None)
         self.namespace_filter = namespace
         
         # Persist namespace selection across pages
@@ -1003,6 +1059,7 @@ class BaseResourcePage(BaseTablePage):
         namespace_state = get_namespace_state()
         namespace_state.set_current_namespace(namespace)
         
+        logging.info(f"Namespace changed from '{old_namespace}' to '{namespace}' - reloading data")
         self.force_load_data()
 
     def _handle_scroll(self, value):
@@ -1054,8 +1111,22 @@ class BaseResourcePage(BaseTablePage):
             print(f"CLUSTER RESOURCE: Loading {self.resource_type} with namespace=None")
         else:
             # Namespaced resources - use the filter (default or selected)
+            # First ensure namespace_filter is never empty or None
+            if not self.namespace_filter or self.namespace_filter.strip() == "":
+                self.namespace_filter = "default"
+                logging.warning(f"Empty namespace_filter detected, forcing to 'default'")
+            
             namespace = None if self.namespace_filter == "All Namespaces" else self.namespace_filter
-            print(f"NAMESPACED RESOURCE: Loading {self.resource_type} with filter='{self.namespace_filter}' -> namespace='{namespace}'")
+            
+            # Double-check: ensure we never pass empty string or None unless explicitly "All Namespaces"
+            if (namespace is None and self.namespace_filter != "All Namespaces") or (isinstance(namespace, str) and namespace.strip() == ""):
+                namespace = "default"
+                self.namespace_filter = "default"
+                logging.warning(f"Invalid namespace detected (was: '{namespace}'), forcing to 'default'")
+                
+            # Better debug output - show None as None, not 'None'
+            namespace_display = "None" if namespace is None else f"'{namespace}'"
+            print(f"NAMESPACED RESOURCE: Loading {self.resource_type} with filter='{self.namespace_filter}' -> namespace={namespace_display}")
         
         self._current_operation_id = unified_loader.load_resources_async(
             resource_type=self.resource_type,
@@ -1462,10 +1533,14 @@ class BaseResourcePage(BaseTablePage):
 
     def force_load_data(self):
         """Force reload of data"""
+        # Use thread-safe loading state management to prevent concurrent loads
+        if not self.set_loading_state(True, is_initial=True):
+            logging.debug(f"Already loading {self.resource_type}, skipping force reload")
+            return
+            
         self._clear_resources()  # Use new method to clear resources properly
         self.current_continue_token = None
         self.all_data_loaded = False
-        self.is_loading_initial = True
         self._start_loading_thread()
     
     def _clear_resources(self):

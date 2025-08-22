@@ -166,7 +166,14 @@ class HighPerformanceCache:
             return True
     
     def _ensure_capacity(self, new_entry_size: int, current_time: float):
-        """Ensure cache has capacity for new entry"""
+        """Ensure cache has capacity for new entry with memory pressure detection"""
+        # Check for critical memory pressure (>90% usage)
+        memory_pressure = (self._current_memory_usage / self.max_memory_bytes) * 100
+        
+        if memory_pressure > 90:
+            # Aggressive cleanup under memory pressure
+            self._emergency_cleanup(current_time)
+        
         # Check memory limit
         while (self._current_memory_usage + new_entry_size > self.max_memory_bytes 
                and self._cache):
@@ -177,7 +184,8 @@ class HighPerformanceCache:
             self._evict_lru_entry()
         
         # Clean up expired entries
-        self._cleanup_expired(current_time)
+        if memory_pressure > 75:  # More frequent cleanup under load
+            self._cleanup_expired(current_time)
     
     def _evict_lru_entry(self):
         """Evict least recently used entry"""
@@ -216,6 +224,29 @@ class HighPerformanceCache:
         
         if expired_keys:
             logging.debug(f"Cleaned up {len(expired_keys)} expired cache entries")
+    
+    def _emergency_cleanup(self, current_time: float):
+        """Emergency cleanup when memory pressure is critical"""
+        initial_count = len(self._cache)
+        
+        # 1. Clear all expired entries immediately
+        self._cleanup_expired(current_time)
+        
+        # 2. Evict 25% of LRU entries to free memory quickly
+        entries_to_evict = max(1, len(self._cache) // 4)
+        for _ in range(entries_to_evict):
+            if self._cache:
+                self._evict_lru_entry()
+            else:
+                break
+        
+        # 3. Force garbage collection
+        import gc
+        gc.collect()
+        
+        cleaned_count = initial_count - len(self._cache)
+        if cleaned_count > 0:
+            logging.warning(f"Emergency cache cleanup: removed {cleaned_count} entries due to memory pressure")
     
     def _estimate_memory_size(self, obj: Any) -> int:
         """Estimate memory size of object"""
