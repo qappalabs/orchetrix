@@ -87,10 +87,18 @@ class BaseResourcePage(BaseTablePage):
         self.is_loading_more = False
         self.all_data_loaded = False
         self.current_continue_token = None
-        self.items_per_page = self.perf_config.get("table_batch_size", 25)  # Use performance-optimized batch size
+        # Reduced initial load size for virtual scrolling
+        self.items_per_page = self.perf_config.get("table_batch_size", 50)  # Initial batch
+        self.virtual_load_size = 100  # How many items to load per scroll
         self.selected_items = set()
         self.reload_on_show = True
-        self.virtual_scroll_threshold = self.perf_config.get("virtual_scroll_threshold", 100)
+        # Lower threshold to enable virtual scrolling more aggressively
+        self.virtual_scroll_threshold = self.perf_config.get("virtual_scroll_threshold", 50)
+        
+        # Virtual scrolling state
+        self._virtual_scrolling_enabled = True
+        self._rendered_items_count = 0
+        self._total_available_items = 0
 
         self.is_showing_skeleton = False
         
@@ -1075,24 +1083,62 @@ class BaseResourcePage(BaseTablePage):
         )
 
     def _handle_scroll_debounced(self):
-        """Handle debounced scroll events"""
+        """Handle debounced scroll events with virtual scrolling support"""
         if not self.table or self.is_loading_more or self.all_data_loaded:
             return
         
         scrollbar = self.table.verticalScrollBar()
-        if scrollbar.value() >= scrollbar.maximum() - 10:  # Near bottom
+        
+        # More aggressive loading trigger for virtual scrolling
+        scroll_threshold = 20 if self._virtual_scrolling_enabled else 10
+        
+        if scrollbar.value() >= scrollbar.maximum() - scroll_threshold:
+            logging.info(f"Scroll triggered: loading more {self.resource_type} (rendered: {self._rendered_items_count}, total: {self._total_available_items})")
             self._load_more_data()
 
     def _load_more_data(self):
-        """Load more data when scrolling to bottom"""
-        if self.is_loading_more or self.all_data_loaded or not self.current_continue_token:
+        """Load more data when scrolling to bottom (client-side virtual scrolling)"""
+        if self.is_loading_more or self.all_data_loaded:
             return
         
-        self.is_loading_more = True
-        self._start_loading_thread(continue_token=self.current_continue_token)
+        # Check if we have more data to render from our cached resources
+        if self._rendered_items_count < len(self.resources):
+            self.is_loading_more = True
+            
+            # Calculate next batch
+            start_idx = self._rendered_items_count
+            end_idx = min(start_idx + self.virtual_load_size, len(self.resources))
+            next_batch = self.resources[start_idx:end_idx]
+            
+            logging.info(f"Client-side load more: rendering items {start_idx}-{end_idx-1} of {len(self.resources)}")
+            
+            # Update state
+            self._rendered_items_count = end_idx
+            if self._rendered_items_count >= len(self.resources):
+                self.all_data_loaded = True
+            
+            # Render the next batch
+            self._render_resources_batch(next_batch, append=True)
+            
+            # Update items count
+            self._update_items_count()
+            
+            # Add loading indicator if more data is available
+            if not self.all_data_loaded:
+                self._add_load_more_indicator()
+            
+            self.is_loading_more = False
+            
+            if self.all_data_loaded:
+                self.all_items_loaded_signal.emit()
+            self.load_more_complete.emit()
+        else:
+            # No more data to render
+            self.all_data_loaded = True
+            self.all_items_loaded_signal.emit()
 
     def _start_loading_thread(self, continue_token=None):
-        """Start the resource loading using unified high-performance loader"""
+        """Start the resource loading using unified high-performance loader with virtual scrolling"""
         # Cancel any existing loading
         if hasattr(self, 'loading_thread') and self.loading_thread and self.loading_thread.isRunning():
             self.loading_thread.cancel()
@@ -1131,13 +1177,14 @@ class BaseResourcePage(BaseTablePage):
             namespace_display = "None" if namespace is None else f"'{namespace}'"
             print(f"NAMESPACED RESOURCE: Loading {self.resource_type} with filter='{self.namespace_filter}' -> namespace={namespace_display}")
         
+        # Load resources without pagination parameters (unified loader handles optimization internally)
         self._current_operation_id = unified_loader.load_resources_async(
             resource_type=self.resource_type,
             namespace=namespace
         )
 
     def _on_unified_resources_loaded(self, resource_type: str, result: LoadResult):
-        """Handle resources loaded from unified loader"""
+        """Handle resources loaded from unified loader with virtual scrolling"""
         try:
             # Only process if this matches our resource type
             if resource_type != self.resource_type:
@@ -1150,30 +1197,52 @@ class BaseResourcePage(BaseTablePage):
             # Process the optimized result format
             resources = result.items or []
             
-            # Replace resources (unified loader loads all at once for better performance)
-            self.resources = resources
-            self.all_data_loaded = True  # Unified loader loads everything efficiently
-            
-            # Use background processing for large datasets to prevent UI blocking
-            if len(resources) > 200:  # Use background processing for large datasets
-                self._process_resources_in_background(resources)
+            # Handle virtual scrolling vs full load (client-side implementation)
+            if self.is_loading_more:
+                # This shouldn't happen with current unified loader, but handle gracefully
+                logging.debug("Load more requested but unified loader loads all data at once")
+                self.is_loading_more = False
+                return
+                
             else:
-                # Always display resources, even if empty (small datasets can be processed immediately)
-                self._display_resources(self.resources)
+                # Store all resources from unified loader
+                self.resources = resources
+                self._total_available_items = len(resources)
+                
+                # Check if we should use client-side virtual scrolling
+                if (self._virtual_scrolling_enabled and 
+                    len(resources) >= self.virtual_scroll_threshold):
+                    
+                    # Client-side virtual scrolling: render only initial batch
+                    initial_batch = resources[:self.items_per_page]
+                    self._rendered_items_count = len(initial_batch)
+                    self.all_data_loaded = False  # More data available to render
+                    
+                    logging.info(f"Client-side virtual scrolling: showing {len(initial_batch)} of {self._total_available_items} {resource_type}")
+                    self._display_resources_virtual(initial_batch)
+                    
+                else:
+                    # Load all at once for smaller datasets
+                    self._rendered_items_count = len(resources)
+                    self.all_data_loaded = True
+                    self._display_resources(resources)
+            
             self._update_items_count()
             
             self.is_loading_initial = False
             self.is_loading_more = False
             self._initial_load_done = True
             
-            self.all_items_loaded_signal.emit()
+            if self.all_data_loaded:
+                self.all_items_loaded_signal.emit()
             self.load_more_complete.emit()
             
             # Log performance info
             if result.from_cache:
-                logging.info(f"Loaded {result.total_count} {resource_type} from cache instantly")
+                logging.info(f"Loaded {len(resources)} {resource_type} from cache instantly")
             else:
-                logging.info(f"Loaded {result.total_count} {resource_type} in {result.load_time_ms:.1f}ms")
+                load_time = getattr(result, 'load_time_ms', 0)
+                logging.info(f"Loaded {len(resources)} {resource_type} in {load_time:.1f}ms")
             
         except Exception as e:
             logging.error(f"Error processing unified resources: {e}")
@@ -1269,6 +1338,72 @@ class BaseResourcePage(BaseTablePage):
         
         # Use performance-optimized rendering
         self._render_resources_optimized(optimized_resources)
+    
+    def _display_resources_virtual(self, resources):
+        """Display resources using client-side virtual scrolling approach"""
+        if not resources:
+            self._show_empty_message()
+            return
+
+        # Don't modify self.resources here - it already contains all data
+        
+        # Hide any empty message overlay when showing data
+        if hasattr(self, '_empty_overlay'):
+            self._empty_overlay.hide()
+        
+        self._table_stack.setCurrentWidget(self.table)
+        
+        logging.info(f"Virtual display: showing {len(resources)} resources initially (client-side)")
+        
+        # Clear selections when displaying new data
+        if hasattr(self, 'selected_items'):
+            self.selected_items.clear()
+        
+        # Use batch rendering optimized for virtual scrolling
+        self._render_resources_batch(resources, append=False)
+        
+        # Add loading indicator if more data is available to render
+        if not self.all_data_loaded:
+            self._add_load_more_indicator()
+    
+    def _add_load_more_indicator(self):
+        """Add a load more indicator at the bottom of the table"""
+        try:
+            if not self.table:
+                return
+            
+            current_row_count = self.table.rowCount()
+            self.table.setRowCount(current_row_count + 1)
+            
+            # Create load more indicator
+            from PyQt6.QtWidgets import QLabel
+            from PyQt6.QtCore import Qt
+            
+            load_more_label = QLabel(f"📄 Scroll down to load more {self.resource_type}...")
+            load_more_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            load_more_label.setStyleSheet("""
+                QLabel {
+                    color: #888888;
+                    font-style: italic;
+                    padding: 10px;
+                    background-color: #2a2a2a;
+                    border-top: 1px solid #444444;
+                }
+            """)
+            
+            # Set the indicator to span all columns
+            self.table.setCellWidget(current_row_count, 0, load_more_label)
+            if self.table.columnCount() > 1:
+                self.table.setSpan(current_row_count, 0, 1, self.table.columnCount())
+            
+            # Set row height
+            self.table.setRowHeight(current_row_count, 60)
+            
+            # Store reference to remove it later
+            self._load_more_indicator_row = current_row_count
+            
+        except Exception as e:
+            logging.debug(f"Error adding load more indicator: {e}")
 
     def _render_resources_optimized(self, resources):
         """Render resources with performance optimization"""
@@ -1332,9 +1467,17 @@ class BaseResourcePage(BaseTablePage):
             logging.error(f"Error rendering optimized batch: {e}")
 
     def _render_resources_batch(self, resources, append=False):
-        """Render a batch of resources to the table with optimized performance"""
+        """Render a batch of resources to the table with optimized performance and virtual scrolling support"""
         if not append:
             self.clear_table()
+        else:
+            # Remove loading indicator if present when appending
+            if hasattr(self, '_load_more_indicator_row'):
+                try:
+                    self.table.setRowCount(self._load_more_indicator_row)
+                    delattr(self, '_load_more_indicator_row')
+                except Exception:
+                    pass
         
         if not resources:
             return
@@ -1416,9 +1559,14 @@ class BaseResourcePage(BaseTablePage):
                 self.table.setItem(row, table_col, item)
 
     def _update_items_count(self):
-        """Update the items count label"""
-        count = len(self.resources)
-        self.items_count.setText(f"{count} items")
+        """Update the items count label with virtual scrolling info"""
+        if self._virtual_scrolling_enabled and self._total_available_items > self._rendered_items_count:
+            # Show virtual scrolling progress
+            self.items_count.setText(f"Showing {self._rendered_items_count} of {self._total_available_items} items")
+        else:
+            # Show normal count
+            count = len(self.resources)
+            self.items_count.setText(f"{count} items")
 
     def _show_empty_message(self):
         """Show empty state message in center of table area while keeping headers visible"""
@@ -1535,16 +1683,38 @@ class BaseResourcePage(BaseTablePage):
                 child.widget().deleteLater()
 
     def force_load_data(self):
-        """Force reload of data"""
+        """Force reload of data with virtual scrolling support"""
         # Use thread-safe loading state management to prevent concurrent loads
         if not self.set_loading_state(True, is_initial=True):
             logging.debug(f"Already loading {self.resource_type}, skipping force reload")
             return
             
         self._clear_resources()  # Use new method to clear resources properly
+        
+        # Reset virtual scrolling state
         self.current_continue_token = None
         self.all_data_loaded = False
+        self._rendered_items_count = 0
+        self._total_available_items = 0
+        
+        # Clear any loading indicators
+        if hasattr(self, '_load_more_indicator_row'):
+            delattr(self, '_load_more_indicator_row')
+            
         self._start_loading_thread()
+    
+    def configure_virtual_scrolling(self, enabled=True, threshold=50, initial_batch=50, load_batch=100):
+        """Configure virtual scrolling parameters"""
+        self._virtual_scrolling_enabled = enabled
+        self.virtual_scroll_threshold = threshold
+        self.items_per_page = initial_batch
+        self.virtual_load_size = load_batch
+        
+        logging.info(f"Virtual scrolling configured: enabled={enabled}, threshold={threshold}, initial={initial_batch}, batch={load_batch}")
+    
+    def disable_virtual_scrolling(self):
+        """Disable virtual scrolling for this page"""
+        self.configure_virtual_scrolling(enabled=False)
     
     def _clear_resources(self):
         """Clear resources data array - used only for force refresh"""
