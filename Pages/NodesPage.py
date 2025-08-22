@@ -501,8 +501,12 @@ class NodesPage(BaseResourcePage):
         self.is_loading = False
         self.is_showing_skeleton = False
         
-        if hasattr(self, 'skeleton_timer') and self.skeleton_timer.isActive():
-            self.skeleton_timer.stop()
+        # Completely remove skeleton timer functionality to prevent unwanted loading icons
+        if hasattr(self, 'skeleton_timer'):
+            if self.skeleton_timer.isActive():
+                self.skeleton_timer.stop()
+            self.skeleton_timer.deleteLater()
+            delattr(self, 'skeleton_timer')
         
         if not nodes_data:
             logging.warning("NodesPage: No nodes data received")
@@ -858,7 +862,7 @@ class NodesPage(BaseResourcePage):
         self.table.setRowCount(0)
 
     def populate_table(self, resources_to_populate):
-        """Populate table with resource data - heavily optimized for performance"""
+        """Populate table with resource data - heavily optimized for performance under heavy load"""
         if not self.table or not resources_to_populate: 
             return
             
@@ -868,47 +872,69 @@ class NodesPage(BaseResourcePage):
         self.table.setSortingEnabled(False)
         self.table.setUpdatesEnabled(False)
         
-        # Clear and resize table efficiently - also clear all cell widgets
-        # First clear all cell widgets explicitly to prevent orphaned widgets
+        # Enhanced clearing for heavy load scenarios
         old_row_count = self.table.rowCount()
-        for row in range(old_row_count):
-            for col in range(len(self.columns)):
-                widget = self.table.cellWidget(row, col)
-                if widget:
-                    widget.setParent(None)
-                    widget.deleteLater()
+        if old_row_count > 0:
+            # Use bulk clearing for better performance with many rows
+            self.table.clearContents()
+            # Clear cell widgets in batches to avoid UI freezing
+            widget_batch_size = 20
+            for start_row in range(0, old_row_count, widget_batch_size):
+                end_row = min(start_row + widget_batch_size, old_row_count)
+                for row in range(start_row, end_row):
+                    for col in range(len(self.columns)):
+                        widget = self.table.cellWidget(row, col)
+                        if widget:
+                            widget.setParent(None)
+                            widget.deleteLater()
+                # Process events every batch to maintain responsiveness
+                if end_row < old_row_count:
+                    QApplication.processEvents()
         
-        # Clear table contents and reset row count
-        self.table.clearContents()
-        self.table.setRowCount(0)  # Reset to 0 first
-        self.table.setRowCount(len(resources_to_populate))  # Then set to new count
+        # Reset row count efficiently
+        self.table.setRowCount(0)
+        self.table.setRowCount(len(resources_to_populate))
         
-        # Use larger batches for better performance
-        batch_size = 50  # Increased batch size
+        # Dynamic batch sizing based on resource count for optimal performance
         total_items = len(resources_to_populate)
+        if total_items > 100:
+            batch_size = 75  # Larger batches for many resources
+        elif total_items > 50:
+            batch_size = 50  # Medium batches
+        else:
+            batch_size = 25  # Smaller batches for few resources
         
-        # Process all items in larger batches with minimal event processing
+        # Process all items in optimized batches
         for start_idx in range(0, total_items, batch_size):
             end_idx = min(start_idx + batch_size, total_items)
             
-            # Populate batch without individual processing
+            # Populate batch efficiently
             for i in range(start_idx, end_idx):
                 self.populate_resource_row_optimized(i, resources_to_populate[i])
             
-            # Process events only between larger batches
-            if end_idx < total_items:
+            # Reduced event processing for heavy load scenarios
+            if end_idx < total_items and total_items > 50:
+                # Only process events every other batch for heavy loads
+                if (start_idx // batch_size) % 2 == 0:
+                    QApplication.processEvents()
+            elif end_idx < total_items:
                 QApplication.processEvents()
         
         # Re-enable updates and sorting
         self.table.setUpdatesEnabled(True)
         self.table.setSortingEnabled(True)
         
-        # Force a proper repaint and update
-        self.table.viewport().update()
-        self.table.update()
+        # Optimized repaint for heavy loads
+        if total_items > 50:
+            # Defer viewport updates for heavy loads
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(100, lambda: self.table.viewport().update())
+        else:
+            self.table.viewport().update()
         
-        # Process any pending events to ensure widgets are properly displayed
-        QApplication.processEvents()
+        # Final cleanup with minimal event processing
+        if total_items <= 50:
+            QApplication.processEvents()
 
     def populate_resource_row_optimized(self, row, resource):
         """Highly optimized row population - minimizes widget creation"""
@@ -1194,15 +1220,20 @@ class NodesPage(BaseResourcePage):
             logging.debug("NodesPage: Already loading, skipping")
             return
         
-        # Check if we have cached data and it's recent (for performance)
+        # Enhanced caching for better performance under heavy load
         if hasattr(self, '_last_load_time') and hasattr(self, 'resources'):
             import time
-            if self.resources and (time.time() - self._last_load_time) < 10:  # Reduced to 10 second cache
-                logging.info("NodesPage: Using cached node data for performance")
+            # Increased cache time to 30 seconds for heavy load scenarios
+            cache_time = 30 if len(getattr(self, 'resources', [])) > 50 else 10
+            if self.resources and (time.time() - self._last_load_time) < cache_time:
+                logging.info(f"NodesPage: Using cached node data ({len(self.resources)} nodes) for performance")
                 self._display_resources(self.resources)
                 return
         
         self.is_loading = True
+        
+        # Prevent any skeleton loading indicators from showing
+        self.is_showing_skeleton = False
         
         if hasattr(self, 'cluster_connector') and self.cluster_connector:
             logging.info("NodesPage: Calling cluster_connector.load_nodes()")

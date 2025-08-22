@@ -32,11 +32,11 @@ from Utils.performance_config import get_performance_config
 from Utils.performance_optimizer import get_performance_profiler, MemoryMonitor
 from log_handler import method_logger, class_logger
 
-# Constants for performance tuning - optimized values
-BATCH_SIZE = 100  # Increased number of items to render in each batch
-SCROLL_DEBOUNCE_MS = 50   # Reduced debounce for more responsive scrolling
-SEARCH_DEBOUNCE_MS = 200  # Reduced debounce for faster search
-CACHE_TTL_SECONDS = 600   # Increased cache time for better performance
+# Constants for performance tuning - optimized for heavy load scenarios
+BATCH_SIZE = 150  # Increased for better heavy load performance
+SCROLL_DEBOUNCE_MS = 100  # Slightly increased to reduce processing overhead under load
+SEARCH_DEBOUNCE_MS = 300  # Increased to prevent excessive search requests under heavy load
+CACHE_TTL_SECONDS = 900   # Extended cache time for better performance under load
 
 # Import performance components  
 from Utils.unified_cache_system import get_unified_cache
@@ -93,6 +93,9 @@ class BaseResourcePage(BaseTablePage):
         self.virtual_scroll_threshold = self.perf_config.get("virtual_scroll_threshold", 100)
 
         self.is_showing_skeleton = False
+        
+        # Disable skeleton loading for all resource pages to prevent unwanted loading icons
+        self._skeleton_loader_disabled = True
 
         # Use unified cache system
         from Utils.unified_cache_system import get_unified_cache
