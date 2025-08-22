@@ -268,6 +268,8 @@ class NodesPage(BaseResourcePage):
         self.resource_type = "nodes"
         self.has_namespace_column = False  # Nodes are cluster-level resources
         self.selected_row = -1
+        self._selected_node_name = None
+        self._is_double_clicking = False
         self.has_loaded_data = False
         self.is_loading = False
         
@@ -965,12 +967,20 @@ class NodesPage(BaseResourcePage):
     # Removed _handle_node_action - now uses base class _handle_action
     
     def select_node_for_graphs(self, row):
-        """Select a node to show in the graphs"""
+        """Select a node to show in the graphs - optimized to avoid unnecessary reloads"""
         if row < 0 or row >= len(self.nodes_data):
+            return
+        
+        node_name = self.table.item(row, 1).text()
+        
+        # Check if this is the same node already selected - avoid unnecessary reload
+        if (hasattr(self, 'selected_row') and self.selected_row == row and 
+            hasattr(self, '_selected_node_name') and self._selected_node_name == node_name):
+            logging.debug(f"Node {node_name} already selected, skipping graph reload")
             return
             
         self.selected_row = row
-        node_name = self.table.item(row, 1).text()
+        self._selected_node_name = node_name
         node_data = None
         
         # Find the node data
@@ -984,6 +994,7 @@ class NodesPage(BaseResourcePage):
             
         self.table.selectRow(row)
         
+        # Only update graphs if this is a different node
         # Force update graphs with current data first - bypass throttling
         for graph in [self.cpu_graph, self.mem_graph, self.disk_graph]:
             # Temporarily reset throttling to force immediate update
@@ -1000,21 +1011,27 @@ class NodesPage(BaseResourcePage):
         
         # Log for debugging
         logging.info(f"Selected node: {node_name}")
-        logging.info(f"CPU utilization data: {self.cpu_graph.utilization_data.get(node_name, 'Not found')}")
-        logging.info(f"Memory utilization data: {self.mem_graph.utilization_data.get(node_name, 'Not found')}")
-        logging.info(f"Disk utilization data: {self.disk_graph.utilization_data.get(node_name, 'Not found')}")
+        logging.debug(f"CPU utilization data: {self.cpu_graph.utilization_data.get(node_name, 'Not found')}")
+        logging.debug(f"Memory utilization data: {self.mem_graph.utilization_data.get(node_name, 'Not found')}")
+        logging.debug(f"Disk utilization data: {self.disk_graph.utilization_data.get(node_name, 'Not found')}")
     
     def handle_row_click(self, row, column):
         if column != self.table.columnCount() - 1:  # Skip action column
-            self.table.selectRow(row)
-            self.select_node_for_graphs(row)
-            
-            # Update selected node graphs immediately - they're already throttled internally
-            self._update_selected_node_graphs()
+            # Check if this is part of a double-click sequence
+            if not getattr(self, '_is_double_clicking', False):
+                self.table.selectRow(row)
+                self.select_node_for_graphs(row)
     
     def handle_row_double_click(self, row, column):
         """Handle double-click to show node detail page"""
         if column != self.table.columnCount() - 1:  # Skip action column
+            # Set flag to prevent single-click graph updates during double-click
+            self._is_double_clicking = True
+            
+            # Use QTimer to reset the flag after a short delay
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(300, lambda: setattr(self, '_is_double_clicking', False))
+            
             resource_name = None
             if self.table.item(row, 1) is not None:
                 resource_name = self.table.item(row, 1).text()

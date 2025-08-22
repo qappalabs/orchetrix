@@ -56,10 +56,8 @@ class BaseResourcePage(BaseTablePage):
         self.resource_type = None
         self.resources = []
         
-        # Initialize namespace from shared state for persistence
-        from Utils.namespace_state import get_namespace_state
-        namespace_state = get_namespace_state()
-        self.namespace_filter = namespace_state.get_current_namespace()
+        # Always start with default namespace
+        self.namespace_filter = "default"
         
         self.search_bar = None
         self.namespace_combo = None
@@ -138,13 +136,7 @@ class BaseResourcePage(BaseTablePage):
         """Override showEvent to automatically load data when page becomes visible"""
         super().showEvent(event)
         
-        # Check if app is still in startup/splash screen mode
-        if self._is_app_starting():
-            # Defer loading until after splash screen to prevent startup lag
-            QTimer.singleShot(5000, self._deferred_startup_load)  # Wait 5 seconds after startup
-            return
-        
-        # Normal show event handling - load immediately if app is already started
+        # Load immediately for faster response - no more startup detection delays
         self._handle_normal_show_event()
     
     def _is_app_starting(self):
@@ -200,20 +192,20 @@ class BaseResourcePage(BaseTablePage):
             logging.debug(f"Error showing startup loading message: {e}")
     
     def _handle_normal_show_event(self):
-        """Handle normal show event loading (after startup)"""
-        # Load namespaces dynamically on first show
+        """Handle normal show event loading - optimized for speed"""
+        # Load namespaces immediately on first show - no delay
         if not hasattr(self, '_namespaces_loaded'):
             self._namespaces_loaded = True
-            QTimer.singleShot(100, self._load_namespaces_async)  # Load namespaces first
-        
-        # Always try to load data when page becomes visible if we don't have current data
-        if not self.is_loading_initial and (not self.resources or not self._initial_load_done):
-            QTimer.singleShot(200, self._auto_load_data)  # Load data after namespaces
+            self._load_namespaces_async()  # Load namespaces immediately
+            # Data will be loaded after namespaces are set in _on_namespaces_loaded
+        else:
+            # Namespaces already loaded, can load data immediately
+            if not self.is_loading_initial and (not self.resources or not self._initial_load_done):
+                self._auto_load_data()  # No delay
 
     def _auto_load_data(self):
         """Auto-load data when page is shown"""
         if hasattr(self, 'resource_type') and self.resource_type and not self.is_loading_initial:
-            logging.debug(f"Auto-loading data for {self.__class__.__name__}")  # Reduced to debug
             self._initial_load_done = True  # Mark as done to prevent repeated attempts
             self.load_data()
 
@@ -875,56 +867,80 @@ class BaseResourcePage(BaseTablePage):
             self.enable_pagination = False
 
     def _load_namespaces_async(self):
-        """Load available namespaces dynamically with minimal startup impact"""
+        """Load available namespaces using the same fast unified loader as AppsChart"""
         try:
-            # Quick fallback during startup to avoid any lag
-            if self._is_app_starting():
-                self._on_namespaces_loaded(["default", "kube-system", "kube-public"])
-                return
+            # Use the same unified loader that AppsChart uses for faster loading
+            from Utils.unified_resource_loader import get_unified_resource_loader
             
-            # Use thread manager to load namespaces asynchronously (only after startup)
-            from Utils.enhanced_worker import EnhancedBaseWorker
+            unified_loader = get_unified_resource_loader()
             
-            class NamespaceLoader(EnhancedBaseWorker):
-                def __init__(self):
-                    super().__init__("namespace_loader")
-                
-                def execute(self):
-                    try:
-                        kube_client = get_kubernetes_client()
-                        if not kube_client or not kube_client.v1:
-                            return ["default", "kube-system", "kube-public"]
-                        
-                        # Get namespaces with pagination for performance
-                        namespaces_response = kube_client.v1.list_namespace(limit=100)
-                        namespace_names = [ns.metadata.name for ns in namespaces_response.items]
-                        
-                        # Sort namespaces with default first, then alphabetically
-                        important_namespaces = ["default", "kube-system", "kube-public", "kube-node-lease"]
-                        other_namespaces = sorted([ns for ns in namespace_names if ns not in important_namespaces])
-                        
-                        return important_namespaces + other_namespaces
-                        
-                    except Exception as e:
-                        return ["default", "kube-system", "kube-public"]
+            # Connect signals if not already connected
+            if not hasattr(self, '_namespace_signals_connected'):
+                unified_loader.loading_completed.connect(self._on_namespaces_loaded_unified)
+                unified_loader.loading_error.connect(self._on_namespace_error_unified)
+                self._namespace_signals_connected = True
             
-            # Create and submit worker
-            worker = NamespaceLoader()
-            worker.signals.finished.connect(self._on_namespaces_loaded)
-            worker.signals.error.connect(lambda error: self._on_namespaces_loaded(["default", "kube-system", "kube-public"]))
-            
-            thread_manager = get_thread_manager()
-            thread_manager.submit_worker("namespace_loader", worker)
+            # Load namespaces using the faster unified loader
+            self._namespace_operation_id = unified_loader.load_resources_async('namespaces')
             
         except Exception as e:
             logging.error(f"Failed to start namespace loading: {e}")
-            # Fallback to default namespaces
-            self._on_namespaces_loaded(["default", "kube-system", "kube-public"])
+            # Show error state instead of fallback data
+            self._on_namespace_loading_error("Failed to connect to cluster")
     
-    def _on_namespaces_loaded(self, namespaces):
-        """Handle loaded namespaces and populate dropdown"""
+    def _on_namespaces_loaded_unified(self, resource_type: str, result):
+        """Handle namespaces loaded from unified loader"""
+        if resource_type != 'namespaces':
+            return
+        
+        if result.success:
+            # Extract namespace names from the processed results
+            namespaces = [item.get('name', '') for item in result.items if item.get('name')]
+            
+            # Sort namespaces with default first, then alphabetically
+            important_namespaces = ["default", "kube-system", "kube-public", "kube-node-lease"]
+            other_namespaces = sorted([ns for ns in namespaces if ns not in important_namespaces])
+            sorted_namespaces = [ns for ns in important_namespaces if ns in namespaces] + other_namespaces
+            
+            self._on_namespaces_loaded(sorted_namespaces)
+        else:
+            logging.warning(f"Failed to load namespaces via unified loader: {result.error_message}")
+            self._on_namespace_loading_error(result.error_message or "Failed to load namespaces from cluster")
+    
+    def _on_namespace_error_unified(self, resource_type: str, error_message: str):
+        """Handle namespace loading errors from unified loader"""
+        if resource_type == 'namespaces':
+            logging.warning(f"Namespace loading error: {error_message}")
+            self._on_namespace_loading_error(error_message)
+    
+    def _on_namespace_loading_error(self, error_message: str):
+        """Handle namespace loading errors by showing error state"""
         try:
             if not self.namespace_combo:
+                return
+            
+            # Clear existing items and show error state
+            self.namespace_combo.clear()
+            self.namespace_combo.addItem(f"Error: {error_message}")
+            self.namespace_combo.setEnabled(False)
+            
+            # Set namespace filter to empty to prevent data loading with invalid namespace
+            self.namespace_filter = ""
+            
+            logging.error(f"Namespace loading failed - showing error state: {error_message}")
+            
+        except Exception as e:
+            logging.error(f"Error handling namespace loading error: {e}")
+    
+    def _on_namespaces_loaded(self, namespaces):
+        """Handle loaded namespaces and populate dropdown - only real cluster data"""
+        try:
+            if not self.namespace_combo:
+                return
+            
+            # Ensure we only work with real cluster data
+            if not namespaces:
+                self._on_namespace_loading_error("No namespaces found in cluster")
                 return
             
             # Clear existing items
@@ -933,35 +949,39 @@ class BaseResourcePage(BaseTablePage):
             # Add "All Namespaces" option first for backward compatibility
             self.namespace_combo.addItem("All Namespaces")
             
-            # Add all loaded namespaces
+            # Add all loaded namespaces from real cluster
             for namespace in namespaces:
                 if namespace:  # Ensure namespace is not empty
                     self.namespace_combo.addItem(namespace)
             
-            # Set selection based on shared namespace state for persistence
+            # Enable the dropdown now that we have real data
+            self.namespace_combo.setEnabled(True)
+            
+            # Always force "default" namespace if it exists
+            if "default" in namespaces:
+                selected_namespace = "default"
+            elif namespaces:
+                selected_namespace = namespaces[0]
+            else:
+                selected_namespace = "All Namespaces"
+            
+            # Set dropdown and filter - ensure they match
+            selected_index = self.namespace_combo.findText(selected_namespace)
+            if selected_index >= 0:
+                self.namespace_combo.setCurrentIndex(selected_index)
+            
+            # FORCE the namespace_filter to match dropdown
+            self.namespace_filter = selected_namespace
+            
+            # Update shared state to match
             from Utils.namespace_state import get_namespace_state
             namespace_state = get_namespace_state()
-            current_namespace = namespace_state.get_current_namespace()
+            namespace_state.set_current_namespace(selected_namespace)
             
-            # Try to find the current namespace in the dropdown
-            current_index = self.namespace_combo.findText(current_namespace)
-            if current_index >= 0:
-                self.namespace_combo.setCurrentIndex(current_index)
-                self.namespace_filter = current_namespace
-            else:
-                # Fallback to default namespace if available
-                default_index = self.namespace_combo.findText("default")
-                if default_index >= 0:
-                    self.namespace_combo.setCurrentIndex(default_index)
-                    self.namespace_filter = "default"
-                    namespace_state.set_current_namespace("default")
-                else:
-                    # If no default namespace, use "All Namespaces"
-                    self.namespace_combo.setCurrentIndex(0)
-                    self.namespace_filter = "All Namespaces"
-                    namespace_state.set_current_namespace("All Namespaces")
-                
-            logging.info(f"Loaded {len(namespaces)} namespaces into dropdown")
+            # Load data immediately with the correct namespace filter
+            if not self.resources or not hasattr(self, '_initial_load_done'):
+                self._initial_load_done = True
+                self.load_data()
             
         except Exception as e:
             logging.error(f"Error updating namespace dropdown: {e}")
@@ -1027,15 +1047,20 @@ class BaseResourcePage(BaseTablePage):
             unified_loader.loading_error.connect(self._on_unified_loading_error)
             self._signals_connected = True
         
-        # Start loading with optimized configuration
-        # Handle "All Namespaces" efficiently by using None (which triggers optimized multi-namespace loading)
-        namespace = None if self.namespace_filter == "All Namespaces" else self.namespace_filter
+        # Start loading with correct namespace
+        if hasattr(self, 'has_namespace_column') and not self.has_namespace_column:
+            # Cluster-level resources (like nodes) - use None for all namespaces
+            namespace = None
+            print(f"CLUSTER RESOURCE: Loading {self.resource_type} with namespace=None")
+        else:
+            # Namespaced resources - use the filter (default or selected)
+            namespace = None if self.namespace_filter == "All Namespaces" else self.namespace_filter
+            print(f"NAMESPACED RESOURCE: Loading {self.resource_type} with filter='{self.namespace_filter}' -> namespace='{namespace}'")
+        
         self._current_operation_id = unified_loader.load_resources_async(
             resource_type=self.resource_type,
             namespace=namespace
         )
-        
-        logging.debug(f"Started unified loading for {self.resource_type} (operation: {self._current_operation_id})")
 
     def _on_unified_resources_loaded(self, resource_type: str, result: LoadResult):
         """Handle resources loaded from unified loader"""

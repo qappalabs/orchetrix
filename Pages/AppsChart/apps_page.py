@@ -274,12 +274,14 @@ class AppsPage(QWidget):
         self.namespace_combo.addItem("All Namespaces")
         self.namespace_combo.addItems(namespaces)
         
-        # Set default namespace if available
+        # Always prioritize "default" namespace if it exists in the cluster
         if "default" in namespaces:
             self.namespace_combo.setCurrentText("default")
         elif namespaces:
-            self.namespace_combo.setCurrentIndex(1)
+            # Use first available namespace if default doesn't exist
+            self.namespace_combo.setCurrentIndex(1)  # Skip "All Namespaces" at index 0
         else:
+            # Only use "All Namespaces" if no real namespaces exist
             self.namespace_combo.setCurrentText("All Namespaces")
         
         self.namespace_combo.blockSignals(False)
@@ -290,14 +292,12 @@ class AppsPage(QWidget):
         QTimer.singleShot(100, self.on_selection_changed)
     
     def on_namespace_error(self, error_message):
-        """Handle namespace loading error"""
+        """Handle namespace loading error - show error state instead of static data"""
         self.namespace_combo.blockSignals(True)
         self.namespace_combo.clear()
-        self.namespace_combo.addItem("All Namespaces")
-        self.namespace_combo.addItem("default")
-        self.namespace_combo.setCurrentText("default")
+        self.namespace_combo.addItem(f"Error: {error_message}")
+        self.namespace_combo.setEnabled(False)  # Disable when there's an error
         self.namespace_combo.blockSignals(False)
-        self.namespace_combo.setEnabled(True)
         logging.error(f"Failed to load namespaces for Apps page: {error_message}")
     
     def on_selection_changed(self):
