@@ -451,6 +451,10 @@ class NodesPage(BaseResourcePage):
         """Show the table using base class implementation"""
         if hasattr(self, '_table_stack') and self._table_stack:
             self._table_stack.setCurrentWidget(self.table)
+        
+        # Hide the empty overlay if it exists and is visible
+        if hasattr(self, '_empty_overlay') and self._empty_overlay:
+            self._empty_overlay.hide()
 
     def _debounced_update_nodes(self, nodes_data):
         """Debounced wrapper for update_nodes to prevent excessive updates"""
@@ -483,9 +487,10 @@ class NodesPage(BaseResourcePage):
             logging.warning("NodesPage: No nodes data received")
             self.nodes_data = []
             self.resources = []
-            # Clear search state when no data is available
-            self._is_searching = False
-            self._current_search_query = None
+            # Only clear search state when no data is available AND not currently searching
+            if not getattr(self, '_is_searching', False):
+                self._is_searching = False
+                self._current_search_query = None
             self.show_no_data_message()
             self.items_count.setText("0 items")
             return
@@ -667,6 +672,9 @@ class NodesPage(BaseResourcePage):
             logging.info(f"Node search for '{search_text}' found {len(filtered_nodes)} results out of {len(self.nodes_data)} total nodes")
             self._display_resources(filtered_nodes)
             
+            # Update items count for search results
+            self.items_count.setText(f"{len(filtered_nodes)} items")
+            
         except Exception as e:
             logging.error(f"Error in node search filtering: {e}")
             # Fallback to showing all nodes
@@ -677,8 +685,14 @@ class NodesPage(BaseResourcePage):
         self._is_searching = False
         self._current_search_query = None
         
-        # Show all nodes data
-        self._display_resources(self.nodes_data)
+        # Show all nodes data and update items count
+        if self.nodes_data:
+            self._display_resources(self.nodes_data)
+            self.items_count.setText(f"{len(self.nodes_data)} items")
+        else:
+            # If no data available, show empty message
+            self.show_no_data_message()
+            self.items_count.setText("0 items")
     
     def _on_search_text_changed(self, text):
         """Override to handle search text changes for nodes"""
