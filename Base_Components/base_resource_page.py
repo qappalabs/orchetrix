@@ -1102,40 +1102,56 @@ class BaseResourcePage(BaseTablePage):
             return
         
         # Check if we have more data to render from our cached resources
-        if self._rendered_items_count < len(self.resources):
-            self.is_loading_more = True
-            
-            # Calculate next batch
-            start_idx = self._rendered_items_count
-            end_idx = min(start_idx + self.virtual_load_size, len(self.resources))
-            next_batch = self.resources[start_idx:end_idx]
-            
-            logging.info(f"Client-side load more: rendering items {start_idx}-{end_idx-1} of {len(self.resources)}")
-            
-            # Update state
-            self._rendered_items_count = end_idx
-            if self._rendered_items_count >= len(self.resources):
+        try:
+            if self._rendered_items_count < len(self.resources):
+                self.is_loading_more = True
+                
+                # Calculate next batch with bounds checking
+                start_idx = max(0, self._rendered_items_count)
+                end_idx = min(start_idx + self.virtual_load_size, len(self.resources))
+                
+                if start_idx >= end_idx:
+                    # Edge case: no more data to render
+                    self.all_data_loaded = True
+                    self.is_loading_more = False
+                    self.all_items_loaded_signal.emit()
+                    return
+                
+                next_batch = self.resources[start_idx:end_idx]
+                
+                logging.info(f"Client-side load more: rendering items {start_idx}-{end_idx-1} of {len(self.resources)} {self.resource_type}")
+                
+                # Update state
+                self._rendered_items_count = end_idx
+                if self._rendered_items_count >= len(self.resources):
+                    self.all_data_loaded = True
+                
+                # Render the next batch
+                if next_batch:
+                    self._render_resources_batch(next_batch, append=True)
+                
+                # Update items count
+                self._update_items_count()
+                
+                # Add loading indicator if more data is available
+                if not self.all_data_loaded:
+                    self._add_load_more_indicator()
+                
+                self.is_loading_more = False
+                
+                if self.all_data_loaded:
+                    logging.info(f"All {len(self.resources)} {self.resource_type} items rendered")
+                    self.all_items_loaded_signal.emit()
+                self.load_more_complete.emit()
+            else:
+                # No more data to render
                 self.all_data_loaded = True
-            
-            # Render the next batch
-            self._render_resources_batch(next_batch, append=True)
-            
-            # Update items count
-            self._update_items_count()
-            
-            # Add loading indicator if more data is available
-            if not self.all_data_loaded:
-                self._add_load_more_indicator()
-            
-            self.is_loading_more = False
-            
-            if self.all_data_loaded:
                 self.all_items_loaded_signal.emit()
-            self.load_more_complete.emit()
-        else:
-            # No more data to render
+                
+        except Exception as e:
+            logging.error(f"Error in client-side load more: {e}")
+            self.is_loading_more = False
             self.all_data_loaded = True
-            self.all_items_loaded_signal.emit()
 
     def _start_loading_thread(self, continue_token=None):
         """Start the resource loading using unified high-performance loader with virtual scrolling"""
@@ -1205,6 +1221,9 @@ class BaseResourcePage(BaseTablePage):
                 return
                 
             else:
+                # Ensure virtual scrolling state is initialized
+                self._init_virtual_scrolling_state()
+                
                 # Store all resources from unified loader
                 self.resources = resources
                 self._total_available_items = len(resources)
@@ -1691,8 +1710,7 @@ class BaseResourcePage(BaseTablePage):
             
         self._clear_resources()  # Use new method to clear resources properly
         
-        # Reset virtual scrolling state
-        self.current_continue_token = None
+        # Reset client-side virtual scrolling state
         self.all_data_loaded = False
         self._rendered_items_count = 0
         self._total_available_items = 0
@@ -1715,6 +1733,19 @@ class BaseResourcePage(BaseTablePage):
     def disable_virtual_scrolling(self):
         """Disable virtual scrolling for this page"""
         self.configure_virtual_scrolling(enabled=False)
+    
+    def _init_virtual_scrolling_state(self):
+        """Initialize virtual scrolling state safely"""
+        if not hasattr(self, '_virtual_scrolling_enabled'):
+            self._virtual_scrolling_enabled = True
+        if not hasattr(self, '_rendered_items_count'):
+            self._rendered_items_count = 0
+        if not hasattr(self, '_total_available_items'):
+            self._total_available_items = 0
+        if not hasattr(self, 'virtual_scroll_threshold'):
+            self.virtual_scroll_threshold = 50
+        if not hasattr(self, 'virtual_load_size'):
+            self.virtual_load_size = 100
     
     def _clear_resources(self):
         """Clear resources data array - used only for force refresh"""

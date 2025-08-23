@@ -374,6 +374,10 @@ class NodesPage(BaseResourcePage):
         # Connect single-click to update graphs
         self.table.cellClicked.connect(self.handle_row_click)
         
+        # Connect scroll events for virtual scrolling
+        if hasattr(self.table, 'verticalScrollBar'):
+            self.table.verticalScrollBar().valueChanged.connect(self._handle_node_scroll)
+        
         # Configure column widths
         self.configure_columns()
 
@@ -526,6 +530,18 @@ class NodesPage(BaseResourcePage):
         self._last_load_time = time.time()
         self.has_loaded_data = True
         
+        # Initialize virtual scrolling state if not present
+        if not hasattr(self, '_virtual_scrolling_enabled'):
+            self._virtual_scrolling_enabled = True
+            self._rendered_items_count = 0
+            self._total_available_items = 0
+            self.virtual_scroll_threshold = 50  # Enable for 50+ nodes
+            self.items_per_page = 50  # Initial batch
+            self.virtual_load_size = 100  # Load more batch
+        
+        # Set total available items
+        self._total_available_items = len(nodes_data)
+        
         # Optimized graph updates - only update when data changes significantly
         if not hasattr(self, '_graphs_initialized') or self._should_update_graphs(nodes_data):
             self._update_graphs_async(nodes_data)
@@ -536,9 +552,19 @@ class NodesPage(BaseResourcePage):
             self._filter_nodes_by_search(self._current_search_query)
         else:
             self.show_table()
-            # Populate table with optimized method
-            self.populate_table(nodes_data)
-            self.items_count.setText(f"{len(nodes_data)} items")
+            # Use virtual scrolling for heavy loads
+            if (self._virtual_scrolling_enabled and 
+                len(nodes_data) >= self.virtual_scroll_threshold):
+                
+                logging.info(f"NodesPage: Using virtual scrolling for {len(nodes_data)} nodes")
+                self._display_nodes_virtual(nodes_data)
+            else:
+                # Use normal population for smaller datasets
+                logging.info(f"NodesPage: Using normal population for {len(nodes_data)} nodes")
+                self.populate_table(nodes_data)
+                self._rendered_items_count = len(nodes_data)
+                self.all_data_loaded = True
+                self.items_count.setText(f"{len(nodes_data)} items")
     
     def _should_update_graphs(self, new_nodes_data):
         """Determine if graphs should be updated based on data changes"""
@@ -747,6 +773,180 @@ class NodesPage(BaseResourcePage):
             total_count = len(resources) if not append else self.table.rowCount()
             self.items_count.setText(f"{total_count} items")
     
+    def _display_nodes_virtual(self, nodes_data):
+        """Display nodes using virtual scrolling for heavy loads"""
+        if not nodes_data:
+            self.show_no_data_message()
+            return
+        
+        # Clear previous selections
+        if hasattr(self, 'selected_items'):
+            self.selected_items.clear()
+        
+        # Show initial batch
+        initial_batch = nodes_data[:self.items_per_page]
+        self._rendered_items_count = len(initial_batch)
+        self.all_data_loaded = False
+        
+        logging.info(f"NodesPage virtual display: showing {len(initial_batch)} of {len(nodes_data)} nodes initially")
+        
+        # Use optimized populate for initial batch
+        self.populate_table(initial_batch)
+        
+        # Add loading indicator if more data is available
+        if len(nodes_data) > len(initial_batch):
+            self._add_nodes_load_more_indicator()
+        
+        # Update items count to show virtual scrolling status
+        self._update_nodes_items_count()
+    
+    def _populate_nodes_batch(self, nodes_batch, append=False):
+        """Populate a batch of nodes efficiently for virtual scrolling"""
+        if not append:
+            self.clear_table()
+        
+        if not nodes_batch:
+            return
+        
+        # Get starting row
+        start_row = self.table.rowCount() if append else 0
+        
+        # Remove loading indicator if appending
+        if append and hasattr(self, '_load_more_indicator_row'):
+            self.table.setRowCount(self._load_more_indicator_row)
+            delattr(self, '_load_more_indicator_row')
+            start_row = self.table.rowCount()
+        
+        # Set new row count
+        total_rows = start_row + len(nodes_batch)
+        self.table.setRowCount(total_rows)
+        
+        # Disable expensive operations (keep updates enabled to prevent loading indicators)
+        self.table.setSortingEnabled(False)
+        # self.table.setUpdatesEnabled(False)  # Skip this to prevent loading indicators
+        
+        try:
+            # Populate rows efficiently
+            for i, node in enumerate(nodes_batch):
+                row = start_row + i
+                self.populate_resource_row_optimized(row, node)
+        finally:
+            # Re-enable operations
+            # self.table.setUpdatesEnabled(True)  # Was never disabled
+            self.table.setSortingEnabled(True)
+    
+    def _add_nodes_load_more_indicator(self):
+        """Add a load more indicator specific to nodes page"""
+        try:
+            if not self.table:
+                return
+            
+            current_row_count = self.table.rowCount()
+            self.table.setRowCount(current_row_count + 1)
+            
+            # Create load more indicator
+            from PyQt6.QtWidgets import QLabel
+            from PyQt6.QtCore import Qt
+            
+            remaining_nodes = self._total_available_items - self._rendered_items_count
+            load_more_label = QLabel(f"🖥️ Scroll down to load {min(remaining_nodes, self.virtual_load_size)} more nodes...")
+            load_more_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            load_more_label.setStyleSheet("""
+                QLabel {
+                    color: #888888;
+                    font-style: italic;
+                    padding: 15px;
+                    background-color: #2a2a2a;
+                    border-top: 1px solid #444444;
+                    font-size: 13px;
+                }
+            """)
+            
+            # Set the indicator to span all columns
+            self.table.setCellWidget(current_row_count, 0, load_more_label)
+            if self.table.columnCount() > 1:
+                self.table.setSpan(current_row_count, 0, 1, self.table.columnCount())
+            
+            # Set row height
+            self.table.setRowHeight(current_row_count, 60)
+            
+            # Store reference to remove it later
+            self._load_more_indicator_row = current_row_count
+            
+        except Exception as e:
+            logging.debug(f"Error adding nodes load more indicator: {e}")
+    
+    def _update_nodes_items_count(self):
+        """Update items count for nodes with virtual scrolling info"""
+        if hasattr(self, 'items_count') and self.items_count:
+            if (hasattr(self, '_virtual_scrolling_enabled') and 
+                self._virtual_scrolling_enabled and 
+                hasattr(self, '_total_available_items') and
+                self._total_available_items > self._rendered_items_count):
+                # Show virtual scrolling progress
+                self.items_count.setText(f"Showing {self._rendered_items_count} of {self._total_available_items} nodes")
+            else:
+                # Show normal count
+                count = len(getattr(self, 'nodes_data', []))
+                self.items_count.setText(f"{count} items")
+    
+    def _handle_node_scroll(self, value):
+        """Handle scroll events for nodes virtual scrolling"""
+        if not hasattr(self, '_virtual_scrolling_enabled') or not self._virtual_scrolling_enabled:
+            return
+            
+        if not self.table or getattr(self, 'is_loading_more', False) or getattr(self, 'all_data_loaded', True):
+            return
+        
+        scrollbar = self.table.verticalScrollBar()
+        if scrollbar.value() >= scrollbar.maximum() - 20:  # Near bottom
+            self._load_more_nodes()
+    
+    def _load_more_nodes(self):
+        """Load more nodes for virtual scrolling"""
+        if (getattr(self, 'is_loading_more', False) or 
+            getattr(self, 'all_data_loaded', True) or 
+            not hasattr(self, 'nodes_data')):
+            return
+        
+        try:
+            # Check if we have more nodes to render
+            if self._rendered_items_count < len(self.nodes_data):
+                self.is_loading_more = True
+                
+                # Calculate next batch
+                start_idx = self._rendered_items_count
+                end_idx = min(start_idx + self.virtual_load_size, len(self.nodes_data))
+                next_batch = self.nodes_data[start_idx:end_idx]
+                
+                logging.info(f"NodesPage: Loading more nodes {start_idx}-{end_idx-1} of {len(self.nodes_data)}")
+                
+                # Render next batch
+                if next_batch:
+                    self._populate_nodes_batch(next_batch, append=True)
+                
+                # Update state
+                self._rendered_items_count = end_idx
+                if self._rendered_items_count >= len(self.nodes_data):
+                    self.all_data_loaded = True
+                    logging.info(f"NodesPage: All {len(self.nodes_data)} nodes rendered")
+                else:
+                    # Add indicator for remaining nodes
+                    self._add_nodes_load_more_indicator()
+                
+                # Update items count
+                self._update_nodes_items_count()
+                
+                self.is_loading_more = False
+            else:
+                # No more nodes to render
+                self.all_data_loaded = True
+                
+        except Exception as e:
+            logging.error(f"Error loading more nodes: {e}")
+            self.is_loading_more = False
+            self.all_data_loaded = True
+    
     def _perform_global_search(self, search_text):
         """Override to perform node-specific search"""
         try:
@@ -868,9 +1068,9 @@ class NodesPage(BaseResourcePage):
             
         logging.info(f"NodesPage: populate_table() called with {len(resources_to_populate)} resources")
         
-        # Disable all expensive operations during population
+        # Disable expensive operations during population (keep updates enabled to prevent loading indicators)
         self.table.setSortingEnabled(False)
-        self.table.setUpdatesEnabled(False)
+        # self.table.setUpdatesEnabled(False)  # Skip this to prevent loading indicators
         
         # Enhanced clearing for heavy load scenarios
         old_row_count = self.table.rowCount()
@@ -887,9 +1087,9 @@ class NodesPage(BaseResourcePage):
                         if widget:
                             widget.setParent(None)
                             widget.deleteLater()
-                # Process events every batch to maintain responsiveness
-                if end_row < old_row_count:
-                    QApplication.processEvents()
+                # Skip process events to prevent loading indicators from showing
+                # if end_row < old_row_count:
+                #     QApplication.processEvents()
         
         # Reset row count efficiently
         self.table.setRowCount(0)
@@ -912,29 +1112,29 @@ class NodesPage(BaseResourcePage):
             for i in range(start_idx, end_idx):
                 self.populate_resource_row_optimized(i, resources_to_populate[i])
             
-            # Reduced event processing for heavy load scenarios
-            if end_idx < total_items and total_items > 50:
-                # Only process events every other batch for heavy loads
-                if (start_idx // batch_size) % 2 == 0:
-                    QApplication.processEvents()
-            elif end_idx < total_items:
-                QApplication.processEvents()
+            # Skip event processing to prevent loading indicators from showing
+            # if end_idx < total_items and total_items > 50:
+            #     # Only process events every other batch for heavy loads
+            #     if (start_idx // batch_size) % 2 == 0:
+            #         QApplication.processEvents()
+            # elif end_idx < total_items:
+            #     QApplication.processEvents()
         
-        # Re-enable updates and sorting
-        self.table.setUpdatesEnabled(True)
+        # Re-enable sorting (updates were never disabled)
+        # self.table.setUpdatesEnabled(True)  # Was never disabled
         self.table.setSortingEnabled(True)
         
-        # Optimized repaint for heavy loads
-        if total_items > 50:
-            # Defer viewport updates for heavy loads
-            from PyQt6.QtCore import QTimer
-            QTimer.singleShot(100, lambda: self.table.viewport().update())
-        else:
-            self.table.viewport().update()
+        # Skip viewport updates to prevent loading indicators
+        # if total_items > 50:
+        #     # Defer viewport updates for heavy loads
+        #     from PyQt6.QtCore import QTimer
+        #     QTimer.singleShot(100, lambda: self.table.viewport().update())
+        # else:
+        #     self.table.viewport().update()
         
-        # Final cleanup with minimal event processing
-        if total_items <= 50:
-            QApplication.processEvents()
+        # Skip final event processing to prevent loading indicators
+        # if total_items <= 50:
+        #     QApplication.processEvents()
 
     def populate_resource_row_optimized(self, row, resource):
         """Highly optimized row population - minimizes widget creation"""
@@ -1244,8 +1444,17 @@ class NodesPage(BaseResourcePage):
             self.show_no_data_message()
     
     def force_load_data(self):
-        """Override base class force_load_data to use cluster connector"""
+        """Override base class force_load_data to use cluster connector with virtual scrolling reset"""
         logging.info("NodesPage: force_load_data() called")
+        
+        # Reset virtual scrolling state
+        if hasattr(self, '_virtual_scrolling_enabled'):
+            self._rendered_items_count = 0
+            self._total_available_items = 0
+            self.all_data_loaded = False
+            if hasattr(self, '_load_more_indicator_row'):
+                delattr(self, '_load_more_indicator_row')
+        
         self.load_data()
     
     def _add_controls_to_header(self, header_layout):
@@ -1310,6 +1519,20 @@ class NodesPage(BaseResourcePage):
         
         # Set namespace_combo to None since nodes don't use namespaces
         self.namespace_combo = None
+    
+    def configure_nodes_virtual_scrolling(self, enabled=True, threshold=50, initial_batch=50, load_batch=100):
+        """Configure virtual scrolling specifically for nodes"""
+        self._virtual_scrolling_enabled = enabled
+        self.virtual_scroll_threshold = threshold
+        self.items_per_page = initial_batch
+        self.virtual_load_size = load_batch
+        
+        logging.info(f"NodesPage: Virtual scrolling configured - enabled={enabled}, threshold={threshold}, initial={initial_batch}, batch={load_batch}")
+    
+    def disable_nodes_virtual_scrolling(self):
+        """Disable virtual scrolling for nodes page"""
+        self.configure_nodes_virtual_scrolling(enabled=False)
+        logging.info("NodesPage: Virtual scrolling disabled")
         
     
     # Disable inherited methods that aren't needed for nodes
