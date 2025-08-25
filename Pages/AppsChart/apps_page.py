@@ -41,6 +41,7 @@ class AppsPage(QWidget):
         self.current_app_flow_data = None
         self.current_resource_positions = {}  # Store current positions for live updates
         self.live_monitoring_enabled = False
+        self.last_selected_namespace = None  # Store last selected namespace for persistence
         self.setup_ui()
         
         # Set horizontal layout by default
@@ -269,27 +270,79 @@ class AppsPage(QWidget):
     
     def on_namespaces_loaded(self, namespaces):
         """Handle loaded namespaces"""
+        # Remember current selection before clearing
+        current_selection = None
+        if self.namespace_combo.count() > 0:
+            current_selection = self.namespace_combo.currentText()
+        
         self.namespace_combo.blockSignals(True)
         self.namespace_combo.clear()
         self.namespace_combo.addItem("All Namespaces")
         self.namespace_combo.addItems(namespaces)
         
-        # Always prioritize "default" namespace if it exists in the cluster
-        if "default" in namespaces:
-            self.namespace_combo.setCurrentText("default")
-        elif namespaces:
-            # Use first available namespace if default doesn't exist
-            self.namespace_combo.setCurrentIndex(1)  # Skip "All Namespaces" at index 0
-        else:
-            # Only use "All Namespaces" if no real namespaces exist
-            self.namespace_combo.setCurrentText("All Namespaces")
+        # Determine namespace selection based on per-page history
+        try:
+            from Utils.namespace_state import get_namespace_state
+            namespace_state = get_namespace_state()
+            page_name = "AppsChart"  # Use consistent page name
+            
+            # 1. First priority: current_selection (what was just selected during this session)
+            if current_selection and current_selection in (["All Namespaces"] + namespaces):
+                self.namespace_combo.setCurrentText(current_selection)
+                logging.info(f"Restored current session selection: {current_selection}")
+                
+            # 2. Only restore previous selection if AppsChart page has been visited before
+            elif namespace_state.has_page_selection(page_name):
+                stored_namespace = namespace_state.get_namespace_for_page(page_name)
+                if stored_namespace and stored_namespace in (["All Namespaces"] + namespaces):
+                    self.namespace_combo.setCurrentText(stored_namespace)
+                    logging.info(f"Restored namespace for AppsChart: {stored_namespace}")
+                else:
+                    # Fallback to default if stored namespace not available
+                    if "default" in namespaces:
+                        self.namespace_combo.setCurrentText("default")
+                        logging.info("Stored AppsChart namespace not available, using default")
+                    elif namespaces:
+                        self.namespace_combo.setCurrentIndex(1)  # Skip "All Namespaces" at index 0
+                        logging.info(f"Using first available namespace: {namespaces[0]}")
+                    else:
+                        self.namespace_combo.setCurrentText("All Namespaces")
+                        logging.info("Using All Namespaces fallback")
+                        
+            # 3. First visit to AppsChart - always use default namespace
+            else:
+                if "default" in namespaces:
+                    self.namespace_combo.setCurrentText("default")
+                    logging.info("First visit to AppsChart - set namespace to default")
+                elif namespaces:
+                    # Use first available namespace if default doesn't exist
+                    self.namespace_combo.setCurrentIndex(1)  # Skip "All Namespaces" at index 0
+                    logging.info(f"First visit to AppsChart - default not available, using: {namespaces[0]}")
+                else:
+                    # Only use "All Namespaces" if no real namespaces exist
+                    self.namespace_combo.setCurrentText("All Namespaces")
+                    logging.info("First visit to AppsChart - no real namespaces found, using All Namespaces")
+                    
+        except Exception as e:
+            # Fallback to local logic if shared state fails
+            logging.warning(f"Could not access namespace state: {e}")
+            if self.last_selected_namespace and self.last_selected_namespace in (["All Namespaces"] + namespaces):
+                self.namespace_combo.setCurrentText(self.last_selected_namespace)
+                logging.info(f"Using local fallback: {self.last_selected_namespace}")
+            elif "default" in namespaces:
+                self.namespace_combo.setCurrentText("default")
+                logging.info("Using default fallback")
+            else:
+                self.namespace_combo.setCurrentText("All Namespaces" if not namespaces else namespaces[0])
+                logging.info("Using final fallback")
         
         self.namespace_combo.blockSignals(False)
         self.namespace_combo.setEnabled(True)
         logging.info(f"Loaded {len(namespaces)} namespaces for Apps page")
         
-        # Trigger initial resource loading
-        QTimer.singleShot(100, self.on_selection_changed)
+        # Only trigger resource loading if selection actually changed
+        if current_selection != self.namespace_combo.currentText():
+            QTimer.singleShot(100, self.on_selection_changed)
     
     def on_namespace_error(self, error_message):
         """Handle namespace loading error - show error state instead of static data"""
@@ -304,6 +357,19 @@ class AppsPage(QWidget):
         """Handle namespace or workload selection change"""
         namespace = self.namespace_combo.currentText()
         workload_type = self.workload_combo.currentText()
+        
+        # Store the selected namespace for persistence (both local and shared state)
+        if namespace and namespace != "Loading...":
+            self.last_selected_namespace = namespace
+            
+            # Store namespace selection for AppsChart page only
+            try:
+                from Utils.namespace_state import get_namespace_state
+                namespace_state = get_namespace_state()
+                namespace_state.set_namespace_for_page("AppsChart", namespace)
+                logging.debug(f"Stored namespace '{namespace}' for AppsChart page")
+            except Exception as e:
+                logging.warning(f"Could not update AppsChart namespace state: {e}")
         
         # Check if we have valid selections
         if not namespace or namespace == "Loading..." or not workload_type:

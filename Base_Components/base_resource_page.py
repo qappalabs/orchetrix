@@ -1002,13 +1002,32 @@ class BaseResourcePage(BaseTablePage):
             # Enable the dropdown now that we have real data
             self.namespace_combo.setEnabled(True)
             
-            # Always force "default" namespace if it exists
-            if "default" in namespaces:
-                selected_namespace = "default"
-            elif namespaces:
-                selected_namespace = namespaces[0]
+            # Determine namespace selection based on per-page history
+            from Utils.namespace_state import get_namespace_state
+            namespace_state = get_namespace_state()
+            page_name = self.__class__.__name__  # e.g., "PodsPage", "ServicesPage"
+            
+            # Only restore previous selection if this specific page has been visited before
+            if namespace_state.has_page_selection(page_name):
+                stored_namespace = namespace_state.get_namespace_for_page(page_name)
+                if stored_namespace and stored_namespace in (["All Namespaces"] + namespaces):
+                    selected_namespace = stored_namespace
+                    logging.info(f"Restored namespace selection for {page_name}: {selected_namespace}")
+                else:
+                    # Fallback to default if stored namespace is not available
+                    selected_namespace = "default" if "default" in namespaces else (namespaces[0] if namespaces else "All Namespaces")
+                    logging.info(f"Stored namespace for {page_name} not available, using fallback: {selected_namespace}")
             else:
-                selected_namespace = "All Namespaces"
+                # First visit to this page - always use default namespace
+                if "default" in namespaces:
+                    selected_namespace = "default"
+                    logging.info(f"First visit to {page_name} - set namespace to default")
+                elif namespaces:
+                    selected_namespace = namespaces[0]
+                    logging.info(f"First visit to {page_name} - default not available, using: {selected_namespace}")
+                else:
+                    selected_namespace = "All Namespaces"
+                    logging.info(f"First visit to {page_name} - no real namespaces found, using All Namespaces")
             
             # Set dropdown and filter - ensure they match
             selected_index = self.namespace_combo.findText(selected_namespace)
@@ -1017,11 +1036,6 @@ class BaseResourcePage(BaseTablePage):
             
             # FORCE the namespace_filter to match dropdown
             self.namespace_filter = selected_namespace
-            
-            # Update shared state to match
-            from Utils.namespace_state import get_namespace_state
-            namespace_state = get_namespace_state()
-            namespace_state.set_current_namespace(selected_namespace)
             
             # Reconnect signal after all dropdown updates are complete
             self.namespace_combo.currentTextChanged.connect(self._on_namespace_changed)
@@ -1065,10 +1079,12 @@ class BaseResourcePage(BaseTablePage):
         old_namespace = getattr(self, 'namespace_filter', None)
         self.namespace_filter = namespace
         
-        # Persist namespace selection across pages
+        # Store namespace selection for this specific page
         from Utils.namespace_state import get_namespace_state
         namespace_state = get_namespace_state()
-        namespace_state.set_current_namespace(namespace)
+        page_name = self.__class__.__name__
+        namespace_state.set_namespace_for_page(page_name, namespace)
+        logging.debug(f"Stored namespace '{namespace}' for page {page_name}")
         
         logging.info(f"Namespace changed from '{old_namespace}' to '{namespace}' - reloading data")
         self.force_load_data()
