@@ -710,12 +710,12 @@ class AppsPage(QWidget):
         if not hasattr(self, 'current_resources') or not self.current_resources:
             return True
             
-        # Get previous resource identifiers
+        # Get previous resource identifiers (excluding status for comparison)
         previous_resource_ids = {
             (r.resource_type.value, r.name, r.namespace) for r in self.current_resources
         }
         
-        # Get current resource identifiers  
+        # Get current resource identifiers (excluding status for comparison)
         current_resource_ids = {
             (r.resource_type.value, r.name, r.namespace) for r in current_resources
         }
@@ -724,8 +724,12 @@ class AppsPage(QWidget):
         added_resources = current_resource_ids - previous_resource_ids
         removed_resources = previous_resource_ids - current_resource_ids
         
-        # Redraw if resources were added or removed
+        # Only redraw if resources were actually added or removed
         if added_resources or removed_resources:
+            return True
+        
+        # Check if the total count of resources changed (another safety check)
+        if len(current_resources) != len(self.current_resources):
             return True
             
         # Check for significant status changes that affect layout
@@ -743,10 +747,14 @@ class AppsPage(QWidget):
                             return True
                     break
         
+        # If we reach here, only status changes occurred - use incremental updates
         return False
     
     def perform_incremental_updates(self, current_resources):
         """Perform incremental updates to existing graph elements"""
+        # Track which resources we've updated to ensure we don't miss any
+        updated_resources = set()
+        
         # Update existing resources with status/color changes
         for item in self.diagram_scene.items():
             if hasattr(item, 'data') and item.data(0):
@@ -760,10 +768,17 @@ class AppsPage(QWidget):
                             new_resource.resource_type == stored_resource.resource_type and
                             new_resource.namespace == stored_resource.namespace):
                             
-                            # Update pod colors if status changed
-                            if (new_resource.resource_type.value.lower() == 'pod' and 
-                                new_resource.status != stored_resource.status):
-                                self.update_pod_color(item, new_resource.status)
+                            # Mark this resource as updated
+                            resource_key = f"{new_resource.resource_type.value}:{new_resource.name}:{new_resource.namespace}"
+                            updated_resources.add(resource_key)
+                            
+                            # Update resource colors and icons if status changed
+                            if new_resource.status != stored_resource.status:
+                                if new_resource.resource_type.value.lower() == 'pod':
+                                    self.update_pod_color(item, new_resource.status)
+                                else:
+                                    # Update other resource types' status displays
+                                    self.update_resource_status_display(item, new_resource)
                                 
                             # Update all resource tooltips with latest information
                             if hasattr(item, 'setToolTip'):
@@ -775,8 +790,26 @@ class AppsPage(QWidget):
                             item.setData(0, item_data)
                             break
         
+        
         # Update stored current resources for next comparison
         self.current_resources = current_resources
+    
+    def update_resource_status_display(self, resource_item, new_resource):
+        """Update non-pod resource status display"""
+        try:
+            # For non-pod resources, we need to find and update the associated status text
+            if hasattr(resource_item, 'data') and resource_item.data(0):
+                item_data = resource_item.data(0)
+                if 'resource' in item_data:
+                    # Update tooltip with new status
+                    tooltip_text = self.create_detailed_tooltip(new_resource)
+                    resource_item.setToolTip(tooltip_text)
+                    
+                    # Update stored resource data
+                    item_data['resource'] = new_resource
+                    resource_item.setData(0, item_data)
+        except Exception as e:
+            logging.warning(f"Failed to update resource status display: {e}")
     
     def update_pod_color(self, pod_item, new_status):
         """Update pod icon based on new status"""
