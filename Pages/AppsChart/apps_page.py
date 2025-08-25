@@ -537,10 +537,16 @@ class AppsPage(QWidget):
         # Store current app flow data for export
         self.current_app_flow_data = app_flow
         
-        # Update status
-        total_resources = (len(app_flow["ingresses"]) + len(app_flow["services"]) + 
-                          len(app_flow["deployments"]) + len(app_flow["pods"]) + 
-                          len(app_flow["configmaps"]) + len(app_flow["secrets"]) + len(app_flow["pvcs"]))
+        # Update status - count all resource types
+        total_resources = (
+            len(app_flow.get("ingresses", [])) + len(app_flow.get("services", [])) + 
+            len(app_flow.get("deployments", [])) + len(app_flow.get("pods", [])) + 
+            len(app_flow.get("configmaps", [])) + len(app_flow.get("secrets", [])) + 
+            len(app_flow.get("pvcs", [])) + len(app_flow.get("pvs", [])) +
+            len(app_flow.get("serviceaccounts", [])) + len(app_flow.get("networkpolicies", [])) +
+            len(app_flow.get("roles", [])) + len(app_flow.get("rolebindings", [])) +
+            len(app_flow.get("limitranges", [])) + len(app_flow.get("resourcequotas", []))
+        )
         
         self.status_text.append(f"\nApp flow analysis complete!")
         self.status_text.append(f"Found {total_resources} related resources")
@@ -1397,7 +1403,14 @@ class AppsPage(QWidget):
             ResourceType.POD: os.path.join("k8s_chart_icon", "pod_running.svg"),
             ResourceType.CONFIGMAP: os.path.join("k8s_chart_icon", "cm.svg"),
             ResourceType.SECRET: "config.png",
-            ResourceType.PVC: "storage.png"
+            ResourceType.PVC: "storage.png",
+            ResourceType.PV: "storage.png",
+            ResourceType.SERVICEACCOUNT: "user.png",
+            ResourceType.NETWORKPOLICY: "network.png", 
+            ResourceType.ROLE: "key.png",
+            ResourceType.ROLEBINDING: "link.png",
+            ResourceType.LIMITRANGE: "limits.png",
+            ResourceType.RESOURCEQUOTA: "quota.png"
         }
         
         icon_name = icon_mapping.get(resource_type, "workloads.png")
@@ -1482,7 +1495,14 @@ class AppsPage(QWidget):
             "deployment_to_pod": "#3F51B5",
             "pod_to_config": "#795548",
             "pod_to_secret": "#9E9E9E",
-            "pod_to_pvc": "#673AB7"
+            "pod_to_pvc": "#673AB7",
+            "pod_to_serviceaccount": "#2196F3",
+            "pvc_to_pv": "#FF5722",
+            "serviceaccount_to_rolebinding": "#FFC107",
+            "rolebinding_to_role": "#FF9800",
+            "pod_to_networkpolicy": "#009688",
+            "limitrange_to_pod": "#795548",
+            "resourcequota_to_deployment": "#E91E63"
         }
         
         color = color_map.get(connection_type, "#666666")
@@ -1916,13 +1936,22 @@ class AppsPage(QWidget):
         
         # Add resource count
         if self.current_app_flow_data:
-            total_resources = (len(self.current_app_flow_data.get("ingresses", [])) + 
-                             len(self.current_app_flow_data.get("services", [])) + 
-                             len(self.current_app_flow_data.get("deployments", [])) + 
-                             len(self.current_app_flow_data.get("pods", [])) + 
-                             len(self.current_app_flow_data.get("configmaps", [])) + 
-                             len(self.current_app_flow_data.get("secrets", [])) + 
-                             len(self.current_app_flow_data.get("pvcs", [])))
+            total_resources = (
+                len(self.current_app_flow_data.get("ingresses", [])) + 
+                len(self.current_app_flow_data.get("services", [])) + 
+                len(self.current_app_flow_data.get("deployments", [])) + 
+                len(self.current_app_flow_data.get("pods", [])) + 
+                len(self.current_app_flow_data.get("configmaps", [])) + 
+                len(self.current_app_flow_data.get("secrets", [])) + 
+                len(self.current_app_flow_data.get("pvcs", [])) +
+                len(self.current_app_flow_data.get("pvs", [])) +
+                len(self.current_app_flow_data.get("serviceaccounts", [])) +
+                len(self.current_app_flow_data.get("networkpolicies", [])) +
+                len(self.current_app_flow_data.get("roles", [])) +
+                len(self.current_app_flow_data.get("rolebindings", [])) +
+                len(self.current_app_flow_data.get("limitranges", [])) +
+                len(self.current_app_flow_data.get("resourcequotas", []))
+            )
             
             resource_info = f"Total Resources: {total_resources}"
             painter.drawText(width - 200, height - 20, resource_info)

@@ -16,6 +16,13 @@ class ResourceType(Enum):
     CONFIGMAP = "configmap"
     SECRET = "secret"
     PVC = "pvc"
+    PV = "pv"
+    SERVICEACCOUNT = "serviceaccount"
+    NETWORKPOLICY = "networkpolicy"
+    ROLE = "role"
+    ROLEBINDING = "rolebinding"
+    LIMITRANGE = "limitrange"
+    RESOURCEQUOTA = "resourcequota"
 
 class GraphLayout(Enum):
     VERTICAL = "vertical"
@@ -85,6 +92,27 @@ class AppFlowBusinessLogic:
             ),
             ResourceType.PVC: K8sIconInfo(
                 ResourceType.PVC, "Icons/pvc.png", "#9C27B0", "#6A1B9A"
+            ),
+            ResourceType.PV: K8sIconInfo(
+                ResourceType.PV, "Icons/storage.png", "#FF5722", "#D84315"
+            ),
+            ResourceType.SERVICEACCOUNT: K8sIconInfo(
+                ResourceType.SERVICEACCOUNT, "Icons/user.png", "#2196F3", "#0D47A1"
+            ),
+            ResourceType.NETWORKPOLICY: K8sIconInfo(
+                ResourceType.NETWORKPOLICY, "Icons/network.png", "#009688", "#004D40"
+            ),
+            ResourceType.ROLE: K8sIconInfo(
+                ResourceType.ROLE, "Icons/key.png", "#FFC107", "#FF8F00"
+            ),
+            ResourceType.ROLEBINDING: K8sIconInfo(
+                ResourceType.ROLEBINDING, "Icons/link.png", "#607D8B", "#263238"
+            ),
+            ResourceType.LIMITRANGE: K8sIconInfo(
+                ResourceType.LIMITRANGE, "Icons/limit.png", "#795548", "#3E2723"
+            ),
+            ResourceType.RESOURCEQUOTA: K8sIconInfo(
+                ResourceType.RESOURCEQUOTA, "Icons/quota.png", "#E91E63", "#880E4F"
             )
         }
     
@@ -190,6 +218,76 @@ class AppFlowBusinessLogic:
                 status="Bound"
             ))
         
+        # Process PVs
+        for pv in raw_app_flow.get("pvs", []):
+            resources.append(ResourceInfo(
+                name=pv["name"],
+                namespace=pv.get("namespace", ""),  # PVs are cluster-scoped
+                resource_type=ResourceType.PV,
+                metadata=pv,
+                status=pv.get("status", "Available")
+            ))
+        
+        # Process ServiceAccounts
+        for sa in raw_app_flow.get("serviceaccounts", []):
+            resources.append(ResourceInfo(
+                name=sa["name"],
+                namespace=sa["namespace"],
+                resource_type=ResourceType.SERVICEACCOUNT,
+                metadata=sa,
+                status="Active"
+            ))
+        
+        # Process NetworkPolicies
+        for np in raw_app_flow.get("networkpolicies", []):
+            resources.append(ResourceInfo(
+                name=np["name"],
+                namespace=np["namespace"],
+                resource_type=ResourceType.NETWORKPOLICY,
+                metadata=np,
+                status="Active"
+            ))
+        
+        # Process Roles
+        for role in raw_app_flow.get("roles", []):
+            resources.append(ResourceInfo(
+                name=role["name"],
+                namespace=role["namespace"],
+                resource_type=ResourceType.ROLE,
+                metadata=role,
+                status="Active"
+            ))
+        
+        # Process RoleBindings
+        for rb in raw_app_flow.get("rolebindings", []):
+            resources.append(ResourceInfo(
+                name=rb["name"],
+                namespace=rb["namespace"],
+                resource_type=ResourceType.ROLEBINDING,
+                metadata=rb,
+                status="Active"
+            ))
+        
+        # Process LimitRanges
+        for lr in raw_app_flow.get("limitranges", []):
+            resources.append(ResourceInfo(
+                name=lr["name"],
+                namespace=lr["namespace"],
+                resource_type=ResourceType.LIMITRANGE,
+                metadata=lr,
+                status="Active"
+            ))
+        
+        # Process ResourceQuotas
+        for rq in raw_app_flow.get("resourcequotas", []):
+            resources.append(ResourceInfo(
+                name=rq["name"],
+                namespace=rq["namespace"],
+                resource_type=ResourceType.RESOURCEQUOTA,
+                metadata=rq,
+                status="Active"
+            ))
+        
         return resources
     
     def _process_connections(self, raw_app_flow: Dict[str, Any]) -> List[ConnectionInfo]:
@@ -210,19 +308,30 @@ class AppFlowBusinessLogic:
         """Calculate horizontal layout positions for resources"""
         positions = {}
         
-        # Group resources by type in horizontal layers
+        # Group resources by type in horizontal layers with logical flow
         layers = {
+            # Network layer (ingress traffic)
             ResourceType.INGRESS: [r for r in resources if r.resource_type == ResourceType.INGRESS],
+            # Service layer (load balancing)
             ResourceType.SERVICE: [r for r in resources if r.resource_type == ResourceType.SERVICE],
+            # Workload layer (deployments, pods)
             ResourceType.DEPLOYMENT: [r for r in resources if r.resource_type == ResourceType.DEPLOYMENT],
             ResourceType.POD: [r for r in resources if r.resource_type == ResourceType.POD],
+            # Configuration layer (configs, secrets, storage)
+            ResourceType.CONFIGMAP: [r for r in resources if r.resource_type == ResourceType.CONFIGMAP],
+            ResourceType.SECRET: [r for r in resources if r.resource_type == ResourceType.SECRET],
+            ResourceType.PVC: [r for r in resources if r.resource_type == ResourceType.PVC],
+            # Storage layer (persistent volumes)
+            ResourceType.PV: [r for r in resources if r.resource_type == ResourceType.PV],
+            # Security layer (RBAC)
+            ResourceType.SERVICEACCOUNT: [r for r in resources if r.resource_type == ResourceType.SERVICEACCOUNT],
+            ResourceType.ROLE: [r for r in resources if r.resource_type == ResourceType.ROLE],
+            ResourceType.ROLEBINDING: [r for r in resources if r.resource_type == ResourceType.ROLEBINDING],
+            # Policy layer (network and resource policies)
+            ResourceType.NETWORKPOLICY: [r for r in resources if r.resource_type == ResourceType.NETWORKPOLICY],
+            ResourceType.LIMITRANGE: [r for r in resources if r.resource_type == ResourceType.LIMITRANGE],
+            ResourceType.RESOURCEQUOTA: [r for r in resources if r.resource_type == ResourceType.RESOURCEQUOTA],
         }
-        
-        # Add config resources to bottom layer
-        config_resources = [r for r in resources if r.resource_type in 
-                          [ResourceType.CONFIGMAP, ResourceType.SECRET, ResourceType.PVC]]
-        if config_resources:
-            layers[ResourceType.CONFIGMAP] = config_resources
         
         # Layout constants for horizontal arrangement - optimized for enhanced boxes with external text
         LAYER_SPACING_X = 300  # Increased horizontal spacing for longer arrows between layers
@@ -296,7 +405,12 @@ class AppFlowBusinessLogic:
                 errors.append(f"Missing required field: {field}")
         
         # Check resource arrays
-        resource_arrays = ["ingresses", "services", "deployments", "pods", "configmaps", "secrets", "pvcs"]
+        resource_arrays = [
+            "ingresses", "services", "deployments", "pods", 
+            "configmaps", "secrets", "pvcs", "pvs",
+            "serviceaccounts", "networkpolicies", "roles", "rolebindings",
+            "limitranges", "resourcequotas"
+        ]
         for array_name in resource_arrays:
             if array_name not in app_flow_data:
                 errors.append(f"Missing resource array: {array_name}")
