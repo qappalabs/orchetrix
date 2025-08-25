@@ -1488,24 +1488,24 @@ class AppsPage(QWidget):
             to_point_x = to_x                   # Left edge of to icon
             to_point_y = to_center_y            # Center Y of to icon
         
-        # Color mapping for connection types with neutral colors (avoiding status colors)
+        # Color mapping for connection types - all arrows now use #ff9036
         color_map = {
-            "ingress_to_service": "#2196F3",
-            "service_to_deployment": "#607D8B", 
-            "deployment_to_pod": "#3F51B5",
-            "pod_to_config": "#795548",
-            "pod_to_secret": "#9E9E9E",
-            "pod_to_pvc": "#673AB7",
-            "pod_to_serviceaccount": "#2196F3",
-            "pvc_to_pv": "#FF5722",
-            "serviceaccount_to_rolebinding": "#FFC107",
-            "rolebinding_to_role": "#FF9800",
-            "pod_to_networkpolicy": "#009688",
-            "limitrange_to_pod": "#795548",
-            "resourcequota_to_deployment": "#E91E63"
+            "ingress_to_service": "#ff9036",
+            "service_to_deployment": "#ff9036", 
+            "deployment_to_pod": "#ff9036",
+            "pod_to_config": "#ff9036",
+            "pod_to_secret": "#ff9036",
+            "pod_to_pvc": "#ff9036",
+            "pod_to_serviceaccount": "#ff9036",
+            "pvc_to_pv": "#ff9036",
+            "serviceaccount_to_rolebinding": "#ff9036",
+            "rolebinding_to_role": "#ff9036",
+            "pod_to_networkpolicy": "#ff9036",
+            "limitrange_to_pod": "#ff9036",
+            "resourcequota_to_deployment": "#ff9036"
         }
         
-        color = color_map.get(connection_type, "#666666")
+        color = color_map.get(connection_type, "#ff9036")
         
         # Draw straight line connection
         # Main line
