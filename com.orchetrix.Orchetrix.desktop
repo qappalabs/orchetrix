@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Orchetrix
+GenericName=Kubernetes Management
+Comment=Advanced Kubernetes cluster management and monitoring tool
+Exec=orchetrix
+Icon=com.orchetrix.Orchetrix
+StartupNotify=true
+Categories=Development;System;Network;
+Keywords=kubernetes;k8s;docker;containers;devops;
+StartupWMClass=Orchetrix

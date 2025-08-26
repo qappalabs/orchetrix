@@ -1,0 +1,71 @@
+name: orchetrix
+version: '1.0.0'
+summary: Advanced Kubernetes Management GUI
+description: |
+  Orchetrix is a comprehensive Kubernetes cluster management and monitoring 
+  tool with an intuitive GUI. Manage your K8s resources, monitor cluster 
+  health, and streamline your DevOps workflows.
+
+grade: stable
+confinement: strict
+base: core22
+
+architectures:
+  - build-on: amd64
+
+apps:
+  orchetrix:
+    command: bin/orchetrix
+    desktop: share/applications/orchetrix.desktop
+    plugs:
+      - desktop
+      - desktop-legacy
+      - x11
+      - wayland
+      - network
+      - network-bind
+      - home
+      - removable-media
+
+parts:
+  orchetrix:
+    plugin: python
+    source: .
+    requirements:
+      - requirements.txt
+    stage-packages:
+      - libxcb-xinerama0
+      - libxcb-randr0
+      - libxcb-render0
+      - libxcb-shape0
+      - libxcb-shm0
+      - libxcb-sync1
+      - libxcb-xfixes0
+      - libxcb-xkb1
+      - libxkbcommon-x11-0
+      - libgl1-mesa-glx
+      - libglu1-mesa
+    organize:
+      bin/main.py: bin/orchetrix
+    override-build: |
+      craftctl default
+      # Copy application files
+      cp -r Icons ${CRAFT_PART_INSTALL}/
+      cp -r Images ${CRAFT_PART_INSTALL}/
+      cp -r UI ${CRAFT_PART_INSTALL}/
+      cp -r Pages ${CRAFT_PART_INSTALL}/
+      cp -r Utils ${CRAFT_PART_INSTALL}/
+      cp -r Services ${CRAFT_PART_INSTALL}/
+      cp -r Base_Components ${CRAFT_PART_INSTALL}/
+      cp -r Business_Logic ${CRAFT_PART_INSTALL}/
+      # Create desktop file
+      mkdir -p ${CRAFT_PART_INSTALL}/share/applications
+      cat > ${CRAFT_PART_INSTALL}/share/applications/orchetrix.desktop << 'EOF'
+      [Desktop Entry]
+      Type=Application
+      Name=Orchetrix
+      Comment=Kubernetes Management GUI
+      Exec=orchetrix
+      Icon=${SNAP}/Icons/logoIcon.png
+      Categories=Development;System;
+      EOF
