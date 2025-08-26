@@ -8,7 +8,7 @@ import logging
 import weakref
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass
-from PyQt6.QtCore import QObject, pyqtSignal, QTimer, QThreadPool
+from PyQt6.QtCore import QObject, pyqtSignal, QTimer, QThreadPool,Qt
 
 from .api_service import get_kubernetes_api_service, reset_kubernetes_api_service
 from Utils.unified_cache_system import get_unified_cache
@@ -477,9 +477,21 @@ class KubernetesService(QObject):
             logging.info(f"Loaded {len(clusters)} clusters from kubeconfig")
             
         except Exception as e:
-            error_msg = f"Failed to load clusters: {str(e)}"
-            logging.error(error_msg)
-            self.error_occurred.emit(error_msg)
+            # Check if this is a kubeconfig not found/invalid error
+            error_str = str(e).lower()
+            if ("no configuration found" in error_str or 
+                "invalid kube-config file" in error_str or
+                "config file" in error_str):
+                # This is a config file issue - show warning but continue startup
+                warning_msg = f"No Kubernetes configuration found: {str(e)}"
+                logging.warning(warning_msg)
+                # Emit empty cluster list to allow home page to load normally
+                self.clusters_loaded.emit([])
+            else:
+                # This is a different error - emit as error
+                error_msg = f"Failed to load clusters: {str(e)}"
+                logging.error(error_msg)
+                self.error_occurred.emit(error_msg)
     
     def get_cache_stats(self) -> Dict[str, Any]:
         """Get cache statistics"""

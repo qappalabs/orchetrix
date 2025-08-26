@@ -455,6 +455,23 @@ class OrchetrixGUI(QMainWindow):
     def on_clusters_loaded(self, clusters):
         """Handle loaded clusters with batch updates"""
         logging.info(f"HomePage: Received {len(clusters)} clusters from kubernetes client")
+        
+        # If no clusters were loaded, show warning to user after delay
+        if len(clusters) == 0:
+            logging.info("No Kubernetes clusters found - likely no kubeconfig available")
+            # Delay warning to show after splash screen
+            QTimer.singleShot(4000, lambda: self.show_warning_message(
+                "No Kubernetes Configuration Found",
+                "No Kubernetes clusters are available. This could be because:\n\n"
+                "• No kubeconfig file found (~/.kube/config)\n"
+                "• No valid cluster contexts in kubeconfig\n"
+                "• Kubernetes tools not installed\n\n"
+                "Please ensure you have kubectl configured with at least one cluster context."
+            ))
+            self.update_filtered_views()
+            self.update_content_view(self.current_view)
+            return
+        
         updates = []
         
         for cluster in clusters:
@@ -708,6 +725,48 @@ class OrchetrixGUI(QMainWindow):
             logging.error(f"Error showing dialog: {e}")
             # Fallback
             QMessageBox.critical(self, "Error", str(error_message))
+
+    def show_warning_message(self, title, message):
+        """Display warning messages to the user"""
+        try:
+            logging.warning(f"Showing warning dialog: {title} - {message}")
+            
+            # Create message box
+            msg_box = QMessageBox(self)
+            msg_box.setIcon(QMessageBox.Icon.Warning)
+            msg_box.setWindowTitle(title)
+            msg_box.setText(message)
+            
+            # Style the dialog
+            msg_box.setStyleSheet("""
+                QMessageBox {
+                    background-color: #2d2d2d;
+                    color: #ffffff;
+                    font-size: 12px;
+                    min-width: 400px;
+                }
+                QMessageBox QLabel {
+                    color: #ffffff;
+                    padding: 10px;
+                }
+                QMessageBox QPushButton {
+                    background-color: #404040;
+                    color: #ffffff;
+                    border: 1px solid #555555;
+                    padding: 8px 15px;
+                    border-radius: 3px;
+                }
+                QMessageBox QPushButton:hover {
+                    background-color: #505050;
+                }
+            """)
+            
+            msg_box.exec()
+            
+        except Exception as e:
+            logging.error(f"Error showing warning dialog: {e}")
+            # Fallback
+            QMessageBox.warning(self, title, message)
 
     def add_table_item(self, name, kind, source, label, status, badge_color=None, original_data=None):
         item = QTreeWidgetItem(self.tree_widget)
