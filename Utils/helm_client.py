@@ -102,7 +102,7 @@
 #     """Optimized Helm repository manager with OCI support"""
     
 #     def __init__(self, config_dir: Optional[str] = None):
-#         self.config_dir = config_dir or os.path.join(os.path.expanduser("~"), ".orchestrix", "helm")
+#         self.config_dir = config_dir or os.path.join(os.path.expanduser("~"), ".orchetrix", "helm")
 #         self.repos_file = os.path.join(self.config_dir, "repositories.yaml")
 #         self.cache_dir = os.path.join(self.config_dir, "cache")
         
@@ -139,7 +139,7 @@
         
 #         # Set default headers
 #         self._session.headers.update({
-#             'User-Agent': 'Orchestrix/1.0',
+#             'User-Agent': 'Orchetrix/1.0',
 #             'Accept': 'application/yaml, application/json, */*',
 #             'Connection': 'keep-alive'
 #         })

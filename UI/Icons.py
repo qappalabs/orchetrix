@@ -281,4 +281,4 @@ class Icons:
             logging.debug(f"Failed to load app logo: {e}")
             
         # Fallback to a generated logo
-        return Icons.create_logo(size, "Orchestrix")
+        return Icons.create_logo(size, "Orchetrix")

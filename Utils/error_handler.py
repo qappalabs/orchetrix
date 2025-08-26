@@ -55,7 +55,7 @@ class ErrorHandler:
             # Create custom styled message box
             msg = QMessageBox()
             msg.setIcon(QMessageBox.Icon.Critical)
-            msg.setWindowTitle("Orchestrix - Error")
+            msg.setWindowTitle("Orchetrix - Error")
             
             # Format error message for better readability
             formatted_message = self._format_user_friendly_message(context, error_message)

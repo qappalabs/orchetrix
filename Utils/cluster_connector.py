@@ -589,6 +589,10 @@ class EnhancedClusterConnector(QObject):
             if hasattr(self, '_issues_timer') and self._issues_timer:
                 self._issues_timer.stop()
     
+    def stop_polling(self) -> None:
+        """Public method to stop all polling - calls internal _stop_polling"""
+        self._stop_polling()
+    
     def _poll_metrics(self) -> None:
         """Poll for cluster metrics with load detection"""
         if self._shutting_down or not self.current_cluster:

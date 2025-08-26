@@ -168,7 +168,7 @@ Connection: close
             <p><strong>Protocol:</strong> {self.config.protocol}</p>
         </div>
         
-        <p><em>This port forward is managed by Orchestrix Kubernetes Manager</em></p>
+        <p><em>This port forward is managed by Orchetrix Kubernetes Manager</em></p>
         <p><small>Note: This is a test response. In production, traffic would be forwarded to the actual service.</small></p>
     </div>
 </body>
@@ -367,7 +367,7 @@ Connection: close
             <p><strong>Protocol:</strong> {self.config.protocol}</p>
         </div>
         
-        <p><em>This port forward is managed by Orchestrix Kubernetes Manager</em></p>
+        <p><em>This port forward is managed by Orchetrix Kubernetes Manager</em></p>
     </div>
 </body>
 </html>"""

@@ -153,7 +153,7 @@ class SidebarButton(QPushButton):
         self.setStyleSheet(AppStyles.SIDEBAR_BUTTON_STYLE)
 
 @class_logger(log_level=logging.INFO, exclude_methods=['__init__', 'set_cluster_icon', 'context_menu_requested', 'open_cluster_signal', 'open_preferences_signal', 'update_pinned_items_signal'])
-class OrchestrixGUI(QMainWindow):
+class OrchetrixGUI(QMainWindow):
     def __init__(self):
         super().__init__()
         self.signals = HomePageSignals()
@@ -192,7 +192,15 @@ class OrchestrixGUI(QMainWindow):
         self.tree_widget = None
         self.browser_label = None
         self.items_label = None
-        self.pinned_items = set()
+        # Load pinned clusters from persistent storage
+        try:
+            from Utils.cluster_config import get_cluster_config
+            cluster_config = get_cluster_config()
+            self.pinned_items = cluster_config.get_pinned_clusters()
+            logging.info(f"Loaded {len(self.pinned_items)} pinned clusters: {self.pinned_items}")
+        except Exception as e:
+            logging.warning(f"Could not load pinned clusters: {e}")
+            self.pinned_items = set()
 
         self.connecting_clusters = set()
         self.waiting_for_cluster_load = None
@@ -1074,7 +1082,8 @@ class OrchestrixGUI(QMainWindow):
             # Stop polling and reset current cluster if this is the current cluster
             if (hasattr(self.kube_client, 'current_cluster') and 
                 self.kube_client.current_cluster == cluster_name):
-                self.stop_polling()
+                if hasattr(self, 'cluster_connector') and self.cluster_connector:
+                    self.cluster_connector.stop_polling()
                 self.kube_client.current_cluster = None
                 logging.info(f"Stopped polling and reset current cluster for {cluster_name}")
                 
@@ -1298,6 +1307,15 @@ class OrchestrixGUI(QMainWindow):
             self.pinned_items.remove(name)
         else:
             self.pinned_items.add(name)
+
+        # Persist the pinned clusters to storage
+        try:
+            from Utils.cluster_config import get_cluster_config
+            cluster_config = get_cluster_config()
+            cluster_config.set_pinned_clusters(self.pinned_items)
+            logging.info(f"Persisted pinned clusters: {self.pinned_items}")
+        except Exception as e:
+            logging.error(f"Could not persist pinned clusters: {e}")
 
         self.update_pinned_items_signal.emit(list(self.pinned_items))
         # No need to call update_content_view here, as only the icon of the pin button changes.

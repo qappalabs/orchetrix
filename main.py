@@ -14,7 +14,7 @@ try:
     log_file = setup_logging()
 except ImportError as e:
     # Fallback logging setup
-    error_file = "orchestrix_critical_error.log"
+    error_file = "orchetrix_critical_error.log"
     with open(error_file, "w") as f:
         f.write(f"CRITICAL IMPORT ERROR: {str(e)}\n")
         f.write(traceback.format_exc())
@@ -39,7 +39,7 @@ try:
 
     # Import application components
     from UI.SplashScreen import SplashScreen
-    from Pages.HomePage import OrchestrixGUI
+    from Pages.HomePage import OrchetrixGUI
     from Pages.Preferences import PreferencesWidget
     from UI.TitleBar import TitleBar
     from UI.ClusterView import ClusterView, LoadingOverlay
@@ -143,7 +143,7 @@ class MainWindow(QMainWindow):
                 self.setWindowIcon(QIcon(png_path))
 
         # Setup window properties first
-        self.setWindowTitle("Orchestrix")
+        self.setWindowTitle("Orchetrix")
         self.setMinimumSize(1300, 700)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         self.setStyleSheet(AppStyles.MAIN_STYLE)
@@ -228,7 +228,7 @@ class MainWindow(QMainWindow):
         self.main_layout.setSpacing(0)
 
         # Initialize pages
-        self.home_page = OrchestrixGUI()
+        self.home_page = OrchetrixGUI()
         self.title_bar = TitleBar(self, update_pinned_items_signal=self.home_page.update_pinned_items_signal)
         self.main_layout.addWidget(self.title_bar)
 
@@ -838,7 +838,7 @@ def main():
     if sys.platform == 'win32':
         try:
             import ctypes
-            app_id = u'Orchestrix.KubernetesManager.1.0'
+            app_id = u'Orchetrix.KubernetesManager.1.0'
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
             logging.info(f"Windows AppUserModelID set to: {app_id}")
         except Exception as e:
@@ -934,7 +934,7 @@ if __name__ == "__main__":
         logging.critical(fatal_error_msg)
 
         try:
-            fatal_log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "orchestrix_FATAL_ERROR.log")
+            fatal_log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "orchetrix_FATAL_ERROR.log")
             with open(fatal_log_path, "a") as f:
                 f.write(fatal_error_msg + "\n")
         except Exception:

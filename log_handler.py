@@ -24,7 +24,7 @@ def setup_logging():
     
     # Create log filename with timestamp
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    log_file = os.path.join(logs_dir, f"orchestrix_{timestamp}.log")
+    log_file = os.path.join(logs_dir, f"orchetrix_{timestamp}.log")
     
     # Create a root logger and remove any existing handlers
     root_logger = logging.getLogger()
@@ -65,7 +65,7 @@ def setup_logging():
         
     except Exception as e:
         # Last resort if even logging setup fails
-        error_log = os.path.join(base_dir, "orchestrix_error.log")
+        error_log = os.path.join(base_dir, "orchetrix_error.log")
         with open(error_log, "w") as f:
             f.write(f"CRITICAL ERROR SETTING UP LOGGING: {str(e)}\n")
             f.write(traceback.format_exc())

@@ -783,6 +783,14 @@ class ClusterView(QWidget):
 
     def set_active_cluster(self, cluster_name: str) -> None:
         """Set the active cluster and update the UI accordingly - FIXED"""
+        # Always switch to cluster page when setting active cluster (disconnect/reconnect scenario)
+        self._ensure_page_loaded('Cluster')
+        self.stacked_widget.setCurrentWidget(self.pages["Cluster"])
+        
+        # Update sidebar selection to show Cluster page as active
+        self.handle_page_change(self.pages["Cluster"])
+        logging.info(f"ClusterView: Switched to Cluster page for {cluster_name}")
+        
         if self.active_cluster == cluster_name:
             logging.info(f"ClusterView: Already active cluster {cluster_name}, ensuring data is loaded")
             
