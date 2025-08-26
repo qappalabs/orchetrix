@@ -132,7 +132,7 @@ class DetailPageComponent(QWidget):
         self.back_button.clicked.connect(self.close_detail)
 
         # Title
-        self.title_label = QLabel("Resource Details")
+        self.title_label = QLabel("Resource Information")
         self.title_label.setStyleSheet(f"""
             color: {AppColors.TEXT_LIGHT};
             font-size: 16px;
@@ -142,7 +142,7 @@ class DetailPageComponent(QWidget):
         self.title_label.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
         # Action button (for Helm operations)
-        self.action_button = QPushButton("Install")
+        self.action_button = QPushButton("Install Chart")
         self.action_button.setCursor(Qt.CursorShape.PointingHandCursor)  # Hand cursor on hover
         self.action_button.setStyleSheet(f"""
             QPushButton {{
@@ -372,7 +372,7 @@ class DetailPageComponent(QWidget):
     def setup_action_button(self, resource_type: str):
         """Setup action button based on resource type"""
         if resource_type == "chart":
-            self.action_button.setText("Install")
+            self.action_button.setText("Install Chart")
             self.action_button.setStyleSheet(f"""
                 QPushButton {{
                     background-color: {AppColors.ACCENT_GREEN};
@@ -391,7 +391,7 @@ class DetailPageComponent(QWidget):
             """)
             self.action_button.show()
         elif resource_type == "helmrelease":
-            self.action_button.setText("Upgrade")
+            self.action_button.setText("Upgrade Release")
             self.action_button.setStyleSheet(f"""
                 QPushButton {{
                     background-color: {AppColors.ACCENT_BLUE};

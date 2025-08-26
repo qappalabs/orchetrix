@@ -96,18 +96,18 @@ class DetailPageDetailsSection(BaseDetailSection):
 
     def add_metadata_section(self, data):
         """Add metadata section"""
-        metadata_title = QLabel("METADATA")
+        metadata_title = QLabel("Resource Metadata")
         metadata_title.setStyleSheet(EnhancedStyles.get_section_header_style())
         self.details_layout.addWidget(metadata_title)
 
         metadata = data.get("metadata", {})
 
         metadata_fields = [
-            ("Name", metadata.get("name", "")),
+            ("Resource Name", metadata.get("name", "")),
             ("Namespace", metadata.get("namespace", "")),
-            ("UID", metadata.get("uid", "")),
-            ("Creation Timestamp", metadata.get("creationTimestamp", "")),
-            ("Resource Version", metadata.get("resourceVersion", ""))
+            ("Unique ID", metadata.get("uid", "")),
+            ("Created At", metadata.get("creationTimestamp", "")),
+            ("Version", metadata.get("resourceVersion", ""))
         ]
 
         # Add annotations if available
@@ -127,7 +127,7 @@ class DetailPageDetailsSection(BaseDetailSection):
 
     def add_spec_section(self, spec):
         """Add spec section"""
-        spec_title = QLabel("SPEC")
+        spec_title = QLabel("Resource Specification")
         spec_title.setStyleSheet(EnhancedStyles.get_section_header_style())
         self.details_layout.addWidget(spec_title)
 
@@ -135,7 +135,7 @@ class DetailPageDetailsSection(BaseDetailSection):
 
     def add_status_section(self, status):
         """Add status section"""
-        status_title = QLabel("STATUS")
+        status_title = QLabel("Current Status")
         status_title.setStyleSheet(EnhancedStyles.get_section_header_style())
         self.details_layout.addWidget(status_title)
 
@@ -163,7 +163,7 @@ class DetailPageDetailsSection(BaseDetailSection):
     def add_object_fields(self, obj, parent_layout, prefix="", depth=0):
         """Recursively add object fields with better limits"""
         if depth > 2 or len(str(obj)) > 10000:  # Stricter limits
-            truncated_label = QLabel("... (data truncated for performance)")
+            truncated_label = QLabel("... (Additional data hidden for better performance - view YAML tab for complete details)")
             truncated_label.setStyleSheet(f"color: {AppColors.TEXT_SUBTLE}; font-style: italic;")
             parent_layout.addWidget(truncated_label)
             return

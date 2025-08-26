@@ -88,7 +88,7 @@ class BaseDetailSection(QWidget, metaclass=QWidgetMeta):
             "404" in error_message or
             "not available in this cluster" in error_message.lower()):
             # Just show that resource is not available
-            self.error_widget.setText(f"{self.section_name}: Resource not available in this cluster")
+            self.error_widget.setText(f"This {self.section_name.lower()} information is not available for this resource")
             self.error_widget.setStyleSheet(f"""
                 QLabel {{
                     color: #888888;
@@ -100,7 +100,7 @@ class BaseDetailSection(QWidget, metaclass=QWidgetMeta):
             """)
         else:
             # Show actual errors in red
-            self.error_widget.setText(f"Error in {self.section_name}: {error_message}")
+            self.error_widget.setText(f"Unable to load {self.section_name.lower()}: {error_message}")
             self.error_widget.setStyleSheet(f"""
                 QLabel {{
                     color: #ff4444;

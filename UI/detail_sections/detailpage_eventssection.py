@@ -28,7 +28,11 @@ class DetailPageEventsSection(BaseDetailSection):
         self.events_list = QListWidget()
         self.events_list.setStyleSheet(AppStyles.DETAIL_PAGE_EVENTS_LIST_STYLE)
         self.events_list.setFrameShape(QListWidget.Shape.NoFrame)
+        # Enable text selection while preventing item selection
         self.events_list.setSelectionMode(QListWidget.SelectionMode.NoSelection)
+        self.events_list.setTextElideMode(Qt.TextElideMode.ElideNone)
+        # Enable text interaction for copying
+        self.events_list.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
 
         self.content_layout.addWidget(self.events_list)
 

@@ -21,6 +21,14 @@ class DetailPageOverviewSection(BaseDetailSection):
         super().__init__("Overview", kubernetes_client, parent)
         self.setup_overview_ui()
 
+    def _make_label_selectable(self, label):
+        """Helper method to make QLabel text selectable"""
+        label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse | 
+            Qt.TextInteractionFlag.TextSelectableByKeyboard
+        )
+        return label
+
     def setup_overview_ui(self):
         """Setup overview-specific UI"""
         # Create scroll area for overview content
@@ -80,12 +88,15 @@ class DetailPageOverviewSection(BaseDetailSection):
 
         self.resource_name_label = QLabel("Resource Name")
         self.resource_name_label.setStyleSheet(EnhancedStyles.get_primary_text_style())
+        self.resource_name_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse | Qt.TextInteractionFlag.TextSelectableByKeyboard)
 
         self.resource_info_label = QLabel("Type / Namespace")
         self.resource_info_label.setStyleSheet(EnhancedStyles.get_secondary_text_style())
+        self.resource_info_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse | Qt.TextInteractionFlag.TextSelectableByKeyboard)
 
         self.creation_time_label = QLabel("Created: unknown")
         self.creation_time_label.setStyleSheet(EnhancedStyles.get_secondary_text_style())
+        self.creation_time_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse | Qt.TextInteractionFlag.TextSelectableByKeyboard)
 
         left_layout.addWidget(self.resource_name_label)
         left_layout.addWidget(self.resource_info_label)
@@ -97,7 +108,7 @@ class DetailPageOverviewSection(BaseDetailSection):
 
     def create_status_section(self, layout):
         """Create status section"""
-        status_header = QLabel("STATUS")
+        status_header = QLabel("Resource Status")
         status_header.setStyleSheet(EnhancedStyles.get_section_header_style())
         layout.addWidget(status_header)
 
@@ -108,8 +119,10 @@ class DetailPageOverviewSection(BaseDetailSection):
         status_layout.setSpacing(16)
 
         self.status_badge = QLabel("Unknown")
+        self.status_badge.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse | Qt.TextInteractionFlag.TextSelectableByKeyboard)
         self.status_text_label = QLabel("Status not available")
         self.status_text_label.setStyleSheet(EnhancedStyles.get_field_value_style())
+        self.status_text_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse | Qt.TextInteractionFlag.TextSelectableByKeyboard)
 
         status_layout.addWidget(self.status_badge)
         status_layout.addWidget(self.status_text_label, 1)
@@ -118,7 +131,7 @@ class DetailPageOverviewSection(BaseDetailSection):
 
     def create_conditions_section(self, layout):
         """Create conditions section"""
-        conditions_header = QLabel("CONDITIONS")
+        conditions_header = QLabel("Health & Conditions")
         conditions_header.setStyleSheet(EnhancedStyles.get_section_header_style())
         layout.addWidget(conditions_header)
 
@@ -127,11 +140,12 @@ class DetailPageOverviewSection(BaseDetailSection):
         self.conditions_container_layout = QVBoxLayout()
         self.conditions_container_layout.setSpacing(EnhancedStyles.FIELD_GAP)
 
-        self.no_conditions_label = QLabel("No conditions available")
+        self.no_conditions_label = QLabel("No health conditions to report - this resource doesn't provide detailed status information")
         self.no_conditions_label.setStyleSheet(EnhancedStyles.get_secondary_text_style() + """
             font-style: italic;
             padding: 8px;
         """)
+        self._make_label_selectable(self.no_conditions_label)
         self.conditions_container_layout.addWidget(self.no_conditions_label)
 
         conditions_card_layout.addLayout(self.conditions_container_layout)  # ✅ FIXED THIS LINE
@@ -139,7 +153,7 @@ class DetailPageOverviewSection(BaseDetailSection):
 
     def create_labels_section(self, layout):
         """Create labels section"""
-        labels_header = QLabel("LABELS")
+        labels_header = QLabel("Resource Labels")
         labels_header.setStyleSheet(EnhancedStyles.get_section_header_style())
         layout.addWidget(labels_header)
 
@@ -153,6 +167,7 @@ class DetailPageOverviewSection(BaseDetailSection):
             border-radius: 4px;
         """)
         self.labels_content.setWordWrap(True)
+        self._make_label_selectable(self.labels_content)
         labels_card_layout.addWidget(self.labels_content)  # ✅ FIXED THIS LINE
         layout.addWidget(self.labels_card)
 
@@ -199,7 +214,7 @@ class DetailPageOverviewSection(BaseDetailSection):
                 'namespace': self.resource_namespace
             },
             'kind': self.resource_type.capitalize(),
-            '_note': 'Resource details not accessible individually'
+            '_note': 'This resource is visible in the cluster but detailed information is not accessible. This may be due to access permissions or the resource type.'
         }
         self.update_ui_with_basic_info(basic_data)
 
@@ -209,9 +224,9 @@ class DetailPageOverviewSection(BaseDetailSection):
 
         # Provide more specific error messages for common issues
         if "customresourcedefinition" in error_message.lower() and "not found" in error_message.lower():
-            error_message = f"CustomResourceDefinition '{self.resource_name}' not found. It may have been deleted or you may not have permission to view it."
+            error_message = f"The CustomResourceDefinition '{self.resource_name}' could not be found. This may happen if the resource was recently deleted or if you don't have sufficient permissions to access it."
         elif "forbidden" in error_message.lower():
-            error_message = f"Access denied. You don't have permission to view {self.resource_type} '{self.resource_name}'."
+            error_message = f"Permission denied - You don't have the necessary permissions to view details for this {self.resource_type} resource named '{self.resource_name}'. Please contact your cluster administrator."
 
         self.handle_error(error_message)
 
@@ -271,7 +286,7 @@ class DetailPageOverviewSection(BaseDetailSection):
             self.resource_info_label.setText(resource_info)
             
             # Set creation time as unavailable
-            self.creation_time_label.setText("Created: Details not available")
+            self.creation_time_label.setText("Created: Information not available")
             
             # Set status as limited info
             self.clear_status_content()
@@ -304,16 +319,16 @@ class DetailPageOverviewSection(BaseDetailSection):
             status_value = phase
 
             if phase == "Running":
-                status_text = "Pod is running"
+                status_text = "Pod is running normally and all containers are healthy"
                 status_type = "success"
             elif phase == "Pending":
-                status_text = "Pod is pending"
+                status_text = "Pod is waiting to be scheduled or containers are being created"
                 status_type = "warning"
             elif phase == "Failed":
-                status_text = "Pod has failed"
+                status_text = "Pod encountered an error and could not complete successfully"
                 status_type = "error"
             elif phase == "Succeeded":
-                status_text = "Pod completed successfully"
+                status_text = "Pod has completed its task successfully and terminated"
                 status_type = "success"
 
         # NetworkPolicy status
@@ -372,11 +387,11 @@ class DetailPageOverviewSection(BaseDetailSection):
 
             if available_replicas == replicas and replicas > 0:
                 status_value = "Available"
-                status_text = f"Deployment is available ({available_replicas}/{replicas} replicas)"
+                status_text = f"All {replicas} replica(s) are running and ready to serve traffic"
                 status_type = "success"
             else:
-                status_value = "Progressing"
-                status_text = f"Deployment is progressing ({available_replicas}/{replicas} replicas available)"
+                status_value = "Updating"
+                status_text = f"Deployment is updating - {available_replicas} of {replicas} replica(s) are ready"
                 status_type = "warning"
 
         # ReplicaSet status
@@ -449,11 +464,11 @@ class DetailPageOverviewSection(BaseDetailSection):
 
             if suspend:
                 status_value = "Suspended"
-                status_text = "CronJob is suspended"
+                status_text = "CronJob is currently suspended and will not create new jobs"
                 status_type = "warning"
             else:
                 status_value = "Active"
-                status_text = "CronJob is active"
+                status_text = "CronJob is active and creating jobs according to its schedule"
                 status_type = "success"
 
         # Service status
@@ -462,7 +477,14 @@ class DetailPageOverviewSection(BaseDetailSection):
             service_type = spec.get("type", "ClusterIP")
 
             status_value = service_type
-            status_text = f"Service is available (type: {service_type})"
+            if service_type == "ClusterIP":
+                status_text = "Service is available within the cluster (internal access only)"
+            elif service_type == "LoadBalancer":
+                status_text = "Service is available with external load balancer access"
+            elif service_type == "NodePort":
+                status_text = "Service is available through specific ports on cluster nodes"
+            else:
+                status_text = f"Service is available as type {service_type}"
             status_type = "success"
 
         # ConfigMap status
@@ -691,6 +713,7 @@ class DetailPageOverviewSection(BaseDetailSection):
             condition_message = condition.get("message", "")
 
             condition_widget = QLabel(f"{condition_type}: {condition_status} - {condition_message}")
+            self._make_label_selectable(condition_widget)
             self.conditions_container_layout.addWidget(condition_widget)
 
     def update_labels(self, data):
@@ -699,7 +722,7 @@ class DetailPageOverviewSection(BaseDetailSection):
         labels = metadata.get("labels", {})
 
         if not labels:
-            self.labels_content.setText("No labels")
+            self.labels_content.setText("No labels assigned - Labels help organize and identify resources")
             return
 
         labels_text = "\n".join([f"{k}={v}" for k, v in labels.items()])
@@ -781,7 +804,7 @@ class DetailPageOverviewSection(BaseDetailSection):
         """Add NetworkPolicy-specific fields"""
         spec = data.get("spec", {})
 
-        section_header = QLabel("NETWORK POLICY DETAILS")
+        section_header = QLabel("Network Policy Configuration")
         section_header.setStyleSheet(EnhancedStyles.get_section_header_style())
         self.specific_layout.addWidget(section_header)
 
@@ -825,7 +848,7 @@ class DetailPageOverviewSection(BaseDetailSection):
         spec = data.get("spec", {})
         status = data.get("status", {})
 
-        section_header = QLabel("CUSTOM RESOURCE DEFINITION DETAILS")
+        section_header = QLabel("Custom Resource Definition")
         section_header.setStyleSheet(EnhancedStyles.get_section_header_style())
         self.specific_layout.addWidget(section_header)
 
@@ -881,7 +904,7 @@ class DetailPageOverviewSection(BaseDetailSection):
         spec = data.get("spec", {})
         status = data.get("status", {})
 
-        section_header = QLabel("POD DETAILS")
+        section_header = QLabel("Pod Information")
         section_header.setStyleSheet(EnhancedStyles.get_section_header_style())
         self.specific_layout.addWidget(section_header)
 
@@ -906,7 +929,7 @@ class DetailPageOverviewSection(BaseDetailSection):
         """Add service-specific fields"""
         spec = data.get("spec", {})
 
-        section_header = QLabel("SERVICE DETAILS")
+        section_header = QLabel("Service Configuration")
         section_header.setStyleSheet(EnhancedStyles.get_section_header_style())
         self.specific_layout.addWidget(section_header)
 
@@ -926,7 +949,7 @@ class DetailPageOverviewSection(BaseDetailSection):
         spec = data.get("spec", {})
         status = data.get("status", {})
 
-        section_header = QLabel("DEPLOYMENT DETAILS")
+        section_header = QLabel("Deployment Configuration")
         section_header.setStyleSheet(EnhancedStyles.get_section_header_style())
         self.specific_layout.addWidget(section_header)
 
@@ -944,7 +967,7 @@ class DetailPageOverviewSection(BaseDetailSection):
         """Add ConfigMap-specific fields"""
         spec = data.get("spec", {})
 
-        section_header = QLabel("CONFIGMAP DETAILS")
+        section_header = QLabel("ConfigMap Contents")
         section_header.setStyleSheet(EnhancedStyles.get_section_header_style())
         self.specific_layout.addWidget(section_header)
 
@@ -967,7 +990,7 @@ class DetailPageOverviewSection(BaseDetailSection):
 
     def _add_secret_specific_fields(self, data):
         """Add Secret-specific fields"""
-        section_header = QLabel("SECRET DETAILS")
+        section_header = QLabel("Secret Information")
         section_header.setStyleSheet(EnhancedStyles.get_section_header_style())
         self.specific_layout.addWidget(section_header)
 
@@ -986,7 +1009,7 @@ class DetailPageOverviewSection(BaseDetailSection):
         """Add Ingress-specific fields"""
         spec = data.get("spec", {})
 
-        section_header = QLabel("INGRESS DETAILS")
+        section_header = QLabel("Ingress Configuration")
         section_header.setStyleSheet(EnhancedStyles.get_section_header_style())
         self.specific_layout.addWidget(section_header)
 
@@ -1016,7 +1039,7 @@ class DetailPageOverviewSection(BaseDetailSection):
         spec = data.get("spec", {})
         status = data.get("status", {})
 
-        section_header = QLabel("PERSISTENT VOLUME DETAILS")
+        section_header = QLabel("Storage Volume Details")
         section_header.setStyleSheet(EnhancedStyles.get_section_header_style())
         self.specific_layout.addWidget(section_header)
 
@@ -1045,7 +1068,7 @@ class DetailPageOverviewSection(BaseDetailSection):
         spec = data.get("spec", {})
         status = data.get("status", {})
 
-        section_header = QLabel("PERSISTENT VOLUME CLAIM DETAILS")
+        section_header = QLabel("Storage Claim Details")
         section_header.setStyleSheet(EnhancedStyles.get_section_header_style())
         self.specific_layout.addWidget(section_header)
 
@@ -1074,7 +1097,7 @@ class DetailPageOverviewSection(BaseDetailSection):
         spec = data.get("spec", {})
         status = data.get("status", {})
 
-        section_header = QLabel("REPLICASET DETAILS")
+        section_header = QLabel("ReplicaSet Status")
         section_header.setStyleSheet(EnhancedStyles.get_section_header_style())
         self.specific_layout.addWidget(section_header)
 
@@ -1097,7 +1120,7 @@ class DetailPageOverviewSection(BaseDetailSection):
         """Add DaemonSet-specific fields"""
         status = data.get("status", {})
 
-        section_header = QLabel("DAEMONSET DETAILS")
+        section_header = QLabel("DaemonSet Status")
         section_header.setStyleSheet(EnhancedStyles.get_section_header_style())
         self.specific_layout.addWidget(section_header)
 
@@ -1121,7 +1144,7 @@ class DetailPageOverviewSection(BaseDetailSection):
         spec = data.get("spec", {})
         status = data.get("status", {})
 
-        section_header = QLabel("STATEFULSET DETAILS")
+        section_header = QLabel("StatefulSet Configuration")
         section_header.setStyleSheet(EnhancedStyles.get_section_header_style())
         self.specific_layout.addWidget(section_header)
 

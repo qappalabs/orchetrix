@@ -59,8 +59,8 @@ class GraphWidget(QFrame):
         self._update_interval = 5.0  # 5 seconds for real-time updates
         self._is_updating = False
 
-        self.setMinimumHeight(120)
-        self.setMaximumHeight(120)
+        self.setMinimumHeight(140)
+        self.setMaximumHeight(140)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         self.setStyleSheet(AppStyles.GRAPH_FRAME_STYLE)
@@ -73,7 +73,7 @@ class GraphWidget(QFrame):
         self.setGraphicsEffect(shadow)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setContentsMargins(12, 8, 12, 8)
 
         header_layout = QHBoxLayout()
         self.title_label = QLabel(f"{title} (No node selected)")
@@ -194,7 +194,7 @@ class GraphWidget(QFrame):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)  # Disabled for performance
         
         width = self.width() - 32
-        height = 40
+        height = 60  # Increased from 40 to 60 for better visibility
         bottom = self.height() - 25
         
         # Use cached color to avoid object creation
@@ -203,11 +203,11 @@ class GraphWidget(QFrame):
         
         # Simplified line drawing - no gradient for performance
         if len(self.data) > 1 and width > 0:
-            # Pre-calculate min/max once
+            # Pre-calculate min/max with proper scaling for percentages
             if not hasattr(self, '_data_range') or len(self.data) != getattr(self, '_last_data_length', 0):
-                self._min_value = min(self.data)
-                self._max_value = max(self.data) 
-                self._value_range = max(self._max_value - self._min_value, 10)
+                self._min_value = 0  # Always start from 0 for percentages
+                self._max_value = max(100, max(self.data))  # Ensure at least 100% scale
+                self._value_range = self._max_value - self._min_value
                 self._data_range = True
                 self._last_data_length = len(self.data)
             
@@ -216,20 +216,35 @@ class GraphWidget(QFrame):
             x_step = width / (len(self.data) - 1)
             
             prev_x = 16
-            prev_y = bottom - ((self.data[0] - self._min_value) / self._value_range) * height
+            # Ensure first point is also properly scaled and clamped
+            y_ratio = (self.data[0] - self._min_value) / self._value_range if self._value_range > 0 else 0
+            prev_y = bottom - (y_ratio * height)
+            prev_y = max(bottom - height, min(bottom, prev_y))  # Clamp to visible area
             
             for i in range(1, len(self.data)):
                 x = 16 + i * x_step
-                y = bottom - ((self.data[i] - self._min_value) / self._value_range) * height
+                # Ensure y-coordinate stays within bounds and properly scales percentages
+                y_ratio = (self.data[i] - self._min_value) / self._value_range if self._value_range > 0 else 0
+                y = bottom - (y_ratio * height)
+                y = max(bottom - height, min(bottom, y))  # Clamp to visible area
                 painter.drawLine(int(prev_x), int(prev_y), int(x), int(y))
                 prev_x, prev_y = x, y
         
-        # Only draw labels if there's significant space
+        # Draw scale labels and time axis if space available
         if width > 200:
             painter.setPen(QPen(QColor("#FFFFFF"), 1))
             font = painter.font()
             font.setPointSize(9)
             painter.setFont(font)
+            
+            # Draw Y-axis scale indicators
+            if hasattr(self, '_max_value'):
+                # Show max value at top
+                max_text = f"{self._max_value:.0f}%" if self._max_value < 1000 else f"{self._max_value:.0f}"
+                painter.drawText(QRectF(2, bottom - height - 15, 40, 12), Qt.AlignmentFlag.AlignLeft, max_text)
+                
+                # Show 0% at bottom
+                painter.drawText(QRectF(2, bottom + 2, 40, 12), Qt.AlignmentFlag.AlignLeft, "0%")
             
             # Cache time strings to avoid repeated formatting
             if not hasattr(self, '_cached_times') or time.time() - getattr(self, '_last_time_update', 0) > 60:
@@ -238,7 +253,7 @@ class GraphWidget(QFrame):
                 self._cached_times = (start_time.strftime("%H:%M"), now.strftime("%H:%M"))
                 self._last_time_update = time.time()
             
-            painter.drawText(QRectF(1, self.height() - 16, 30, 12), Qt.AlignmentFlag.AlignCenter, self._cached_times[0])
+            painter.drawText(QRectF(16, self.height() - 16, 30, 12), Qt.AlignmentFlag.AlignCenter, self._cached_times[0])
             painter.drawText(QRectF(width - 15, self.height() - 16, 30, 12), Qt.AlignmentFlag.AlignCenter, self._cached_times[1])
         
         # Only show placeholder if no node selected and space is available
@@ -347,14 +362,18 @@ class NodesPage(BaseResourcePage):
                 self.select_all_checkbox.deleteLater()
                 self.select_all_checkbox = None
             
-        self.layout().setContentsMargins(16, 16, 16, 16)
-        self.layout().setSpacing(16)
+        self.layout().setContentsMargins(8, 8, 8, 8)
+        self.layout().setSpacing(12)
         
-        # Add graphs at the top
+        # Add graphs at the top with optimized spacing
         graphs_layout = QHBoxLayout()
+        graphs_layout.setContentsMargins(0, 0, 0, 0)
+        graphs_layout.setSpacing(8)  # Reduced spacing between graphs
+        
         self.cpu_graph = GraphWidget("CPU Usage", "%", AppColors.ACCENT_ORANGE)
         self.mem_graph = GraphWidget("Memory Usage", "%", AppColors.ACCENT_BLUE)
         self.disk_graph = GraphWidget("Disk Usage", "%", AppColors.ACCENT_PURPLE)
+        
         graphs_layout.addWidget(self.cpu_graph)
         graphs_layout.addWidget(self.mem_graph)
         graphs_layout.addWidget(self.disk_graph)
@@ -420,19 +439,19 @@ class NodesPage(BaseResourcePage):
         if available_width <= 0:
             return
         
-        # Column priorities and minimum widths
+        # Optimized column configuration for perfect matrix display
         column_config = [
-            (0, 40, 40, "fixed"),      # Hidden checkbox
-            (1, 140, 100, "priority"), # Name (priority)
-            (2, 110, 80, "normal"),    # CPU
-            (3, 110, 80, "normal"),    # Memory
-            (4, 110, 80, "normal"),    # Disk
-            (5, 60, 50, "compact"),    # Taints
-            (6, 120, 80, "normal"),    # Roles
-            (7, 90, 60, "compact"),    # Version
-            (8, 60, 50, "compact"),    # Age
-            (9, 90, 70, "stretch"),    # Conditions (stretch)
-            (10, 40, 40, "fixed")      # Actions
+            (0, 0, 0, "fixed"),        # Hidden checkbox - zero width
+            (1, 120, 90, "priority"),   # Name (priority) - slightly reduced
+            (2, 95, 70, "normal"),     # CPU - more compact
+            (3, 95, 70, "normal"),     # Memory - more compact  
+            (4, 95, 70, "normal"),     # Disk - more compact
+            (5, 50, 40, "compact"),    # Taints - more compact
+            (6, 100, 70, "normal"),    # Roles - reduced
+            (7, 75, 55, "compact"),    # Version - more compact
+            (8, 50, 40, "compact"),    # Age - more compact
+            (9, 85, 65, "stretch"),    # Conditions (stretch) - optimized
+            (10, 35, 35, "fixed")      # Actions - minimal but functional
         ]
         
         # Calculate total reserved space for fixed and minimum widths
@@ -444,8 +463,8 @@ class NodesPage(BaseResourcePage):
         normal_columns = sum(1 for _, _, _, col_type in column_config if col_type == "normal")
         
         if priority_columns > 0:
-            priority_extra = remaining_space * 0.4 / priority_columns  # 40% to priority columns
-            normal_extra = remaining_space * 0.6 / normal_columns if normal_columns > 0 else 0
+            priority_extra = remaining_space * 0.35 / priority_columns  # 35% to priority columns
+            normal_extra = remaining_space * 0.65 / normal_columns if normal_columns > 0 else 0
         else:
             priority_extra = 0
             normal_extra = remaining_space / normal_columns if normal_columns > 0 else 0
