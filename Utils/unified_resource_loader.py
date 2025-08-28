@@ -190,12 +190,16 @@ class SearchResourceLoadWorker(EnhancedBaseWorker):
         api_method = getattr(api_client, namespaced_method_name)
         
         kwargs = {
-            'namespace': self.config.namespace,
+            # 'namespace': self.config.namespace,
             'timeout_seconds': self.config.timeout_seconds,
             '_request_timeout': self.config.timeout_seconds + 5,
             'limit': 200  # Larger limit for search
         }
         
+        # Only add namespace if NOT cluster-scoped
+        if self.config.resource_type not in CLUSTER_SCOPED_RESOURCES:
+            kwargs['namespace'] = self.config.namespace
+
         response = api_method(**kwargs)
         return response.items if hasattr(response, 'items') else []
     
@@ -1569,6 +1573,8 @@ class ResourceLoadWorker(EnhancedBaseWorker):
         return None
     
 # cancel() method inherited from EnhancedBaseWorker
+
+CLUSTER_SCOPED_RESOURCES = ResourceLoadWorker.CLUSTER_SCOPED_RESOURCES
 
 
 class HighPerformanceResourceLoader(QObject):

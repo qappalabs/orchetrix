@@ -667,18 +667,32 @@ class BaseResourcePage(BaseTablePage):
             self._filter_resources_linear(search_text)
     
     def _show_search_loading_message(self, search_query):
-        """Show loading message during search"""
+        """Show loading message during search with proper widget cleanup"""
         try:
             if hasattr(self, 'table') and self.table:
+                # Clear all existing widgets first to prevent positioning issues
+                self._clear_table_widgets()
+                
+                # Set table to single row with proper height
                 self.table.setRowCount(1)
+                self.table.setRowHeight(0, 60)
+                
                 from PyQt6.QtWidgets import QTableWidgetItem
                 from PyQt6.QtCore import Qt
                 
+                # Create loading message item
                 item = QTableWidgetItem(f"🔍 Searching for '{search_query}' across all resources...")
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                
+                # Set item and span across all columns
                 self.table.setItem(0, 0, item)
                 if self.table.columnCount() > 1:
                     self.table.setSpan(0, 0, 1, self.table.columnCount())
+                    
+                # Style the loading message
+                item.setBackground(self.table.palette().alternateBase())
+                
         except Exception as e:
             logging.debug(f"Error showing search loading message: {e}")
     
@@ -742,24 +756,40 @@ class BaseResourcePage(BaseTablePage):
             logging.error(f"Error processing search results: {e}")
     
     def _on_search_error(self, resource_type, error_message):
-        """Handle search errors"""
+        """Handle search errors with proper widget cleanup"""
         if resource_type != self.resource_type:
             return
             
         logging.error(f"Search error for {resource_type}: {error_message}")
         
-        # Show error message in table
+        # Show error message in table with proper cleanup
         try:
             if hasattr(self, 'table') and self.table:
+                # Clear all existing widgets first to prevent positioning issues
+                self._clear_table_widgets()
+                
+                # Set table to single row with proper height
                 self.table.setRowCount(1)
+                self.table.setRowHeight(0, 60)
+                
                 from PyQt6.QtWidgets import QTableWidgetItem
                 from PyQt6.QtCore import Qt
+                from PyQt6.QtGui import QColor
                 
+                # Create error message item
                 item = QTableWidgetItem(f"❌ Search failed: {error_message}")
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                
+                # Set item and span across all columns
                 self.table.setItem(0, 0, item)
                 if self.table.columnCount() > 1:
                     self.table.setSpan(0, 0, 1, self.table.columnCount())
+                    
+                # Style the error message with red background
+                item.setBackground(QColor("#ffcccc"))  # Light red background
+                item.setForeground(QColor("#cc0000"))  # Dark red text
+                
         except Exception as e:
             logging.debug(f"Error showing search error message: {e}")
     
@@ -1343,6 +1373,12 @@ class BaseResourcePage(BaseTablePage):
             self._show_empty_message()
             return
         
+        # Clear any existing widgets when transitioning from search states
+        if (getattr(self, '_is_searching', False) or 
+            self.table.rowCount() == 1 or  # Single row might be search/error message
+            any(self.table.cellWidget(0, col) is None for col in range(min(3, self.table.columnCount())))):
+            self._clear_table_widgets()
+        
         # Store resources for search index
         self.resources = resources
         
@@ -1603,8 +1639,32 @@ class BaseResourcePage(BaseTablePage):
             count = len(self.resources)
             self.items_count.setText(f"{count} items")
 
+    def _clear_table_widgets(self):
+        """Clear all cell widgets from the table to prevent positioning issues"""
+        try:
+            if not hasattr(self, 'table') or not self.table:
+                return
+                
+            # Clear all cell widgets from all rows
+            for row in range(self.table.rowCount()):
+                for col in range(self.table.columnCount()):
+                    widget = self.table.cellWidget(row, col)
+                    if widget:
+                        widget.setParent(None)
+                        widget.deleteLater()
+                        self.table.setCellWidget(row, col, None)
+                        
+            # Also clear any existing spans
+            self.table.clearSpans()
+            
+        except Exception as e:
+            logging.debug(f"Error clearing table widgets: {e}")
+    
     def _show_empty_message(self):
         """Show empty state message in center of table area while keeping headers visible"""
+        # Clear all existing widgets first to prevent positioning issues
+        self._clear_table_widgets()
+        
         # Keep table headers visible - clear rows but keep headers
         if self.table:
             self.table.setRowCount(0)  # Just clear rows, keep headers

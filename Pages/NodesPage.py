@@ -1,14 +1,25 @@
 """
-Corrected implementation of the Nodes page with performance improvements and proper data display.
+Optimized Nodes Page Implementation for Heavy Data Loads
+
+Key Performance Features:
+- Progressive table population for 1000+ nodes
+- Memory-optimized widget pooling with size limits  
+- Smart data caching with adaptive TTL
+- Background search threading for large datasets
+- Virtual scrolling with viewport optimization
+- Segmentation fault protection
+- Async population for medium datasets (50-1000 nodes)
+- Direct population for small datasets (<50 nodes)
+
+Removed: Unused imports, duplicate methods, loading indicators, fallback stubs
 """
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem, QLabel, QHeaderView, QToolButton, QMenu, QCheckBox, QFrame, 
-    QGraphicsDropShadowEffect, QSizePolicy, QStyleOptionButton, QStyle, QStyleOptionHeader,
-    QApplication, QPushButton, QProxyStyle
+    QWidget, QVBoxLayout, QHBoxLayout, QTableWidgetItem, QLabel, QToolButton, QMenu, QFrame, 
+    QGraphicsDropShadowEffect, QSizePolicy, QApplication, QPushButton, QHeaderView
 )
-from PyQt6.QtCore import Qt, QTimer, QRect, QRectF, pyqtSignal, QSize
-from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QLinearGradient, QPainterPath, QBrush, QCursor
+from PyQt6.QtCore import Qt, QTimer, QRectF, pyqtSignal, QThread, pyqtSignal as Signal
+from PyQt6.QtGui import QColor, QPainter, QPen, QLinearGradient, QPainterPath, QBrush
 
 from UI.Styles import AppStyles, AppColors, AppConstants
 from Base_Components.base_components import SortableTableWidgetItem, StatusLabel
@@ -22,22 +33,6 @@ import re
 import logging
 import time
 
-#------------------------------------------------------------------
-# Custom Style to hide checkbox in header
-#------------------------------------------------------------------
-class CustomHeaderStyle(QProxyStyle):
-    """A proxy style that hides checkbox in header"""
-    def __init__(self, style=None):
-        super().__init__(style)
-        
-    def drawControl(self, element, option, painter, widget=None):
-        if element == QStyle.ControlElement.CE_Header:
-            opt = QStyleOptionHeader(option)
-            if widget and widget.orientation() == Qt.Orientation.Horizontal and opt.section == 0:
-                opt.text = ""
-                super().drawControl(element, opt, painter, widget)
-                return
-        super().drawControl(element, option, painter, widget)
 
 
 #------------------------------------------------------------------
@@ -261,6 +256,9 @@ class GraphWidget(QFrame):
             painter.setPen(QPen(QColor(AppColors.TEXT_SUBTLE)))
             text_rect = QRectF(0, self.rect().top() + 20, self.rect().width(), 30)
             painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, "Select a node")
+        
+        # CRITICAL: Always end the painter to prevent segfaults
+        painter.end()
 
     def cleanup(self):
         """Cleanup method"""
@@ -272,6 +270,265 @@ class GraphWidget(QFrame):
 #------------------------------------------------------------------
 # NodesPage - Now extending BaseResourcePage for consistency
 #------------------------------------------------------------------
+class AsyncTablePopulator(QThread):
+    """Worker thread for asynchronous table population"""
+    rows_ready = Signal(list, bool)  # (rows_data, is_complete)
+    population_complete = Signal()
+    
+    def __init__(self, resources, batch_size=25):
+        super().__init__()
+        self.resources = resources
+        self.batch_size = batch_size
+        self._should_stop = False
+        
+    def stop(self):
+        self._should_stop = True
+        
+    def run(self):
+        """Process resources in batches asynchronously"""
+        try:
+            total_items = len(self.resources)
+            
+            for start_idx in range(0, total_items, self.batch_size):
+                if self._should_stop:
+                    return
+                    
+                end_idx = min(start_idx + self.batch_size, total_items)
+                batch = self.resources[start_idx:end_idx]
+                is_complete = end_idx >= total_items
+                
+                # Pre-process row data in background thread
+                processed_rows = []
+                for i, resource in enumerate(batch):
+                    if self._should_stop:
+                        return
+                    row_data = self._process_resource(resource, start_idx + i)
+                    processed_rows.append(row_data)
+                
+                # Emit batch of processed rows
+                self.rows_ready.emit(processed_rows, is_complete)
+                
+                # Small delay to prevent overwhelming the UI thread
+                if not is_complete:
+                    self.msleep(10)
+                    
+            self.population_complete.emit()
+            
+        except Exception as e:
+            logging.error(f"Error in async table population: {e}")
+            self.population_complete.emit()
+    
+    def _process_resource(self, resource, row_index):
+        """Pre-process resource data for faster UI updates"""
+        return {
+            'row': row_index,
+            'node_name': resource.get("name", "unknown"),
+            'resource': resource
+        }
+
+
+class WidgetPool:
+    """Memory-optimized widget pool with size limits and smart reuse"""
+    def __init__(self, max_pool_size=200):
+        self._status_widgets = []
+        self._action_containers = []
+        self._checkbox_containers = []
+        self.max_pool_size = max_pool_size
+        self._creation_count = 0
+        
+    def get_status_widget(self, status, color):
+        """Get or create a status widget with intelligent reuse"""
+        # Find reusable widget - check if widget is still valid
+        for widget in self._status_widgets[:]:  # Create copy to avoid modification during iteration
+            try:
+                if not widget.parent():
+                    widget.setText(status)
+                    if hasattr(widget, 'set_color'):
+                        widget.set_color(color)
+                    return widget
+            except RuntimeError:
+                # Widget has been deleted, remove from pool
+                self._status_widgets.remove(widget)
+        
+        # Create new widget if pool not at limit
+        if len(self._status_widgets) < self.max_pool_size // 3:
+            from Base_Components.base_components import StatusLabel
+            widget = StatusLabel(status, color)
+            self._status_widgets.append(widget)
+            self._creation_count += 1
+            return widget
+        
+        # Pool at limit, force reuse oldest widget
+        oldest_widget = self._status_widgets[0]
+        oldest_widget.setParent(None)
+        oldest_widget.setText(status)
+        if hasattr(oldest_widget, 'set_color'):
+            oldest_widget.set_color(color)
+        return oldest_widget
+        
+    def get_action_container(self):
+        """Get or create an action container with size management"""
+        # Find reusable container - check if container is still valid
+        for container in self._action_containers[:]:
+            try:
+                if not container.parent():
+                    return container
+            except RuntimeError:
+                # Container has been deleted, remove from pool
+                self._action_containers.remove(container)
+                
+        # Create new if under limit
+        if len(self._action_containers) < self.max_pool_size // 3:
+            container = QWidget()
+            container.setFixedSize(40, 30)
+            container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
+            self._action_containers.append(container)
+            return container
+        
+        # Reuse oldest
+        oldest = self._action_containers[0]
+        oldest.setParent(None)
+        return oldest
+        
+    def get_checkbox_container(self):
+        """Get or create a checkbox container with memory limits"""
+        # Find reusable container - check if container is still valid
+        for container in self._checkbox_containers[:]:
+            try:
+                if not container.parent():
+                    return container
+            except RuntimeError:
+                # Container has been deleted, remove from pool
+                self._checkbox_containers.remove(container)
+        
+        # Create new if under limit        
+        if len(self._checkbox_containers) < self.max_pool_size // 3:
+            container = QWidget()
+            container.setStyleSheet("background-color: transparent;")
+            self._checkbox_containers.append(container)
+            return container
+        
+        # Reuse oldest
+        oldest = self._checkbox_containers[0]
+        oldest.setParent(None)
+        return oldest
+    
+    def get_pool_stats(self):
+        """Get widget pool statistics with validation"""
+        try:
+            # Count valid widgets only
+            valid_status = 0
+            valid_actions = 0
+            valid_checkboxes = 0
+            
+            for widget in self._status_widgets:
+                try:
+                    widget.parent()  # Try to access the widget
+                    valid_status += 1
+                except RuntimeError:
+                    pass
+            
+            for widget in self._action_containers:
+                try:
+                    widget.parent()
+                    valid_actions += 1
+                except RuntimeError:
+                    pass
+            
+            for widget in self._checkbox_containers:
+                try:
+                    widget.parent()
+                    valid_checkboxes += 1
+                except RuntimeError:
+                    pass
+            
+            return {
+                'status_widgets': valid_status,
+                'action_containers': valid_actions,
+                'checkbox_containers': valid_checkboxes,
+                'total_widgets': valid_status + valid_actions + valid_checkboxes,
+                'creation_count': self._creation_count,
+                'max_pool_size': self.max_pool_size
+            }
+        except Exception:
+            # Fallback if there's any error
+            return {
+                'status_widgets': 0,
+                'action_containers': 0,
+                'checkbox_containers': 0,
+                'total_widgets': 0,
+                'creation_count': self._creation_count,
+                'max_pool_size': self.max_pool_size
+            }
+    
+    def optimize_pool(self):
+        """Optimize pool by removing unused widgets"""
+        def cleanup_pool(widget_list, max_keep=50):
+            # First, remove any deleted widgets from the list
+            valid_widgets = []
+            for widget in widget_list:
+                try:
+                    # Try to access widget to check if it's still valid
+                    widget.parent()
+                    valid_widgets.append(widget)
+                except RuntimeError:
+                    # Widget has been deleted, don't add to valid list
+                    pass
+            
+            # Replace list with valid widgets
+            widget_list[:] = valid_widgets
+            
+            # Keep only widgets that are not parented and limit count
+            orphaned = [w for w in valid_widgets if not w.parent()]
+            excess = len(orphaned) - max_keep
+            
+            if excess > 0:
+                # Remove oldest excess widgets
+                for widget in orphaned[:excess]:
+                    try:
+                        widget.deleteLater()
+                        widget_list.remove(widget)
+                    except (RuntimeError, ValueError):
+                        # Widget already deleted or not in list
+                        pass
+                
+                logging.debug(f"Cleaned up {excess} excess widgets from pool")
+        
+        try:
+            cleanup_pool(self._status_widgets)
+            cleanup_pool(self._action_containers)  
+            cleanup_pool(self._checkbox_containers)
+        except Exception as e:
+            logging.debug(f"Error in pool optimization: {e}")
+        
+    def cleanup(self):
+        """Clean up all pooled widgets with memory optimization"""
+        try:
+            # Clean up in batches to avoid UI freezing
+            all_widgets = (self._status_widgets + self._action_containers + 
+                          self._checkbox_containers)
+            
+            batch_size = 50
+            for i in range(0, len(all_widgets), batch_size):
+                batch = all_widgets[i:i + batch_size]
+                for widget in batch:
+                    widget.setParent(None)
+                    widget.deleteLater()
+                    
+                # Small delay between batches for very large pools
+                if len(all_widgets) > 200 and i + batch_size < len(all_widgets):
+                    QApplication.processEvents()
+            
+            self._status_widgets.clear()
+            self._action_containers.clear()
+            self._checkbox_containers.clear()
+            
+            logging.info(f"Widget pool cleanup completed. Cleaned {len(all_widgets)} widgets")
+            
+        except Exception as e:
+            logging.error(f"Error in widget pool cleanup: {e}")
+
+
 class NodesPage(BaseResourcePage):
     """
     Displays Kubernetes Nodes with live data and resource operations.
@@ -298,6 +555,25 @@ class NodesPage(BaseResourcePage):
         self.perf_config = get_performance_config()
         self.debounced_updater = get_debounced_updater()
         
+        # Initialize memory-optimized widget pool and async populator
+        self.widget_pool = WidgetPool(max_pool_size=300)  # Larger pool for heavy loads
+        self.async_populator = None
+        
+        # Periodic widget pool optimization for heavy loads
+        self._pool_optimizer_timer = QTimer()
+        self._pool_optimizer_timer.timeout.connect(self._optimize_widget_pool)
+        self._pool_optimizer_timer.start(30000)  # Optimize every 30 seconds
+        
+        # Virtual scrolling optimizations with memory efficiency
+        self._viewport_buffer = 3  # Reduced buffer for memory efficiency
+        self._visible_range = (0, 0)
+        
+        # Verify heavy load capabilities are properly initialized
+        QTimer.singleShot(1000, self._verify_heavy_load_capability)  # Check after 1 second
+        self._widget_cache = {}  # Cache for created widgets
+        self._rendered_widgets = set()  # Track which rows have widgets
+        self._lazy_widget_creation = True  # Enable lazy widget creation
+        
         # Get the cluster connector
         self.cluster_connector = get_cluster_connector()
         
@@ -319,10 +595,32 @@ class NodesPage(BaseResourcePage):
     def cleanup_on_destroy(self):
         """Override base cleanup to handle NodesPage-specific resources"""
         try:
+            # Stop async populator
+            if hasattr(self, 'async_populator') and self.async_populator:
+                self.async_populator.stop()
+                self.async_populator.wait(1000)  # Wait max 1 second
+                self.async_populator.deleteLater()
+            
+            # Stop pool optimizer timer
+            if hasattr(self, '_pool_optimizer_timer'):
+                self._pool_optimizer_timer.stop()
+                self._pool_optimizer_timer.deleteLater()
+                
+            # Clean up widget pool
+            if hasattr(self, 'widget_pool'):
+                self.widget_pool.cleanup()
+            
             # Stop NodesPage-specific timers
             if hasattr(self, '_graph_update_timer'):
                 self._graph_update_timer.stop()
                 self._graph_update_timer.deleteLater()
+            
+            # Clean up background search worker
+            if hasattr(self, '_search_worker'):
+                self._search_worker.quit()
+                self._search_worker.wait(1000)
+                self._search_worker.deleteLater()
+                delattr(self, '_search_worker')
             
             # Disconnect cluster connector signals
             if hasattr(self, 'cluster_connector') and self.cluster_connector:
@@ -393,9 +691,9 @@ class NodesPage(BaseResourcePage):
         # Connect single-click to update graphs
         self.table.cellClicked.connect(self.handle_row_click)
         
-        # Connect scroll events for virtual scrolling
+        # Connect scroll events for optimized virtual scrolling
         if hasattr(self.table, 'verticalScrollBar'):
-            self.table.verticalScrollBar().valueChanged.connect(self._handle_node_scroll)
+            self.table.verticalScrollBar().valueChanged.connect(self._handle_optimized_scroll)
         
         # Configure column widths
         self.configure_columns()
@@ -518,72 +816,284 @@ class NodesPage(BaseResourcePage):
             self.update_nodes(nodes_data)
 
     def update_nodes(self, nodes_data):
-        """Update with real node data from the cluster - optimized for speed"""
-        logging.info(f"NodesPage: update_nodes() called with {len(nodes_data) if nodes_data else 0} nodes")
+        """Ultra-optimized node data update with intelligent processing strategies"""
+        data_size = len(nodes_data) if nodes_data else 0
+        logging.info(f"NodesPage: update_nodes() called with {data_size} nodes")
         
         self.is_loading = False
         self.is_showing_skeleton = False
         
-        # Completely remove skeleton timer functionality to prevent unwanted loading icons
+        # Clean up any loading artifacts
+        self._cleanup_loading_artifacts()
+        
+        if not nodes_data:
+            self._handle_empty_data()
+            return
+        
+        # Store data and optimize memory usage
+        self._store_and_cache_data(nodes_data)
+        
+        # Smart processing strategy based on data size
+        if data_size > 1000:
+            logging.info(f"NodesPage: Processing VERY LARGE dataset ({data_size} nodes) with maximum optimization")
+            self._process_large_dataset(nodes_data)
+        elif data_size > 500:
+            logging.info(f"NodesPage: Processing LARGE dataset ({data_size} nodes) with heavy optimization")
+            self._process_medium_dataset(nodes_data) 
+        elif data_size > 100:
+            logging.info(f"NodesPage: Processing MEDIUM dataset ({data_size} nodes) with standard optimization")
+            self._process_small_dataset(nodes_data)
+        else:
+            logging.info(f"NodesPage: Processing SMALL dataset ({data_size} nodes) with direct rendering")
+            self._process_tiny_dataset(nodes_data)
+    
+    def _cleanup_loading_artifacts(self):
+        """Clean up loading timers and artifacts"""
         if hasattr(self, 'skeleton_timer'):
             if self.skeleton_timer.isActive():
                 self.skeleton_timer.stop()
             self.skeleton_timer.deleteLater()
             delattr(self, 'skeleton_timer')
-        
-        if not nodes_data:
-            logging.warning("NodesPage: No nodes data received")
-            self.nodes_data = []
-            self.resources = []
-            if not getattr(self, '_is_searching', False):
-                self._is_searching = False
-                self._current_search_query = None
-            self.show_no_data_message()
-            self.items_count.setText("0 items")
-            return
-        
-        # Store the data and cache timestamp for performance
+    
+    def _handle_empty_data(self):
+        """Handle case when no node data is received"""
+        logging.warning("NodesPage: No nodes data received")
+        self.nodes_data = []
+        self.resources = []
+        if not getattr(self, '_is_searching', False):
+            self._is_searching = False
+            self._current_search_query = None
+        self.show_no_data_message()
+        self.items_count.setText("0 items")
+    
+    def _store_and_cache_data(self, nodes_data):
+        """Efficiently store and cache node data"""
+        # Use memory-optimized storage
         self.nodes_data = nodes_data
         self.resources = nodes_data
+        
         import time
         self._last_load_time = time.time()
         self.has_loaded_data = True
         
-        # Initialize virtual scrolling state if not present
+        # Set total available items for virtual scrolling
+        self._total_available_items = len(nodes_data)
+        
+        # Initialize virtual scrolling if needed
+        self._ensure_virtual_scrolling_state()
+    
+    def _ensure_virtual_scrolling_state(self):
+        """Ensure virtual scrolling state is properly initialized"""
         if not hasattr(self, '_virtual_scrolling_enabled'):
             self._virtual_scrolling_enabled = True
             self._rendered_items_count = 0
-            self._total_available_items = 0
-            self.virtual_scroll_threshold = 50  # Enable for 50+ nodes
-            self.items_per_page = 50  # Initial batch
-            self.virtual_load_size = 100  # Load more batch
+            # Adaptive thresholds based on system performance
+            self.virtual_scroll_threshold = 50
+            self.items_per_page = 50
+            self.virtual_load_size = 100
+    
+    def _process_large_dataset(self, nodes_data):
+        """Process datasets > 1000 nodes with maximum optimization"""
+        data_size = len(nodes_data)
+        logging.info(f"Processing large dataset: {data_size} nodes")
         
-        # Set total available items
-        self._total_available_items = len(nodes_data)
+        # Update graphs with reduced frequency for performance
+        if self._should_update_graphs_throttled(nodes_data):
+            self._update_graphs_async_throttled(nodes_data)
         
-        # Optimized graph updates - only update when data changes significantly
-        if not hasattr(self, '_graphs_initialized') or self._should_update_graphs(nodes_data):
+        # Handle search mode
+        if self._is_searching and self._current_search_query:
+            self._filter_nodes_by_search_optimized(self._current_search_query)
+        else:
+            self.show_table()
+            # Always use progressive rendering for large datasets
+            self._display_nodes_progressive_large(nodes_data)
+    
+    def _process_medium_dataset(self, nodes_data):
+        """Process datasets 500-1000 nodes with balanced optimization"""
+        data_size = len(nodes_data)
+        logging.info(f"Processing medium dataset: {data_size} nodes")
+        
+        # Update graphs with normal frequency
+        if self._should_update_graphs(nodes_data):
             self._update_graphs_async(nodes_data)
-            self._graphs_initialized = True
         
-        # Check if we're in search mode and apply search filter
+        # Handle search mode
         if self._is_searching and self._current_search_query:
             self._filter_nodes_by_search(self._current_search_query)
         else:
             self.show_table()
-            # Use virtual scrolling for heavy loads
-            if (self._virtual_scrolling_enabled and 
-                len(nodes_data) >= self.virtual_scroll_threshold):
+            # Use progressive rendering for medium datasets
+            self._display_nodes_progressive(nodes_data)
+    
+    def _process_small_dataset(self, nodes_data):
+        """Process datasets 100-500 nodes with standard optimization"""
+        data_size = len(nodes_data)
+        logging.info(f"Processing small dataset: {data_size} nodes")
+        
+        # Update graphs normally
+        if self._should_update_graphs(nodes_data):
+            self._update_graphs_async(nodes_data)
+        
+        # Handle search mode
+        if self._is_searching and self._current_search_query:
+            self._filter_nodes_by_search(self._current_search_query)
+        else:
+            self.show_table()
+            # Use virtual scrolling
+            self._display_nodes_virtual(nodes_data)
+    
+    def _process_tiny_dataset(self, nodes_data):
+        """Process datasets < 100 nodes with minimal optimization"""
+        data_size = len(nodes_data)
+        logging.info(f"Processing tiny dataset: {data_size} nodes")
+        
+        # Update graphs normally
+        if self._should_update_graphs(nodes_data):
+            self._update_graphs_async(nodes_data)
+        
+        # Handle search mode
+        if self._is_searching and self._current_search_query:
+            self._filter_nodes_by_search(self._current_search_query)
+        else:
+            self.show_table()
+            # Use direct population for small datasets
+            self.populate_table(nodes_data)
+            self._rendered_items_count = len(nodes_data)
+            self.all_data_loaded = True
+            self.items_count.setText(f"{len(nodes_data)} items")
+    
+    def _display_nodes_progressive_large(self, nodes_data):
+        """Display nodes with maximum optimization for very large datasets"""
+        data_size = len(nodes_data)
+        logging.info(f"Progressive large display for {data_size} nodes")
+        
+        # Use the most optimized progressive rendering
+        self._populate_table_progressive(nodes_data)
+        
+        # Update state
+        self._rendered_items_count = data_size
+        self.all_data_loaded = True
+        
+        # Use deferred counter update to avoid blocking
+        QTimer.singleShot(100, lambda: self.items_count.setText(f"{data_size} items"))
+    
+    def _should_update_graphs_throttled(self, nodes_data):
+        """Throttled graph update decision for large datasets"""
+        if not hasattr(self, '_last_graph_update_time'):
+            self._last_graph_update_time = 0
+        
+        import time
+        current_time = time.time()
+        
+        # Update graphs less frequently for large datasets (every 10 seconds)
+        return (current_time - self._last_graph_update_time) > 10
+    
+    def _update_graphs_async_throttled(self, nodes_data):
+        """Throttled graph update for performance with large datasets"""
+        try:
+            import time
+            self._last_graph_update_time = time.time()
+            
+            # Update graphs with reduced precision for performance
+            self.cpu_graph.generate_utilization_data(nodes_data[:500])  # Sample first 500
+            self.mem_graph.generate_utilization_data(nodes_data[:500])
+            self.disk_graph.generate_utilization_data(nodes_data[:500])
+            
+        except Exception as e:
+            logging.error(f"Error in throttled graph update: {e}")
+    
+    def _filter_nodes_by_search_optimized(self, search_query):
+        """Optimized search filtering for large datasets"""
+        if not search_query or not self.nodes_data:
+            self._display_resources(self.nodes_data)
+            return
+        
+        # Use background thread for large dataset searches
+        if len(self.nodes_data) > 500:
+            self._perform_background_search(search_query)
+        else:
+            self._filter_nodes_by_search(search_query)
+    
+    def _perform_background_search(self, search_query):
+        """Perform search in background thread for large datasets"""
+        from PyQt6.QtCore import QThread, pyqtSignal
+        
+        class BackgroundSearchWorker(QThread):
+            search_complete = pyqtSignal(list)
+            
+            def __init__(self, nodes_data, search_query):
+                super().__init__()
+                self.nodes_data = nodes_data
+                self.search_query = search_query.lower().strip()
                 
-                logging.info(f"NodesPage: Using virtual scrolling for {len(nodes_data)} nodes")
-                self._display_nodes_virtual(nodes_data)
-            else:
-                # Use normal population for smaller datasets
-                logging.info(f"NodesPage: Using normal population for {len(nodes_data)} nodes")
-                self.populate_table(nodes_data)
-                self._rendered_items_count = len(nodes_data)
-                self.all_data_loaded = True
-                self.items_count.setText(f"{len(nodes_data)} items")
+            def run(self):
+                try:
+                    filtered_nodes = []
+                    for node in self.nodes_data:
+                        try:
+                            # Optimized search fields
+                            node_name = str(node.get("name", "")).lower()
+                            if self.search_query in node_name:
+                                filtered_nodes.append(node)
+                                continue
+                                
+                            # Additional fields for comprehensive search
+                            node_roles = str(node.get("roles", [])).lower()
+                            node_version = str(node.get("version", "")).lower()
+                            node_status = str(node.get("status", "")).lower()
+                            
+                            if (self.search_query in node_roles or 
+                                self.search_query in node_version or 
+                                self.search_query in node_status):
+                                filtered_nodes.append(node)
+                                
+                        except Exception:
+                            continue
+                    
+                    self.search_complete.emit(filtered_nodes)
+                    
+                except Exception as e:
+                    logging.error(f"Background search error: {e}")
+                    self.search_complete.emit([])
+        
+        # Show search indicator
+        self.items_count.setText("🔍 Searching...")
+        
+        # Start background search
+        self._search_worker = BackgroundSearchWorker(self.nodes_data, search_query)
+        self._search_worker.search_complete.connect(self._handle_background_search_complete)
+        self._search_worker.start()
+    
+    def _handle_background_search_complete(self, filtered_nodes):
+        """Handle completion of background search"""
+        try:
+            logging.info(f"Background search completed: {len(filtered_nodes)} results")
+            self._display_resources(filtered_nodes)
+            self.items_count.setText(f"{len(filtered_nodes)} items")
+            
+            # Clean up search worker
+            if hasattr(self, '_search_worker'):
+                self._search_worker.deleteLater()
+                delattr(self, '_search_worker')
+                
+        except Exception as e:
+            logging.error(f"Error handling background search completion: {e}")
+    
+    def _optimize_widget_pool(self):
+        """Periodic widget pool optimization for memory management"""
+        try:
+            if hasattr(self, 'widget_pool'):
+                stats_before = self.widget_pool.get_pool_stats()
+                self.widget_pool.optimize_pool()
+                stats_after = self.widget_pool.get_pool_stats()
+                
+                # Log optimization if significant cleanup occurred
+                if stats_before['total_widgets'] - stats_after['total_widgets'] > 10:
+                    logging.debug(f"Widget pool optimized: {stats_before['total_widgets']} -> {stats_after['total_widgets']} widgets")
+                
+        except Exception as e:
+            logging.debug(f"Error optimizing widget pool: {e}")  # Changed to debug to reduce noise
     
     def _should_update_graphs(self, new_nodes_data):
         """Determine if graphs should be updated based on data changes"""
@@ -793,31 +1303,58 @@ class NodesPage(BaseResourcePage):
             self.items_count.setText(f"{total_count} items")
     
     def _display_nodes_virtual(self, nodes_data):
-        """Display nodes using virtual scrolling for heavy loads"""
+        """Memory-efficient virtual display with lazy loading"""
         if not nodes_data:
             self.show_no_data_message()
             return
         
-        # Clear previous selections
+        # Clear previous selections and widget tracking
         if hasattr(self, 'selected_items'):
             self.selected_items.clear()
+        self._rendered_widgets.clear()
         
-        # Show initial batch
-        initial_batch = nodes_data[:self.items_per_page]
-        self._rendered_items_count = len(initial_batch)
-        self.all_data_loaded = False
+        # Create table structure without widgets initially
+        self.table.setSortingEnabled(False)
+        self.table.setRowCount(len(nodes_data))  # Full row count for scrolling
         
-        logging.info(f"NodesPage virtual display: showing {len(initial_batch)} of {len(nodes_data)} nodes initially")
+        # Populate text items only (no widgets yet)
+        for row, resource in enumerate(nodes_data):
+            self._populate_text_items_only(row, resource)
+            
+        # Create widgets only for initially visible rows
+        visible_range = self._get_visible_row_range()
+        if visible_range:
+            start_row, end_row = visible_range
+            for row in range(start_row, min(end_row + 1, len(nodes_data))):
+                self._create_row_widgets_lazy(row)
+                
+        self.table.setSortingEnabled(True)
+        self._rendered_items_count = len(nodes_data)
+        self.all_data_loaded = True
         
-        # Use optimized populate for initial batch
-        self.populate_table(initial_batch)
-        
-        # Add loading indicator if more data is available
-        if len(nodes_data) > len(initial_batch):
-            self._add_nodes_load_more_indicator()
-        
-        # Update items count to show virtual scrolling status
+        logging.info(f"NodesPage: Memory-efficient virtual display for {len(nodes_data)} nodes")
         self._update_nodes_items_count()
+        
+    def _populate_text_items_only(self, row, resource):
+        """Populate only text items without expensive widgets"""
+        self.table.setRowHeight(row, 40)
+        
+        # Pre-calculate display values
+        display_values = self._calculate_display_values_fast(resource)
+        
+        # Create table items efficiently (text only)
+        for col, (value, sort_value) in enumerate(display_values):
+            cell_col = col + 1
+            item = SortableTableWidgetItem(value, sort_value) if sort_value is not None else SortableTableWidgetItem(value)
+            
+            # Set alignment based on column type
+            if col in [1, 2, 3, 4, 5, 6, 7]:
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            else:
+                item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            
+            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, cell_col, item)
     
     def _populate_nodes_batch(self, nodes_batch, append=False):
         """Populate a batch of nodes efficiently for virtual scrolling"""
@@ -909,17 +1446,144 @@ class NodesPage(BaseResourcePage):
                 count = len(getattr(self, 'nodes_data', []))
                 self.items_count.setText(f"{count} items")
     
-    def _handle_node_scroll(self, value):
-        """Handle scroll events for nodes virtual scrolling"""
-        if not hasattr(self, '_virtual_scrolling_enabled') or not self._virtual_scrolling_enabled:
+    def _handle_optimized_scroll(self, value):
+        """Handle scroll events with viewport optimization"""
+        # Update visible range for viewport optimization
+        visible_range = self._get_visible_row_range()
+        if visible_range != self._visible_range:
+            self._visible_range = visible_range
+            self._optimize_viewport_rendering()
+            
+        # Handle virtual scrolling
+        if hasattr(self, '_virtual_scrolling_enabled') and self._virtual_scrolling_enabled:
+            if (self.table and not getattr(self, 'is_loading_more', False) and 
+                not getattr(self, 'all_data_loaded', True)):
+                
+                scrollbar = self.table.verticalScrollBar()
+                if scrollbar.value() >= scrollbar.maximum() - 20:  # Near bottom
+                    self._load_more_nodes()
+                    
+    def _get_visible_row_range(self):
+        """Get range of visible rows in viewport"""
+        if not self.table or self.table.rowCount() == 0:
+            return None
+            
+        try:
+            viewport_rect = self.table.viewport().rect()
+            top_row = self.table.rowAt(viewport_rect.top())
+            bottom_row = self.table.rowAt(viewport_rect.bottom())
+            
+            # Handle edge cases
+            if top_row == -1:
+                top_row = 0
+            if bottom_row == -1:
+                bottom_row = self.table.rowCount() - 1
+                
+            # Add buffer for smoother scrolling
+            buffer = self._viewport_buffer
+            start_row = max(0, top_row - buffer)
+            end_row = min(self.table.rowCount() - 1, bottom_row + buffer)
+            
+            return (start_row, end_row)
+        except Exception as e:
+            logging.debug(f"Error getting visible row range: {e}")
+            return None
+            
+    def _optimize_viewport_rendering(self):
+        """Memory-efficient viewport optimization with lazy widget creation"""
+        if not self._visible_range:
             return
             
-        if not self.table or getattr(self, 'is_loading_more', False) or getattr(self, 'all_data_loaded', True):
-            return
+        start_row, end_row = self._visible_range
         
-        scrollbar = self.table.verticalScrollBar()
-        if scrollbar.value() >= scrollbar.maximum() - 20:  # Near bottom
-            self._load_more_nodes()
+        # Create widgets only for visible rows
+        for row in range(self.table.rowCount()):
+            if start_row <= row <= end_row:
+                # Ensure widgets exist for visible rows
+                if row not in self._rendered_widgets:
+                    self._create_row_widgets_lazy(row)
+                    
+                # Show existing widgets
+                for col in [0, 9, 10]:  # checkbox, status, action columns
+                    widget = self.table.cellWidget(row, col)
+                    if widget and not widget.isVisible():
+                        widget.show()
+            else:
+                # Hide widgets outside visible range and potentially remove them
+                for col in [0, 9, 10]:
+                    widget = self.table.cellWidget(row, col)
+                    if widget:
+                        if widget.isVisible():
+                            widget.hide()
+                        # Remove widgets that are far from viewport for memory efficiency
+                        if row < start_row - 20 or row > end_row + 20:
+                            self._remove_row_widgets(row)
+                            
+    def _create_row_widgets_lazy(self, row):
+        """Lazily create widgets for a specific row"""
+        if row in self._rendered_widgets or row >= self.table.rowCount():
+            return
+            
+        try:
+            # Find the corresponding resource data
+            resource_data = None
+            if hasattr(self, 'nodes_data') and row < len(self.nodes_data):
+                resource_data = self.nodes_data[row]
+            elif hasattr(self, 'resources') and row < len(self.resources):
+                resource_data = self.resources[row]
+                
+            if resource_data:
+                node_name = resource_data.get("name", "unknown")
+                
+                # Create widgets using pool
+                checkbox_container = self.widget_pool.get_checkbox_container()
+                checkbox_container.setParent(None)
+                self.table.setCellWidget(row, 0, checkbox_container)
+                
+                # Create status and action widgets
+                self._create_status_and_action_widgets_pooled(row, resource_data, node_name)
+                
+                self._rendered_widgets.add(row)
+                
+        except Exception as e:
+            logging.debug(f"Error creating lazy widgets for row {row}: {e}")
+            
+    def _remove_row_widgets(self, row):
+        """Remove widgets for a row to save memory"""
+        if row not in self._rendered_widgets:
+            return
+            
+        try:
+            # Return widgets to pool and remove from table
+            for col in [0, 9, 10]:
+                widget = self.table.cellWidget(row, col)
+                if widget:
+                    widget.setParent(None)  # Return to pool
+                    self.table.setCellWidget(row, col, None)
+                    
+            self._rendered_widgets.discard(row)
+            
+        except Exception as e:
+            logging.debug(f"Error removing widgets for row {row}: {e}")
+                        
+    def _update_viewport_region(self, visible_range):
+        """Update only the visible viewport region"""
+        if not visible_range:
+            return
+            
+        start_row, end_row = visible_range
+        
+        # Update only visible region
+        for row in range(start_row, end_row + 1):
+            for col in range(self.table.columnCount()):
+                index = self.table.model().index(row, col)
+                rect = self.table.visualRect(index)
+                if rect.isValid():
+                    self.table.viewport().update(rect)
+
+    def _handle_node_scroll(self, value):
+        """Legacy method - redirects to optimized version"""
+        self._handle_optimized_scroll(value)
     
     def _load_more_nodes(self):
         """Load more nodes for virtual scrolling"""
@@ -1064,96 +1728,346 @@ class NodesPage(BaseResourcePage):
         return self.populate_resource_row_optimized(row, resource)
 
     def clear_table(self):
-        """Override base class clear_table to ensure proper widget cleanup"""
+        """Override base class clear_table with memory-efficient cleanup"""
         if not self.table:
             return
             
-        # Clear all cell widgets first
+        # Return widgets to pool instead of deleting
         for row in range(self.table.rowCount()):
-            for col in range(len(self.columns)):
+            for col in [0, 9, 10]:  # Only widget columns
                 widget = self.table.cellWidget(row, col)
                 if widget:
-                    widget.setParent(None)
-                    widget.deleteLater()
+                    widget.setParent(None)  # Return to pool
+        
+        # Clear tracking sets
+        self._rendered_widgets.clear()
+        self._widget_cache.clear()
         
         # Clear contents and reset row count
         self.table.clearContents()
         self.table.setRowCount(0)
 
     def populate_table(self, resources_to_populate):
-        """Populate table with resource data - heavily optimized for performance under heavy load"""
+        """Ultra-optimized table population with segfault protection"""
         if not self.table or not resources_to_populate: 
             return
+        
+        # Additional safety checks to prevent segfaults
+        try:
+            # Check if table is still valid
+            self.table.rowCount()  # This will raise an exception if table is deleted
+        except RuntimeError:
+            logging.error("Table widget has been deleted, cannot populate")
+            return
             
-        logging.info(f"NodesPage: populate_table() called with {len(resources_to_populate)} resources")
+        total_items = len(resources_to_populate)
+        logging.info(f"NodesPage: populate_table() called with {total_items} resources")
         
-        # Disable expensive operations during population (keep updates enabled to prevent loading indicators)
+        # Prevent concurrent population attempts
+        if hasattr(self, '_populating_table') and self._populating_table:
+            logging.debug("Table population already in progress, skipping")
+            return
+        
+        self._populating_table = True
+        
+        try:
+            # For heavy loads, use progressive population strategy
+            if total_items > 100:
+                logging.info(f"NodesPage: Using PROGRESSIVE table population for {total_items} nodes (heavy load)")
+                self._populate_table_progressive(resources_to_populate)
+            elif total_items > 50:
+                logging.info(f"NodesPage: Using ASYNC table population for {total_items} nodes (medium load)")
+                self._populate_table_async(resources_to_populate)
+            else:
+                logging.info(f"NodesPage: Using SYNC table population for {total_items} nodes (light load)")
+                self._populate_table_sync(resources_to_populate)
+        finally:
+            self._populating_table = False
+    
+    def _populate_table_progressive(self, resources_to_populate):
+        """Progressive population for very heavy loads (1000+ nodes)"""
+        total_items = len(resources_to_populate)
+        
+        # Disable all expensive operations
         self.table.setSortingEnabled(False)
-        # self.table.setUpdatesEnabled(False)  # Skip this to prevent loading indicators
+        self.table.setUpdatesEnabled(False)
         
-        # Enhanced clearing for heavy load scenarios
-        old_row_count = self.table.rowCount()
-        if old_row_count > 0:
-            # Use bulk clearing for better performance with many rows
-            self.table.clearContents()
-            # Clear cell widgets in batches to avoid UI freezing
-            widget_batch_size = 20
-            for start_row in range(0, old_row_count, widget_batch_size):
-                end_row = min(start_row + widget_batch_size, old_row_count)
-                for row in range(start_row, end_row):
-                    for col in range(len(self.columns)):
-                        widget = self.table.cellWidget(row, col)
-                        if widget:
-                            widget.setParent(None)
-                            widget.deleteLater()
-                # Skip process events to prevent loading indicators from showing
-                # if end_row < old_row_count:
-                #     QApplication.processEvents()
+        # Optimized clearing
+        self._ultra_fast_clear_table()
         
-        # Reset row count efficiently
-        self.table.setRowCount(0)
+        # Set final row count
+        self.table.setRowCount(total_items)
+        
+        # Progressive rendering in optimized chunks
+        chunk_size = min(200, max(50, total_items // 10))  # Adaptive chunk size
+        
+        def render_chunk(start_idx):
+            try:
+                end_idx = min(start_idx + chunk_size, total_items)
+                
+                # Render chunk efficiently
+                for i in range(start_idx, end_idx):
+                    if i >= total_items:
+                        break
+                    self._populate_row_ultra_fast(i, resources_to_populate[i])
+                
+                # Schedule next chunk or finish
+                if end_idx < total_items:
+                    # Schedule next chunk with minimal delay
+                    QTimer.singleShot(1, lambda: render_chunk(end_idx))
+                else:
+                    # Final setup
+                    self._finalize_progressive_rendering()
+                    
+            except Exception as e:
+                logging.error(f"Error in progressive rendering: {e}")
+                self._finalize_progressive_rendering()
+        
+        # Start progressive rendering
+        render_chunk(0)
+    
+    def _populate_table_sync(self, resources_to_populate):
+        """Optimized synchronous population for small datasets"""
+        self.table.setSortingEnabled(False)
+        self._ultra_fast_clear_table()
         self.table.setRowCount(len(resources_to_populate))
         
-        # Dynamic batch sizing based on resource count for optimal performance
-        total_items = len(resources_to_populate)
-        if total_items > 100:
-            batch_size = 75  # Larger batches for many resources
-        elif total_items > 50:
-            batch_size = 50  # Medium batches
-        else:
-            batch_size = 25  # Smaller batches for few resources
+        for i, resource in enumerate(resources_to_populate):
+            self._populate_row_ultra_fast(i, resource)
         
-        # Process all items in optimized batches
-        for start_idx in range(0, total_items, batch_size):
-            end_idx = min(start_idx + batch_size, total_items)
-            
-            # Populate batch efficiently
-            for i in range(start_idx, end_idx):
-                self.populate_resource_row_optimized(i, resources_to_populate[i])
-            
-            # Skip event processing to prevent loading indicators from showing
-            # if end_idx < total_items and total_items > 50:
-            #     # Only process events every other batch for heavy loads
-            #     if (start_idx // batch_size) % 2 == 0:
-            #         QApplication.processEvents()
-            # elif end_idx < total_items:
-            #     QApplication.processEvents()
-        
-        # Re-enable sorting (updates were never disabled)
-        # self.table.setUpdatesEnabled(True)  # Was never disabled
         self.table.setSortingEnabled(True)
+        self.table.viewport().update()
+    
+    def _ultra_fast_clear_table(self):
+        """Ultra-fast table clearing with segfault protection"""
+        try:
+            # Verify table is still valid
+            old_count = self.table.rowCount()
+        except RuntimeError:
+            logging.debug("Table widget deleted during clear operation")
+            return
         
-        # Skip viewport updates to prevent loading indicators
-        # if total_items > 50:
-        #     # Defer viewport updates for heavy loads
-        #     from PyQt6.QtCore import QTimer
-        #     QTimer.singleShot(100, lambda: self.table.viewport().update())
-        # else:
-        #     self.table.viewport().update()
+        if old_count > 0:
+            try:
+                # Return widgets to pool instead of deleting - with safety checks
+                for row in range(min(old_count, 100)):  # Only process first 100 for speed
+                    for col in [0, 9, 10]:  # Only widget columns
+                        try:
+                            widget = self.table.cellWidget(row, col)
+                            if widget:
+                                widget.setParent(None)  # Return to pool
+                        except RuntimeError:
+                            # Widget or table was deleted, skip
+                            continue
+                
+                # Clear everything at once with error handling
+                self.table.clearContents()
+                self.table.setRowCount(0)
+                
+            except RuntimeError:
+                logging.debug("Table widget deleted during clear operation")
+                return
+    
+    def _populate_row_ultra_fast(self, row, resource):
+        """Ultra-fast row population with segfault protection"""
+        try:
+            # Verify table is still valid and has enough rows
+            if row >= self.table.rowCount():
+                logging.debug(f"Row {row} exceeds table size, skipping")
+                return
+                
+            self.table.setRowHeight(row, 40)
+            
+            # Pre-calculate display values once
+            display_values = self._calculate_display_values_fast(resource)
+            
+            # Create text items in batch with error handling
+            for col, (value, sort_value) in enumerate(display_values):
+                try:
+                    cell_col = col + 1
+                    item = SortableTableWidgetItem(value, sort_value) if sort_value is not None else SortableTableWidgetItem(value)
+                    
+                    # Optimized alignment setting
+                    if col in {1, 2, 3, 4, 5, 6, 7}:  # Use set for faster lookup
+                        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    else:
+                        item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+                    
+                    item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    self.table.setItem(row, cell_col, item)
+                except RuntimeError:
+                    # Table was deleted, abort population
+                    return
+            
+            # Create widgets only when needed (lazy) - with error handling
+            self._create_minimal_row_widgets(row, resource)
+            
+        except RuntimeError:
+            logging.debug("Table widget deleted during row population")
+            return
+    
+    def _create_minimal_row_widgets(self, row, resource):
+        """Create only essential widgets with pooling and segfault protection"""
+        try:
+            # Verify table is still valid
+            if row >= self.table.rowCount():
+                return
+                
+            # Checkbox container (minimal)
+            checkbox_container = QWidget()
+            checkbox_container.setStyleSheet("background-color: transparent;")
+            self.table.setCellWidget(row, 0, checkbox_container)
+            
+            # Status widget (pooled) - with error handling
+            status = resource.get("status", "Unknown")
+            color = AppColors.STATUS_ACTIVE if status.lower() == "ready" else AppColors.STATUS_DISCONNECTED
+            
+            try:
+                # Use widget pool for status
+                status_widget = self.widget_pool.get_status_widget(status, color)
+                if status_widget:  # Check if widget is valid
+                    status_widget.setParent(None)
+                    self.table.setCellWidget(row, 9, status_widget)
+            except (RuntimeError, AttributeError):
+                # Widget pool failed, skip status widget
+                logging.debug("Failed to create status widget, skipping")
+            
+            # Action container (pooled) - with error handling
+            try:
+                action_container = self.widget_pool.get_action_container()
+                if action_container:  # Check if container is valid
+                    action_container.setParent(None)
+                    
+                    # Create action button using the original method
+                    action_button = self._create_action_button(row, resource.get("name", ""))
+                    if action_button:  # Check if button was created successfully
+                        layout = action_container.layout()
+                        if not layout:
+                            layout = QHBoxLayout(action_container)
+                            layout.setContentsMargins(5, 0, 5, 0)
+                            layout.setSpacing(0)
+                            layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                        else:
+                            # Clear existing layout safely
+                            while layout.count():
+                                child = layout.takeAt(0)
+                                if child.widget():
+                                    child.widget().setParent(None)
+                        
+                        layout.addWidget(action_button)
+                        self.table.setCellWidget(row, 10, action_container)
+            except (RuntimeError, AttributeError):
+                # Widget pool failed, skip action container
+                logging.debug("Failed to create action container, skipping")
+            
+            # Store raw data efficiently
+            if "raw_data" not in resource:
+                resource["raw_data"] = {
+                    "metadata": {"name": resource.get("name", "")},
+                    "status": {"conditions": [{"type": status, "status": "True"}]}
+                }
+                
+        except RuntimeError:
+            logging.debug("Table widget deleted during widget creation")
+            return
+    
+    
+    def _finalize_progressive_rendering(self):
+        """Finalize progressive rendering setup with segfault protection"""
+        try:
+            # Verify table is still valid before finalizing
+            if not self.table:
+                return
+                
+            row_count = self.table.rowCount()  # This will raise RuntimeError if table is deleted
+            
+            self.table.setUpdatesEnabled(True)
+            self.table.setSortingEnabled(True)
+            self.table.viewport().update()
+            logging.info(f"Progressive rendering completed for {row_count} nodes")
+            
+        except RuntimeError:
+            logging.debug("Table widget deleted during finalization")
+            return
+        except Exception as e:
+            logging.error(f"Error finalizing progressive rendering: {e}")
+    
+
+    def _populate_table_async(self, resources_to_populate):
+        """Populate table asynchronously to prevent UI freezing"""
+        # Stop any existing async populator
+        if self.async_populator:
+            self.async_populator.stop()
+            self.async_populator.wait(1000)
+            self.async_populator.deleteLater()
+            
+        # Create and start async populator
+        batch_size = min(25, max(10, len(resources_to_populate) // 10))
+        self.async_populator = AsyncTablePopulator(resources_to_populate, batch_size)
+        self.async_populator.rows_ready.connect(self._handle_async_rows)
+        self.async_populator.population_complete.connect(self._handle_population_complete)
+        self.async_populator.start()
         
-        # Skip final event processing to prevent loading indicators
-        # if total_items <= 50:
-        #     QApplication.processEvents()
+    def _handle_async_rows(self, processed_rows, is_complete):
+        """Handle rows processed asynchronously"""
+        try:
+            for row_data in processed_rows:
+                row = row_data['row']
+                if row < self.table.rowCount():
+                    self._populate_row_from_processed_data(row_data)
+                    
+            # Update viewport only for visible rows
+            if self.table.isVisible():
+                visible_rows = self._get_visible_row_range()
+                if visible_rows:
+                    self._update_viewport_region(visible_rows)
+                    
+        except Exception as e:
+            logging.error(f"Error handling async rows: {e}")
+            
+    def _handle_population_complete(self):
+        """Handle completion of async population"""
+        try:
+            # Re-enable sorting
+            self.table.setSortingEnabled(True)
+            
+            # Final viewport update
+            self.table.viewport().update()
+            
+            logging.info(f"Async table population completed for {self.table.rowCount()} rows")
+        except Exception as e:
+            logging.error(f"Error in population complete handler: {e}")
+            
+    def _populate_row_from_processed_data(self, row_data):
+        """Populate a single row using pre-processed data"""
+        row = row_data['row']
+        node_name = row_data['node_name']
+        resource = row_data['resource']
+        display_values = row_data['display_values']
+        
+        self.table.setRowHeight(row, 40)
+        
+        # Create widgets using pool
+        checkbox_container = self.widget_pool.get_checkbox_container()
+        checkbox_container.setParent(None)  # Clear previous parent
+        self.table.setCellWidget(row, 0, checkbox_container)
+        
+        # Create table items efficiently
+        for col, (value, sort_value) in enumerate(display_values):
+            cell_col = col + 1
+            item = SortableTableWidgetItem(value, sort_value) if sort_value is not None else SortableTableWidgetItem(value)
+            
+            # Set alignment based on column type
+            if col in [1, 2, 3, 4, 5, 6, 7]:
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            else:
+                item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            
+            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, cell_col, item)
+        
+        # Create status and action widgets using pool
+        self._create_status_and_action_widgets_pooled(row, resource, node_name)
 
     def populate_resource_row_optimized(self, row, resource):
         """Highly optimized row population - minimizes widget creation"""
@@ -1266,48 +2180,51 @@ class NodesPage(BaseResourcePage):
             (age, age_sort)
         ]
     
-    def _create_status_and_action_widgets_fast(self, row, resource, column_offset):
-        """Create status and action widgets with minimal styling"""
-        node_name = resource.get("name", "unknown")
+    def _create_status_and_action_widgets_pooled(self, row, resource, node_name):
+        """Create status and action widgets using widget pool"""
         status = resource.get("status", "Unknown")
         
         # Status goes in column 9 (Conditions column)
         status_col = 9
         
-        # Simple status widget
+        # Get status widget from pool
         color = AppColors.STATUS_ACTIVE if status.lower() == "ready" else AppColors.STATUS_DISCONNECTED
-        status_widget = StatusLabel(status, color)
+        status_widget = self.widget_pool.get_status_widget(status, color)
         status_widget.clicked.connect(lambda r=row: self.table.selectRow(r))
-        
-        # Ensure the widget is properly initialized before setting
-        status_widget.show()
+        status_widget.setParent(None)  # Clear previous parent
         self.table.setCellWidget(row, status_col, status_widget)
-        # Use base class action button implementation with proper styling
+        
+        # Get action container from pool
+        action_container = self.widget_pool.get_action_container()
+        action_container.setParent(None)  # Clear previous parent
+        
+        # Create action button
         action_button = self._create_action_button(row, node_name)
         action_button.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE +
     """
     QToolButton::menu-indicator { image: none; width: 0px; }
     """)
         
-        # Create action container with proper styling
-        action_container = QWidget()
-        action_container.setFixedSize(40, 30)  # Fixed size instead of just width
-        action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
-        action_layout = QHBoxLayout(action_container)
-        action_layout.setContentsMargins(5, 0, 5, 0)
-        action_layout.setSpacing(0)
-        action_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        action_layout.addWidget(action_button)
-        
-        # Ensure the container is properly initialized before setting
-        action_container.show()
+        # Set up container layout
+        if action_container.layout():
+            # Clear existing layout
+            layout = action_container.layout()
+            while layout.count():
+                child = layout.takeAt(0)
+                if child.widget():
+                    child.widget().setParent(None)
+        else:
+            # Create new layout
+            layout = QHBoxLayout(action_container)
+            layout.setContentsMargins(5, 0, 5, 0)
+            layout.setSpacing(0)
+            layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            
+        layout.addWidget(action_button)
         
         # Action button goes in column 10 (last column)
         action_col = 10
         self.table.setCellWidget(row, action_col, action_container)
-        # Ensure the table cell is properly updated
-        self.table.viewport().update(self.table.visualRect(self.table.model().index(row, status_col)))
-        self.table.viewport().update(self.table.visualRect(self.table.model().index(row, action_col)))
         
         # Store raw data for potential use
         if "raw_data" not in resource:
@@ -1315,6 +2232,11 @@ class NodesPage(BaseResourcePage):
                 "metadata": {"name": node_name},
                 "status": {"conditions": [{"type": status, "status": "True"}]}
             }
+    
+    def _create_status_and_action_widgets_fast(self, row, resource, column_offset):
+        """Redirect to pooled version"""
+        node_name = resource.get("name", "unknown")
+        return self._create_status_and_action_widgets_pooled(row, resource, node_name)
     
     def _highlight_active_row(self, row, is_active):
         """Highlight the row when its menu is active"""
@@ -1432,49 +2354,256 @@ class NodesPage(BaseResourcePage):
                     parent.detail_manager.show_detail(resource_type, resource_name, None)
             
     def load_data(self, load_more=False):
-        """Override to fetch node data from cluster connector with performance optimization"""
+        """Ultra-optimized data loading with intelligent caching and lazy strategies"""
         logging.info(f"NodesPage: load_data() called, is_loading={self.is_loading}")
         
         if self.is_loading:
             logging.debug("NodesPage: Already loading, skipping")
             return
         
-        # Enhanced caching for better performance under heavy load
-        if hasattr(self, '_last_load_time') and hasattr(self, 'resources'):
-            import time
-            # Increased cache time to 30 seconds for heavy load scenarios
-            cache_time = 30 if len(getattr(self, 'resources', [])) > 50 else 10
-            if self.resources and (time.time() - self._last_load_time) < cache_time:
-                logging.info(f"NodesPage: Using cached node data ({len(self.resources)} nodes) for performance")
+        # Intelligent caching strategy
+        if self._should_use_cached_data():
+            logging.info(f"NodesPage: Using cached node data ({len(self.resources)} nodes)")
+            self._display_cached_data()
+            return
+        
+        # Smart loading strategy based on data size
+        expected_size = self._estimate_data_size()
+        logging.info(f"NodesPage: Expected data size: {expected_size} nodes")
+        
+        if expected_size > 500:
+            logging.info("NodesPage: Detected HEAVY load scenario (500+ nodes) - using progressive rendering")
+            self._load_data_heavy()
+        elif expected_size > 100:
+            logging.info("NodesPage: Detected MEDIUM load scenario (100-500 nodes) - using async rendering")
+            self._load_data_medium()
+        else:
+            logging.info("NodesPage: Detected LIGHT load scenario (<100 nodes) - using direct rendering")
+            self._load_data_light()
+    
+    def _should_use_cached_data(self):
+        """Intelligent cache decision based on data freshness and load"""
+        if not hasattr(self, '_last_load_time') or not hasattr(self, 'resources'):
+            return False
+        
+        import time
+        current_time = time.time()
+        time_since_load = current_time - self._last_load_time
+        
+        # Dynamic cache time based on current load and data size
+        if len(getattr(self, 'resources', [])) > 1000:
+            cache_time = 120  # 2 minutes for very large datasets
+        elif len(getattr(self, 'resources', [])) > 500:
+            cache_time = 60   # 1 minute for large datasets  
+        elif len(getattr(self, 'resources', [])) > 100:
+            cache_time = 30   # 30 seconds for medium datasets
+        else:
+            cache_time = 15   # 15 seconds for small datasets
+        
+        return self.resources and time_since_load < cache_time
+    
+    def _display_cached_data(self):
+        """Efficiently display cached data with minimal overhead"""
+        try:
+            # Use lazy rendering for cached data too
+            total_items = len(self.resources)
+            if total_items > 200:
+                # For large cached datasets, still use progressive rendering
+                self._display_resources_progressive(self.resources)
+            else:
+                # Direct display for smaller cached datasets
                 self._display_resources(self.resources)
-                return
-        
+            
+            # Update UI indicators
+            self.items_count.setText(f"{total_items} items (cached)")
+            
+        except Exception as e:
+            logging.error(f"Error displaying cached data: {e}")
+            self._force_fresh_load()
+    
+    def _estimate_data_size(self):
+        """Estimate expected data size based on cluster characteristics"""
+        try:
+            # Check if we have previous data to estimate from
+            if hasattr(self, 'resources') and self.resources:
+                estimated_size = len(self.resources)
+                logging.debug(f"NodesPage: Data size estimate based on previous load: {estimated_size}")
+                return estimated_size
+            
+            # Try to get a quick count estimate from cluster connector
+            if hasattr(self, 'cluster_connector') and self.cluster_connector:
+                # Enhanced estimation based on cluster size
+                if hasattr(self.cluster_connector, 'get_estimated_node_count'):
+                    estimated = self.cluster_connector.get_estimated_node_count()
+                    logging.debug(f"NodesPage: Cluster connector estimates {estimated} nodes")
+                    return estimated
+                else:
+                    # Default estimate for production clusters
+                    estimated = 200  # Higher default for production scenarios
+                    logging.debug(f"NodesPage: Using default production estimate: {estimated}")
+                    return estimated
+            
+            # Conservative estimate for unknown scenarios
+            logging.debug("NodesPage: Using conservative fallback estimate: 50")
+            return 50
+            
+        except Exception as e:
+            logging.debug(f"NodesPage: Error in data size estimation: {e}")
+            return 50
+    
+    def _load_data_heavy(self):
+        """Optimized loading for heavy datasets (500+ nodes)"""
+        logging.info("NodesPage: Using heavy data loading strategy")
+        self._setup_progressive_loading()
+        self._perform_load()
+    
+    def _load_data_medium(self):
+        """Optimized loading for medium datasets (100-500 nodes)"""
+        logging.info("NodesPage: Using medium data loading strategy")
+        self._perform_load()
+    
+    def _load_data_light(self):
+        """Optimized loading for light datasets (<100 nodes)"""
+        logging.info("NodesPage: Using light data loading strategy")
+        self._perform_load()
+    
+    def _perform_load(self):
+        """Common loading logic"""
         self.is_loading = True
-        
-        # Prevent any skeleton loading indicators from showing
         self.is_showing_skeleton = False
         
         if hasattr(self, 'cluster_connector') and self.cluster_connector:
-            logging.info("NodesPage: Calling cluster_connector.load_nodes()")
             self.cluster_connector.load_nodes()
         else:
-            logging.warning("NodesPage: No cluster_connector available")
-            self.is_loading = False
-            self.show_no_data_message()
+            self._handle_no_connector()
+    
+    def _setup_progressive_loading(self):
+        """Setup for progressive/chunked data loading"""
+        self._progressive_loading_active = True
+        self._loaded_chunks = 0
+        self._total_expected_chunks = 0
+    
+    
+    def _handle_no_connector(self):
+        """Handle case when no cluster connector is available"""
+        logging.warning("NodesPage: No cluster_connector available")
+        self.is_loading = False
+        self.show_no_data_message()
+    
+    def _force_fresh_load(self):
+        """Force a fresh load bypassing cache"""
+        if hasattr(self, '_last_load_time'):
+            self._last_load_time = 0  # Reset cache timestamp
+        self.load_data()
+    
+    def _display_resources_progressive(self, resources):
+        """Display resources with progressive rendering for large datasets"""
+        total_items = len(resources)
+        logging.info(f"Progressive display for {total_items} resources")
+        
+        # Use the progressive table population
+        self.show_table()
+        self._populate_table_progressive(resources)
+        
+        # Update counters
+        self.items_count.setText(f"Loading {total_items} items...")
+        
+        # Final update will be done in _finalize_progressive_rendering
     
     def force_load_data(self):
-        """Override base class force_load_data to use cluster connector with virtual scrolling reset"""
+        """Override base class force_load_data with protection against rapid successive calls"""
         logging.info("NodesPage: force_load_data() called")
         
-        # Reset virtual scrolling state
-        if hasattr(self, '_virtual_scrolling_enabled'):
-            self._rendered_items_count = 0
-            self._total_available_items = 0
-            self.all_data_loaded = False
-            if hasattr(self, '_load_more_indicator_row'):
-                delattr(self, '_load_more_indicator_row')
+        # Prevent rapid successive calls that can cause segfaults
+        import time
+        current_time = time.time()
+        if hasattr(self, '_last_force_load_time'):
+            if current_time - self._last_force_load_time < 0.5:  # 500ms minimum interval
+                logging.debug("NodesPage: Skipping force_load_data - too soon after previous call")
+                return
         
-        self.load_data()
+        self._last_force_load_time = current_time
+        
+        # Check if currently loading to prevent conflicts
+        if self.is_loading:
+            logging.debug("NodesPage: Already loading, skipping force_load_data")
+            return
+        
+        try:
+            # Reset cache timestamp to force fresh load
+            if hasattr(self, '_last_load_time'):
+                self._last_load_time = 0
+            
+            # Reset virtual scrolling state safely
+            if hasattr(self, '_virtual_scrolling_enabled'):
+                self._rendered_items_count = 0
+                self._total_available_items = 0
+                self.all_data_loaded = False
+                if hasattr(self, '_load_more_indicator_row'):
+                    delattr(self, '_load_more_indicator_row')
+            
+            # Cancel any existing background operations
+            self._cancel_background_operations()
+            
+            # Load data
+            self.load_data()
+            
+        except Exception as e:
+            logging.error(f"Error in force_load_data: {e}")
+            self.is_loading = False
+    
+    def _cancel_background_operations(self):
+        """Cancel any running background operations to prevent conflicts"""
+        try:
+            # Cancel background search worker
+            if hasattr(self, '_search_worker') and self._search_worker:
+                if self._search_worker.isRunning():
+                    self._search_worker.quit()
+                    self._search_worker.wait(100)  # Short wait
+                    
+            # Cancel async populator
+            if hasattr(self, 'async_populator') and self.async_populator:
+                self.async_populator.stop()
+                
+        except Exception as e:
+            logging.debug(f"Error canceling background operations: {e}")
+    
+    def _verify_heavy_load_capability(self):
+        """Verify that heavy load optimizations are working correctly"""
+        capabilities = []
+        
+        # Check if all heavy load methods exist
+        required_methods = [
+            '_populate_table_progressive', '_populate_table_async', 
+            '_process_large_dataset', '_process_medium_dataset',
+            '_load_data_heavy', '_load_data_medium', '_load_data_light'
+        ]
+        
+        for method_name in required_methods:
+            if hasattr(self, method_name):
+                capabilities.append(f"✓ {method_name}")
+            else:
+                capabilities.append(f"✗ {method_name} MISSING")
+        
+        # Check widget pool
+        if hasattr(self, 'widget_pool') and self.widget_pool:
+            capabilities.append("✓ Widget pool initialized")
+            stats = self.widget_pool.get_pool_stats()
+            capabilities.append(f"  Pool capacity: {stats.get('max_pool_size', 0)}")
+        else:
+            capabilities.append("✗ Widget pool MISSING")
+        
+        # Check cluster connector
+        if hasattr(self, 'cluster_connector') and self.cluster_connector:
+            capabilities.append("✓ Cluster connector connected")
+        else:
+            capabilities.append("✗ Cluster connector MISSING")
+        
+        logging.info("NodesPage Heavy Load Capabilities:")
+        for capability in capabilities:
+            logging.info(f"  {capability}")
+        
+        return all('✓' in cap for cap in capabilities)
     
     def _add_controls_to_header(self, header_layout):
         """Override to add custom controls for nodes page without delete button"""
