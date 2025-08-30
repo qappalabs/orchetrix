@@ -359,6 +359,33 @@ class UnifiedCacheSystem:
             self._resource_cache.clear()
             logging.info("Cleared all resource cache")
     
+    def clear_cluster_cache(self, cluster_name: str):
+        """Clear all cache entries for a specific cluster to prevent stale data"""
+        try:
+            # Clear all caches that might contain cluster-specific data
+            for cache_name, cache_instance in self._caches.items():
+                with cache_instance._lock:
+                    keys_to_remove = []
+                    for key in cache_instance._cache.keys():
+                        # Remove entries that contain the cluster name or are general resources
+                        if (cluster_name in key or 
+                            key.startswith('resource:') or 
+                            key.startswith('metrics:') or
+                            key.startswith('nodes:') or
+                            key.startswith('namespaces:')):
+                            keys_to_remove.append(key)
+                    
+                    for key in keys_to_remove:
+                        cache_instance.delete(key)
+                    
+                    if keys_to_remove:
+                        logging.info(f"Cleared {len(keys_to_remove)} cache entries for cluster {cluster_name} from {cache_name}")
+            
+            logging.info(f"Cleared all cache data for cluster: {cluster_name}")
+            
+        except Exception as e:
+            logging.error(f"Error clearing cluster cache for {cluster_name}: {e}")
+    
     # Metrics caching methods
     def cache_metrics(self, cluster_name: str, metrics: Dict[str, Any], ttl_seconds: int = 30):
         """Cache cluster metrics"""

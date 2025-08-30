@@ -745,15 +745,32 @@ class DetailPageYAMLSection(BaseDetailSection):
     def update_ui_with_data(self, data: Dict[str, Any]):
         """Update YAML UI with loaded resource data"""
         try:
+            if not data:
+                self.yaml_editor.setPlainText("# No data available for this resource")
+                return
+                
             # Convert snake_case back to camelCase for proper Kubernetes YAML
             kubernetes_yaml = self._convert_to_kubernetes_yaml(data)
-            yaml_text = yaml.dump(kubernetes_yaml, default_flow_style=False, sort_keys=False)
+            
+            # Use better YAML dump settings for readability
+            yaml_text = yaml.dump(
+                kubernetes_yaml, 
+                default_flow_style=False, 
+                sort_keys=False,
+                indent=2,
+                width=120,
+                allow_unicode=True
+            )
             self.yaml_editor.setPlainText(yaml_text)
             self.original_yaml = yaml_text
+            
+            logging.debug(f"Successfully rendered YAML for {self.resource_type}/{self.resource_name}")
 
         except Exception as e:
-            self.yaml_editor.setPlainText(f"Error rendering YAML: {str(e)}")
-            self.handle_error(f"Error rendering YAML: {str(e)}")
+            error_message = f"Error rendering YAML: {str(e)}"
+            logging.error(f"YAML rendering error for {self.resource_type}/{self.resource_name}: {e}")
+            self.yaml_editor.setPlainText(f"# {error_message}\n# Raw data:\n{str(data)}")
+            self.handle_error(error_message)
 
     def _convert_to_kubernetes_yaml(self, data):
         """Convert Python client dict format to Kubernetes YAML format - Pod-safe version"""
@@ -808,6 +825,33 @@ class DetailPageYAMLSection(BaseDetailSection):
             # Remove events as they're read-only
             if 'events' in converted_data:
                 del converted_data['events']
+
+            # Add apiVersion if missing for better YAML completeness
+            if 'apiVersion' not in converted_data and 'kind' in converted_data:
+                kind = converted_data['kind']
+                # Add appropriate apiVersion based on resource kind
+                api_version_mapping = {
+                    'PriorityClass': 'scheduling.k8s.io/v1',
+                    'RuntimeClass': 'node.k8s.io/v1',
+                    'HorizontalPodAutoscaler': 'autoscaling/v2',
+                    'PodDisruptionBudget': 'policy/v1',
+                    'MutatingWebhookConfiguration': 'admissionregistration.k8s.io/v1',
+                    'ValidatingWebhookConfiguration': 'admissionregistration.k8s.io/v1',
+                    'Lease': 'coordination.k8s.io/v1',
+                    'CustomResourceDefinition': 'apiextensions.k8s.io/v1',
+                    # Common v1 resources
+                    'ReplicationController': 'v1',
+                    'LimitRange': 'v1', 
+                    'ResourceQuota': 'v1',
+                    'ServiceAccount': 'v1',
+                    'Endpoints': 'v1',
+                    'Role': 'rbac.authorization.k8s.io/v1',
+                    'RoleBinding': 'rbac.authorization.k8s.io/v1',
+                    'ClusterRole': 'rbac.authorization.k8s.io/v1',
+                    'ClusterRoleBinding': 'rbac.authorization.k8s.io/v1',
+                }
+                if kind in api_version_mapping:
+                    converted_data['apiVersion'] = api_version_mapping[kind]
 
             # For Pods specifically, clean up the spec to only include editable fields
             if converted_data.get('kind') == 'Pod' and 'spec' in converted_data:

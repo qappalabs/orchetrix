@@ -6,7 +6,7 @@ from PyQt6.QtGui import QColor
 
 from Base_Components.base_components import SortableTableWidgetItem
 from Base_Components.base_resource_page import BaseResourcePage
-from UI.Styles import AppStyles, AppColors
+from UI.Styles import AppStyles
 
 class IngressClassesPage(BaseResourcePage):
     """
@@ -22,6 +22,7 @@ class IngressClassesPage(BaseResourcePage):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.resource_type = "ingressclasses"
+        self.show_namespace_dropdown = False  # IngressClasses are cluster-scoped
         self.setup_page_ui()
         
     def setup_page_ui(self):

@@ -74,43 +74,43 @@ class OverviewResourceWorker(EnhancedBaseWorker):
             
             if self.resource_type == "pods":
                 if hasattr(self.kube_client, 'v1') and self.kube_client.v1:
-                    logging.info(f"OverviewResourceWorker: Calling list_pod_for_all_namespaces")
-                    items = self.kube_client.v1.list_pod_for_all_namespaces()
+                    logging.info(f"OverviewResourceWorker: Calling list_pod_for_all_namespaces with limit")
+                    items = self.kube_client.v1.list_pod_for_all_namespaces(limit=1000)
                     logging.info(f"OverviewResourceWorker: Got {len(items.items) if items and hasattr(items, 'items') else 0} pods")
                 else:
                     raise Exception("Kubernetes v1 API not available")
             elif self.resource_type == "deployments":
                 if hasattr(self.kube_client, 'apps_v1') and self.kube_client.apps_v1:
-                    items = self.kube_client.apps_v1.list_deployment_for_all_namespaces()
+                    items = self.kube_client.apps_v1.list_deployment_for_all_namespaces(limit=1000)
                 else:
                     raise Exception("Kubernetes apps_v1 API not available")
             elif self.resource_type == "daemonsets":
                 if hasattr(self.kube_client, 'apps_v1') and self.kube_client.apps_v1:
-                    items = self.kube_client.apps_v1.list_daemon_set_for_all_namespaces()
+                    items = self.kube_client.apps_v1.list_daemon_set_for_all_namespaces(limit=1000)
                 else:
                     raise Exception("Kubernetes apps_v1 API not available")
             elif self.resource_type == "statefulsets":
                 if hasattr(self.kube_client, 'apps_v1') and self.kube_client.apps_v1:
-                    items = self.kube_client.apps_v1.list_stateful_set_for_all_namespaces()
+                    items = self.kube_client.apps_v1.list_stateful_set_for_all_namespaces(limit=1000)
                 else:
                     raise Exception("Kubernetes apps_v1 API not available")
             elif self.resource_type == "replicasets":
                 if hasattr(self.kube_client, 'apps_v1') and self.kube_client.apps_v1:
-                    items = self.kube_client.apps_v1.list_replica_set_for_all_namespaces()
+                    items = self.kube_client.apps_v1.list_replica_set_for_all_namespaces(limit=1000)
                 else:
                     raise Exception("Kubernetes apps_v1 API not available")
             elif self.resource_type == "jobs":
                 if hasattr(self.kube_client, 'batch_v1') and self.kube_client.batch_v1:
-                    items = self.kube_client.batch_v1.list_job_for_all_namespaces()
+                    items = self.kube_client.batch_v1.list_job_for_all_namespaces(limit=1000)
                 else:
                     raise Exception("Kubernetes batch_v1 API not available")
             elif self.resource_type == "cronjobs":
                 if hasattr(self.kube_client, 'batch_v1') and self.kube_client.batch_v1:
                     try:
-                        items = self.kube_client.batch_v1.list_cron_job_for_all_namespaces()
+                        items = self.kube_client.batch_v1.list_cron_job_for_all_namespaces(limit=1000)
                     except (AttributeError, ApiException):
                         if hasattr(self.kube_client, 'batch_v1beta1') and self.kube_client.batch_v1beta1:
-                            items = self.kube_client.batch_v1beta1.list_cron_job_for_all_namespaces()
+                            items = self.kube_client.batch_v1beta1.list_cron_job_for_all_namespaces(limit=1000)
                         else:
                             raise Exception("CronJob API not available")
                 else:
@@ -547,14 +547,30 @@ class OverviewPage(QWidget):
             logging.info(f"OverviewPage: Loading data for {len(self.metric_cards)} resource types")
             
             # Load data directly for faster response
+            # Load data with timeout protection to prevent crashes
+            import time
+            start_time = time.time()
+            timeout_seconds = 30  # 30 second timeout
+            
             for resource_type in self.metric_cards.keys():
                 try:
+                    # Check timeout
+                    if time.time() - start_time > timeout_seconds:
+                        logging.warning(f"OverviewPage: Timeout reached, skipping remaining resource types")
+                        break
+                        
                     self._load_resource_direct(resource_type)
+                    
+                    # Force garbage collection periodically to prevent memory issues
+                    import gc
+                    gc.collect()
+                    
                 except Exception as e:
                     logging.error(f"Error loading {resource_type}: {e}")
                     self.handle_resource_error(resource_type, str(e))
             
             self._is_loading = False
+            logging.info(f"OverviewPage: Completed data loading in {time.time() - start_time:.2f} seconds")
                     
         except Exception as e:
             logging.error(f"Error in fetch_kubernetes_data: {e}")
@@ -608,59 +624,149 @@ class OverviewPage(QWidget):
             running_count = 0
             total_count = 0
             
-            # Direct API calls for faster loading
+            # Direct API calls for faster loading with crash protection
             if resource_type == "pods":
-                items = self.kube_client.v1.list_pod_for_all_namespaces()
-                total_count = len(items.items)
-                running_count = sum(1 for pod in items.items if pod.status and pod.status.phase == "Running")
+                try:
+                    # Use limit to prevent crashes with large datasets
+                    items = self.kube_client.v1.list_pod_for_all_namespaces(limit=1000)
+                    if not items or not hasattr(items, 'items') or not items.items:
+                        total_count = 0
+                        running_count = 0
+                    else:
+                        total_count = len(items.items)
+                        running_count = sum(1 for pod in items.items if pod and pod.status and hasattr(pod.status, 'phase') and pod.status.phase == "Running")
+                except Exception as e:
+                    logging.error(f"Error loading pods: {e}")
+                    raise e
                 
             elif resource_type == "deployments":
-                items = self.kube_client.apps_v1.list_deployment_for_all_namespaces()
-                total_count = len(items.items)
-                running_count = sum(1 for dep in items.items 
-                                  if dep.status and 
-                                  (dep.status.available_replicas or 0) == (dep.status.replicas or 0) and 
-                                  (dep.status.replicas or 0) > 0)
+                try:
+                    items = self.kube_client.apps_v1.list_deployment_for_all_namespaces(limit=1000)
+                    if not items or not hasattr(items, 'items') or not items.items:
+                        total_count = 0
+                        running_count = 0
+                    else:
+                        total_count = len(items.items)
+                        running_count = 0
+                        for dep in items.items:
+                            if dep and dep.status and hasattr(dep.status, 'available_replicas') and hasattr(dep.status, 'replicas'):
+                                available = getattr(dep.status, 'available_replicas', 0) or 0
+                                desired = getattr(dep.status, 'replicas', 0) or 0
+                                if available == desired and desired > 0:
+                                    running_count += 1
+                except Exception as e:
+                    logging.error(f"Error loading deployments: {e}")
+                    raise e
                                   
             elif resource_type == "daemonsets":
-                items = self.kube_client.apps_v1.list_daemon_set_for_all_namespaces()
-                total_count = len(items.items)
-                running_count = sum(1 for ds in items.items 
-                                  if ds.status and 
-                                  (ds.status.number_ready or 0) == (ds.status.desired_number_scheduled or 0))
+                try:
+                    items = self.kube_client.apps_v1.list_daemon_set_for_all_namespaces(limit=1000)
+                    if not items or not hasattr(items, 'items') or not items.items:
+                        total_count = 0
+                        running_count = 0
+                    else:
+                        total_count = len(items.items)
+                        running_count = 0
+                        for ds in items.items:
+                            if ds and ds.status and hasattr(ds.status, 'number_ready') and hasattr(ds.status, 'desired_number_scheduled'):
+                                ready = getattr(ds.status, 'number_ready', 0) or 0
+                                desired = getattr(ds.status, 'desired_number_scheduled', 0) or 0
+                                if ready == desired and desired > 0:
+                                    running_count += 1
+                except Exception as e:
+                    logging.error(f"Error loading daemonsets: {e}")
+                    raise e
                                   
             elif resource_type == "statefulsets":
-                items = self.kube_client.apps_v1.list_stateful_set_for_all_namespaces()
-                total_count = len(items.items)
-                running_count = sum(1 for ss in items.items 
-                                  if ss.status and 
-                                  (ss.status.ready_replicas or 0) == (ss.status.replicas or 0) and 
-                                  (ss.status.replicas or 0) > 0)
+                try:
+                    items = self.kube_client.apps_v1.list_stateful_set_for_all_namespaces(limit=1000)
+                    if not items or not hasattr(items, 'items') or not items.items:
+                        total_count = 0
+                        running_count = 0
+                    else:
+                        total_count = len(items.items)
+                        running_count = 0
+                        for ss in items.items:
+                            if ss and ss.status and hasattr(ss.status, 'ready_replicas') and hasattr(ss.status, 'replicas'):
+                                ready = getattr(ss.status, 'ready_replicas', 0) or 0
+                                desired = getattr(ss.status, 'replicas', 0) or 0
+                                if ready == desired and desired > 0:
+                                    running_count += 1
+                except Exception as e:
+                    logging.error(f"Error loading statefulsets: {e}")
+                    raise e
                                   
             elif resource_type == "replicasets":
-                items = self.kube_client.apps_v1.list_replica_set_for_all_namespaces()
-                # Filter out zero-replica replicasets
-                active_items = [rs for rs in items.items if (rs.status and rs.status.replicas or 0) > 0]
-                total_count = len(active_items)
-                running_count = sum(1 for rs in active_items 
-                                  if rs.status and 
-                                  (rs.status.ready_replicas or 0) == (rs.status.replicas or 0))
+                try:
+                    items = self.kube_client.apps_v1.list_replica_set_for_all_namespaces(limit=1000)
+                    if not items or not hasattr(items, 'items') or not items.items:
+                        total_count = 0
+                        running_count = 0
+                    else:
+                        # Filter out zero-replica replicasets safely
+                        active_items = []
+                        for rs in items.items:
+                            if rs and rs.status and hasattr(rs.status, 'replicas'):
+                                replicas = getattr(rs.status, 'replicas', 0) or 0
+                                if replicas > 0:
+                                    active_items.append(rs)
+                        
+                        total_count = len(active_items)
+                        running_count = 0
+                        for rs in active_items:
+                            if rs and rs.status and hasattr(rs.status, 'ready_replicas') and hasattr(rs.status, 'replicas'):
+                                ready = getattr(rs.status, 'ready_replicas', 0) or 0
+                                desired = getattr(rs.status, 'replicas', 0) or 0
+                                if ready == desired:
+                                    running_count += 1
+                except Exception as e:
+                    logging.error(f"Error loading replicasets: {e}")
+                    raise e
                                   
             elif resource_type == "jobs":
-                items = self.kube_client.batch_v1.list_job_for_all_namespaces()
-                total_count = len(items.items)
-                running_count = sum(1 for job in items.items 
-                                  if job.status and (job.status.succeeded or 0) > 0)
+                try:
+                    items = self.kube_client.batch_v1.list_job_for_all_namespaces(limit=1000)
+                    if not items or not hasattr(items, 'items') or not items.items:
+                        total_count = 0
+                        running_count = 0
+                    else:
+                        total_count = len(items.items)
+                        running_count = 0
+                        for job in items.items:
+                            if job and job.status and hasattr(job.status, 'succeeded'):
+                                succeeded = getattr(job.status, 'succeeded', 0) or 0
+                                if succeeded > 0:
+                                    running_count += 1
+                except Exception as e:
+                    logging.error(f"Error loading jobs: {e}")
+                    raise e
                                   
             elif resource_type == "cronjobs":
                 try:
-                    items = self.kube_client.batch_v1.list_cron_job_for_all_namespaces()
-                except AttributeError:
-                    # Fallback to beta API
-                    items = self.kube_client.batch_v1beta1.list_cron_job_for_all_namespaces()
-                total_count = len(items.items)
-                running_count = sum(1 for cj in items.items 
-                                  if not (cj.spec and cj.spec.suspend))
+                    items = None
+                    try:
+                        items = self.kube_client.batch_v1.list_cron_job_for_all_namespaces(limit=1000)
+                    except (AttributeError, Exception):
+                        # Fallback to beta API
+                        if hasattr(self.kube_client, 'batch_v1beta1'):
+                            items = self.kube_client.batch_v1beta1.list_cron_job_for_all_namespaces(limit=1000)
+                    
+                    if not items or not hasattr(items, 'items') or not items.items:
+                        total_count = 0
+                        running_count = 0
+                    else:
+                        total_count = len(items.items)
+                        running_count = 0
+                        for cj in items.items:
+                            if cj and cj.spec and hasattr(cj.spec, 'suspend'):
+                                suspended = getattr(cj.spec, 'suspend', False)
+                                if not suspended:
+                                    running_count += 1
+                            elif cj:  # If no suspend field, assume it's running
+                                running_count += 1
+                except Exception as e:
+                    logging.error(f"Error loading cronjobs: {e}")
+                    raise e
                                   
             logging.info(f"OverviewPage: Successfully loaded {resource_type}: {running_count}/{total_count}")
             self.update_card_data(resource_type, (running_count, total_count))
@@ -745,5 +851,55 @@ class OverviewPage(QWidget):
 
     def cleanup(self):
         """Cleanup when page is being destroyed."""
-        if self.refresh_timer:
-            self.refresh_timer.stop()
+        try:
+            # Stop the timer first
+            if self.refresh_timer:
+                self.refresh_timer.stop()
+                self.refresh_timer.deleteLater()
+                self.refresh_timer = None
+            
+            # Cancel any ongoing loading
+            self._is_loading = False
+            self._loading_resources.clear()
+            
+            # Cancel any pending workers
+            try:
+                thread_manager = get_thread_manager()
+                for resource_type in self.metric_cards.keys():
+                    worker_id = f"overview_{resource_type}_{id(self)}"
+                    thread_manager.cancel_worker(worker_id)
+            except Exception as e:
+                logging.error(f"Error canceling workers: {e}")
+            
+            # Clear references
+            self.kube_client = None
+            if hasattr(self, 'metric_cards'):
+                self.metric_cards.clear()
+            
+            # Force garbage collection
+            import gc
+            gc.collect()
+            
+            logging.info("OverviewPage: Cleanup completed")
+            
+        except Exception as e:
+            logging.error(f"OverviewPage: Error during cleanup: {e}")
+    
+    def closeEvent(self, event):
+        """Handle close event"""
+        try:
+            self.cleanup()
+        except Exception as e:
+            logging.error(f"Error in closeEvent: {e}")
+        finally:
+            if hasattr(super(), 'closeEvent'):
+                super().closeEvent(event)
+            else:
+                event.accept()
+    
+    def __del__(self):
+        """Destructor for additional safety"""
+        try:
+            self.cleanup()
+        except Exception as e:
+            logging.error(f"OverviewPage: Error in destructor: {e}")

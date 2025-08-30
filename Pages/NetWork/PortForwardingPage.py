@@ -16,6 +16,7 @@ from Utils.port_forward_manager import get_port_forward_manager, PortForwardConf
 from Utils.port_forward_dialog import PortForwardDialog, ActivePortForwardsDialog
 from functools import partial
 import time
+import logging
 from UI.Icons import resource_path
 
 
@@ -181,6 +182,14 @@ class PortForwardingPage(BaseResourcePage):
         # Ensure full width utilization after configuration
         QTimer.singleShot(100, self._ensure_full_width_utilization)
 
+    def force_load_data(self):
+        """Override to prevent calling unified resource loader for port forwarding"""
+        self.load_data()
+    
+    def _start_loading_thread(self, continue_token=None):
+        """Override to prevent starting resource loading thread for port forwarding"""
+        self.load_data()
+
     def load_data(self, load_more=False):
         """Load port forwarding data - override to use real data"""
         if hasattr(self, 'is_loading') and self.is_loading:
@@ -195,20 +204,25 @@ class PortForwardingPage(BaseResourcePage):
         # Convert to resource format expected by base class
         self.resources = []
         for config in port_forwards:
-            resource = {
-                'name': f"{config.resource_name}",
-                'resource_name': config.resource_name,
-                'namespace': config.namespace,
-                'resource_type': config.resource_type,
-                'local_port': config.local_port,
-                'target_port': config.target_port,
-                'protocol': config.protocol,
-                'status': config.status,
-                'created_at': config.created_at,
-                'error_message': config.error_message,
-                'key': config.key
-            }
-            self.resources.append(resource)
+            try:
+                resource = {
+                    'name': getattr(config, 'resource_name', 'Unknown'),
+                    'resource_name': getattr(config, 'resource_name', 'Unknown'),
+                    'namespace': getattr(config, 'namespace', 'default'),
+                    'resource_type': getattr(config, 'resource_type', 'service'),
+                    'local_port': getattr(config, 'local_port', 0),
+                    'target_port': getattr(config, 'target_port', 0),
+                    'protocol': getattr(config, 'protocol', 'TCP'),
+                    'status': getattr(config, 'status', 'unknown'),
+                    'created_at': getattr(config, 'created_at', 0),
+                    'error_message': getattr(config, 'error_message', ''),
+                    'key': getattr(config, 'key', f"{config.resource_name}:{config.local_port}" if hasattr(config, 'resource_name') and hasattr(config, 'local_port') else 'unknown'),
+                    'age': 'N/A'  # Port forwards don't have age like Kubernetes resources
+                }
+                self.resources.append(resource)
+            except Exception as e:
+                logging.error(f"Error processing port forward config: {e}")
+                continue
         
         # Apply search filter if any
         search_text = self.search_bar.text().lower() if self.search_bar and self.search_bar.text() else ""

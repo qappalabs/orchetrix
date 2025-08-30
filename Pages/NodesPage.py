@@ -113,19 +113,19 @@ class GraphWidget(QFrame):
         layout.addLayout(header_layout)
         layout.addStretch()
 
-        # Much longer timer interval for better performance  
+        # Timer for regular updates - but allow immediate updates on selection
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_data)
-        self.timer.start(45000)  # 45 seconds to reduce CPU usage
+        self.timer.start(5000)  # 5 seconds for responsive updates
 
-    def generate_utilization_data(self, nodes_data):
+    def generate_utilization_data(self, nodes_data, force_update=False):
         """Generate utilization data for nodes - optimized for performance"""
         if not nodes_data or self._is_updating:
             return
             
         current_time = time.time()
-        # Only throttle if we have data and enough time hasn't passed
-        if (self.utilization_data and 
+        # Only throttle if we have data, enough time hasn't passed, and not forced
+        if (not force_update and self.utilization_data and 
             self._last_update_time > 0 and 
             current_time - self._last_update_time < self._update_interval):
             return
@@ -180,6 +180,11 @@ class GraphWidget(QFrame):
             logging.debug(f"Set {self.title} value: {self.current_value}{self.unit}")
         else:
             logging.debug(f"No utilization data found for {node_name} in {self.title}")
+            
+        # Force immediate data update and display
+        self.update_data()
+        self.update()
+        self.repaint()
 
     def update_data(self):
         """Update the chart data - only use real cluster data"""
@@ -200,7 +205,7 @@ class GraphWidget(QFrame):
                 self.update()
 
     def paintEvent(self, event):
-        """Ultra-simplified paint event for maximum performance"""
+        """Ultra-simplified paint event for maximum performance with proper bounds checking"""
         super().paintEvent(event)
         
         # Skip drawing if not visible or data is empty
@@ -210,9 +215,23 @@ class GraphWidget(QFrame):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)  # Disabled for performance
         
-        width = self.width() - 32
-        height = 40
-        bottom = self.height() - 25
+        # Ensure proper bounds for drawing area
+        widget_width = self.width()
+        widget_height = self.height()
+        
+        if widget_width <= 32 or widget_height <= 50:
+            return  # Widget too small to draw properly
+        
+        width = widget_width - 32
+        # Reserve space for header (40px) and footer (25px)
+        top_margin = 45  # Increased top margin for header
+        bottom_margin = 30
+        height = max(60, widget_height - top_margin - bottom_margin)
+        bottom = widget_height - bottom_margin
+        
+        # Ensure proper drawing area
+        if bottom <= top_margin:
+            bottom = top_margin + height
         
         # Use cached color to avoid object creation
         if not hasattr(self, '_cached_color'):
@@ -220,24 +239,26 @@ class GraphWidget(QFrame):
         
         # Simplified line drawing - no gradient for performance
         if len(self.data) > 1 and width > 0:
-            # Pre-calculate min/max once
-            if not hasattr(self, '_data_range') or len(self.data) != getattr(self, '_last_data_length', 0):
-                self._min_value = min(self.data)
-                self._max_value = max(self.data) 
-                self._value_range = max(self._max_value - self._min_value, 10)
-                self._data_range = True
-                self._last_data_length = len(self.data)
+            # Use fixed 0-100% scale for proper percentage visualization
+            self._min_value = 0
+            self._max_value = 100 
+            self._value_range = 100
             
             # Draw simple line without path objects for better performance
             painter.setPen(QPen(self._cached_color, 2))
-            x_step = width / (len(self.data) - 1)
+            x_step = width / (len(self.data) - 1) if len(self.data) > 1 else 0
             
             prev_x = 16
-            prev_y = bottom - ((self.data[0] - self._min_value) / self._value_range) * height
+            # Ensure y coordinates stay within the drawing area
+            data_y = bottom - ((self.data[0] - self._min_value) / self._value_range) * height
+            prev_y = max(top_margin + 5, min(bottom - 5, data_y))  # 5px padding from edges
             
             for i in range(1, len(self.data)):
                 x = 16 + i * x_step
-                y = bottom - ((self.data[i] - self._min_value) / self._value_range) * height
+                data_y = bottom - ((self.data[i] - self._min_value) / self._value_range) * height
+                y = max(top_margin + 5, min(bottom - 5, data_y))  # 5px padding from edges
+                
+                # Draw line ensuring it stays within visible area
                 painter.drawLine(int(prev_x), int(prev_y), int(x), int(y))
                 prev_x, prev_y = x, y
         
@@ -255,13 +276,38 @@ class GraphWidget(QFrame):
                 self._cached_times = (start_time.strftime("%H:%M"), now.strftime("%H:%M"))
                 self._last_time_update = time.time()
             
-            painter.drawText(QRectF(1, self.height() - 16, 30, 12), Qt.AlignmentFlag.AlignCenter, self._cached_times[0])
-            painter.drawText(QRectF(width - 15, self.height() - 16, 30, 12), Qt.AlignmentFlag.AlignCenter, self._cached_times[1])
+            # Ensure text drawing is within bounds
+            text_y = max(widget_height - 16, 10)
+            painter.drawText(QRectF(1, text_y, 30, 12), Qt.AlignmentFlag.AlignCenter, self._cached_times[0])
+            painter.drawText(QRectF(width - 15, text_y, 30, 12), Qt.AlignmentFlag.AlignCenter, self._cached_times[1])
+            
+            # Add percentage scale indicators and grid lines
+            painter.setPen(QPen(QColor("#333333"), 1))  # Subtle dark gray for grid
+            
+            # Draw horizontal grid lines for 25%, 50%, 75%
+            y_25 = top_margin + (height * 0.25)
+            y_50 = top_margin + (height * 0.5) 
+            y_75 = top_margin + (height * 0.75)
+            
+            painter.drawLine(16, int(y_25), width + 16, int(y_25))  # 75% line
+            painter.drawLine(16, int(y_50), width + 16, int(y_50))  # 50% line  
+            painter.drawLine(16, int(y_75), width + 16, int(y_75))  # 25% line
+            
+            # Scale text indicators
+            painter.setPen(QPen(QColor("#666666"), 1))
+            font.setPointSize(8)
+            painter.setFont(font)
+            
+            # Only show key percentages to avoid clutter
+            painter.drawText(QRectF(width + 20, top_margin - 1, 25, 12), Qt.AlignmentFlag.AlignLeft, "100%")
+            painter.drawText(QRectF(width + 20, y_50 - 6, 25, 12), Qt.AlignmentFlag.AlignLeft, "50%") 
+            painter.drawText(QRectF(width + 20, bottom - 11, 25, 12), Qt.AlignmentFlag.AlignLeft, "0%")
         
         # Only show placeholder if no node selected and space is available
         if not self.selected_node and width > 150:
             painter.setPen(QPen(QColor(AppColors.TEXT_SUBTLE)))
-            text_rect = QRectF(0, self.rect().top() + 20, self.rect().width(), 30)
+            placeholder_y = max(top_margin, min(widget_height - 50, 20))
+            text_rect = QRectF(0, placeholder_y, widget_width, min(30, widget_height - placeholder_y - 20))
             painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, "Select a node")
 
     def cleanup(self):
@@ -282,6 +328,7 @@ class NodesPage(BaseResourcePage):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.resource_type = "nodes"
+        self.show_namespace_dropdown = False  # Nodes are cluster-scoped
         self.selected_row = -1
         self.has_loaded_data = False
         self.is_loading = False
@@ -330,19 +377,33 @@ class NodesPage(BaseResourcePage):
         self.layout().setContentsMargins(16, 16, 16, 16)
         self.layout().setSpacing(16)
         
-        # Add graphs at the top
+        # Add graphs at the top with proper size constraints
         graphs_layout = QHBoxLayout()
         self.cpu_graph = GraphWidget("CPU Usage", "%", AppColors.ACCENT_ORANGE)
         self.mem_graph = GraphWidget("Memory Usage", "%", AppColors.ACCENT_BLUE)
         self.disk_graph = GraphWidget("Disk Usage", "%", AppColors.ACCENT_PURPLE)
+        
+        # Set fixed heights for graphs to prevent positioning issues
+        for graph in [self.cpu_graph, self.mem_graph, self.disk_graph]:
+            graph.setFixedHeight(220)  # Fixed height instead of min/max
+            graph.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        
         graphs_layout.addWidget(self.cpu_graph)
         graphs_layout.addWidget(self.mem_graph)
         graphs_layout.addWidget(self.disk_graph)
+        graphs_layout.setContentsMargins(0, 10, 0, 10)  # Add margins to prevent overlap
         
+        # Create graphs container with fixed positioning
+        graphs_widget = QWidget()
+        graphs_widget.setLayout(graphs_layout)
+        graphs_widget.setFixedHeight(240)  # Fixed height container
+        graphs_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        
+        # Insert at position 0 but ensure proper spacing
         if self.layout().count() > 0:
-            graphs_widget = QWidget()
-            graphs_widget.setLayout(graphs_layout)
             self.layout().insertWidget(0, graphs_widget)
+            # Add spacing between graphs and table
+            self.layout().setSpacing(20)
         
         # Apply table style
         self.table.setStyleSheet(AppStyles.TABLE_STYLE)
@@ -781,9 +842,13 @@ class NodesPage(BaseResourcePage):
         
         # Disk data
         disk_usage = resource.get("disk_usage")
-        if disk_usage is not None:
-            display_disk = f"Cluster ({disk_usage:.1f}%)"
+        disk_capacity = resource.get("disk_capacity", "")
+        if disk_usage is not None and disk_capacity:
+            display_disk = f"{disk_capacity} ({disk_usage:.1f}%)"
             disk_util = disk_usage
+        elif disk_capacity:
+            display_disk = f"{disk_capacity}"
+            disk_util = 0
         else:
             display_disk = "N/A"
             disk_util = 0
@@ -893,11 +958,14 @@ class NodesPage(BaseResourcePage):
     
     def select_node_for_graphs(self, row):
         """Select a node to show in the graphs"""
-        if row < 0 or row >= len(self.nodes_data):
+        if row < 0 or not hasattr(self, 'nodes_data') or row >= len(self.nodes_data):
             return
             
         self.selected_row = row
-        node_name = self.table.item(row, 1).text()
+        node_name = self.table.item(row, 1).text() if self.table.item(row, 1) else None
+        if not node_name:
+            return
+            
         node_data = None
         
         # Find the node data
@@ -907,23 +975,34 @@ class NodesPage(BaseResourcePage):
                 break
                 
         if not node_data:
+            logging.warning(f"Node data not found for {node_name}")
             return
             
         self.table.selectRow(row)
         
-        # Force update graphs with current data first - bypass throttling
+        # Ensure graphs are properly initialized and visible
         for graph in [self.cpu_graph, self.mem_graph, self.disk_graph]:
-            # Temporarily reset throttling to force immediate update
-            old_time = graph._last_update_time
+            if not graph.isVisible():
+                graph.show()
+            graph.raise_()  # Bring graph to front
+        
+        # Force immediate update of graph data with no throttling
+        for graph in [self.cpu_graph, self.mem_graph, self.disk_graph]:
+            # Bypass all throttling for immediate display
             graph._last_update_time = 0
             graph._is_updating = False
-            graph.generate_utilization_data(self.nodes_data)
-            graph._last_update_time = old_time
+            # Force utilization data update
+            graph.generate_utilization_data(self.nodes_data, force_update=True)
         
-        # Then set the selected node
+        # Set the selected node with immediate updates
         self.cpu_graph.set_selected_node(node_data, node_name)
-        self.mem_graph.set_selected_node(node_data, node_name)
+        self.mem_graph.set_selected_node(node_data, node_name)  
         self.disk_graph.set_selected_node(node_data, node_name)
+        
+        # Force immediate repaint of all graphs
+        for graph in [self.cpu_graph, self.mem_graph, self.disk_graph]:
+            graph.update()
+            graph.repaint()
         
         # Log for debugging
         logging.info(f"Selected node: {node_name}")
@@ -934,7 +1013,8 @@ class NodesPage(BaseResourcePage):
     def handle_row_click(self, row, column):
         if column != self.table.columnCount() - 1:  # Skip action column
             self.table.selectRow(row)
-            self.select_node_for_graphs(row)
+            # Use QTimer.singleShot to ensure immediate graph display
+            QTimer.singleShot(0, lambda: self.select_node_for_graphs(row))
     
     def handle_row_double_click(self, row, column):
         """Handle double-click to show node detail page"""

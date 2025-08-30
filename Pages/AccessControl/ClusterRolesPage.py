@@ -18,6 +18,7 @@ class ClusterRolesPage(BaseResourcePage):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.resource_type = "clusterroles"  # Set resource type for kubectl
+        self.show_namespace_dropdown = False  # ClusterRoles are cluster-scoped
         self.setup_page_ui()
         
     def setup_page_ui(self):

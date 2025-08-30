@@ -91,7 +91,7 @@ class StyleConstants:
             width: 20px;
         }}
         QComboBox::down-arrow {{
-            image: url(icons/down_btn.svg);
+            image: url(Icons/down_btn.svg);
             width: 12px;
             height: 12px;
             margin-right: 8px;

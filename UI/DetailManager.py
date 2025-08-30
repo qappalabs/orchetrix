@@ -78,7 +78,21 @@ class DetailManager(QObject):
                     namespace: Optional[str] = None, raw_data: Optional[Dict[str, Any]] = None) -> None:
         """Show detail view for the specified resource with optimized performance"""
         # Convert plural resource type to singular for API compatibility
-        resource_type_singular = resource_type.rstrip('s') if resource_type.endswith('s') else resource_type
+        plural_to_singular_mapping = {
+            'priorityclasses': 'priorityclass',
+            'runtimeclasses': 'runtimeclass',
+            'mutatingwebhookconfigurations': 'mutatingwebhookconfiguration',
+            'validatingwebhookconfigurations': 'validatingwebhookconfiguration',
+            'customresourcedefinitions': 'customresourcedefinition',
+            'horizontalpodautoscalers': 'horizontalpodautoscaler',
+            'poddisruptionbudgets': 'poddisruptionbudget',
+            'resourcequotas': 'resourcequota',
+            'limitranges': 'limitrange',
+            'replicationcontrollers': 'replicationcontroller',
+        }
+        
+        resource_type_singular = plural_to_singular_mapping.get(resource_type.lower(), 
+                                                              resource_type.rstrip('s') if resource_type.endswith('s') else resource_type)
         
         # Ensure detail page is created
         detail_page = self._ensure_detail_page()

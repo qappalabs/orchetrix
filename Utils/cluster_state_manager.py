@@ -195,8 +195,18 @@ class ClusterStateManager(QObject):
             return False
     
     def _initiate_cluster_switch(self, cluster_name: str):
-        """Initiate cluster switch with better error handling"""
+        """Initiate cluster switch with better error handling and cache clearing"""
         try:
+            # Clear cache for previous cluster to prevent stale data
+            if self.current_cluster and self.current_cluster != cluster_name:
+                try:
+                    from Utils.unified_cache_system import get_unified_cache
+                    cache_system = get_unified_cache()
+                    cache_system.clear_cluster_cache(self.current_cluster)
+                    logging.info(f"Cleared cache for previous cluster: {self.current_cluster}")
+                except Exception as cache_error:
+                    logging.error(f"Error clearing cache for {self.current_cluster}: {cache_error}")
+            
             self.cluster_states[cluster_name] = ClusterState.CONNECTING
             self.state_changed.emit(cluster_name, ClusterState.CONNECTING)
             
@@ -234,6 +244,15 @@ class ClusterStateManager(QObject):
                 if not result:
                     self._handle_connection_error(cluster_name, "Connection returned no result")
                     return
+                
+                # Clear any existing cache for the new cluster to ensure fresh data
+                try:
+                    from Utils.unified_cache_system import get_unified_cache
+                    cache_system = get_unified_cache()
+                    cache_system.clear_cluster_cache(cluster_name)
+                    logging.info(f"Cleared cache for new cluster connection: {cluster_name}")
+                except Exception as cache_error:
+                    logging.error(f"Error clearing cache for {cluster_name}: {cache_error}")
                 
                 self.current_cluster = cluster_name
                 self.cluster_states[cluster_name] = ClusterState.CONNECTED

@@ -49,6 +49,7 @@ class PersistentVolumesPage(BaseResourcePage):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.resource_type = "persistentvolumes"  # Set resource type for kubectl
+        self.show_namespace_dropdown = False  # PersistentVolumes are cluster-scoped
         self.setup_page_ui()
         
     def setup_page_ui(self):

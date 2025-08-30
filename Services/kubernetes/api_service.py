@@ -109,6 +109,12 @@ class KubernetesAPIService:
             'RbacAuthorizationV1Api': ThreadSafeAPIClient(client.RbacAuthorizationV1Api),
             'BatchV1Api': ThreadSafeAPIClient(client.BatchV1Api),
             'AutoscalingV1Api': ThreadSafeAPIClient(client.AutoscalingV1Api),
+            'AutoscalingV2Api': ThreadSafeAPIClient(client.AutoscalingV2Api),
+            'PolicyV1Api': ThreadSafeAPIClient(client.PolicyV1Api),
+            'SchedulingV1Api': ThreadSafeAPIClient(client.SchedulingV1Api),
+            'NodeV1Api': ThreadSafeAPIClient(client.NodeV1Api),
+            'AdmissionregistrationV1Api': ThreadSafeAPIClient(client.AdmissionregistrationV1Api),
+            'CoordinationV1Api': ThreadSafeAPIClient(client.CoordinationV1Api),
             'ApiextensionsV1Api': ThreadSafeAPIClient(client.ApiextensionsV1Api),
             'CustomObjectsApi': ThreadSafeAPIClient(client.CustomObjectsApi),
             'VersionApi': ThreadSafeAPIClient(client.VersionApi),
@@ -239,6 +245,36 @@ class KubernetesAPIService:
     def autoscaling_v1(self):
         """Get AutoscalingV1Api client"""
         return self.get_api_client('AutoscalingV1Api').get_instance()
+    
+    @property
+    def autoscaling_v2(self):
+        """Get AutoscalingV2Api client"""
+        return self.get_api_client('AutoscalingV2Api').get_instance()
+    
+    @property
+    def policy_v1(self):
+        """Get PolicyV1Api client"""
+        return self.get_api_client('PolicyV1Api').get_instance()
+    
+    @property
+    def scheduling_v1(self):
+        """Get SchedulingV1Api client"""
+        return self.get_api_client('SchedulingV1Api').get_instance()
+    
+    @property
+    def node_v1(self):
+        """Get NodeV1Api client"""
+        return self.get_api_client('NodeV1Api').get_instance()
+    
+    @property
+    def admissionregistration_v1(self):
+        """Get AdmissionregistrationV1Api client"""
+        return self.get_api_client('AdmissionregistrationV1Api').get_instance()
+    
+    @property
+    def coordination_v1(self):
+        """Get CoordinationV1Api client"""
+        return self.get_api_client('CoordinationV1Api').get_instance()
     
     @property
     def apiextensions_v1(self):

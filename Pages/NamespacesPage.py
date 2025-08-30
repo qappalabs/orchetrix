@@ -113,6 +113,7 @@ class NamespacesPage(BaseResourcePage):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.resource_type = "namespaces"
+        self.show_namespace_dropdown = False  # Namespaces are cluster-scoped
         self.kube_client = get_kubernetes_client()
         self.operation_thread = None
         self.setup_page_ui()

@@ -29,11 +29,13 @@ from Utils.thread_manager import get_thread_manager
 from Utils.kubernetes_client import get_kubernetes_client
 from log_handler import method_logger, class_logger
 
-# Constants for performance tuning - optimized values
-BATCH_SIZE = 100  # Increased number of items to render in each batch
-SCROLL_DEBOUNCE_MS = 50   # Reduced debounce for more responsive scrolling
-SEARCH_DEBOUNCE_MS = 200  # Reduced debounce for faster search
-CACHE_TTL_SECONDS = 600   # Increased cache time for better performance
+# Constants for performance tuning - optimized for large datasets
+BATCH_SIZE = 50  # Reduced batch size to prevent UI freezing with large datasets
+SCROLL_DEBOUNCE_MS = 100   # Increased debounce for stability with large data
+SEARCH_DEBOUNCE_MS = 300  # Increased debounce for better performance
+CACHE_TTL_SECONDS = 300   # Reduced cache time to prevent memory bloat
+MAX_ITEMS_IN_MEMORY = 1000  # Maximum items to keep in memory
+LARGE_DATASET_THRESHOLD = 500  # Threshold to activate large dataset optimizations
 
 # Import performance components  
 from Utils.unified_cache_system import get_unified_cache
@@ -59,14 +61,17 @@ class BaseResourcePage(BaseTablePage):
         self.delete_thread = None
         self.batch_delete_thread = None
 
-        # Performance optimizations
+        # Performance optimizations for large datasets
         self.is_loading_initial = False
         self.is_loading_more = False
         self.all_data_loaded = False
         self.current_continue_token = None
-        self.items_per_page = 100  # Increased for better performance
+        self.items_per_page = 50  # Reduced for better memory management
         self.selected_items = set()
         self.reload_on_show = True
+        self._large_dataset_mode = False
+        self._total_item_count = 0
+        self._loaded_item_count = 0
 
         self.is_showing_skeleton = False
 
@@ -92,6 +97,7 @@ class BaseResourcePage(BaseTablePage):
         self._visible_start = 0
         self._visible_end = 100  # Increased for better performance
         self._render_buffer = 20  # Extra rows to render for smooth scrolling
+        self._remaining_resources = []  # Store remaining resources for lazy loading
         
         # Debouncing timers
         # Use unified debounced updater instead of individual timers
@@ -162,15 +168,23 @@ class BaseResourcePage(BaseTablePage):
         """Show a subtle message that data is loading"""
         try:
             if hasattr(self, 'table') and self.table:
+                # Clear the table completely first to remove any status/action widgets
+                self.clear_table()
+                
                 # Set a loading message in the table temporarily
                 self.table.setRowCount(1)
+                
                 from PyQt6.QtWidgets import QTableWidgetItem
                 from PyQt6.QtCore import Qt
                 
                 item = QTableWidgetItem("🔄 Loading resources...")
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 self.table.setItem(0, 0, item)
-                self.table.setSpan(0, 0, 1, self.table.columnCount())
+                
+                # Span the loading message across all columns
+                if self.table.columnCount() > 0:
+                    self.table.setSpan(0, 0, 1, self.table.columnCount())
+                    
         except Exception as e:
             logging.debug(f"Error showing startup loading message: {e}")
     
@@ -279,6 +293,35 @@ class BaseResourcePage(BaseTablePage):
         # Bounded cache handles cleanup automatically with TTL and size limits
         # Manual cleanup is no longer needed
         pass
+
+    def _manage_memory_usage(self):
+        """Manage memory usage to prevent crashes with large datasets"""
+        try:
+            if not self._large_dataset_mode:
+                return
+            
+            # If we have too many items loaded, trim the oldest ones
+            if len(self.resources) > MAX_ITEMS_IN_MEMORY:
+                items_to_remove = len(self.resources) - MAX_ITEMS_IN_MEMORY
+                # Move oldest items back to remaining resources for potential reload
+                removed_items = self.resources[:items_to_remove]
+                self.resources = self.resources[items_to_remove:]
+                
+                # Add removed items back to the front of remaining resources
+                self._remaining_resources = removed_items + self._remaining_resources
+                
+                # Update display
+                self._display_resources(self.resources)
+                self._update_items_count()
+                
+                logging.info(f"Memory management: Trimmed {items_to_remove} items from display")
+                
+            # Force garbage collection
+            import gc
+            gc.collect()
+            
+        except Exception as e:
+            logging.error(f"Error in memory management: {e}")
 
     # Thread-safe data access methods
     def get_cached_data(self, key: str) -> Any:
@@ -501,17 +544,21 @@ class BaseResourcePage(BaseTablePage):
             }""")
         self.search_bar.setStyleSheet(search_style)
         
-        # Namespace combo with label
-        namespace_label = QLabel("Namespace:")
-        namespace_label.setStyleSheet("color: #ffffff; font-size: 12px; font-weight: normal;")
-        namespace_label.setMinimumWidth(70)
-        
-        self.namespace_combo = QComboBox()
-        # Start with loading indicator, will be populated dynamically
-        self.namespace_combo.addItem("Loading namespaces...")
-        self.namespace_combo.currentTextChanged.connect(self._on_namespace_changed)
-        self.namespace_combo.setFixedWidth(150)
-        self.namespace_combo.setFixedHeight(32)
+        # Namespace combo with label - only show for namespaced resources
+        namespace_label = None
+        if getattr(self, 'show_namespace_dropdown', True):
+            namespace_label = QLabel("Namespace:")
+            namespace_label.setStyleSheet("color: #ffffff; font-size: 12px; font-weight: normal;")
+            namespace_label.setMinimumWidth(70)
+            
+            self.namespace_combo = QComboBox()
+            # Start with loading indicator, will be populated dynamically
+            self.namespace_combo.addItem("Loading namespaces...")
+            self.namespace_combo.currentTextChanged.connect(self._on_namespace_changed)
+            self.namespace_combo.setFixedWidth(150)
+            self.namespace_combo.setFixedHeight(32)
+        else:
+            self.namespace_combo = None
         
         # Apply consistent styling with proper icon
         import os
@@ -546,14 +593,18 @@ class BaseResourcePage(BaseTablePage):
             QComboBox::down-arrow:hover {{
                 opacity: 0.8;
             }}""")
-        self.namespace_combo.setStyleSheet(combo_style)
+        if self.namespace_combo:
+            self.namespace_combo.setStyleSheet(combo_style)
         
         # Add widgets to layout with proper spacing
         filters_layout.addWidget(search_label)
         filters_layout.addWidget(self.search_bar)
-        filters_layout.addSpacing(16)  # Add space between search and namespace
-        filters_layout.addWidget(namespace_label)
-        filters_layout.addWidget(self.namespace_combo)
+        
+        # Only add namespace dropdown if it exists
+        if self.namespace_combo and namespace_label:
+            filters_layout.addSpacing(16)  # Add space between search and namespace
+            filters_layout.addWidget(namespace_label)
+            filters_layout.addWidget(self.namespace_combo)
         
         # Add the filters layout directly to header layout
         header_layout.addLayout(filters_layout)
@@ -610,15 +661,23 @@ class BaseResourcePage(BaseTablePage):
         """Show loading message during search"""
         try:
             if hasattr(self, 'table') and self.table:
+                # Clear the table completely first to remove any status/action widgets
+                self.clear_table()
+                
+                # Set single row for loading message
                 self.table.setRowCount(1)
+                
                 from PyQt6.QtWidgets import QTableWidgetItem
                 from PyQt6.QtCore import Qt
                 
                 item = QTableWidgetItem(f"🔍 Searching for '{search_query}' across all resources...")
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 self.table.setItem(0, 0, item)
+                
+                # Span the loading message across all columns
                 if self.table.columnCount() > 1:
                     self.table.setSpan(0, 0, 1, self.table.columnCount())
+                    
         except Exception as e:
             logging.debug(f"Error showing search loading message: {e}")
     
@@ -691,15 +750,23 @@ class BaseResourcePage(BaseTablePage):
         # Show error message in table
         try:
             if hasattr(self, 'table') and self.table:
+                # Clear the table completely first to remove any status/action widgets
+                self.clear_table()
+                
+                # Set single row for error message
                 self.table.setRowCount(1)
+                
                 from PyQt6.QtWidgets import QTableWidgetItem
                 from PyQt6.QtCore import Qt
                 
                 item = QTableWidgetItem(f"❌ Search failed: {error_message}")
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 self.table.setItem(0, 0, item)
+                
+                # Span the error message across all columns
                 if self.table.columnCount() > 1:
                     self.table.setSpan(0, 0, 1, self.table.columnCount())
+                    
         except Exception as e:
             logging.debug(f"Error showing search error message: {e}")
     
@@ -768,6 +835,8 @@ class BaseResourcePage(BaseTablePage):
         """Handle loaded namespaces and populate dropdown"""
         try:
             if not self.namespace_combo:
+                # For cluster-scoped resources, set namespace filter to All Namespaces
+                self.namespace_filter = "All Namespaces"
                 return
             
             # Clear existing items
@@ -809,6 +878,38 @@ class BaseResourcePage(BaseTablePage):
         self.namespace_filter = namespace
         self.force_load_data()
 
+    def _load_more_data_batch(self):
+        """Load more data for large datasets when needed"""
+        if not self._large_dataset_mode or not self._remaining_resources:
+            return
+        
+        try:
+            # Load next batch
+            batch_size = min(BATCH_SIZE, len(self._remaining_resources))
+            next_batch = self._remaining_resources[:batch_size]
+            self._remaining_resources = self._remaining_resources[batch_size:]
+            
+            # Add to existing resources
+            self.resources.extend(next_batch)
+            self._loaded_item_count = len(self.resources)
+            
+            # Check if all data is loaded
+            if not self._remaining_resources:
+                self.all_data_loaded = True
+                logging.info(f"All {self._total_item_count} items loaded")
+            
+            # Manage memory usage to prevent crashes
+            self._manage_memory_usage()
+            
+            # Update display
+            self._display_resources(self.resources)
+            self._update_items_count()
+            
+            logging.debug(f"Loaded batch: {batch_size} items. Total loaded: {self._loaded_item_count}/{self._total_item_count}")
+            
+        except Exception as e:
+            logging.error(f"Error loading more data batch: {e}")
+
     def _handle_scroll(self, value):
         """Handle scroll events with debouncing"""
         # Use debounced updater for scroll
@@ -819,16 +920,21 @@ class BaseResourcePage(BaseTablePage):
         )
 
     def _handle_scroll_debounced(self):
-        """Handle debounced scroll events"""
-        if not self.table or self.is_loading_more or self.all_data_loaded:
+        """Handle debounced scroll events with large dataset support"""
+        if not self.table or self.is_loading_more:
             return
         
         scrollbar = self.table.verticalScrollBar()
         if scrollbar.value() >= scrollbar.maximum() - 10:  # Near bottom
-            self._load_more_data()
+            if self._large_dataset_mode and self._remaining_resources:
+                # For large datasets, load next batch from memory
+                self._load_more_data_batch()
+            elif not self.all_data_loaded and self.current_continue_token:
+                # For normal pagination, use traditional method
+                self._load_more_data()
 
     def _load_more_data(self):
-        """Load more data when scrolling to bottom"""
+        """Load more data when scrolling to bottom (traditional pagination)"""
         if self.is_loading_more or self.all_data_loaded or not self.current_continue_token:
             return
         
@@ -862,7 +968,7 @@ class BaseResourcePage(BaseTablePage):
         logging.debug(f"Started unified loading for {self.resource_type} (operation: {self._current_operation_id})")
 
     def _on_unified_resources_loaded(self, resource_type: str, result: LoadResult):
-        """Handle resources loaded from unified loader"""
+        """Handle resources loaded from unified loader with large dataset optimizations"""
         try:
             # Only process if this matches our resource type
             if resource_type != self.resource_type:
@@ -875,9 +981,24 @@ class BaseResourcePage(BaseTablePage):
             # Process the optimized result format
             resources = result.items or []
             
-            # Replace resources (unified loader loads all at once for better performance)
-            self.resources = resources
-            self.all_data_loaded = True  # Unified loader loads everything efficiently
+            # Check if we have a large dataset
+            self._total_item_count = len(resources)
+            self._large_dataset_mode = self._total_item_count > LARGE_DATASET_THRESHOLD
+            
+            if self._large_dataset_mode:
+                logging.info(f"Large dataset detected: {self._total_item_count} items. Activating optimizations.")
+                # For large datasets, only load the first batch
+                self.resources = resources[:MAX_ITEMS_IN_MEMORY]
+                self._loaded_item_count = len(self.resources)
+                self.all_data_loaded = False
+                # Store remaining items for lazy loading
+                self._remaining_resources = resources[MAX_ITEMS_IN_MEMORY:]
+            else:
+                # Small dataset - load everything
+                self.resources = resources
+                self._loaded_item_count = len(self.resources)
+                self.all_data_loaded = True
+                self._remaining_resources = []
             
             # Always display resources, even if empty
             self._display_resources(self.resources)
@@ -892,9 +1013,9 @@ class BaseResourcePage(BaseTablePage):
             
             # Log performance info
             if result.from_cache:
-                logging.info(f"Loaded {result.total_count} {resource_type} from cache instantly")
+                logging.info(f"Loaded {self._loaded_item_count}/{self._total_item_count} {resource_type} from cache instantly")
             else:
-                logging.info(f"Loaded {result.total_count} {resource_type} in {result.load_time_ms:.1f}ms")
+                logging.info(f"Loaded {self._loaded_item_count}/{self._total_item_count} {resource_type} in {result.load_time_ms:.1f}ms")
             
         except Exception as e:
             logging.error(f"Error processing unified resources: {e}")
@@ -1126,7 +1247,41 @@ class BaseResourcePage(BaseTablePage):
     def _clear_resources(self):
         """Clear resources data array - used only for force refresh"""
         self.resources.clear()
+        # Also clear any remaining resources for large datasets
+        if hasattr(self, '_remaining_resources'):
+            self._remaining_resources.clear()
+        # Reset large dataset mode
+        self._large_dataset_mode = False
+        self._total_item_count = 0
+        self._loaded_item_count = 0
         logging.debug("Resources data array cleared for refresh")
+        
+    def clear_for_cluster_change(self):
+        """Clear all data when cluster changes to prevent showing stale data"""
+        try:
+            # Clear the table immediately
+            self.clear_table()
+            
+            # Clear all cached data
+            self._clear_resources()
+            
+            # Reset loading states
+            self.is_loading_initial = False
+            self.is_loading_more = False
+            self.all_data_loaded = False
+            self.current_continue_token = None
+            self._initial_load_done = False
+            
+            # Clear selected items
+            self.selected_items.clear()
+            
+            # Update UI
+            self._update_items_count()
+            
+            logging.info(f"Cleared {self.__class__.__name__} for cluster change")
+            
+        except Exception as e:
+            logging.error(f"Error clearing {self.__class__.__name__} for cluster change: {e}")
 
     def load_data(self):
         """Load data if not already loaded"""
@@ -1359,7 +1514,16 @@ class BaseResourcePage(BaseTablePage):
                 # For VirtualScrollTable
                 self.table.set_data([])
             elif hasattr(self.table, 'setRowCount'):
-                # For QTableWidget
+                # For QTableWidget - clear spans and widgets first
+                if hasattr(self.table, 'clearSpans'):
+                    self.table.clearSpans()
+                
+                # Clear any cell widgets that might interfere with new layout
+                for row in range(self.table.rowCount()):
+                    for col in range(self.table.columnCount()):
+                        if self.table.cellWidget(row, col):
+                            self.table.removeCellWidget(row, col)
+                
                 self.table.setRowCount(0)
             elif hasattr(self.table, 'clear'):
                 # For other table widgets

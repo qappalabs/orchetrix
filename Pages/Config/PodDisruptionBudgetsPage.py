@@ -8,7 +8,7 @@ from PyQt6.QtGui import QColor
 
 from Base_Components.base_components import SortableTableWidgetItem
 from Base_Components.base_resource_page import BaseResourcePage
-from UI.Styles import AppColors
+from UI.Styles import AppStyles
 
 class PodDisruptionBudgetsPage(BaseResourcePage):
     """
@@ -86,6 +86,7 @@ class PodDisruptionBudgetsPage(BaseResourcePage):
         # Create checkbox for row selection
         resource_name = resource["name"]
         checkbox_container = self._create_checkbox_container(row, resource_name)
+        checkbox_container.setStyleSheet(AppStyles.CHECKBOX_STYLE)        
         self.table.setCellWidget(row, 0, checkbox_container)
         
         # Extract data from raw_data
