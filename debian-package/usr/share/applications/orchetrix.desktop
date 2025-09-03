@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Orchetrix
+Comment=Kubernetes Cluster Management Tool
+Exec=orchetrix
+Icon=orchetrix
+Terminal=false
+StartupNotify=true
+Categories=Development;System;Network;
+Keywords=kubernetes;k8s;cluster;management;devops;
+MimeType=application/x-kubernetes-config;

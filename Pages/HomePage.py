@@ -502,13 +502,13 @@ class OrchestrixGUI(QMainWindow):
         try:
             from Utils.cluster_state_manager import ClusterState
             
-            # Update status in all data views
+            # FIXED: Update status mapping to properly reflect cluster states
             status_mapping = {
                 ClusterState.DISCONNECTED: "available",
                 ClusterState.CONNECTING: "connecting", 
                 ClusterState.CONNECTED: "connected",
-                ClusterState.ERROR: "available",
-                ClusterState.MANUALLY_DISCONNECTED: "disconnect"
+                ClusterState.ERROR: "available",  # Error state shows as available to allow retry
+                ClusterState.MANUALLY_DISCONNECTED: "available"  # Manual disconnect shows as available to allow reconnect
             }
             
             new_status = status_mapping.get(state, "available")

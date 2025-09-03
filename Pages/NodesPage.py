@@ -4,23 +4,21 @@ Corrected implementation of the Nodes page with performance improvements and pro
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
-    QLabel, QHeaderView, QToolButton, QMenu, QCheckBox, QFrame, 
+    QLabel, QHeaderView, QToolButton, QMenu, QFrame, 
     QGraphicsDropShadowEffect, QSizePolicy, QStyleOptionButton, QStyle, QStyleOptionHeader,
     QApplication, QPushButton, QProxyStyle, QTableView, QAbstractItemView, QStyledItemDelegate
 )
-from PyQt6.QtCore import Qt, QTimer, QRect, QRectF, pyqtSignal, QSize, QAbstractTableModel, QModelIndex
-from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QLinearGradient, QPainterPath, QBrush, QCursor, QFont
+from PyQt6.QtCore import Qt, QTimer, QRectF, pyqtSignal, QSize, QAbstractTableModel, QModelIndex
+from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QCursor, QFont
 
 from UI.Styles import AppStyles, AppColors, AppConstants
 from Base_Components.base_components import SortableTableWidgetItem
 from Base_Components.base_resource_page import BaseResourcePage
-from Base_Components.virtualized_table_model import VirtualizedResourceModel
 from Utils.cluster_connector import get_cluster_connector
 from Utils.debounced_updater import get_debounced_updater
 from Utils.performance_config import get_performance_config
 from UI.Icons import resource_path
 import datetime
-import re
 import logging
 import time
 
@@ -598,8 +596,7 @@ class NodesPage(BaseResourcePage):
         if not self.use_virtual_scrolling:
             # Use traditional table widget
             layout = super().setup_ui("Nodes", headers, sortable_columns)
-            self._add_search_bar_above_table_traditional()
-            logging.info("NodesPage: Using traditional table widget with search bar above table")
+            logging.info("NodesPage: Using traditional table widget")
             return  # Early return - base class handles everything
     
     def _add_filter_controls(self, header_layout):
@@ -611,115 +608,6 @@ class NodesPage(BaseResourcePage):
         else:
             # For virtual scrolling, use the original method but we'll move it later
             super()._add_filter_controls(header_layout)
-    
-    def _move_search_bar_above_table_traditional(self):
-        """Move search bar from header to above table for traditional table widget mode"""
-        try:
-            from PyQt6.QtWidgets import QVBoxLayout, QHBoxLayout, QWidget, QLabel, QLineEdit
-            from UI.Styles import AppStyles
-            
-            # Find and remove the search bar from the header
-            if hasattr(self, 'search_bar') and self.search_bar:
-                # Remove from parent layout
-                parent_widget = self.search_bar.parent()
-                if parent_widget:
-                    parent_layout = parent_widget.layout()
-                    if parent_layout:
-                        # Find and remove the search bar's container
-                        for i in range(parent_layout.count()):
-                            item = parent_layout.itemAt(i)
-                            if item and item.widget():
-                                widget = item.widget()
-                                if widget == self.search_bar:
-                                    parent_layout.removeItem(item)
-                                    break
-                                # Check if it's in a sublayout
-                                elif hasattr(widget, 'layout') and widget.layout():
-                                    sublayout = widget.layout()
-                                    for j in range(sublayout.count()):
-                                        subitem = sublayout.itemAt(j)
-                                        if subitem and subitem.widget() == self.search_bar:
-                                            sublayout.removeItem(subitem)
-                                            parent_layout.removeItem(item)
-                                            break
-                
-                # Store reference to search bar and remove from old position
-                old_search_bar = self.search_bar
-                old_search_bar.setParent(None)
-                
-                # Find the table stack widget and insert search bar above it
-                if hasattr(self, '_table_stack') and self._table_stack:
-                    main_layout = self.layout()
-                    if main_layout:
-                        # Create new search bar above table
-                        search_container = self._create_search_bar_container()
-                        
-                        # Find table stack position and insert search bar before it
-                        for i in range(main_layout.count()):
-                            item = main_layout.itemAt(i)
-                            if item and item.widget() == self._table_stack:
-                                main_layout.insertWidget(i, search_container)
-                                break
-                        
-                        logging.debug("NodesPage: Moved search bar above table in traditional mode")
-                
-        except Exception as e:
-            logging.warning(f"NodesPage: Failed to move search bar above table in traditional mode: {e}")
-    
-    def _create_search_bar_container(self):
-        """Create a container widget with search bar for traditional mode"""
-        from PyQt6.QtWidgets import QHBoxLayout, QWidget, QLabel, QLineEdit
-        from UI.Styles import AppStyles
-        
-        # Create container widget
-        search_container = QWidget()
-        search_container.setMaximumHeight(50)
-        
-        # Create layout
-        container_layout = QVBoxLayout(search_container)
-        container_layout.setContentsMargins(0, 10, 0, 10)
-        container_layout.setSpacing(0)
-        
-        # Create filters layout for search bar
-        filters_layout = QHBoxLayout()
-        filters_layout.setSpacing(12)
-        
-        # Search bar with label
-        search_label = QLabel("Search:")
-        search_label.setStyleSheet("color: #ffffff; font-size: 12px; font-weight: normal;")
-        search_label.setMinimumWidth(50)
-        
-        self.search_bar = QLineEdit()
-        self.search_bar.setPlaceholderText("Search nodes...")
-        self.search_bar.textChanged.connect(self._on_search_text_changed)
-        self.search_bar.setFixedWidth(200)
-        self.search_bar.setFixedHeight(32)
-        
-        # Apply search bar styling
-        search_style = getattr(AppStyles, 'SEARCH_INPUT', 
-            """QLineEdit {
-                background-color: #2d2d2d;
-                color: #ffffff;
-                border: 1px solid #3d3d3d;
-                border-radius: 4px;
-                padding: 6px 12px;
-                font-size: 12px;
-            }
-            QLineEdit:focus {
-                border-color: #0078d4;
-                background-color: #353535;
-            }""")
-        self.search_bar.setStyleSheet(search_style)
-        
-        # Add search components to filters layout
-        filters_layout.addWidget(search_label)
-        filters_layout.addWidget(self.search_bar)
-        filters_layout.addStretch()  # Push search bar to the left
-        
-        # Add filters layout to container
-        container_layout.addLayout(filters_layout)
-        
-        return search_container
     
     def _replace_table_with_virtual_and_graphs(self):
         """Replace BaseResourcePage table with virtual table and move search bar above table"""
@@ -910,8 +798,7 @@ class NodesPage(BaseResourcePage):
                 container_layout.addWidget(self.table)
                 logging.debug("NodesPage: Added virtual table to container")
                 
-                # Setup action buttons and styling for virtual table
-                self._setup_virtual_action_buttons()
+                # Apply styling for virtual table  
                 self._apply_virtual_table_styling()
                 
                 # Ensure clean header without checkboxes
@@ -992,13 +879,6 @@ class NodesPage(BaseResourcePage):
         except Exception as e:
             logging.error(f"NodesPage: Error handling double-click for detail page: {e}")
     
-    def _setup_virtual_action_buttons(self):
-        """Setup action buttons for virtual table - DISABLED, using real widgets now"""
-        # This method is disabled because we now use real QToolButton widgets
-        # created in _add_virtual_action_buttons method, not delegates
-        logging.debug("NodesPage: Action buttons are now created as real widgets, not delegates")
-        return
-    
     def _add_virtual_action_buttons(self, resources_data):
         """Add actual action button widgets to virtual table like other pages"""
         try:
@@ -1045,12 +925,6 @@ class NodesPage(BaseResourcePage):
         except Exception as e:
             logging.error(f"NodesPage: Error adding virtual action button widgets: {e}")
     
-    def _create_safe_action_button_for_virtual_table(self, row, resource_data):
-        """Create a safe action button and container - DISABLED, using delegate approach instead"""
-        # This method is no longer used, action buttons are created via delegate
-        logging.debug(f"NodesPage: Action button creation handled by delegate for row {row}")
-        return None
-    
     def _handle_view_details_action(self, node_name):
         """Handle View Details action"""
         try:
@@ -1070,18 +944,43 @@ class NodesPage(BaseResourcePage):
         """Handle Edit action - opens detail page in edit mode"""
         logging.info(f"NodesPage: Edit action for node '{node_name}'")
         try:
-            # Open detail page (same as View Details for nodes since they're cluster resources)
+            # Find the ClusterView that contains the detail manager
             parent = self.parent()
-            while parent and not hasattr(parent, 'detail_manager'):
+            cluster_view = None
+            
+            # Walk up the parent tree to find ClusterView
+            while parent:
+                if parent.__class__.__name__ == 'ClusterView' or hasattr(parent, 'detail_manager'):
+                    cluster_view = parent
+                    break
                 parent = parent.parent()
             
-            if parent and hasattr(parent, 'detail_manager'):
-                parent.detail_manager.show_detail('node', node_name, None)
-                logging.info(f"NodesPage: Opened detail page for editing node '{node_name}'")
+            if cluster_view and hasattr(cluster_view, 'detail_manager'):
+                # Show the detail page first  
+                cluster_view.detail_manager.show_detail('node', node_name, None)
+                
+                # After showing detail page, trigger edit mode
+                # We need to wait a bit for the detail page to load completely
+                from PyQt6.QtCore import QTimer
+                QTimer.singleShot(500, lambda: self._trigger_edit_mode(cluster_view))
+                
+                logging.info(f"Opening node/{node_name} in edit mode")
             else:
-                logging.warning("NodesPage: Could not find detail_manager for edit action")
+                # Fallback: show error if detail manager not found
+                from PyQt6.QtWidgets import QMessageBox
+                QMessageBox.information(
+                    self, "Edit Resource",
+                    f"Cannot edit node/{node_name}: Detail panel not available"
+                )
+                logging.warning(f"Detail manager not found for editing {node_name}")
+                
         except Exception as e:
-            logging.error(f"NodesPage: Error in edit action for node '{node_name}': {e}")
+            logging.error(f"Failed to open {node_name} for editing: {e}")
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.critical(
+                self, "Error", 
+                f"Failed to open {node_name} for editing: {str(e)}"
+            )
     
     def _handle_delete_action(self, node_name):
         """Handle Delete action - shows confirmation and deletes node"""
@@ -1191,74 +1090,6 @@ class NodesPage(BaseResourcePage):
         
         button.setMenu(menu)
         return button
-    
-    def _create_standard_action_button(self, row, resource_data):
-        """Create action button using EXACT same pattern as BaseResourcePage._create_action_button"""
-        try:
-            from PyQt6.QtWidgets import QToolButton, QMenu
-            from functools import partial
-            import os
-            
-            # Create button using EXACT same pattern as BaseResourcePage
-            button = QToolButton()
-
-            # Use custom SVG icon (EXACT same code as BaseResourcePage)
-            try:
-                icon_path = resource_path("Icons/Moreaction_Button.svg")
-                if os.path.exists(icon_path):
-                    button.setIcon(QIcon(icon_path))
-                    button.setIconSize(QSize(16, 16))
-                    logging.debug(f"NodesPage: Loaded standard action icon for row {row}")
-            except Exception as e:
-                logging.warning(f"NodesPage: Could not load action button icon: {e}")
-
-            # Remove text and change to icon-only style (EXACT same code as BaseResourcePage)
-            button.setText("")
-            button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-            button.setFixedWidth(30)
-            
-            # Apply EXACT same styling as BaseResourcePage
-            try:
-                from UI.Styles import AppStyles
-                button.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE)
-            except (ImportError, AttributeError) as e:
-                logging.debug(f"NodesPage: Could not load AppStyles for button: {e}")
-                # EXACT same fallback styling as BaseResourcePage
-                button.setStyleSheet("""
-                    QToolButton {
-                        background-color: transparent;
-                        border: none;
-                        padding: 2px;
-                    }""")
-            
-            # Create menu with actions matching BaseResourcePage pattern
-            menu = QMenu(button)
-            
-            # Add actions exactly like BaseResourcePage does
-            try:
-                # Standard action creation pattern
-                actions = [
-                    {"text": "View Details", "icon": None},
-                    {"text": "Edit", "icon": None},
-                    {"text": "Delete", "icon": None},
-                    {"text": "View Metrics", "icon": None},  # Node-specific action
-                ]
-                
-                for action_info in actions:
-                    action = menu.addAction(action_info["text"])
-                    action.triggered.connect(partial(self._handle_action, action_info["text"], row))
-                    logging.debug(f"Action button: Connected '{action_info['text']}' for row {row}")
-            except Exception as e:
-                logging.error(f"Error adding action {action_info['text']}: {e}")
-                
-            button.setMenu(menu)
-            
-            logging.debug(f"NodesPage: Created EXACT BaseResourcePage-style action button for row {row}")
-            return button  # Return button directly, not in container
-            
-        except Exception as e:
-            logging.error(f"NodesPage: Error creating standard action button for row {row}: {e}")
-            return None
     
     def _apply_virtual_table_styling(self):
         """Apply proper styling to virtual table (QTableView) matching other pages"""
@@ -1427,61 +1258,6 @@ class NodesPage(BaseResourcePage):
         except Exception as e:
             logging.error(f"NodesPage: Failed to setup base UI: {e}")
     
-    def _create_search_bar_above_table(self, table_layout):
-        """Create search bar and add it above the table"""
-        try:
-            from PyQt6.QtWidgets import QHBoxLayout, QLabel, QLineEdit
-            from UI.Styles import AppStyles
-            
-            # Create filters layout for search bar
-            filters_layout = QHBoxLayout()
-            filters_layout.setSpacing(12)
-            
-            # Search bar with label
-            search_label = QLabel("Search:")
-            search_label.setStyleSheet("color: #ffffff; font-size: 12px; font-weight: normal;")
-            search_label.setMinimumWidth(50)
-            
-            self.search_bar = QLineEdit()
-            self.search_bar.setPlaceholderText("Search nodes...")
-            self.search_bar.textChanged.connect(self._on_search_text_changed)
-            self.search_bar.setFixedWidth(200)
-            self.search_bar.setFixedHeight(32)
-            
-            # Apply search bar styling
-            search_style = getattr(AppStyles, 'SEARCH_INPUT', 
-                """QLineEdit {
-                    background-color: #2d2d2d;
-                    color: #ffffff;
-                    border: 1px solid #3d3d3d;
-                    border-radius: 4px;
-                    padding: 6px 12px;
-                    font-size: 12px;
-                }
-                QLineEdit:focus {
-                    border-color: #0078d4;
-                    background-color: #353535;
-                }""")
-            self.search_bar.setStyleSheet(search_style)
-            
-            # Add search components to filters layout
-            filters_layout.addWidget(search_label)
-            filters_layout.addWidget(self.search_bar)
-            filters_layout.addStretch()  # Push search bar to the left
-            
-            # Create a container widget for the search bar
-            search_container = QWidget()
-            search_container.setLayout(filters_layout)
-            search_container.setMaximumHeight(40)  # Limit height
-            
-            # Add search container to table layout
-            table_layout.addWidget(search_container)
-            
-            logging.debug("NodesPage: Created search bar above table")
-            
-        except Exception as e:
-            logging.error(f"NodesPage: Failed to create search bar above table: {e}")
-    
     def _on_search_text_changed(self, text):
         """Handle search text changes with debouncing"""
         # Use base class search functionality
@@ -1553,33 +1329,6 @@ class NodesPage(BaseResourcePage):
             self.populate_table(self.nodes_data)
             self.items_count.setText(f"{len(self.nodes_data)} items")
     
-    def _show_virtual_action_menu(self, row, index):
-        """Show action menu when action column is clicked"""
-        try:
-            from PyQt6.QtWidgets import QMenu
-            from PyQt6.QtGui import QCursor
-            
-            node = self.virtual_model.get_node_at_row(row)
-            if not node:
-                logging.warning(f"NodesPage: No node found at row {row}")
-                return
-                
-            node_name = node.get('name', 'Unknown')
-            
-            # Create context menu with standard action names using base class pattern
-            menu = QMenu(self)
-            menu.addAction("View Details", lambda: self._handle_action("View Details", row))
-            menu.addAction("Edit", lambda: self._handle_action("Edit", row))
-            menu.addAction("Delete", lambda: self._handle_action("Delete", row))
-            menu.addAction("View Metrics", lambda: self._handle_action("View Metrics", row))
-            
-            # Show menu at cursor position
-            menu.exec(QCursor.pos())
-            
-            logging.debug(f"NodesPage: Showing action menu for node '{node_name}' at row {row}")
-            
-        except Exception as e:
-            logging.error(f"NodesPage: Error showing virtual action menu for row {row}: {e}")
     
     def _handle_action(self, action, row):
         """Override base class _handle_action to work with both virtual and traditional tables"""
@@ -1783,8 +1532,6 @@ class NodesPage(BaseResourcePage):
             # Configure initial column setup
             if hasattr(self, 'table') and self.table:
                 QTimer.singleShot(100, self.configure_columns)
-                # Setup action buttons after layout is complete
-                QTimer.singleShot(150, self._setup_virtual_action_buttons)
             
             logging.info("NodesPage: Virtual layout setup completed successfully with Node title, count, refresh button and search bar above table")
             
@@ -1800,8 +1547,9 @@ class NodesPage(BaseResourcePage):
             column = index.column()
             logging.debug(f"NodesPage: Virtual table click - row: {row}, column: {column}")
             
-            if column == 9:  # Action column clicked
-                self._show_virtual_action_menu(row, index)
+            if column == 9:  # Action column clicked - buttons handle this
+                # Action buttons are already in place, no need for context menu
+                pass
             else:
                 self._select_node_for_graphs_virtual(row)
     

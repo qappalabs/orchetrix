@@ -1,0 +1,10 @@
+#!/bin/bash
+set -e
+
+# Stop any running orchetrix processes
+pkill -f orchetrix || true
+
+# Clean up temporary files
+rm -rf /tmp/orchetrix-* || true
+
+exit 0

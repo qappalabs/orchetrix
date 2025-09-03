@@ -362,17 +362,14 @@ class UnifiedCacheSystem:
     def clear_cluster_cache(self, cluster_name: str):
         """Clear all cache entries for a specific cluster to prevent stale data"""
         try:
-            # Clear all caches that might contain cluster-specific data
+            # FIXED: Only clear cache entries specifically for this cluster
             for cache_name, cache_instance in self._caches.items():
                 with cache_instance._lock:
                     keys_to_remove = []
                     for key in cache_instance._cache.keys():
-                        # Remove entries that contain the cluster name or are general resources
-                        if (cluster_name in key or 
-                            key.startswith('resource:') or 
-                            key.startswith('metrics:') or
-                            key.startswith('nodes:') or
-                            key.startswith('namespaces:')):
+                        # Only remove entries that explicitly contain the cluster name
+                        # Don't remove general resource cache entries that might be shared
+                        if cluster_name in key:
                             keys_to_remove.append(key)
                     
                     for key in keys_to_remove:

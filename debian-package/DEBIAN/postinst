@@ -1,0 +1,21 @@
+#!/bin/bash
+set -e
+
+# Update desktop database
+if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database -q /usr/share/applications
+fi
+
+# Update icon cache
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor
+fi
+
+# Create application directory for user data
+mkdir -p /var/lib/orchetrix
+chmod 755 /var/lib/orchetrix
+
+echo "Orchetrix has been installed successfully!"
+echo "You can start it from the applications menu or run 'orchetrix' in terminal."
+
+exit 0
