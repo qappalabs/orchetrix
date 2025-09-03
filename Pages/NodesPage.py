@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QGraphicsDropShadowEffect, QSizePolicy, QStyleOptionButton, QStyle, QStyleOptionHeader,
     QApplication, QPushButton, QProxyStyle, QTableView, QAbstractItemView, QStyledItemDelegate
 )
-from PyQt6.QtCore import Qt, QTimer, QRectF, pyqtSignal, QSize, QAbstractTableModel, QModelIndex
+from PyQt6.QtCore import Qt, QTimer, QRectF, pyqtSignal, QSize, QAbstractTableModel, QModelIndex, QThreadPool, QRunnable, QObject
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QCursor, QFont
 
 from UI.Styles import AppStyles, AppColors, AppConstants
@@ -21,6 +21,169 @@ from UI.Icons import resource_path
 import datetime
 import logging
 import time
+
+#------------------------------------------------------------------
+# Async Worker for Node Metrics Calculation
+#------------------------------------------------------------------
+class NodeMetricsWorkerSignals(QObject):
+    """Signals for the node metrics worker"""
+    finished = pyqtSignal(str, str, dict)  # node_name, metric_type, result
+    error = pyqtSignal(str, str, str)  # node_name, metric_type, error_msg
+
+class NodeMetricsWorker(QRunnable):
+    """Worker to calculate metrics for a single node asynchronously"""
+    
+    def __init__(self, node_name: str, node_data: dict, metric_type: str):
+        super().__init__()
+        self.node_name = node_name
+        self.node_data = node_data
+        self.metric_type = metric_type
+        self.signals = NodeMetricsWorkerSignals()
+    
+    def run(self):
+        """Calculate the metric and emit result"""
+        logging.info(f"NodeMetricsWorker: Starting {self.metric_type} calculation for {self.node_name}")
+        try:
+            if self.metric_type == 'cpu':
+                result = self._calculate_cpu_metrics()
+            elif self.metric_type == 'memory':
+                result = self._calculate_memory_metrics()
+            elif self.metric_type == 'disk':
+                result = self._calculate_disk_metrics()
+            else:
+                result = {'usage': None, 'capacity': 'N/A'}
+            
+            logging.info(f"NodeMetricsWorker: Completed {self.metric_type} calculation for {self.node_name}: {result}")
+            self.signals.finished.emit(self.node_name, self.metric_type, result)
+            
+        except Exception as e:
+            error_msg = f"Error calculating {self.metric_type} for {self.node_name}: {str(e)}"
+            logging.error(error_msg)
+            self.signals.error.emit(self.node_name, self.metric_type, error_msg)
+    
+    def _calculate_cpu_metrics(self):
+        """Calculate CPU metrics for the node"""
+        try:
+            # Use the already processed node data that has cpu_capacity and cpu_usage
+            cpu_capacity = self.node_data.get('cpu_capacity', '')
+            cpu_usage = self.node_data.get('cpu_usage', None)
+            
+            logging.info(f"CPU metrics - capacity: {cpu_capacity}, usage: {cpu_usage}")
+            
+            # Parse CPU capacity to get readable format
+            if cpu_capacity:
+                cpu_cores = self._parse_cpu_value(cpu_capacity)
+                if cpu_cores > 0:
+                    capacity_str = f"{cpu_cores} cores"
+                else:
+                    capacity_str = str(cpu_capacity)
+            else:
+                capacity_str = 'N/A'
+            
+            return {
+                'usage': cpu_usage,
+                'capacity': capacity_str
+            }
+                
+        except Exception as e:
+            logging.error(f"Error calculating CPU metrics: {e}")
+            return {'usage': None, 'capacity': ''}
+    
+    def _calculate_memory_metrics(self):
+        """Calculate Memory metrics for the node"""
+        try:
+            # Use the already processed node data that has memory_capacity and memory_usage
+            memory_capacity = self.node_data.get('memory_capacity', '')
+            memory_usage = self.node_data.get('memory_usage', None)
+            
+            logging.info(f"Memory metrics - capacity: {memory_capacity}, usage: {memory_usage}")
+            
+            # Use the capacity directly (it's already formatted)
+            capacity_str = memory_capacity if memory_capacity else ''
+            
+            return {
+                'usage': memory_usage,
+                'capacity': capacity_str
+            }
+                
+        except Exception as e:
+            logging.error(f"Error calculating memory metrics: {e}")
+            return {'usage': None, 'capacity': ''}
+    
+    def _calculate_disk_metrics(self):
+        """Calculate Disk metrics for the node"""
+        try:
+            # Use the already processed node data that has disk_capacity and disk_usage
+            disk_capacity = self.node_data.get('disk_capacity', '')
+            disk_usage = self.node_data.get('disk_usage', None)
+            
+            logging.info(f"Disk metrics - capacity: {disk_capacity}, usage: {disk_usage}")
+            
+            # Use the capacity directly (it's already formatted)
+            capacity_str = disk_capacity if disk_capacity else ''
+            
+            return {
+                'usage': disk_usage,
+                'capacity': capacity_str
+            }
+                
+        except Exception as e:
+            logging.error(f"Error calculating disk metrics: {e}")
+            return {'usage': None, 'capacity': ''}
+    
+    def _parse_cpu_value(self, cpu_str):
+        """Parse CPU string to numeric value"""
+        try:
+            if not cpu_str:
+                return 0
+            cpu_str = str(cpu_str).lower()
+            if 'm' in cpu_str:
+                # Handle millicores (e.g., "2000m" = 2 cores)
+                return int(cpu_str.replace('m', '')) / 1000
+            else:
+                return float(cpu_str)
+        except:
+            return 0
+    
+    def _format_memory_value(self, memory_str):
+        """Format memory/storage value to readable format"""
+        try:
+            if not memory_str:
+                return 'N/A'
+            
+            memory_str = str(memory_str).upper()
+            
+            # Handle different units
+            if 'KI' in memory_str:
+                value = int(memory_str.replace('KI', ''))
+                return f"{value / 1024 / 1024:.1f} GiB" if value > 1024*1024 else f"{value / 1024:.1f} MiB"
+            elif 'MI' in memory_str:
+                value = int(memory_str.replace('MI', ''))
+                return f"{value / 1024:.1f} GiB" if value > 1024 else f"{value} MiB"
+            elif 'GI' in memory_str:
+                value = int(memory_str.replace('GI', ''))
+                return f"{value} GiB"
+            elif 'K' in memory_str:
+                value = int(memory_str.replace('K', ''))
+                return f"{value / 1024 / 1024:.1f} GiB" if value > 1024*1024 else f"{value / 1024:.1f} MiB"
+            elif 'M' in memory_str:
+                value = int(memory_str.replace('M', ''))
+                return f"{value / 1024:.1f} GiB" if value > 1024 else f"{value} MiB"
+            elif 'G' in memory_str:
+                value = int(memory_str.replace('G', ''))
+                return f"{value} GiB"
+            else:
+                # Assume bytes
+                value = int(memory_str)
+                if value > 1024*1024*1024:
+                    return f"{value / 1024 / 1024 / 1024:.1f} GiB"
+                elif value > 1024*1024:
+                    return f"{value / 1024 / 1024:.1f} MiB"
+                else:
+                    return f"{value / 1024:.1f} KiB"
+                    
+        except:
+            return str(memory_str) if memory_str else 'N/A'
 
 #------------------------------------------------------------------
 # Custom Style to hide checkbox in header
@@ -71,7 +234,7 @@ class ConditionColorDelegate(QStyledItemDelegate):
                 elif status == 'unknown':
                     text_color = QColor("#FFA500")  # Bright orange
                 else:
-                    text_color = QColor("#FFFFFF")  # White fallback
+                    text_color = QColor("#FFFFFF")  # Default white for other statuses
                 
                 # Set font and pen
                 font = painter.font()
@@ -131,7 +294,7 @@ class GraphWidget(QFrame):
         self.node_name = "None"
         self.utilization_data = {}
         self._last_update_time = 0
-        self._update_interval = 10.0  # 10 seconds
+        self._update_interval = 30.0  # 30 seconds to reduce load
         self._is_updating = False
 
         self.setMinimumHeight(120)
@@ -164,17 +327,11 @@ class GraphWidget(QFrame):
         # Timer for regular updates - but allow immediate updates on selection
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_data)
-        self.timer.start(5000)  # 5 seconds for responsive updates
+        self.timer.start(30000)  # 30 seconds to reduce CPU load
 
     def generate_utilization_data(self, nodes_data, force_update=False):
         """Generate utilization data for nodes - optimized for performance"""
-        logging.debug(f"GraphWidget ({self.title}): generate_utilization_data called - nodes: {len(nodes_data) if nodes_data else 0}, force_update: {force_update}")
-        
         if not nodes_data or self._is_updating:
-            if not nodes_data:
-                logging.debug(f"GraphWidget ({self.title}): No nodes data provided")
-            if self._is_updating:
-                logging.debug(f"GraphWidget ({self.title}): Already updating, skipping")
             return
             
         current_time = time.time()
@@ -182,7 +339,6 @@ class GraphWidget(QFrame):
         if (not force_update and self.utilization_data and 
             self._last_update_time > 0 and 
             current_time - self._last_update_time < self._update_interval):
-            logging.debug(f"GraphWidget ({self.title}): Throttling update - last update {current_time - self._last_update_time:.1f}s ago")
             return
         
         self._is_updating = True
@@ -207,10 +363,8 @@ class GraphWidget(QFrame):
             # Update utilization_data in one operation
             if new_data:
                 self.utilization_data.update(new_data)
-                logging.debug(f"GraphWidget ({self.title}): Updated utilization data for {len(new_data)} nodes: {new_data}")
-                logging.info(f"GraphWidget ({self.title}): Successfully processed utilization data from {len(nodes_data)} nodes")
             else:
-                logging.warning(f"GraphWidget ({self.title}): No utilization data found in nodes for metric_key: {metric_key}")
+                logging.warning(f"GraphWidget ({self.title}): No utilization data found for metric_key: {metric_key}")
                 
         finally:
             self._is_updating = False
@@ -230,9 +384,6 @@ class GraphWidget(QFrame):
         self.node_name = node_name
         self.title_label.setText(f"{self.title} ({node_name})")
         
-        logging.debug(f"GraphWidget ({self.title}): Set selected node {node_name}")
-        logging.debug(f"GraphWidget ({self.title}): Available utilization data nodes: {list(self.utilization_data.keys())}")
-        
         if node_name in self.utilization_data:
             self.current_value = round(self.utilization_data[node_name], 1)
             self.value_label.setText(f"{self.current_value}{self.unit}")
@@ -240,20 +391,12 @@ class GraphWidget(QFrame):
         else:
             logging.warning(f"GraphWidget ({self.title}): No utilization data found for {node_name} - available nodes: {list(self.utilization_data.keys())}")
             
-        # Force immediate data update and display
-        logging.debug(f"GraphWidget ({self.title}): Forcing immediate update and repaint for {node_name}")
+        # Update data without forcing immediate repaint to reduce load
         self.update_data()
-        self.update()
-        self.repaint()
-        logging.debug(f"GraphWidget ({self.title}): Completed immediate update for {node_name}")
 
     def update_data(self):
         """Update the chart data - only use real cluster data"""
         if not self.selected_node or self.node_name not in self.utilization_data:
-            if not self.selected_node:
-                logging.debug(f"GraphWidget ({self.title}): No node selected for data update")
-            if self.node_name not in self.utilization_data:
-                logging.debug(f"GraphWidget ({self.title}): Node {self.node_name} not in utilization data")
             return
             
         # Use the actual utilization value from real cluster data
@@ -265,11 +408,9 @@ class GraphWidget(QFrame):
             self.data.pop(0)
             self.current_value = round(current_utilization, 1)
             self.value_label.setText(f"{self.current_value}{self.unit}")
-            logging.debug(f"GraphWidget ({self.title}): Updated data point for {self.node_name}: {current_utilization}")
-            
+            # Only trigger visual update if widget is visible to reduce painting overhead
             if self.isVisible():
                 self.update()
-                logging.debug(f"GraphWidget ({self.title}): Triggered visual update for {self.node_name}")
 
     def paintEvent(self, event):
         """Ultra-simplified paint event for maximum performance with proper bounds checking"""
@@ -370,12 +511,7 @@ class GraphWidget(QFrame):
             painter.drawText(QRectF(width + 20, y_50 - 6, 25, 12), Qt.AlignmentFlag.AlignLeft, "50%") 
             painter.drawText(QRectF(width + 20, bottom - 11, 25, 12), Qt.AlignmentFlag.AlignLeft, "0%")
         
-        # Only show placeholder if no node selected and space is available
-        if not self.selected_node and width > 150:
-            painter.setPen(QPen(QColor(AppColors.TEXT_SUBTLE)))
-            placeholder_y = max(top_margin, min(widget_height - 50, 20))
-            text_rect = QRectF(0, placeholder_y, widget_width, min(30, widget_height - placeholder_y - 20))
-            painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, "Select a node")
+        # No placeholder text - graph only shows data when real node is selected
 
     def cleanup(self):
         """Cleanup method"""
@@ -395,6 +531,7 @@ class NodesTableModel(QAbstractTableModel):
         self._nodes_data = []
         self._headers = ["Name", "CPU", "Memory", "Disk", "Taints", "Roles", "Version", "Age", "Conditions", "Actions"]
         self._performance_cache = {}
+        self._calculation_status = {}  # Track which nodes have completed calculations
         
     def rowCount(self, parent=QModelIndex()) -> int:
         return len(self._nodes_data)
@@ -431,36 +568,55 @@ class NodesTableModel(QAbstractTableModel):
     def _get_node_display_data(self, node: dict, col: int) -> str:
         """Get display data for node efficiently"""
         if col == 0:  # Name column
-            return node.get("name", "Unknown")
+            name = node.get("name")
+            return name if name else None
         elif col == 1:  # CPU
-            cpu_usage = node.get("cpu_usage")
-            cpu_capacity = node.get("cpu_capacity", "")
-            if cpu_usage is not None and cpu_capacity:
-                return f"{cpu_capacity} ({cpu_usage:.1f}%)"
-            return cpu_capacity or "N/A"
-        elif col == 2:  # Memory (was col 3)
-            memory_usage = node.get("memory_usage")
-            memory_capacity = node.get("memory_capacity", "")
-            if memory_usage is not None and memory_capacity:
-                return f"{memory_capacity} ({memory_usage:.1f}%)"
-            return memory_capacity or "N/A"
-        elif col == 3:  # Disk (was col 4)
-            disk_usage = node.get("disk_usage")
-            disk_capacity = node.get("disk_capacity", "")
-            if disk_usage is not None and disk_capacity:
-                return f"{disk_capacity} ({disk_usage:.1f}%)"
-            return disk_capacity or "N/A"
+            node_name = node.get("name", "")
+            # Check if calculations are complete for this node
+            if self._calculation_status.get(node_name, {}).get('cpu_complete', False):
+                cpu_usage = node.get("cpu_usage")
+                cpu_capacity = node.get("cpu_capacity", "")
+                if cpu_usage is not None and cpu_capacity:
+                    return f"{cpu_capacity} ({cpu_usage:.1f}%)"
+                return cpu_capacity if cpu_capacity else ""
+            else:
+                return "⏳"  # Loading indicator
+        elif col == 2:  # Memory 
+            node_name = node.get("name", "")
+            # Check if calculations are complete for this node
+            if self._calculation_status.get(node_name, {}).get('memory_complete', False):
+                memory_usage = node.get("memory_usage")
+                memory_capacity = node.get("memory_capacity", "")
+                if memory_usage is not None and memory_capacity:
+                    return f"{memory_capacity} ({memory_usage:.1f}%)"
+                return memory_capacity if memory_capacity else ""
+            else:
+                return "⏳"  # Loading indicator
+        elif col == 3:  # Disk
+            node_name = node.get("name", "")
+            # Check if calculations are complete for this node
+            if self._calculation_status.get(node_name, {}).get('disk_complete', False):
+                disk_usage = node.get("disk_usage")
+                disk_capacity = node.get("disk_capacity", "")
+                if disk_usage is not None and disk_capacity:
+                    return f"{disk_capacity} ({disk_usage:.1f}%)"
+                return disk_capacity if disk_capacity else ""
+            else:
+                return "⏳"  # Loading indicator
         elif col == 4:  # Taints (was col 5)
             return str(node.get("taints", "0"))
         elif col == 5:  # Roles (was col 6)
             roles = node.get("roles", [])
             return ", ".join(roles) if isinstance(roles, list) else str(roles)
         elif col == 6:  # Version (was col 7)
-            return node.get("version", "Unknown")
+            version = node.get("version")
+            return version if version else None
         elif col == 7:  # Age (was col 8)
-            return node.get("age", "Unknown")
+            age = node.get("age")
+            return age if age else None
         elif col == 8:  # Conditions (was col 9)
-            return node.get("status", "Unknown")
+            status = node.get("status")
+            return status if status else None
         elif col == 9:  # Actions (was col 10)
             return ""  # Empty for action column - handled by widget
         return ""
@@ -473,7 +629,10 @@ class NodesTableModel(QAbstractTableModel):
     def _get_node_text_color(self, node: dict, col: int):
         """Get text color for node status - used for conditions column with strong colors"""
         if col == 8:  # Conditions/Status column (correct index)
-            status = node.get("status", "Unknown").lower()
+            status_value = node.get("status")
+            if not status_value:
+                return ""  # Skip nodes without status
+            status = status_value.lower()
             if status == "ready":
                 # Use bright green that stands out
                 color = QColor(AppColors.STATUS_ACTIVE)
@@ -495,17 +654,158 @@ class NodesTableModel(QAbstractTableModel):
     
     def update_nodes_data(self, nodes_data):
         """Update the model with new node data efficiently"""
+        
         self.beginResetModel()
         self._nodes_data = nodes_data or []
         self._performance_cache.clear()  # Clear cache on data update
+        self.reset_calculation_status()  # Reset calculation status for new data
         self.endResetModel()
+        
+        # Start async calculations for the new nodes
+        if self._nodes_data:
+            logging.info(f"CALLING _start_async_calculations() for {len(self._nodes_data)} nodes")
+            self._start_async_calculations()
+        else:
+            logging.info("No nodes data provided, skipping async calculations")
+        
         logging.info(f"NodesTableModel: Updated with {len(self._nodes_data)} nodes")
+    
+    def _start_async_calculations(self):
+        """Start async calculations for all nodes with optimized staggered timing"""
+        if not hasattr(self, 'threadpool'):
+            self.threadpool = QThreadPool()
+            self.threadpool.setMaxThreadCount(2)  # Limit to 2 concurrent calculations
+        
+        # Optimize scheduling based on number of nodes
+        node_count = len(self._nodes_data)
+        
+        logging.info(f"Starting async calculations for {node_count} nodes")
+        
+        if node_count == 0:
+            logging.info("No nodes to calculate, skipping async calculations")
+            return
+        
+        # Calculate optimal delay based on load
+        if node_count <= 5:
+            base_delay = 50  # Fast for few nodes
+        elif node_count <= 20:
+            base_delay = 100  # Medium for moderate load
+        else:
+            base_delay = 200  # Slower for heavy load
+        
+        # Schedule calculations in batches to prevent overwhelming
+        batch_size = 5  # Process 5 nodes at a time
+        
+        for batch_start in range(0, node_count, batch_size):
+            batch_end = min(batch_start + batch_size, node_count)
+            batch_delay = batch_start * base_delay // batch_size
+            
+            # Schedule this batch
+            QTimer.singleShot(batch_delay, lambda start=batch_start, end=batch_end: self._process_node_batch(start, end))
+    
+    def _process_node_batch(self, start_idx: int, end_idx: int):
+        """Process a batch of nodes for calculation"""
+        logging.info(f"Processing node batch {start_idx}-{end_idx}")
+        for i in range(start_idx, end_idx):
+            if i < len(self._nodes_data):
+                node = self._nodes_data[i]
+                node_name = node.get('name')
+                if node_name:
+                    # Small delay within batch to stagger individual node calculations
+                    delay_ms = (i - start_idx) * 50  # 50ms between nodes in same batch
+                    QTimer.singleShot(delay_ms, lambda name=node_name, node_data=node: self._calculate_node_metrics(name, node_data))
+    
+    def _calculate_node_metrics(self, node_name: str, node_data: dict):
+        """Calculate metrics for a single node asynchronously"""
+        try:
+            # Calculate CPU metrics immediately
+            cpu_worker = NodeMetricsWorker(node_name, node_data, 'cpu')
+            cpu_worker.signals.finished.connect(lambda name, metric, result: self._on_metric_calculated(name, metric, result))
+            if hasattr(self, 'threadpool'):
+                self.threadpool.start(cpu_worker)
+            
+            # Calculate memory metrics immediately
+            memory_worker = NodeMetricsWorker(node_name, node_data, 'memory')
+            memory_worker.signals.finished.connect(lambda name, metric, result: self._on_metric_calculated(name, metric, result))
+            if hasattr(self, 'threadpool'):
+                self.threadpool.start(memory_worker)
+            
+            # Calculate disk metrics immediately
+            disk_worker = NodeMetricsWorker(node_name, node_data, 'disk')
+            disk_worker.signals.finished.connect(lambda name, metric, result: self._on_metric_calculated(name, metric, result))
+            if hasattr(self, 'threadpool'):
+                self.threadpool.start(disk_worker)
+                
+            logging.info(f"Started async calculations for node {node_name}")
+            
+        except Exception as e:
+            logging.error(f"Error starting calculations for node {node_name}: {e}")
+    
+    
+    def _on_metric_calculated(self, node_name: str, metric_type: str, result: dict):
+        """Handle completed metric calculation"""
+        logging.info(f"Received {metric_type} calculation result for {node_name}: {result}")
+        try:
+            # Update the node data with calculated values
+            for node in self._nodes_data:
+                if node.get('name') == node_name:
+                    if metric_type == 'cpu':
+                        node.update({
+                            'cpu_usage': result.get('usage'),
+                            'cpu_capacity': result.get('capacity')
+                        })
+                    elif metric_type == 'memory':
+                        node.update({
+                            'memory_usage': result.get('usage'),
+                            'memory_capacity': result.get('capacity')
+                        })
+                    elif metric_type == 'disk':
+                        node.update({
+                            'disk_usage': result.get('usage'),
+                            'disk_capacity': result.get('capacity')
+                        })
+                    break
+            
+            # Mark calculation as complete and trigger UI update
+            self.mark_calculation_complete(node_name, metric_type)
+            logging.info(f"Marked {metric_type} calculation complete for {node_name} and updated UI")
+            
+        except Exception as e:
+            logging.error(f"Error processing calculated metric {metric_type} for {node_name}: {e}")
     
     def get_node_at_row(self, row: int):
         """Get node data at specific row"""
         if 0 <= row < len(self._nodes_data):
             return self._nodes_data[row]
         return None
+    
+    def mark_calculation_complete(self, node_name: str, metric_type: str):
+        """Mark a metric calculation as complete for a node"""
+        if node_name not in self._calculation_status:
+            self._calculation_status[node_name] = {}
+        self._calculation_status[node_name][f'{metric_type}_complete'] = True
+        
+        # Find row index and emit dataChanged for the specific cell
+        for row, node in enumerate(self._nodes_data):
+            if node.get('name') == node_name:
+                # Determine column based on metric type
+                col = 1 if metric_type == 'cpu' else 2 if metric_type == 'memory' else 3
+                index = self.createIndex(row, col)
+                self.dataChanged.emit(index, index)
+                break
+    
+    def reset_calculation_status(self):
+        """Reset all calculation statuses when new data is loaded"""
+        self._calculation_status.clear()
+    
+    def cleanup_calculations(self):
+        """Cleanup calculation resources"""
+        try:
+            if hasattr(self, 'threadpool'):
+                self.threadpool.waitForDone(1000)  # Wait max 1 second for completion
+                self.threadpool.clear()
+        except Exception as e:
+            logging.error(f"Error during calculation cleanup: {e}")
 
 #------------------------------------------------------------------
 # NodesPage - Now extending BaseResourcePage for consistency with Virtual Scrolling
@@ -585,8 +885,8 @@ class NodesPage(BaseResourcePage):
                 # Setup the complete layout with graphs above table and controls above table
                 self._setup_virtual_layout()
                 
-                # Load initial data
-                QTimer.singleShot(100, self.force_load_data)
+                # Load initial data with delay to ensure UI is properly set up
+                QTimer.singleShot(300, self._initial_load_data)
                 
                 logging.info("NodesPage: Virtual table and graphs created successfully")
             except Exception as e:
@@ -594,20 +894,13 @@ class NodesPage(BaseResourcePage):
                 self.use_virtual_scrolling = False
         
         if not self.use_virtual_scrolling:
-            # Use traditional table widget
-            layout = super().setup_ui("Nodes", headers, sortable_columns)
-            logging.info("NodesPage: Using traditional table widget")
-            return  # Early return - base class handles everything
+            # Virtual scrolling failed - NodesPage only supports virtual tables
+            raise Exception("NodesPage requires virtual scrolling - traditional table fallback removed")
     
     def _add_filter_controls(self, header_layout):
         """Override to add search bar above table instead of in header"""
-        # For traditional mode, don't add search to header - we'll add it above table later
-        if not self.use_virtual_scrolling:
-            # Skip adding search to header for traditional mode
-            pass
-        else:
-            # For virtual scrolling, use the original method but we'll move it later
-            super()._add_filter_controls(header_layout)
+        # Virtual scrolling only - no traditional mode
+        super()._add_filter_controls(header_layout)
     
     def _replace_table_with_virtual_and_graphs(self):
         """Replace BaseResourcePage table with virtual table and move search bar above table"""
@@ -731,14 +1024,14 @@ class NodesPage(BaseResourcePage):
         except Exception as e:
             logging.error(f"NodesPage: Virtual table setup failed: {e}")
             logging.debug(f"NodesPage: Virtual table error details", exc_info=True)
-            # Clean up partial state
+            # Clean up partial state and fail - no fallback
             if hasattr(self, 'virtual_model'):
                 delattr(self, 'virtual_model')
             if hasattr(self, 'table'):
                 delattr(self, 'table')
-            # Fallback to traditional table will be handled by setup_page_ui
+            # No fallback - virtual table is required
             self.use_virtual_scrolling = False
-            raise e  # Re-raise to trigger fallback in setup_page_ui
+            raise Exception(f"NodesPage virtual table setup failed: {e}")
     
     def _setup_graphs(self):
         """Setup graphs for virtual scrolling mode"""
@@ -758,10 +1051,7 @@ class NodesPage(BaseResourcePage):
             
         except Exception as e:
             logging.error(f"NodesPage: Failed to create graphs: {e}")
-            # Create dummy graphs to prevent attribute errors
-            self.cpu_graph = None
-            self.mem_graph = None 
-            self.disk_graph = None
+            # Graphs will only be created if real node data with metrics is available
     
     def _replace_table_with_virtual_and_graphs(self):
         """Replace the BaseResourcePage table with virtual table and graphs while preserving proper header structure"""
@@ -1331,15 +1621,14 @@ class NodesPage(BaseResourcePage):
     
     
     def _handle_action(self, action, row):
-        """Override base class _handle_action to work with both virtual and traditional tables"""
+        """Handle actions for virtual table only"""
         logging.info(f"NodesPage: Action '{action}' clicked on row {row}")
         
-        # Handle virtual table differently
-        if hasattr(self, 'virtual_model') and self.virtual_model and hasattr(self, 'use_virtual_scrolling') and self.use_virtual_scrolling:
+        # NodesPage only supports virtual table
+        if hasattr(self, 'virtual_model') and self.virtual_model:
             return self._handle_virtual_table_action(action, row)
         else:
-            # Use base class implementation for traditional table
-            return super()._handle_action(action, row)
+            raise Exception("NodesPage action handling requires virtual table")
     
     def _handle_virtual_table_action(self, action, row):
         """Handle action button clicks in virtual table using standard BaseResourcePage pattern"""
@@ -1349,7 +1638,9 @@ class NodesPage(BaseResourcePage):
                 logging.warning(f"NodesPage: No node found at row {row}")
                 return
                 
-            node_name = node.get('name', 'Unknown')
+            node_name = node.get('name')
+            if not node_name:
+                return  # Skip nodes without names
             logging.info(f"NodesPage: Virtual action '{action}' for node '{node_name}' (row {row})")
             
             if action == "View Details":
@@ -1531,6 +1822,9 @@ class NodesPage(BaseResourcePage):
             
             # Configure initial column setup
             if hasattr(self, 'table') and self.table:
+                # Configure columns immediately for proper initial visibility
+                self.configure_columns()
+                # Also schedule a delayed reconfigure for final adjustments
                 QTimer.singleShot(100, self.configure_columns)
             
             logging.info("NodesPage: Virtual layout setup completed successfully with Node title, count, refresh button and search bar above table")
@@ -1611,10 +1905,10 @@ class NodesPage(BaseResourcePage):
                     if hasattr(self, 'disk_graph') and self.disk_graph:
                         self.disk_graph.set_selected_node(node, node_name)
                     
-                    # Force immediate repaint
+                    # Request updates without forcing immediate repaint
                     for graph in graphs:
-                        graph.update()
-                        graph.repaint()
+                        if graph.isVisible():
+                            graph.update()
                     
                     logging.debug(f"NodesPage: Updated {len(graphs)} graphs for selected node {node_name}")
                 else:
@@ -1628,8 +1922,8 @@ class NodesPage(BaseResourcePage):
         # No longer need to hide checkbox column since it's removed
         header = self.table.horizontalHeader()
         
-        # Use responsive column sizing
-        QTimer.singleShot(100, self._setup_responsive_columns)
+        # Use responsive column sizing with reduced frequency
+        QTimer.singleShot(300, self._setup_responsive_columns)
     
     def _setup_responsive_columns(self):
         """Setup responsive column sizing for nodes table"""
@@ -1640,21 +1934,24 @@ class NodesPage(BaseResourcePage):
         available_width = self.table.viewport().width() - 20  # Account for scrollbar
         
         if available_width <= 0:
-            return
+            available_width = 1200  # Use default width if viewport not ready
         
-        # Column priorities and minimum widths
+        # Ensure first column (Name) is immediately visible
+        if hasattr(self, 'virtual_model') and self.virtual_model and self.virtual_model.columnCount() > 0:
+            self.table.setColumnWidth(0, 150)  # Force Name column width
+        
+        # Column priorities and minimum widths (no checkbox column)
         column_config = [
-            (0, 40, 40, "fixed"),      # Hidden checkbox
-            (1, 140, 100, "priority"), # Name (priority)
-            (2, 110, 80, "normal"),    # CPU
-            (3, 110, 80, "normal"),    # Memory
-            (4, 110, 80, "normal"),    # Disk
-            (5, 60, 50, "compact"),    # Taints
-            (6, 120, 80, "normal"),    # Roles
-            (7, 90, 60, "compact"),    # Version
-            (8, 60, 50, "compact"),    # Age
-            (9, 90, 70, "stretch"),    # Conditions (stretch)
-            (10, 40, 40, "fixed")      # Actions
+            (0, 160, 120, "priority"), # Name (priority - first column)
+            (1, 110, 80, "normal"),    # CPU
+            (2, 110, 80, "normal"),    # Memory
+            (3, 110, 80, "normal"),    # Disk
+            (4, 60, 50, "compact"),    # Taints
+            (5, 120, 80, "normal"),    # Roles
+            (6, 90, 60, "compact"),    # Version
+            (7, 60, 50, "compact"),    # Age
+            (8, 90, 70, "stretch"),    # Conditions (stretch)
+            (9, 60, 60, "fixed")       # Actions
         ]
         
         # Calculate total reserved space for fixed and minimum widths
@@ -1673,16 +1970,13 @@ class NodesPage(BaseResourcePage):
             normal_extra = remaining_space / normal_columns if normal_columns > 0 else 0
         
         for col_index, default_width, min_width, col_type in column_config:
-            # Use the model's columnCount method instead of table's
+            # Virtual table only - check model column count
             if hasattr(self, 'virtual_model') and self.virtual_model:
                 if col_index >= self.virtual_model.columnCount():
                     continue
             else:
-                # Fallback for traditional table
-                if hasattr(self.table, 'columnCount') and col_index >= self.table.columnCount():
-                    continue
-                elif not hasattr(self.table, 'columnCount') and col_index >= 11:  # Default column count
-                    continue
+                # No virtual model available
+                continue
                 
             if col_type == "fixed":
                 header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Fixed)
@@ -1710,8 +2004,8 @@ class NodesPage(BaseResourcePage):
             # Show a proper empty message for virtual table
             self._show_virtual_empty_message()
         else:
-            # Use base class implementation for traditional table
-            self._show_empty_message()
+            # No virtual table available
+            logging.warning("NodesPage: Cannot show empty message - virtual table not available")
         
     def _show_virtual_empty_message(self):
         """Show empty message for virtual table mode"""
@@ -1792,6 +2086,14 @@ class NodesPage(BaseResourcePage):
         logging.info(f"NodesPage: update_nodes() called with {len(nodes_data) if nodes_data else 0} nodes")
         logging.debug(f"NodesPage: Received nodes data type: {type(nodes_data)}")
         
+        # Debounce rapid update calls
+        current_time = time.time()
+        if (hasattr(self, '_last_update_time') and 
+            current_time - self._last_update_time < 0.5):  # 500ms debounce
+            logging.debug("NodesPage: Debouncing rapid update call")
+            return
+        self._last_update_time = current_time
+        
         self.is_loading = False
         self.is_showing_skeleton = False
         
@@ -1810,7 +2112,22 @@ class NodesPage(BaseResourcePage):
             return
         
         logging.info(f"NodesPage: Processing {len(nodes_data)} nodes for UI display")
-        logging.debug(f"NodesPage: Sample node data: {nodes_data[0] if nodes_data else 'No data'}")
+        
+        # Check if this is the same data to prevent redundant updates
+        if (hasattr(self, 'nodes_data') and self.nodes_data and 
+            len(self.nodes_data) == len(nodes_data) and
+            hasattr(self, '_last_data_hash')):
+            # Compare data hash to avoid unnecessary updates
+            import hashlib
+            current_hash = hashlib.md5(str(nodes_data).encode()).hexdigest()
+            if current_hash == self._last_data_hash:
+                logging.debug("NodesPage: Identical data received, skipping update")
+                return
+            self._last_data_hash = current_hash
+        else:
+            # Store hash for future comparisons
+            import hashlib
+            self._last_data_hash = hashlib.md5(str(nodes_data).encode()).hexdigest()
         
         # Store the data
         self.nodes_data = nodes_data
@@ -1818,12 +2135,9 @@ class NodesPage(BaseResourcePage):
         self.has_loaded_data = True
         logging.debug(f"NodesPage: Stored node data - has_loaded_data: {self.has_loaded_data}")
         
-        # Update graphs asynchronously to avoid blocking UI
-        QTimer.singleShot(10, lambda: self._update_graphs_async(nodes_data))
-        
-        # Also update graphs immediately if this is the first load
-        if not hasattr(self, '_graphs_initialized'):
-            self._update_graphs_async(nodes_data)
+        # Update graphs only once to reduce load
+        if not hasattr(self, '_graphs_initialized') or not self._graphs_initialized:
+            QTimer.singleShot(100, lambda: self._update_graphs_async(nodes_data))
             self._graphs_initialized = True
         
         # Check if we're in search mode and apply search filter
@@ -1988,7 +2302,7 @@ class NodesPage(BaseResourcePage):
             
         except Exception as e:
             logging.error(f"Error in node search filtering: {e}")
-            # Fallback to showing all nodes
+            # Show all nodes data
             self._display_resources(self.nodes_data)
     
     def _clear_search_and_reload(self):
@@ -2011,18 +2325,38 @@ class NodesPage(BaseResourcePage):
     
     # Removed duplicate populate_resource_row methods - using optimized version directly
 
+    def _show_startup_loading_message(self):
+        """Override to prevent clearing table if data is already loaded"""
+        # Check if we already have data loaded - don't clear it
+        if (hasattr(self, 'virtual_model') and 
+            self.virtual_model and 
+            hasattr(self.virtual_model, '_nodes_data') and 
+            self.virtual_model._nodes_data):
+            logging.info(f"NodesPage: Skipping startup loading message - {len(self.virtual_model._nodes_data)} nodes already loaded")
+            return
+        
+        # Check if we have loaded data flag
+        if hasattr(self, 'has_loaded_data') and self.has_loaded_data:
+            logging.info("NodesPage: Skipping startup loading message - data already loaded")
+            return
+            
+        # If no data loaded yet, use parent implementation
+        logging.info("NodesPage: No data loaded yet, showing startup loading message")
+        super()._show_startup_loading_message()
+
     def clear_table(self):
         """Override base class clear_table to ensure proper widget cleanup"""
         if not self.table:
             return
             
-        # Clear all cell widgets first
-        for row in range(self.table.rowCount()):
-            for col in range(self.table.columnCount()):
-                widget = self.table.cellWidget(row, col)
-                if widget:
-                    widget.setParent(None)
-                    widget.deleteLater()
+        # Clear all cell widgets first (only for QTableWidget, skip for QTableView)
+        if hasattr(self.table, 'columnCount'):  # QTableWidget
+            for row in range(self.table.rowCount()):
+                for col in range(self.table.columnCount()):
+                    widget = self.table.cellWidget(row, col)
+                    if widget:
+                        widget.setParent(None)
+                        widget.deleteLater()
         
         # Clear virtual model data
         if hasattr(self, 'virtual_model') and self.virtual_model:
@@ -2054,71 +2388,13 @@ class NodesPage(BaseResourcePage):
             # Only add action buttons if there are resources
             if resources_to_use:
                 self._add_virtual_action_buttons(resources_to_use)
+            # Schedule async metrics updates for virtual model
+            self._schedule_virtual_metrics_updates(resources_to_use)
             return
         
-        # Use traditional table widget approach for smaller datasets
-        self._populate_traditional_table(resources_to_populate)
+        # NodesPage only supports virtual tables - no traditional table fallback
+        raise Exception("NodesPage populate_table called but virtual table not available")
     
-    def _populate_traditional_table(self, resources_to_populate):
-        """Populate traditional QTableWidget - for backward compatibility"""
-        logging.debug(f"NodesPage: Using traditional table population for {len(resources_to_populate)} resources")
-        
-        # Disable all expensive operations during population
-        if hasattr(self.table, 'setSortingEnabled'):  # QTableWidget
-            self.table.setSortingEnabled(False)
-            self.table.setUpdatesEnabled(False)
-        
-        # Clear and resize table efficiently - also clear all cell widgets
-        # First clear all cell widgets explicitly to prevent orphaned widgets
-        old_row_count = self.table.rowCount()
-        for row in range(old_row_count):
-            for col in range(self.table.columnCount()):
-                widget = self.table.cellWidget(row, col)
-                if widget:
-                    widget.setParent(None)
-                    widget.deleteLater()
-        
-        # Clear table contents and reset row count (only for QTableWidget)
-        if hasattr(self.table, 'clearContents'):
-            self.table.clearContents()
-        if hasattr(self.table, 'setRowCount'):
-            self.table.setRowCount(0)  # Reset to 0 first
-            self.table.setRowCount(len(resources_to_populate))  # Then set to new count
-        
-        # Use batched rendering for better performance with large datasets
-        batch_size = self.perf_config.get('table_batch_size', 25)  # Use performance config
-        total_items = len(resources_to_populate)
-        logging.debug(f"NodesPage: Using batch size {batch_size} for {total_items} total items")
-        
-        for start_idx in range(0, total_items, batch_size):
-            end_idx = min(start_idx + batch_size, total_items)
-            batch = resources_to_populate[start_idx:end_idx]
-            
-            logging.debug(f"NodesPage: Processing batch {start_idx}-{end_idx} ({len(batch)} nodes)")
-            # Populate batch
-            for i, resource in enumerate(batch):
-                actual_row = start_idx + i
-                self.populate_resource_row_optimized(actual_row, resource)
-            
-            # Process events every batch to keep UI responsive
-            QApplication.processEvents()
-            
-        logging.debug(f"NodesPage: Completed all batches for table population")
-        
-        # Re-enable updates and sorting
-        if hasattr(self.table, 'setUpdatesEnabled'):  # QTableWidget
-            self.table.setUpdatesEnabled(True)
-            self.table.setSortingEnabled(True)
-            logging.debug("NodesPage: Re-enabled table updates and sorting")
-        
-        # Force a proper repaint and update
-        self.table.viewport().update()
-        self.table.update()
-        logging.debug("NodesPage: Triggered table repaint and update")
-        
-        # Process any pending events to ensure widgets are properly displayed
-        QApplication.processEvents()
-        logging.info(f"NodesPage: Traditional table population completed successfully - {len(resources_to_populate)} nodes displayed")
     
     def _configure_virtual_table_columns(self):
         """Configure columns for virtual table"""
@@ -2129,13 +2405,12 @@ class NodesPage(BaseResourcePage):
         available_width = self.table.viewport().width() - 20
         
         if available_width <= 0:
-            # Defer column setup until table is properly sized
-            QTimer.singleShot(100, self._configure_virtual_table_columns)
-            return
+            # Use default width if viewport not ready yet
+            available_width = 1200  # Default assumption for column calculation
         
-        # Column configuration (same as traditional table)
+        # Column configuration - ensure Name column is always visible properly
         column_config = [
-            (0, 140, 100, "priority"), # Name (no more checkbox column)
+            (0, 160, 120, "priority"), # Name - increased width and minimum for visibility
             (1, 110, 80, "normal"),    # CPU
             (2, 110, 80, "normal"),    # Memory
             (3, 110, 80, "normal"),    # Disk
@@ -2166,22 +2441,22 @@ class NodesPage(BaseResourcePage):
         logging.debug("NodesPage: Virtual table columns configured")
 
     def populate_resource_row_optimized(self, row, resource):
-        """Highly optimized row population - minimizes widget creation"""
+        """Fast initial row population - displays basic data immediately, calculates metrics async"""
         self.table.setRowHeight(row, 40)
         
-        node_name = resource.get("name", "unknown")
-        logging.debug(f"NodesPage: Populating row {row} with node: {node_name}")
+        node_name = resource.get("name")
+        if not node_name:
+            return  # Skip nodes without names
         
-        # Skip creating complex widgets during initial population for speed
         # Create simple checkbox container
         checkbox_container = self._create_checkbox_container(row, node_name)
         checkbox_container.setStyleSheet("background-color: transparent;")
         self.table.setCellWidget(row, 0, checkbox_container)
         
-        # Pre-calculate all display values
-        display_values = self._calculate_display_values_fast(resource)
+        # Get only basic display values (no metrics calculation)
+        display_values = self._get_basic_display_values(resource)
         
-        # Create table items in one pass
+        # Create table items with basic data (CPU/Memory/Disk show as "Loading...")
         for col, (value, sort_value) in enumerate(display_values):
             cell_col = col + 1
             item = SortableTableWidgetItem(value, sort_value) if sort_value is not None else SortableTableWidgetItem(value)
@@ -2195,50 +2470,239 @@ class NodesPage(BaseResourcePage):
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             self.table.setItem(row, cell_col, item)
         
-        # Create status and action widgets - defer complex styling
+        # Create status and action widgets
         self._create_status_and_action_widgets_fast(row, resource, len(display_values))
-        logging.debug(f"NodesPage: Completed populating row {row} for node {node_name}")
+    
+    def _get_basic_display_values(self, resource):
+        """Get basic display values without expensive metrics calculations"""
+        # Columns: Name, CPU, Memory, Disk, Taints, Roles, Version, Age, Conditions
+        
+        # Basic node info (no calculation needed)
+        node_name = resource.get("name")
+        if not node_name:
+            return  # Skip nodes without names
+        
+        # Show empty cells for metrics columns (will be updated async when data is available)
+        display_cpu = ""
+        display_mem = ""  
+        display_disk = ""
+        
+        # Basic data (no calculation needed)
+        taints = resource.get("taints", "0")
+        try:
+            taint_sort = int(taints)
+        except ValueError:
+            taint_sort = 0
+        
+        roles = resource.get("roles", [])
+        roles_text = ", ".join(roles) if isinstance(roles, list) else str(roles)
+        
+        # Only show nodes with real version, age, and status data
+        version = resource.get("version")
+        age = resource.get("age") 
+        status = resource.get("status")
+        
+        if not version or not age or not status:
+            # Skip nodes without complete basic data
+            return []
+        
+        return [
+            (node_name, None),                    # Name (no sort value)
+            (display_cpu, None),                  # CPU (will be updated async with real data)
+            (display_mem, None),                  # Memory (will be updated async with real data)
+            (display_disk, None),                 # Disk (will be updated async with real data)
+            (taints, taint_sort),                 # Taints
+            (roles_text, None),                   # Roles
+            (version, None),                      # Version
+            (age, None),                          # Age
+            (status, None)                        # Conditions
+        ]
+    
+    def _calculate_metrics_async(self, row, resource):
+        """Asynchronously calculate and update CPU/Memory/Disk metrics for a specific row"""
+        try:
+            # Check if row still exists (user might have scrolled or refreshed)
+            if not self.table or row >= self.table.rowCount():
+                return
+                
+            node_name = resource.get("name")
+            if not node_name:
+                return  # Skip nodes without names
+            
+            # Calculate CPU metrics - only show if complete data exists
+            cpu_usage = resource.get("cpu_usage")
+            cpu_capacity = resource.get("cpu_capacity", "")
+            if cpu_usage is not None and cpu_capacity:
+                display_cpu = f"{cpu_capacity} ({cpu_usage:.1f}%)"
+                cpu_sort = cpu_usage
+            else:
+                # Skip rows without complete CPU data
+                return
+            
+            # Calculate Memory metrics - only show if complete data exists
+            memory_usage = resource.get("memory_usage")
+            mem_capacity = resource.get("memory_capacity", "")
+            if memory_usage is not None and mem_capacity:
+                display_mem = f"{mem_capacity} ({memory_usage:.1f}%)"
+                mem_sort = memory_usage
+            else:
+                # Skip rows without complete memory data
+                return
+            
+            # Calculate Disk metrics - only show if complete data exists
+            disk_usage = resource.get("disk_usage")
+            disk_capacity = resource.get("disk_capacity", "")
+            if disk_usage is not None and disk_capacity:
+                display_disk = f"{disk_capacity} ({disk_usage:.1f}%)"
+                disk_sort = disk_usage
+            else:
+                # Skip rows without complete disk data
+                return
+            
+            # Update table cells (columns 2, 3, 4 = CPU, Memory, Disk)
+            metrics_updates = [
+                (2, display_cpu, cpu_sort),    # CPU column
+                (3, display_mem, mem_sort),    # Memory column  
+                (4, display_disk, disk_sort)   # Disk column
+            ]
+            
+            for col, display_value, sort_value in metrics_updates:
+                # Check bounds using model for virtual table
+                model_col_count = self.virtual_model.columnCount() if hasattr(self, 'virtual_model') and self.virtual_model else 10
+                if row < self.table.rowCount() and col < model_col_count:
+                    item = self.table.item(row, col) if hasattr(self.table, 'item') else None
+                    if item:
+                        item.setText(display_value)
+                        if hasattr(item, 'sort_value'):
+                            item.sort_value = sort_value
+                        
+            # Update graphs if this node is selected
+            if hasattr(self, 'selected_row') and self.selected_row == row:
+                self._update_selected_node_metrics(resource, node_name)
+                
+        except Exception as e:
+            logging.error(f"Error calculating metrics for row {row}: {e}")
+    
+    def _update_selected_node_metrics(self, resource, node_name):
+        """Update graph metrics for the currently selected node"""
+        try:
+            graphs = []
+            if hasattr(self, 'cpu_graph') and self.cpu_graph:
+                graphs.append(self.cpu_graph)
+            if hasattr(self, 'mem_graph') and self.mem_graph:
+                graphs.append(self.mem_graph)
+            if hasattr(self, 'disk_graph') and self.disk_graph:
+                graphs.append(self.disk_graph)
+                
+            if graphs:
+                for graph in graphs:
+                    graph.generate_utilization_data([resource], force_update=True)
+                    graph.set_selected_node(resource, node_name)
+                    
+        except Exception as e:
+            logging.error(f"Error updating selected node metrics: {e}")
+    
+    def _schedule_virtual_metrics_updates(self, resources):
+        """Schedule async metrics updates for virtual table model"""
+        if not resources:
+            return
+            
+        # Update virtual model progressively
+        for i, resource in enumerate(resources):
+            delay = 100 + (i * 20)  # Staggered updates every 20ms
+            QTimer.singleShot(delay, lambda res=resource, idx=i: self._update_virtual_metrics(idx, res))
+    
+    
+    def _update_virtual_metrics(self, index, resource):
+        """Update metrics for a virtual table row"""
+        try:
+            if hasattr(self, 'virtual_model') and self.virtual_model:
+                # Calculate metrics  
+                node_name = resource.get("name")
+                if not node_name:
+                    return  # Skip nodes without names
+                
+                # Calculate the same metrics as traditional table - only if data exists
+                cpu_usage = resource.get("cpu_usage")
+                cpu_capacity = resource.get("cpu_capacity", "")
+                if cpu_usage is not None and cpu_capacity:
+                    display_cpu = f"{cpu_capacity} ({cpu_usage:.1f}%)"
+                elif cpu_capacity:
+                    display_cpu = f"{cpu_capacity}"
+                else:
+                    # Skip virtual rows without real CPU data
+                    return
+                
+                memory_usage = resource.get("memory_usage")
+                mem_capacity = resource.get("memory_capacity", "")
+                if memory_usage is not None and mem_capacity:
+                    display_mem = f"{mem_capacity} ({memory_usage:.1f}%)"
+                elif mem_capacity:
+                    display_mem = f"{mem_capacity}"
+                else:
+                    # Skip virtual rows without real memory data
+                    return
+                
+                disk_usage = resource.get("disk_usage")
+                disk_capacity = resource.get("disk_capacity", "")
+                if disk_usage is not None and disk_capacity:
+                    display_disk = f"{disk_capacity} ({disk_usage:.1f}%)"
+                elif disk_capacity:
+                    display_disk = f"{disk_capacity}"
+                else:
+                    # Skip virtual rows without real disk data
+                    return
+                
+                # Update the resource data with calculated values
+                resource.update({
+                    'calculated_cpu': display_cpu,
+                    'calculated_memory': display_mem,
+                    'calculated_disk': display_disk
+                })
+                
+                # Trigger model update for this specific row
+                if hasattr(self.virtual_model, 'update_row_metrics'):
+                    self.virtual_model.update_row_metrics(index, resource)
+                else:
+                    # Alternative: trigger data changed signal for the metric columns
+                    model_index = self.virtual_model.index(index, 1)  # CPU column
+                    self.virtual_model.dataChanged.emit(model_index, self.virtual_model.index(index, 3))
+                    
+        except Exception as e:
+            logging.error(f"Error updating virtual metrics for index {index}: {e}")
+    
     
     def _calculate_display_values_fast(self, resource):
         """Pre-calculate all display values for faster rendering"""
-        # CPU data
+        # CPU data - only show if complete data exists
         cpu_usage = resource.get("cpu_usage")
         cpu_capacity = resource.get("cpu_capacity", "")
         if cpu_usage is not None and cpu_capacity:
             display_cpu = f"{cpu_capacity} ({cpu_usage:.1f}%)"
             cpu_util = cpu_usage
-        elif cpu_capacity:
-            display_cpu = f"{cpu_capacity}"
-            cpu_util = 0
         else:
-            display_cpu = "N/A"
-            cpu_util = 0
+            # Skip nodes without complete CPU data
+            return []
         
-        # Memory data
+        # Memory data - only show if complete data exists
         memory_usage = resource.get("memory_usage")
         mem_capacity = resource.get("memory_capacity", "")
         if memory_usage is not None and mem_capacity:
             display_mem = f"{mem_capacity} ({memory_usage:.1f}%)"
             mem_util = memory_usage
-        elif mem_capacity:
-            display_mem = f"{mem_capacity}"
-            mem_util = 0
         else:
-            display_mem = "N/A"
-            mem_util = 0
+            # Skip nodes without complete memory data
+            return []
         
-        # Disk data
+        # Disk data - only show if complete data exists
         disk_usage = resource.get("disk_usage")
         disk_capacity = resource.get("disk_capacity", "")
         if disk_usage is not None and disk_capacity:
             display_disk = f"{disk_capacity} ({disk_usage:.1f}%)"
             disk_util = disk_usage
-        elif disk_capacity:
-            display_disk = f"{disk_capacity}"
-            disk_util = 0
         else:
-            display_disk = "N/A"
-            disk_util = 0
+            # Skip nodes without complete disk data
+            return []
         
         # Other data
         taints = resource.get("taints", "0")
@@ -2250,8 +2714,13 @@ class NodesPage(BaseResourcePage):
         roles = resource.get("roles", [])
         roles_text = ", ".join(roles) if isinstance(roles, list) else str(roles)
         
-        version = resource.get("version", "Unknown")
-        age = resource.get("age", "Unknown")
+        # Only show nodes with real version and age data
+        version = resource.get("version")
+        age = resource.get("age")
+        
+        if not version or not age:
+            # Skip nodes without complete data
+            return []
         
         # Age sorting value
         try:
@@ -2279,8 +2748,13 @@ class NodesPage(BaseResourcePage):
     
     def _create_status_and_action_widgets_fast(self, row, resource, column_offset):
         """Create status and action widgets with minimal styling"""
-        node_name = resource.get("name", "unknown")
-        status = resource.get("status", "Unknown")
+        node_name = resource.get("name")
+        if not node_name:
+            return  # Skip nodes without names
+        status = resource.get("status")
+        if not status:
+            # Skip nodes without status
+            return []
         
         # Status goes in column 9 (Conditions column)
         status_col = 9
@@ -2341,15 +2815,8 @@ class NodesPage(BaseResourcePage):
                     self.table.clearSelection()
                     logging.debug(f"NodesPage: Cleared virtual table row {row} highlight")
             else:
-                # Fallback for traditional table (QTableWidget)
-                if hasattr(self, 'table') and hasattr(self.table, 'columnCount'):
-                    for col in range(self.table.columnCount()):
-                        item = self.table.item(row, col)
-                        if item:
-                            if is_active:
-                                item.setBackground(QColor(AppColors.ACCENT_BLUE + "22"))  # 13% opacity
-                            else:
-                                item.setBackground(QColor("transparent"))
+                # No virtual table available for highlighting
+                logging.warning("NodesPage: Cannot highlight row - virtual table not available")
         except Exception as e:
             logging.error(f"NodesPage: Error highlighting row {row}: {e}")
 
@@ -2422,7 +2889,9 @@ class NodesPage(BaseResourcePage):
     
     def handle_row_click(self, row, column):
         logging.debug(f"NodesPage: Row click - row: {row}, column: {column}")
-        if column != self.table.columnCount() - 1:  # Skip action column
+        # Skip action column (last column)
+        model_col_count = self.virtual_model.columnCount() if hasattr(self, 'virtual_model') and self.virtual_model else 10
+        if column != model_col_count - 1:
             self.table.selectRow(row)
             logging.debug(f"NodesPage: Selected table row {row}, triggering graph update")
             # Use QTimer.singleShot to ensure immediate graph display
@@ -2430,7 +2899,9 @@ class NodesPage(BaseResourcePage):
     
     def handle_row_double_click(self, row, column):
         """Handle double-click to show node detail page"""
-        if column != self.table.columnCount() - 1:  # Skip action column
+        # Skip action column (last column)  
+        model_col_count = self.virtual_model.columnCount() if hasattr(self, 'virtual_model') and self.virtual_model else 10
+        if column != model_col_count - 1:
             resource_name = None
             if self.table.item(row, 1) is not None:
                 resource_name = self.table.item(row, 1).text()
@@ -2455,7 +2926,15 @@ class NodesPage(BaseResourcePage):
             logging.debug("NodesPage: Already loading data, skipping duplicate request")
             return
             
+        # Check if we have recent data to avoid redundant loads
+        if (hasattr(self, 'nodes_data') and self.nodes_data and 
+            hasattr(self, '_last_load_time') and self._last_load_time and
+            time.time() - self._last_load_time < 3.0):  # 3 second throttle
+            logging.info("NodesPage: Recent data available, skipping load due to throttling")
+            return
+            
         self.is_loading = True
+        self._last_load_time = time.time()
         logging.debug("NodesPage: Set is_loading=True, starting data fetch process")
         
         if hasattr(self, 'cluster_connector') and self.cluster_connector:
@@ -2470,26 +2949,21 @@ class NodesPage(BaseResourcePage):
     def force_load_data(self):
         """Override base class force_load_data to use cluster connector"""
         logging.info("NodesPage: force_load_data() called")
+        # Reset throttling for forced refresh
+        self._last_load_time = 0
         self.load_data()
+    
+    def _initial_load_data(self):
+        """Initial data load with proper state management"""
+        logging.info("NodesPage: _initial_load_data() called")
+        if not hasattr(self, 'has_loaded_data') or not self.has_loaded_data:
+            self._last_load_time = 0  # Bypass throttling for initial load
+            self.load_data()
     
     def _add_controls_to_header(self, header_layout):
         """Override to add custom controls for nodes page without delete button"""
-        self._add_filter_controls(header_layout)
-        header_layout.addStretch(1)
-
-        # Only add refresh button, no delete button for nodes
-        refresh_btn = QPushButton("Refresh")
-        refresh_btn.setMinimumHeight(24)  # Height adjusted for proper visibility
-        refresh_btn.setFixedHeight(24)
-        refresh_style = getattr(AppStyles, "SECONDARY_BUTTON_STYLE",
-                                """QPushButton { background-color: #2d2d2d; color: #ffffff; border: 1px solid #3d3d3d;
-                                               border-radius: 4px; padding: 4px 8px; font-weight: bold; }
-                                   QPushButton:hover { background-color: #3d3d3d; }
-                                   QPushButton:pressed { background-color: #1e1e1e; }"""
-                                )
-        refresh_btn.setStyleSheet(refresh_style)
-        refresh_btn.clicked.connect(lambda: self.force_load_data())
-        header_layout.addWidget(refresh_btn)
+        # NodesPage uses virtual layout with its own refresh button - no duplicate needed
+        pass
         
     def _add_filter_controls(self, header_layout):
         """Override to remove namespace dropdown for nodes (cluster-scoped resources)"""

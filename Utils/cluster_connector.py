@@ -228,7 +228,7 @@ class EnhancedClusterConnector(QObject):
         
         # Cache cleanup timer - reduced frequency for better performance
         self._cleanup_timer.timeout.connect(self._cleanup_cache)
-        self._cleanup_timer.start(300000)  # Cleanup every 5 minutes instead of 1 minute
+        self._cleanup_timer.start(600000)  # Cleanup every 10 minutes for better performance
     
     def _setup_timers_on_main_thread(self):
         """Setup timers on main thread - called via QMetaObject.invokeMethod"""
@@ -279,7 +279,6 @@ class EnhancedClusterConnector(QObject):
                 nodes_data = load_result.items
                 
                 logging.info(f"Cluster Connector: Received {len(nodes_data)} processed nodes from unified loader")
-                logging.debug(f"Cluster Connector: Node data structure sample: {nodes_data[0] if nodes_data else 'No nodes'}")
                 
                 # Emit the processed data directly
                 logging.debug(f"Cluster Connector: Emitting node_data_loaded signal with {len(nodes_data)} nodes")
@@ -451,7 +450,6 @@ class EnhancedClusterConnector(QObject):
             try:
                 # Extract basic information
                 node_name = node.metadata.name
-                logging.debug(f"Cluster Connector: Processing node: {node_name}")
                 node_labels = node.metadata.labels or {}
                 
                 # Determine status
@@ -490,7 +488,6 @@ class EnhancedClusterConnector(QObject):
                     raw_data=self.kube_client.v1.api_client.sanitize_for_serialization(node)
                 )
                 
-                logging.debug(f"Cluster Connector: Successfully processed node {node_name} - Status: {status}, Roles: {roles}, CPU: {cpu_capacity}, Memory: {memory_capacity}")
                 processed_nodes.append(node_info)
                 
             except Exception as e:
@@ -500,7 +497,6 @@ class EnhancedClusterConnector(QObject):
                 continue
         
         logging.info(f"Cluster Connector: Successfully processed {len(processed_nodes)} out of {len(raw_nodes)} nodes")
-        logging.debug(f"Cluster Connector: Processed node names: {[node.name for node in processed_nodes]}")
         return processed_nodes
     
     def _format_memory_capacity(self, memory_str: str) -> str:
@@ -573,9 +569,9 @@ class EnhancedClusterConnector(QObject):
             
             self._polling_active = True
             if hasattr(self, '_metrics_timer') and self._metrics_timer:
-                self._metrics_timer.start(5000)   # Poll metrics every 5 seconds
+                self._metrics_timer.start(15000)   # Poll metrics every 15 seconds
             if hasattr(self, '_issues_timer') and self._issues_timer:
-                self._issues_timer.start(10000)   # Poll issues every 10 seconds
+                self._issues_timer.start(30000)   # Poll issues every 30 seconds
     
     def _stop_polling(self) -> None:
         """Stop all polling"""

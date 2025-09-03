@@ -143,10 +143,6 @@
 #                 except Exception as e:
 #                     pass
             
-#             # Final fallback: Use a curated list of popular Bitnami charts if API fails
-#             if not charts_data:
-#                 charts_data = self.get_fallback_bitnami_charts()
-#                 is_more_available = False
             
 #             # Filter to ensure only Bitnami charts are included
 #             bitnami_charts = [chart for chart in charts_data if 

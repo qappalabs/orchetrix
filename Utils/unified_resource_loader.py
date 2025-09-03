@@ -394,18 +394,9 @@ class SearchResourceLoadWorker(EnhancedBaseWorker):
                 if hasattr(kube_client, 'v1') and hasattr(kube_client.v1, 'api_client'):
                     resource_data['raw_data'] = kube_client.v1.api_client.sanitize_for_serialization(item)
                 else:
-                    # Fallback: create a basic raw_data structure
-                    resource_data['raw_data'] = {
-                        'metadata': {
-                            'name': name,
-                            'namespace': namespace,
-                            'labels': metadata.labels,
-                            'annotations': metadata.annotations,
-                            'creationTimestamp': str(creation_timestamp) if creation_timestamp else None
-                        },
-                        'spec': item.spec if hasattr(item, 'spec') else {},
-                        'status': item.status if hasattr(item, 'status') else {}
-                    }
+                    # No fallback - skip items that can't be serialized to avoid dummy data
+                    logging.warning(f"Skipping item {name} - unable to serialize raw data")
+                    return None
             except Exception as e:
                 logging.debug(f"Error serializing search raw data: {e}")
                 resource_data['raw_data'] = {}
@@ -582,10 +573,11 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             
             # Handle specific timeout and connection errors gracefully
             if "timeout" in error_message.lower() or "read timed out" in error_message.lower():
-                # For timeout-prone resources, try a fallback approach or return cached data
-                fallback_result = self._handle_timeout_fallback()
-                if fallback_result:
-                    return fallback_result
+                # For timeout-prone resources, return cached data if available
+                cached_result = self._try_cache_first()
+                if cached_result and cached_result.success:
+                    logging.info(f"Using cached data for timed-out {self.config.resource_type}")
+                    return cached_result
                 
                 error_message = f"Connection timeout - {self.config.resource_type} may be slow to respond"
                 logging.warning(f"Timeout loading {self.config.resource_type}: {error_message}")
@@ -967,16 +959,8 @@ class ResourceLoadWorker(EnhancedBaseWorker):
                 if hasattr(kube_client, 'v1') and hasattr(kube_client.v1, 'api_client'):
                     processed_item['raw_data'] = kube_client.v1.api_client.sanitize_for_serialization(item)
                 else:
-                    # Fallback: create a basic raw_data structure
-                    processed_item['raw_data'] = {
-                        'metadata': {
-                            'name': name,
-                            'namespace': namespace,
-                            'labels': metadata.labels,
-                            'annotations': metadata.annotations,
-                            'creation_timestamp': str(creation_timestamp) if creation_timestamp else None
-                        }
-                    }
+                    # No fallback - set empty raw_data to avoid dummy data
+                    processed_item['raw_data'] = {}
             except Exception as e:
                 logging.debug(f"Error serializing raw data: {e}")
                 processed_item['raw_data'] = {}
@@ -1999,7 +1983,6 @@ class HighPerformanceResourceLoader(QObject):
         try:
             if resource_type == 'nodes':
                 logging.info(f"Unified Resource Loader: Emitting node data to UI - {result.total_count} nodes loaded in {result.load_time_ms:.1f}ms")
-                logging.debug(f"Unified Resource Loader: Sample node data: {result.items[0] if result.items else 'No items'}")
             
             self.loading_completed.emit(resource_type, result)
             logging.info(

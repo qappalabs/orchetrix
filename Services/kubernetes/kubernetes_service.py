@@ -196,7 +196,7 @@ class KubernetesService(QObject):
         except Exception as e:
             logging.error(f"Error disconnecting from cluster: {e}")
     
-    def start_polling(self, metrics_interval: int = 30000, issues_interval: int = 60000):
+    def start_polling(self, metrics_interval: int = 60000, issues_interval: int = 120000):
         """Start polling for metrics and issues"""
         if not self.current_cluster:
             return
