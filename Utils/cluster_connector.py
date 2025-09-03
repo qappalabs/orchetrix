@@ -271,25 +271,31 @@ class EnhancedClusterConnector(QObject):
     
     def _handle_resource_loading_completed(self, resource_type: str, load_result):
         """Handle completion of resource loading from unified loader"""
+        logging.debug(f"Cluster Connector: Handling resource loading completion for: {resource_type}")
         try:
             if resource_type == "nodes" and load_result.success:
                 # The unified loader already processed the data into dictionaries
                 # No need to process again - just emit the processed data
                 nodes_data = load_result.items
                 
-                logging.info(f"Received {len(nodes_data)} processed nodes from unified loader")
+                logging.info(f"Cluster Connector: Received {len(nodes_data)} processed nodes from unified loader")
+                logging.debug(f"Cluster Connector: Node data structure sample: {nodes_data[0] if nodes_data else 'No nodes'}")
                 
                 # Emit the processed data directly
+                logging.debug(f"Cluster Connector: Emitting node_data_loaded signal with {len(nodes_data)} nodes")
                 self.node_data_loaded.emit(nodes_data)
-                logging.info(f"Emitted {len(nodes_data)} processed nodes to UI")
+                logging.info(f"Cluster Connector: Successfully emitted {len(nodes_data)} processed nodes to UI")
                 
         except Exception as e:
-            logging.error(f"Error handling resource loading completion: {e}")
+            logging.error(f"Cluster Connector: Error handling resource loading completion for {resource_type}: {e}")
+            logging.debug(f"Cluster Connector: Resource loading completion error details", exc_info=True)
             self.error_occurred.emit(resource_type, str(e))
     
     def _handle_resource_loading_error(self, resource_type: str, error_message: str):
         """Handle resource loading errors from unified loader"""
-        logging.error(f"Resource loading error for {resource_type}: {error_message}")
+        logging.error(f"Cluster Connector: Resource loading error for {resource_type}: {error_message}")
+        if resource_type == "nodes":
+            logging.error(f"Cluster Connector: Node loading failed - UI will not receive node data")
         self.error_occurred.emit(resource_type, error_message)
     
     @property
@@ -434,7 +440,9 @@ class EnhancedClusterConnector(QObject):
     
     def _process_nodes_data(self, raw_nodes: List) -> List[NodeInfo]:
         """Process raw Kubernetes node objects into NodeInfo objects"""
+        logging.info(f"Cluster Connector: Starting to process {len(raw_nodes) if raw_nodes else 0} raw node objects")
         if not raw_nodes:
+            logging.warning("Cluster Connector: No raw nodes data to process")
             return []
         
         processed_nodes = []
@@ -443,6 +451,7 @@ class EnhancedClusterConnector(QObject):
             try:
                 # Extract basic information
                 node_name = node.metadata.name
+                logging.debug(f"Cluster Connector: Processing node: {node_name}")
                 node_labels = node.metadata.labels or {}
                 
                 # Determine status
@@ -481,13 +490,17 @@ class EnhancedClusterConnector(QObject):
                     raw_data=self.kube_client.v1.api_client.sanitize_for_serialization(node)
                 )
                 
+                logging.debug(f"Cluster Connector: Successfully processed node {node_name} - Status: {status}, Roles: {roles}, CPU: {cpu_capacity}, Memory: {memory_capacity}")
                 processed_nodes.append(node_info)
                 
             except Exception as e:
-                logging.error(f"Error processing node {getattr(node, 'metadata', {}).get('name', 'unknown')}: {e}")
+                node_name = getattr(node, 'metadata', {}).get('name', 'unknown')
+                logging.error(f"Cluster Connector: Error processing node {node_name}: {e}")
+                logging.debug(f"Cluster Connector: Node processing error details for {node_name}", exc_info=True)
                 continue
         
-        logging.info(f"Processed {len(processed_nodes)} nodes")
+        logging.info(f"Cluster Connector: Successfully processed {len(processed_nodes)} out of {len(raw_nodes)} nodes")
+        logging.debug(f"Cluster Connector: Processed node names: {[node.name for node in processed_nodes]}")
         return processed_nodes
     
     def _format_memory_capacity(self, memory_str: str) -> str:
@@ -670,13 +683,16 @@ class EnhancedClusterConnector(QObject):
     
     def load_nodes(self):
         """Load nodes data using unified resource loader"""
+        logging.info("Cluster Connector: Initiating node data loading process")
         try:
             unified_loader = get_unified_resource_loader()
+            logging.debug("Cluster Connector: Got unified resource loader, requesting nodes data")
             operation_id = unified_loader.load_resources_async('nodes')
-            logging.info(f"Started loading nodes, operation_id: {operation_id}")
+            logging.info(f"Cluster Connector: Started loading nodes with operation_id: {operation_id}")
         except Exception as e:
             error_msg = f"Failed to load nodes: {e}"
-            logging.error(error_msg)
+            logging.error(f"Cluster Connector: {error_msg}")
+            logging.debug(f"Cluster Connector: Node loading error details", exc_info=True)
             self.error_occurred.emit("nodes", error_msg)
     
     def load_metrics(self):

@@ -7,6 +7,13 @@ TABLE_BATCH_SIZE = 25  # Smaller batches for responsive UI
 TABLE_PROGRESSIVE_THRESHOLD = 250  # When to use progressive rendering
 TABLE_RENDER_INTERVAL = 5  # Milliseconds between render batches
 
+# Heavy Data Performance
+HEAVY_DATA_THRESHOLD = 100  # When to enable heavy data optimizations
+VIRTUAL_SCROLLING_THRESHOLD = 150  # When to use virtual scrolling
+PROGRESSIVE_LOADING_THRESHOLD = 200  # When to use progressive loading
+PROGRESSIVE_CHUNK_SIZE = 50  # Size of progressive loading chunks
+MAX_INITIAL_DISPLAY = 100  # Maximum items to show initially
+
 # Graph and Chart Performance
 GRAPH_UPDATE_INTERVAL = 45000  # 45 seconds between graph updates
 GRAPH_DATA_THROTTLE = 20000  # 20 seconds minimum between data updates
@@ -37,17 +44,26 @@ PERFORMANCE_PROFILES = {
         "table_batch_size": 50,
         "graph_update_interval": 60000,
         "overview_refresh_interval": 90000,
-        "max_cached_resources": 500
+        "max_cached_resources": 500,
+        "enable_virtual_scrolling": True,
+        "progressive_loading_threshold": 150,
+        "progressive_chunk_size": 75
     },
     "balanced": {
         "table_batch_size": 25,
         "graph_update_interval": 45000, 
         "overview_refresh_interval": 60000,
-        "max_cached_resources": 1000
+        "max_cached_resources": 1000,
+        "enable_virtual_scrolling": True,
+        "progressive_loading_threshold": 100,
+        "progressive_chunk_size": 50
     },
     "responsive": {
         "table_batch_size": 15,
         "graph_update_interval": 30000,
+        "enable_virtual_scrolling": False,
+        "progressive_loading_threshold": 50,
+        "progressive_chunk_size": 25,
         "overview_refresh_interval": 45000,
         "max_cached_resources": 1500
     }

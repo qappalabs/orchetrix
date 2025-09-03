@@ -3,8 +3,13 @@ import os
 import sys
 from pathlib import Path
 
-# Get absolute path to icon
-icon_path = os.path.abspath(os.path.join('icons', 'logoIcon.ico'))
+# Get absolute path to icon (fixed case for Icons directory)
+icon_path = os.path.abspath(os.path.join('Icons', 'logoIcon.ico'))
+if not os.path.exists(icon_path):
+    # Fallback to PNG icon
+    icon_path = os.path.abspath(os.path.join('Icons', 'logoIcon.png'))
+    if not os.path.exists(icon_path):
+        icon_path = None
 
 def collect_icons():
     """Collect all icon files from the icons directory"""
@@ -58,7 +63,9 @@ def collect_data_files():
         ('UI', 'UI'),
         ('Pages', 'Pages'),
         ('utils', 'utils'),
-        ('Base_Bomponents', 'base_components'),
+        ('Base_Components', 'Base_Components'),
+        ('Utils', 'Utils'),
+        ('Services', 'Services'),
     ]
     
     for src_dir, dest_dir in directories_to_check:
@@ -262,7 +269,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=icon_path if os.path.exists(icon_path) else None,
+    icon=icon_path if icon_path and os.path.exists(icon_path) else None,
 )
 
 coll = COLLECT(

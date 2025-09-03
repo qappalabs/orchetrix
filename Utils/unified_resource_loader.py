@@ -39,12 +39,15 @@ class ResourceConfig:
     resource_type: str
     api_method: str
     namespace: Optional[str] = None
-    batch_size: int = 30  # Further reduced for stability
-    timeout_seconds: int = 30  # Longer timeout for Docker Desktop Kubernetes
-    cache_ttl: int = 600  # 10 minutes for much better cache performance
-    enable_streaming: bool = False  # Disabled streaming to reduce complexity
-    enable_pagination: bool = False  # Disabled pagination to reduce load
-    max_concurrent_requests: int = 2  # Further reduced to prevent API overload
+    batch_size: int = 50  # Increased for heavy data handling
+    timeout_seconds: int = 45  # Longer timeout for heavy data
+    cache_ttl: int = 900  # 15 minutes for heavy data caching
+    enable_streaming: bool = False  # Keep disabled for stability
+    enable_pagination: bool = True  # Enable for heavy data handling
+    max_concurrent_requests: int = 3  # Slightly increased for heavy data
+    enable_chunking: bool = True  # New: Enable data chunking for heavy loads
+    chunk_size: int = 100  # New: Process data in chunks of 100 items
+    progressive_loading: bool = True  # New: Enable progressive loading
 
 
 @dataclass
@@ -526,11 +529,12 @@ class ResourceLoadWorker(EnhancedBaseWorker):
                     error_message="Operation cancelled"
                 )
             
-            # Process and cache results
-            processed_items = self._process_items(items)
+            # Process and cache results with chunking for heavy data
+            processed_items = self._process_items_chunked(items) if self.config.enable_chunking else self._process_items(items)
             self._cache_results(processed_items)
             
             load_time = (time.time() - start_time) * 1000
+            logging.info(f"Unified Resource Loader: Loaded {len(processed_items)} {self.config.resource_type} in {load_time:.1f}ms")
             
             return LoadResult(
                 success=True,
@@ -633,11 +637,15 @@ class ResourceLoadWorker(EnhancedBaseWorker):
         # Get the appropriate API client
         api_client = self._get_api_client(kube_client)
         
-        # Build method parameters for optimal performance and fast failure
+        # Build method parameters for optimal performance and heavy data handling
         kwargs = {
-            'timeout_seconds': 30,  # Longer timeout for Docker Desktop
-            '_request_timeout': 35  # Longer request timeout for slow clusters
+            'timeout_seconds': self.config.timeout_seconds,  # Use config timeout
+            '_request_timeout': self.config.timeout_seconds + 10  # Request timeout with buffer
         }
+        
+        # For heavy data scenarios, add pagination support
+        if self.config.enable_pagination and self.config.resource_type == 'nodes':
+            kwargs['limit'] = min(self.config.chunk_size, 1000)  # Limit for heavy data
         
         # Handle cluster scoped vs namespaced resources
         # Use the global cluster_scoped_resources set instead of redefining
@@ -659,10 +667,17 @@ class ResourceLoadWorker(EnhancedBaseWorker):
         if self.config.enable_streaming:
             kwargs['watch'] = False  # We handle our own streaming
         
-        # Optimize field selection for better performance
+        # Optimize field selection for better performance with heavy data
         if self.config.resource_type in ['pods', 'nodes', 'services']:
-            # Only get essential fields to reduce network overhead
-            kwargs['field_selector'] = self._get_field_selector()
+            # Only get essential fields to reduce network overhead for heavy data
+            field_selector = self._get_field_selector()
+            if field_selector:
+                kwargs['field_selector'] = field_selector
+        
+        # For nodes, further optimize by reducing unnecessary data
+        if self.config.resource_type == 'nodes':
+            # Skip some heavy fields that aren't displayed in UI
+            logging.debug(f"Unified Resource Loader: Optimizing node API call for heavy data - using limit: {kwargs.get('limit', 'no limit')}")
         
         # Execute API call with timeout
         response = api_method(**kwargs)
@@ -856,6 +871,50 @@ class ResourceLoadWorker(EnhancedBaseWorker):
         
         return processed_items
     
+    def _process_items_chunked(self, raw_items: List[Any]) -> List[Dict[str, Any]]:
+        """Process raw Kubernetes objects in chunks for heavy data scenarios"""
+        if not raw_items:
+            return []
+        
+        processed_items = []
+        chunk_size = self.config.chunk_size
+        total_items = len(raw_items)
+        
+        logging.info(f"Unified Resource Loader: Processing {total_items} {self.config.resource_type} in chunks of {chunk_size}")
+        
+        for start_idx in range(0, total_items, chunk_size):
+            if self.is_cancelled():
+                break
+            
+            end_idx = min(start_idx + chunk_size, total_items)
+            chunk = raw_items[start_idx:end_idx]
+            
+            logging.debug(f"Unified Resource Loader: Processing chunk {start_idx}-{end_idx} ({len(chunk)} items)")
+            
+            # Process chunk
+            chunk_start_time = time.time()
+            for item in chunk:
+                if self.is_cancelled():
+                    break
+                    
+                try:
+                    processed_item = self._process_single_item(item)
+                    if processed_item:  # Only add valid items
+                        processed_items.append(processed_item)
+                except Exception as e:
+                    item_name = getattr(getattr(item, 'metadata', None), 'name', 'unknown')
+                    logging.warning(f"Error processing {self.config.resource_type} {item_name}: {e}")
+                    continue
+            
+            chunk_time = (time.time() - chunk_start_time) * 1000
+            logging.debug(f"Unified Resource Loader: Processed chunk {start_idx}-{end_idx} in {chunk_time:.1f}ms")
+            
+            # Yield control to prevent UI blocking
+            time.sleep(0.001)  # 1ms pause between chunks
+        
+        logging.info(f"Unified Resource Loader: Chunked processing completed - {len(processed_items)} items processed")
+        return processed_items
+    
     def _process_batch(self, batch: List[Any]) -> List[Dict[str, Any]]:
         """Process a batch of items efficiently"""
         processed_batch = []
@@ -935,6 +994,7 @@ class ResourceLoadWorker(EnhancedBaseWorker):
         if resource_type == 'pods':
             self._add_pod_fields(processed_item, item)
         elif resource_type == 'nodes':
+            logging.debug(f"Unified Resource Loader: Adding node-specific fields for {processed_item.get('name', 'unknown')}")
             self._add_node_fields(processed_item, item)
         elif resource_type == 'services':
             self._add_service_fields(processed_item, item)
@@ -1011,8 +1071,31 @@ class ResourceLoadWorker(EnhancedBaseWorker):
         })
     
     def _add_node_fields(self, processed_item: Dict[str, Any], node: Any):
-        """Add node-specific fields efficiently"""
+        """Add node-specific fields efficiently - optimized for heavy data"""
+        node_name = processed_item.get('name', 'unknown')
+        logging.debug(f"Unified Resource Loader: Processing node fields for {node_name}")
+        
         status = node.status
+        
+        # Quick exit for invalid nodes
+        if not status:
+            logging.warning(f"Unified Resource Loader: Node {node_name} has no status - using defaults")
+            processed_item.update({
+                'status': 'Unknown',
+                'conditions': 'Unknown',
+                'roles': ['<none>'],
+                'version': 'Unknown',
+                'os': 'Unknown',
+                'kernel': 'Unknown',
+                'taints': '0',
+                'cpu_usage': 0.0,
+                'memory_usage': 0.0,
+                'disk_usage': 0.0,
+                'cpu_capacity': '',
+                'memory_capacity': '',
+                'disk_capacity': ''
+            })
+            return
         
         # Get node status efficiently and format all conditions
         node_status = 'Unknown'
@@ -1113,6 +1196,7 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             })
         
         # Get real node metrics using the metrics service
+        logging.debug(f"Unified Resource Loader: Attempting to load metrics for node {processed_item['name']}")
         try:
             from Services.kubernetes.kubernetes_service import get_kubernetes_service
             kube_service = get_kubernetes_service()
@@ -1121,9 +1205,13 @@ class ResourceLoadWorker(EnhancedBaseWorker):
                 if node_metrics:
                     processed_item['cpu_usage'] = node_metrics['cpu']['usage']
                     processed_item['memory_usage'] = node_metrics['memory']['usage']
-                    logging.debug(f"Added real metrics for node {processed_item['name']}: CPU {node_metrics['cpu']['usage']:.1f}%, Memory {node_metrics['memory']['usage']:.1f}%")
+                    logging.info(f"Unified Resource Loader: Added real metrics for node {processed_item['name']}: CPU {node_metrics['cpu']['usage']:.1f}%, Memory {node_metrics['memory']['usage']:.1f}%")
+                else:
+                    logging.debug(f"Unified Resource Loader: No metrics available for node {processed_item['name']}")
+            else:
+                logging.debug(f"Unified Resource Loader: Metrics service not available for node {processed_item['name']}")
         except Exception as e:
-            logging.debug(f"Could not get real metrics for node {processed_item['name']}: {e}")
+            logging.warning(f"Unified Resource Loader: Could not get real metrics for node {processed_item['name']}: {e}")
     
     def _add_service_fields(self, processed_item: Dict[str, Any], service: Any):
         """Add service-specific fields efficiently"""
@@ -1583,6 +1671,9 @@ class HighPerformanceResourceLoader(QObject):
         # High-frequency resources (need faster loading)
         high_frequency_resources = ['pods', 'events', 'nodes']
         
+        # Heavy data resources (need chunking and optimization)
+        heavy_data_resources = ['nodes', 'pods']
+        
         # Medium-frequency resources
         medium_frequency_resources = ['deployments', 'services', 'configmaps', 'secrets']
         
@@ -1591,7 +1682,7 @@ class HighPerformanceResourceLoader(QObject):
         
         # Configure high-frequency resources for speed
         for resource_type in high_frequency_resources:
-            self._config_cache[resource_type] = ResourceConfig(
+            config = ResourceConfig(
                 resource_type=resource_type,
                 api_method=self._get_api_method(resource_type),
                 batch_size=100,
@@ -1600,6 +1691,18 @@ class HighPerformanceResourceLoader(QObject):
                 enable_streaming=True,
                 max_concurrent_requests=8
             )
+            
+            # Enable heavy data optimizations for large datasets
+            if resource_type in heavy_data_resources:
+                config.timeout_seconds = 60  # Longer timeout for heavy data
+                config.cache_ttl = 900  # 15 minutes for heavy data
+                config.enable_chunking = True
+                config.chunk_size = 200 if resource_type == 'nodes' else 100
+                config.progressive_loading = True
+                config.enable_pagination = True
+                logging.info(f"Unified Resource Loader: Enabled heavy data optimizations for {resource_type}")
+                
+            self._config_cache[resource_type] = config
         
         # Configure medium-frequency resources
         for resource_type in medium_frequency_resources:
@@ -1804,26 +1907,32 @@ class HighPerformanceResourceLoader(QObject):
         Load Kubernetes resources asynchronously with high performance.
         Returns operation ID for tracking.
         """
+        logging.info(f"Unified Resource Loader: Starting async load for resource_type='{resource_type}', namespace='{namespace or 'all'}'") 
         
         # Get or create configuration
         config = custom_config or self._get_config_for_resource(resource_type, namespace)
+        logging.debug(f"Unified Resource Loader: Using config for {resource_type}: timeout={config.timeout_seconds}s, batch_size={config.batch_size}")
         
         # Generate operation ID
         operation_id = f"{resource_type}_{namespace or 'all'}_{int(time.time() * 1000)}"
+        logging.debug(f"Unified Resource Loader: Generated operation_id: {operation_id}")
         
         # Cancel any existing load for this resource type
         self._cancel_existing_load(resource_type, namespace)
         
         # Emit loading started signal
+        logging.debug(f"Unified Resource Loader: Emitting loading_started signal for {resource_type}")
         self.loading_started.emit(resource_type)
         
         # Create and start worker
+        logging.debug(f"Unified Resource Loader: Creating ResourceLoadWorker for {resource_type}")
         worker = ResourceLoadWorker(config, self)
         
         # Track the worker
         with self._worker_lock:
             worker_key = f"{resource_type}_{namespace or 'all'}"
             self._active_workers[worker_key] = worker
+            logging.debug(f"Unified Resource Loader: Tracking worker with key: {worker_key}")
         
         # Connect worker signals for completion handling
         worker.signals.finished.connect(
@@ -1832,10 +1941,13 @@ class HighPerformanceResourceLoader(QObject):
         worker.signals.error.connect(
             lambda error: self._handle_load_completion_error(error, resource_type, namespace, operation_id)
         )
+        logging.debug(f"Unified Resource Loader: Connected worker signals for {resource_type}")
         
         # Submit to unified thread manager
+        logging.debug(f"Unified Resource Loader: Submitting worker to thread manager for {resource_type}")
         self._thread_manager.submit_worker(operation_id, worker)
         
+        logging.info(f"Unified Resource Loader: Successfully initiated async loading for {resource_type} with operation_id: {operation_id}")
         return operation_id
     
     def _get_config_for_resource(self, resource_type: str, namespace: Optional[str]) -> ResourceConfig:
@@ -1883,26 +1995,36 @@ class HighPerformanceResourceLoader(QObject):
     
     def _handle_load_completion_success(self, result: LoadResult, resource_type: str, namespace: Optional[str], operation_id: str):
         """Handle successful load completion"""
+        logging.info(f"Unified Resource Loader: Load completed successfully for {resource_type} (operation_id: {operation_id})")
         try:
+            if resource_type == 'nodes':
+                logging.info(f"Unified Resource Loader: Emitting node data to UI - {result.total_count} nodes loaded in {result.load_time_ms:.1f}ms")
+                logging.debug(f"Unified Resource Loader: Sample node data: {result.items[0] if result.items else 'No items'}")
+            
             self.loading_completed.emit(resource_type, result)
             logging.info(
-                f"Loaded {result.total_count} {resource_type} "
+                f"Unified Resource Loader: Loaded {result.total_count} {resource_type} "
                 f"in {result.load_time_ms:.1f}ms "
                 f"({'cached' if result.from_cache else 'fresh'})"
             )
         except Exception as e:
-            logging.error(f"Error emitting load completion signal: {e}")
+            logging.error(f"Unified Resource Loader: Error emitting load completion signal for {resource_type}: {e}")
+            logging.debug(f"Unified Resource Loader: Load completion error details", exc_info=True)
         finally:
             # Cleanup worker reference
             self._cleanup_worker(resource_type, namespace)
     
     def _handle_load_completion_error(self, error_message: str, resource_type: str, namespace: Optional[str], operation_id: str):
         """Handle error in load completion"""
+        logging.error(f"Unified Resource Loader: Load failed for {resource_type} (operation_id: {operation_id}): {error_message}")
         try:
+            if resource_type == 'nodes':
+                logging.error(f"Unified Resource Loader: Node loading failed - UI will not receive node data")
+            
             self.loading_error.emit(resource_type, error_message)
-            logging.error(f"Failed to load {resource_type}: {error_message}")
+            logging.error(f"Unified Resource Loader: Failed to load {resource_type}: {error_message}")
         except Exception as e:
-            logging.error(f"Error emitting load error signal: {e}")
+            logging.error(f"Unified Resource Loader: Error emitting load error signal for {resource_type}: {e}")
         finally:
             # Cleanup worker reference
             self._cleanup_worker(resource_type, namespace)

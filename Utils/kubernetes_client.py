@@ -722,10 +722,15 @@ class KubernetesClient(QObject):
     
     def _get_nodes(self):
         """Legacy compatibility method for getting nodes"""
+        logging.info("Kubernetes Client: Starting to fetch nodes from API")
         try:
-            return self.v1.list_node().items
+            logging.debug("Kubernetes Client: Calling v1.list_node() API")
+            nodes = self.v1.list_node().items
+            logging.info(f"Kubernetes Client: Successfully fetched {len(nodes)} nodes from API")
+            logging.debug(f"Kubernetes Client: Node names: {[node.metadata.name for node in nodes]}")
+            return nodes
         except Exception as e:
-            logging.error(f'Failed to get nodes: {e}')
+            logging.error(f'Kubernetes Client: Failed to get nodes from API: {e}')
             return []
     
     def _get_namespaces(self):

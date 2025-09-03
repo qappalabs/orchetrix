@@ -176,29 +176,35 @@ class KubernetesAPIService:
     
     def get_api_client(self, client_type: str) -> ThreadSafeAPIClient:
         """Get a specific API client by type"""
+        logging.debug(f"API Service: Getting API client for type: {client_type}")
         if client_type not in self._api_clients:
+            logging.error(f"API Service: Unknown API client type requested: {client_type}")
             raise ValueError(f"Unknown API client type: {client_type}")
         
+        logging.debug(f"API Service: Successfully retrieved {client_type} client")
         return self._api_clients[client_type]
     
     def is_connected(self) -> bool:
         """Check if API clients are properly initialized with improved error handling"""
+        logging.debug("API Service: Checking Kubernetes API connectivity for node operations")
         try:
             # Try to access the version API as a connectivity test with timeout
+            logging.debug("API Service: Attempting to connect to Kubernetes API server")
             version_info = self.version_api.get_code(_request_timeout=10)
-            logging.debug(f"Kubernetes API connectivity test successful: {version_info}")
+            logging.debug(f"API Service: Kubernetes API connectivity test successful: {version_info}")
+            logging.info("API Service: Successfully connected to Kubernetes API - nodes API ready")
             return version_info is not None
         except Exception as e:
             # Classify error types for better handling
             error_type = type(e).__name__
             if "timeout" in str(e).lower() or "timed out" in str(e).lower():
-                logging.warning(f"Kubernetes API connectivity timeout: {e}")
+                logging.warning(f"API Service: Kubernetes API connectivity timeout - node operations unavailable: {e}")
             elif "connection" in str(e).lower() or "refused" in str(e).lower():
-                logging.warning(f"Kubernetes API connection refused: {e}")
+                logging.warning(f"API Service: Kubernetes API connection refused - cluster may be down: {e}")
             elif "unauthorized" in str(e).lower() or "forbidden" in str(e).lower():
-                logging.error(f"Kubernetes API authentication/authorization error: {e}")
+                logging.error(f"API Service: Kubernetes API authentication/authorization error - check kubeconfig: {e}")
             else:
-                logging.error(f"Kubernetes API connectivity check failed: {error_type}: {e}")
+                logging.error(f"API Service: Kubernetes API connectivity check failed: {error_type}: {e}")
             return False
     
     def get_cluster_version(self) -> Optional[str]:
@@ -214,6 +220,7 @@ class KubernetesAPIService:
     @property
     def v1(self):
         """Get CoreV1Api client"""
+        logging.debug("API Service: Accessing CoreV1Api client for node operations")
         return self.get_api_client('CoreV1Api').get_instance()
     
     @property
