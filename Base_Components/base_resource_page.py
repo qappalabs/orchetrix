@@ -427,8 +427,7 @@ class BaseResourcePage(BaseTablePage):
                 color: #ffffff;
                 border: none;
                 border-radius: 4px;
-                padding: 8px 16px;
-                font-weight: bold;
+                padding: 5px 16px;
                 font-size: 13px;
                 margin-right: 8px;
             }

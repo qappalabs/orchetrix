@@ -74,10 +74,8 @@ class AppsPage(QWidget):
         # Filter controls (middle)
         self._add_filter_controls(header_controls_layout)
         
-        # Stretch to push buttons to right
-        header_controls_layout.addStretch(1)
-        
-        # Remove labels controls - keeping only namespace dropdown
+        # Add sufficient spacing between filters and buttons to ensure resource dropdown is fully visible
+        header_controls_layout.addSpacing(30)
         
         # Live monitoring button
         self.live_monitor_btn = QPushButton("▶ Start Live")
@@ -87,8 +85,9 @@ class AppsPage(QWidget):
                 color: #ffffff; 
                 border: 1px solid #34ce57;
                 border-radius: 4px; 
-                padding: 5px 10px; 
+                padding: 3px 8px; 
                 font-weight: bold;
+                font-size: 12px;
             }
             QPushButton:hover { 
                 background-color: #34ce57; 
@@ -106,7 +105,7 @@ class AppsPage(QWidget):
         header_controls_layout.addWidget(self.live_monitor_btn)
         
         # Add some spacing
-        header_controls_layout.addSpacing(10)
+        header_controls_layout.addSpacing(5)
         
         # Refresh button (far right) - optional, matching other pages
         refresh_btn = QPushButton("Refresh")
@@ -116,7 +115,8 @@ class AppsPage(QWidget):
                 color: #ffffff; 
                 border: 1px solid #3d3d3d;
                 border-radius: 4px; 
-                padding: 5px 10px; 
+                padding: 3px 8px; 
+                font-size: 12px;
             }
             QPushButton:hover { 
                 background-color: #3d3d3d; 
@@ -144,8 +144,9 @@ class AppsPage(QWidget):
     def _add_filter_controls(self, header_layout):
         """Add namespace control in header"""
         filters_widget = QWidget()
+        filters_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         filters_layout = QHBoxLayout(filters_widget)
-        filters_layout.setContentsMargins(0, 0, 0, 0)
+        filters_layout.setContentsMargins(0, 0, 15, 0)  # Add 15px right margin for resource dropdown
         filters_layout.setSpacing(10)
         
         # Add spacing to shift namespace right
@@ -210,7 +211,7 @@ class AppsPage(QWidget):
         
         self.resource_combo = QComboBox()
         self.resource_combo.setFixedHeight(30)
-        self.resource_combo.setMinimumWidth(200)
+        self.resource_combo.setFixedWidth(150)  # Further reduced width for better visibility
         # Configure dropdown behavior to prevent upward opening
         self._configure_dropdown_behavior(self.resource_combo)
         
