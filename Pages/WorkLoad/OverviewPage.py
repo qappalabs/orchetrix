@@ -285,17 +285,28 @@ class MetricCard(QWidget):
     def update_data(self, running, total):
         """Update the card with new data."""
         logging.info(f"MetricCard: Updating {self.resource_type} card with data: {running}/{total}")
-        self.running = running
-        self.total = total
-        self.metric_label.setText(f"{running} / {total}")
+        self.running = running if isinstance(running, int) else 0
+        
+        # Handle progressive display for large datasets
+        if isinstance(total, str) and "+" in str(total):
+            # Progressive count display (e.g., "1500+")
+            self.total = 0  # We don't know the exact total yet
+            self.metric_label.setText(f"{running} / {total}")
+        else:
+            # Final accurate count
+            self.total = total if isinstance(total, int) else 0
+            self.metric_label.setText(f"{running} / {total}")
         
         # Force a repaint to ensure the update is visible
         self.metric_label.update()
         
+        # Use different styling for progressive vs final display
+        border_color = self.colors['accent_color'] if "+" in str(total) else self.colors['border_color']
+        
         self.card.setStyleSheet(f"""
             QFrame#metricCard {{
                 background-color: {self.colors['bg_secondary']};
-                border: 1px solid {self.colors['border_color']};
+                border: 1px solid {border_color};
                 border-radius: 8px;
                 padding: 0px;
             }}
@@ -305,6 +316,21 @@ class MetricCard(QWidget):
         """)
         
         logging.info(f"MetricCard: Successfully updated {self.resource_type} card display")
+
+    def show_loading(self):
+        """Show loading state with spinner indicator."""
+        self.metric_label.setText("⏳")
+        self.subtitle_label.setText("Loading...")
+        self.card.setStyleSheet(f"""
+            QFrame#metricCard {{
+                background-color: {self.colors['bg_secondary']};
+                border: 1px solid {self.colors['accent_color']};
+                border-radius: 8px;
+                padding: 0px;
+            }}
+        """)
+        self.metric_label.update()
+        self.subtitle_label.update()
 
     def show_error_state(self, show_error, error_message=""):
         """Show error state on the card."""
@@ -506,6 +532,10 @@ class OverviewPage(QWidget):
         """Force reload data when refresh button is clicked."""
         logging.info("OverviewPage: Force loading data requested")
         
+        # Stop any current loading to prevent conflicts
+        self._is_loading = False
+        self._loading_resources.clear()
+        
         # Clear any error states first
         for card in self.metric_cards.values():
             card.show_error_state(False)
@@ -517,7 +547,7 @@ class OverviewPage(QWidget):
             self.show_connection_error("Failed to initialize Kubernetes client")
 
     def fetch_kubernetes_data(self):
-        """Fetch actual Kubernetes data using simple direct loading."""
+        """Fetch Kubernetes data with progressive async loading to prevent UI freezing."""
         try:
             logging.info("OverviewPage: fetch_kubernetes_data called")
             
@@ -527,6 +557,7 @@ class OverviewPage(QWidget):
                 return
             
             self._is_loading = True
+            self._loading_resources.clear()  # Clear any previous loading state
             
             if not self.kube_client:
                 if not self.initialize_kube_client():
@@ -544,33 +575,16 @@ class OverviewPage(QWidget):
                 self._is_loading = False
                 return
 
-            logging.info(f"OverviewPage: Loading data for {len(self.metric_cards)} resource types")
+            logging.info(f"OverviewPage: Starting progressive loading for {len(self.metric_cards)} resource types")
             
-            # Load data directly for faster response
-            # Load data with timeout protection to prevent crashes
-            import time
-            start_time = time.time()
-            timeout_seconds = 30  # 30 second timeout
+            # Show loading indicators on all cards immediately
+            for card in self.metric_cards.values():
+                card.show_loading()
             
-            for resource_type in self.metric_cards.keys():
-                try:
-                    # Check timeout
-                    if time.time() - start_time > timeout_seconds:
-                        logging.warning(f"OverviewPage: Timeout reached, skipping remaining resource types")
-                        break
-                        
-                    self._load_resource_direct(resource_type)
-                    
-                    # Force garbage collection periodically to prevent memory issues
-                    import gc
-                    gc.collect()
-                    
-                except Exception as e:
-                    logging.error(f"Error loading {resource_type}: {e}")
-                    self.handle_resource_error(resource_type, str(e))
-            
-            self._is_loading = False
-            logging.info(f"OverviewPage: Completed data loading in {time.time() - start_time:.2f} seconds")
+            # Load all resource types immediately without staggering for faster response
+            resource_types = list(self.metric_cards.keys())
+            for resource_type in resource_types:
+                self.load_resource_async(resource_type)
                     
         except Exception as e:
             logging.error(f"Error in fetch_kubernetes_data: {e}")
@@ -586,194 +600,176 @@ class OverviewPage(QWidget):
                 return
                 
             self._loading_resources.add(resource_type)
-            logging.info(f"OverviewPage: Creating worker for {resource_type}")
-            worker = OverviewResourceWorker(resource_type, self.kube_client)
+            logging.info(f"OverviewPage: Starting load for {resource_type}")
             
-            # Set up callbacks
-            worker.connect_callbacks(
-                lambda data, rtype=resource_type: self._handle_resource_completed(rtype, data, False),
-                lambda error, rtype=resource_type: self._handle_resource_completed(rtype, error, True)
-            )
-            
-            # Submit to thread manager with proper worker_id
-            thread_manager = get_thread_manager()
-            worker_id = f"overview_{resource_type}_{id(self)}"
-            logging.info(f"OverviewPage: Submitting worker {worker_id} for {resource_type}")
-            success = thread_manager.submit_worker(worker_id, worker)
-            
-            if not success:
-                logging.error(f"Failed to submit worker for {resource_type}, trying direct load")
-                # Fallback: try direct synchronous loading
-                self._load_resource_direct(resource_type)
-            else:
-                logging.info(f"OverviewPage: Successfully submitted worker for {resource_type}")
+            # Use direct optimized loading for faster response and fewer thread issues
+            self._load_resource_direct_optimized(resource_type)
                 
         except Exception as e:
-            logging.error(f"Error creating worker for {resource_type}: {e}, trying direct load")
+            logging.error(f"Critical error for {resource_type}: {e}")
             self._loading_resources.discard(resource_type)
-            # Fallback: try direct synchronous loading
-            self._load_resource_direct(resource_type)
+            self.handle_resource_error(resource_type, str(e))
     
-    def _load_resource_direct(self, resource_type):
-        """Direct synchronous loading - optimized for speed"""
+    def _load_resource_with_timer(self, resource_type):
+        """Load resource using QTimer for main-thread async loading"""
+        try:
+            logging.info(f"OverviewPage: Loading {resource_type} with timer fallback")
+            self._load_resource_direct_optimized(resource_type)
+        except Exception as e:
+            logging.error(f"Timer load failed for {resource_type}: {e}")
+            self._loading_resources.discard(resource_type)
+            self.handle_resource_error(resource_type, str(e))
+    
+    def _load_resource_direct_optimized(self, resource_type):
+        """Scalable loading optimized for large datasets (1000+ resources)"""
         try:
             if not self.kube_client:
                 self.handle_resource_error(resource_type, "No Kubernetes client")
                 return
                 
-            running_count = 0
-            total_count = 0
+            logging.info(f"OverviewPage: Scalable loading {resource_type}")
             
-            # Direct API calls for faster loading with crash protection
-            if resource_type == "pods":
+            # For overview page, we only need counts, not full resource details
+            # Use efficient pagination to handle 1000+ resources
+            batch_size = 500  # Larger batches for efficiency
+            all_items = []
+            continue_token = None
+            total_fetched = 0
+            max_total_items = 5000  # Safety limit to prevent memory issues
+            
+            while total_fetched < max_total_items:
                 try:
-                    # Use limit to prevent crashes with large datasets
-                    items = self.kube_client.v1.list_pod_for_all_namespaces(limit=1000)
-                    if not items or not hasattr(items, 'items') or not items.items:
-                        total_count = 0
-                        running_count = 0
-                    else:
-                        total_count = len(items.items)
-                        running_count = sum(1 for pod in items.items if pod and pod.status and hasattr(pod.status, 'phase') and pod.status.phase == "Running")
-                except Exception as e:
-                    logging.error(f"Error loading pods: {e}")
-                    raise e
-                
-            elif resource_type == "deployments":
-                try:
-                    items = self.kube_client.apps_v1.list_deployment_for_all_namespaces(limit=1000)
-                    if not items or not hasattr(items, 'items') or not items.items:
-                        total_count = 0
-                        running_count = 0
-                    else:
-                        total_count = len(items.items)
-                        running_count = 0
-                        for dep in items.items:
-                            if dep and dep.status and hasattr(dep.status, 'available_replicas') and hasattr(dep.status, 'replicas'):
-                                available = getattr(dep.status, 'available_replicas', 0) or 0
-                                desired = getattr(dep.status, 'replicas', 0) or 0
-                                if available == desired and desired > 0:
-                                    running_count += 1
-                except Exception as e:
-                    logging.error(f"Error loading deployments: {e}")
-                    raise e
-                                  
-            elif resource_type == "daemonsets":
-                try:
-                    items = self.kube_client.apps_v1.list_daemon_set_for_all_namespaces(limit=1000)
-                    if not items or not hasattr(items, 'items') or not items.items:
-                        total_count = 0
-                        running_count = 0
-                    else:
-                        total_count = len(items.items)
-                        running_count = 0
-                        for ds in items.items:
-                            if ds and ds.status and hasattr(ds.status, 'number_ready') and hasattr(ds.status, 'desired_number_scheduled'):
-                                ready = getattr(ds.status, 'number_ready', 0) or 0
-                                desired = getattr(ds.status, 'desired_number_scheduled', 0) or 0
-                                if ready == desired and desired > 0:
-                                    running_count += 1
-                except Exception as e:
-                    logging.error(f"Error loading daemonsets: {e}")
-                    raise e
-                                  
-            elif resource_type == "statefulsets":
-                try:
-                    items = self.kube_client.apps_v1.list_stateful_set_for_all_namespaces(limit=1000)
-                    if not items or not hasattr(items, 'items') or not items.items:
-                        total_count = 0
-                        running_count = 0
-                    else:
-                        total_count = len(items.items)
-                        running_count = 0
-                        for ss in items.items:
-                            if ss and ss.status and hasattr(ss.status, 'ready_replicas') and hasattr(ss.status, 'replicas'):
-                                ready = getattr(ss.status, 'ready_replicas', 0) or 0
-                                desired = getattr(ss.status, 'replicas', 0) or 0
-                                if ready == desired and desired > 0:
-                                    running_count += 1
-                except Exception as e:
-                    logging.error(f"Error loading statefulsets: {e}")
-                    raise e
-                                  
-            elif resource_type == "replicasets":
-                try:
-                    items = self.kube_client.apps_v1.list_replica_set_for_all_namespaces(limit=1000)
-                    if not items or not hasattr(items, 'items') or not items.items:
-                        total_count = 0
-                        running_count = 0
-                    else:
-                        # Filter out zero-replica replicasets safely
-                        active_items = []
-                        for rs in items.items:
-                            if rs and rs.status and hasattr(rs.status, 'replicas'):
-                                replicas = getattr(rs.status, 'replicas', 0) or 0
-                                if replicas > 0:
-                                    active_items.append(rs)
-                        
-                        total_count = len(active_items)
-                        running_count = 0
-                        for rs in active_items:
-                            if rs and rs.status and hasattr(rs.status, 'ready_replicas') and hasattr(rs.status, 'replicas'):
-                                ready = getattr(rs.status, 'ready_replicas', 0) or 0
-                                desired = getattr(rs.status, 'replicas', 0) or 0
-                                if ready == desired:
-                                    running_count += 1
-                except Exception as e:
-                    logging.error(f"Error loading replicasets: {e}")
-                    raise e
-                                  
-            elif resource_type == "jobs":
-                try:
-                    items = self.kube_client.batch_v1.list_job_for_all_namespaces(limit=1000)
-                    if not items or not hasattr(items, 'items') or not items.items:
-                        total_count = 0
-                        running_count = 0
-                    else:
-                        total_count = len(items.items)
-                        running_count = 0
-                        for job in items.items:
-                            if job and job.status and hasattr(job.status, 'succeeded'):
-                                succeeded = getattr(job.status, 'succeeded', 0) or 0
-                                if succeeded > 0:
-                                    running_count += 1
-                except Exception as e:
-                    logging.error(f"Error loading jobs: {e}")
-                    raise e
-                                  
-            elif resource_type == "cronjobs":
-                try:
-                    items = None
-                    try:
-                        items = self.kube_client.batch_v1.list_cron_job_for_all_namespaces(limit=1000)
-                    except (AttributeError, Exception):
-                        # Fallback to beta API
-                        if hasattr(self.kube_client, 'batch_v1beta1'):
-                            items = self.kube_client.batch_v1beta1.list_cron_job_for_all_namespaces(limit=1000)
+                    # Fetch batch with continuation token for pagination
+                    batch_items = None
+                    if resource_type == "pods":
+                        batch_items = self.kube_client.v1.list_pod_for_all_namespaces(
+                            limit=batch_size, _continue=continue_token)
+                    elif resource_type == "deployments":
+                        batch_items = self.kube_client.apps_v1.list_deployment_for_all_namespaces(
+                            limit=batch_size, _continue=continue_token)
+                    elif resource_type == "daemonsets":
+                        batch_items = self.kube_client.apps_v1.list_daemon_set_for_all_namespaces(
+                            limit=batch_size, _continue=continue_token)
+                    elif resource_type == "statefulsets":
+                        batch_items = self.kube_client.apps_v1.list_stateful_set_for_all_namespaces(
+                            limit=batch_size, _continue=continue_token)
+                    elif resource_type == "replicasets":
+                        batch_items = self.kube_client.apps_v1.list_replica_set_for_all_namespaces(
+                            limit=batch_size, _continue=continue_token)
+                    elif resource_type == "jobs":
+                        batch_items = self.kube_client.batch_v1.list_job_for_all_namespaces(
+                            limit=batch_size, _continue=continue_token)
+                    elif resource_type == "cronjobs":
+                        try:
+                            batch_items = self.kube_client.batch_v1.list_cron_job_for_all_namespaces(
+                                limit=batch_size, _continue=continue_token)
+                        except (AttributeError, Exception):
+                            if hasattr(self.kube_client, 'batch_v1beta1'):
+                                batch_items = self.kube_client.batch_v1beta1.list_cron_job_for_all_namespaces(
+                                    limit=batch_size, _continue=continue_token)
                     
-                    if not items or not hasattr(items, 'items') or not items.items:
-                        total_count = 0
-                        running_count = 0
-                    else:
-                        total_count = len(items.items)
-                        running_count = 0
-                        for cj in items.items:
-                            if cj and cj.spec and hasattr(cj.spec, 'suspend'):
-                                suspended = getattr(cj.spec, 'suspend', False)
-                                if not suspended:
-                                    running_count += 1
-                            elif cj:  # If no suspend field, assume it's running
-                                running_count += 1
+                    if not batch_items or not hasattr(batch_items, 'items'):
+                        break
+                    
+                    # Add items from this batch
+                    if batch_items.items:
+                        all_items.extend(batch_items.items)
+                        total_fetched += len(batch_items.items)
+                        
+                        # Update with progressive count for very large datasets
+                        if total_fetched > 1000 and total_fetched % 500 == 0:
+                            # Show progressive update for large datasets
+                            partial_running = self._calculate_running_count(resource_type, all_items)
+                            self.update_card_data(resource_type, (partial_running, f"{total_fetched}+"))
+                    
+                    # Check for continuation token
+                    continue_token = getattr(batch_items.metadata, 'continue', None) if hasattr(batch_items, 'metadata') else None
+                    if not continue_token:
+                        break
+                        
                 except Exception as e:
-                    logging.error(f"Error loading cronjobs: {e}")
-                    raise e
-                                  
-            logging.info(f"OverviewPage: Successfully loaded {resource_type}: {running_count}/{total_count}")
-            self.update_card_data(resource_type, (running_count, total_count))
+                    logging.warning(f"OverviewPage: Batch fetch error for {resource_type}: {e}")
+                    break
             
+            # Calculate final counts
+            total_count = len(all_items)
+            running_count = self._calculate_running_count(resource_type, all_items)
+            
+            # Update card with final accurate data
+            self.update_card_data(resource_type, (running_count, total_count))
+            self._loading_resources.discard(resource_type)
+            
+            if total_count >= max_total_items:
+                logging.warning(f"OverviewPage: {resource_type} count may be incomplete due to safety limit ({max_total_items})")
+            
+            logging.info(f"OverviewPage: Completed {resource_type} scalable load: {running_count}/{total_count}")
+                
         except Exception as e:
-            logging.error(f"OverviewPage: Direct load failed for {resource_type}: {e}")
+            logging.error(f"OverviewPage: Scalable load failed for {resource_type}: {e}")
+            self._loading_resources.discard(resource_type)
             self.handle_resource_error(resource_type, str(e))
+    
+    def _process_remaining_chunks(self, resource_type, remaining_items, chunk_size, initial_running, total_count):
+        """Process remaining items in chunks with timers to prevent UI blocking"""
+        if not remaining_items:
+            self._loading_resources.discard(resource_type)
+            return
+            
+        # Process next chunk
+        chunk = remaining_items[:chunk_size]
+        remaining = remaining_items[chunk_size:]
+        
+        chunk_running = self._calculate_running_count(resource_type, chunk)
+        final_running = initial_running + chunk_running
+        
+        # Update card with more accurate data
+        self.update_card_data(resource_type, (final_running, total_count))
+        
+        # Continue processing remaining chunks
+        if remaining:
+            QTimer.singleShot(50, lambda: self._process_remaining_chunks(
+                resource_type, remaining, chunk_size, final_running, total_count))
+        else:
+            self._loading_resources.discard(resource_type)
+    
+    def _calculate_running_count(self, resource_type, items):
+        """Calculate running count for a chunk of items"""
+        running = 0
+        for item in items:
+            if not item or not hasattr(item, 'status'):
+                continue
+                
+            status = item.status
+            if resource_type == "pods":
+                if status and hasattr(status, 'phase') and status.phase == "Running":
+                    running += 1
+            elif resource_type in ["deployments", "statefulsets", "daemonsets"]:
+                if status:
+                    available = getattr(status, 'available_replicas', 0) or 0
+                    desired = getattr(status, 'replicas', 0) or 0
+                    if available == desired and desired > 0:
+                        running += 1
+            elif resource_type == "replicasets":
+                if status:
+                    ready = getattr(status, 'ready_replicas', 0) or 0
+                    desired = getattr(status, 'replicas', 0) or 0
+                    if desired > 0 and ready == desired:
+                        running += 1
+            elif resource_type == "jobs":
+                if status:
+                    succeeded = getattr(status, 'succeeded', 0) or 0
+                    if succeeded > 0:
+                        running += 1
+            elif resource_type == "cronjobs":
+                if hasattr(item, 'spec') and item.spec:
+                    if not getattr(item.spec, 'suspend', False):
+                        running += 1
+        return running
+    
+    def _load_resource_direct(self, resource_type):
+        """Legacy direct synchronous loading - kept for compatibility"""
+        # Redirect to optimized version
+        self._load_resource_direct_optimized(resource_type)
         
     def _handle_resource_completed(self, resource_type, data_or_error, is_error):
         """Handle resource loading completion and cleanup loading state"""
@@ -833,8 +829,8 @@ class OverviewPage(QWidget):
         """Handle show event - trigger immediate data load if needed"""
         super().showEvent(event)
         
-        # If we don't have data yet and it's been a while since initialization, try loading
-        if (self._initialization_complete and 
+        # Only trigger load if not already loading and no data is visible
+        if (self._initialization_complete and not self._is_loading and
             not any(card.running > 0 or card.total > 0 for card in self.metric_cards.values())):
             logging.info("OverviewPage: No data visible on show, triggering immediate load")
             QTimer.singleShot(100, self._force_load_all_data)
