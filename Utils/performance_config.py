@@ -7,22 +7,22 @@ TABLE_BATCH_SIZE = 25  # Smaller batches for responsive UI
 TABLE_PROGRESSIVE_THRESHOLD = 250  # When to use progressive rendering
 TABLE_RENDER_INTERVAL = 5  # Milliseconds between render batches
 
-# Heavy Data Performance
-HEAVY_DATA_THRESHOLD = 100  # When to enable heavy data optimizations
-VIRTUAL_SCROLLING_THRESHOLD = 150  # When to use virtual scrolling
-PROGRESSIVE_LOADING_THRESHOLD = 200  # When to use progressive loading
-PROGRESSIVE_CHUNK_SIZE = 50  # Size of progressive loading chunks
-MAX_INITIAL_DISPLAY = 100  # Maximum items to show initially
+# Heavy Data Performance - Optimized for large deployments
+HEAVY_DATA_THRESHOLD = 50   # Lower threshold for earlier optimizations
+VIRTUAL_SCROLLING_THRESHOLD = 100  # Earlier virtual scrolling activation
+PROGRESSIVE_LOADING_THRESHOLD = 100  # Earlier progressive loading
+PROGRESSIVE_CHUNK_SIZE = 75   # Larger chunks for efficiency
+MAX_INITIAL_DISPLAY = 150     # Show more items initially for better UX
 
 # Graph and Chart Performance
 GRAPH_UPDATE_INTERVAL = 45000  # 45 seconds between graph updates
 GRAPH_DATA_THROTTLE = 20000  # 20 seconds minimum between data updates
 GRAPH_PAINT_OPTIMIZATION = True  # Use optimized painting
 
-# Data Loading Performance  
-OVERVIEW_REFRESH_INTERVAL = 60000  # 60 seconds between overview refreshes
-INITIAL_LOAD_DELAY = 2500  # Delay before initial data load
-RESOURCE_FETCH_TIMEOUT = 30000  # 30 seconds timeout for resource fetching
+# Data Loading Performance - Optimized for heavy loads
+OVERVIEW_REFRESH_INTERVAL = 180000  # 3 minutes between overview refreshes for heavy loads
+INITIAL_LOAD_DELAY = 1000  # Reduced delay for faster initial response  
+RESOURCE_FETCH_TIMEOUT = 45000  # Extended timeout for heavy loads
 
 # Memory Management
 MAX_CACHED_RESOURCES = 1000  # Maximum resources to keep in memory
@@ -34,38 +34,38 @@ PROCESS_EVENTS_FREQUENCY = 200  # Process UI events every N operations
 SEARCH_DEBOUNCE_MS = 300  # 300ms debounce for search
 SCROLL_DEBOUNCE_MS = 100  # 100ms debounce for scrolling
 
-# Thread Management
-MAX_CONCURRENT_WORKERS = 3  # Maximum concurrent background workers
-WORKER_TIMEOUT_MS = 30000  # 30 second timeout for workers
+# Thread Management - Optimized for heavy loads
+MAX_CONCURRENT_WORKERS = 6  # Increased workers for parallel processing
+WORKER_TIMEOUT_MS = 45000   # Extended timeout for heavy calculations
 
 # Performance Profiles
 PERFORMANCE_PROFILES = {
     "high_performance": {
-        "table_batch_size": 50,
-        "graph_update_interval": 60000,
-        "overview_refresh_interval": 90000,
-        "max_cached_resources": 500,
-        "enable_virtual_scrolling": True,
-        "progressive_loading_threshold": 150,
-        "progressive_chunk_size": 75
-    },
-    "balanced": {
-        "table_batch_size": 25,
-        "graph_update_interval": 45000, 
-        "overview_refresh_interval": 60000,
-        "max_cached_resources": 1000,
+        "table_batch_size": 75,  # Larger batches for heavy loads
+        "graph_update_interval": 90000,  # Less frequent updates
+        "overview_refresh_interval": 240000,  # 4 minutes for heavy loads
+        "max_cached_resources": 2000,  # More caching for heavy data
         "enable_virtual_scrolling": True,
         "progressive_loading_threshold": 100,
-        "progressive_chunk_size": 50
+        "progressive_chunk_size": 100
+    },
+    "balanced": {
+        "table_batch_size": 50,  # Increased batch size
+        "graph_update_interval": 60000,  # Reduced frequency 
+        "overview_refresh_interval": 180000,  # 3 minutes
+        "max_cached_resources": 1500,  # Increased cache
+        "enable_virtual_scrolling": True,
+        "progressive_loading_threshold": 75,
+        "progressive_chunk_size": 75
     },
     "responsive": {
-        "table_batch_size": 15,
-        "graph_update_interval": 30000,
-        "enable_virtual_scrolling": False,
+        "table_batch_size": 25,
+        "graph_update_interval": 45000,
+        "enable_virtual_scrolling": True,  # Enable for all profiles now
         "progressive_loading_threshold": 50,
-        "progressive_chunk_size": 25,
-        "overview_refresh_interval": 45000,
-        "max_cached_resources": 1500
+        "progressive_chunk_size": 50,
+        "overview_refresh_interval": 120000,  # 2 minutes
+        "max_cached_resources": 2000
     }
 }
 

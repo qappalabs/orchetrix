@@ -197,6 +197,107 @@ class NodeMetricsWorker(QRunnable):
             return str(memory_str) if memory_str else 'N/A'
 
 # ====================================================================
+# BATCH WORKER CLASSES - Optimized batch processing
+# ====================================================================
+
+class NodeBatchMetricsWorkerSignals(QObject):
+    """Signals for batch node metrics worker"""
+    batch_finished = pyqtSignal(str, dict)  # metric_type, {node_name: result}
+    batch_error = pyqtSignal(str, str)  # metric_type, error_msg
+
+class NodeBatchMetricsWorker(QRunnable):
+    """Worker to calculate metrics for multiple nodes in batch for better performance"""
+    
+    def __init__(self, batch_nodes: list, metric_type: str):
+        super().__init__()
+        self.batch_nodes = batch_nodes  # List of (node_name, node_data) tuples
+        self.metric_type = metric_type
+        self.signals = NodeBatchMetricsWorkerSignals()
+    
+    def run(self):
+        """Calculate the metric for all nodes in the batch"""
+        logging.info(f"NodeBatchMetricsWorker: Starting {self.metric_type} calculation for {len(self.batch_nodes)} nodes")
+        batch_results = {}
+        
+        try:
+            for node_name, node_data in self.batch_nodes:
+                try:
+                    if self.metric_type == 'cpu':
+                        result = self._calculate_cpu_metrics(node_data)
+                    elif self.metric_type == 'memory':
+                        result = self._calculate_memory_metrics(node_data)
+                    elif self.metric_type == 'disk':
+                        result = self._calculate_disk_metrics(node_data)
+                    else:
+                        result = {'usage': None, 'capacity': 'N/A'}
+                    
+                    batch_results[node_name] = result
+                    
+                except Exception as e:
+                    logging.error(f"Error calculating {self.metric_type} for {node_name}: {e}")
+                    batch_results[node_name] = {'usage': None, 'capacity': 'Error'}
+            
+            logging.info(f"NodeBatchMetricsWorker: Completed {self.metric_type} calculation for {len(batch_results)} nodes")
+            self.signals.batch_finished.emit(self.metric_type, batch_results)
+            
+        except Exception as e:
+            error_msg = f"Batch calculation error for {self.metric_type}: {str(e)}"
+            logging.error(error_msg)
+            self.signals.batch_error.emit(self.metric_type, error_msg)
+    
+    def _calculate_cpu_metrics(self, node_data):
+        """Calculate CPU metrics for a single node"""
+        try:
+            cpu_capacity = node_data.get('cpu_capacity', '')
+            cpu_usage = node_data.get('cpu_usage', None)
+            
+            if cpu_capacity:
+                cpu_cores = self._parse_cpu_value(cpu_capacity)
+                capacity_str = f"{cpu_cores} cores" if cpu_cores > 0 else str(cpu_capacity)
+            else:
+                capacity_str = 'N/A'
+            
+            return {'usage': cpu_usage, 'capacity': capacity_str}
+        except Exception as e:
+            logging.error(f"Error calculating CPU metrics: {e}")
+            return {'usage': None, 'capacity': ''}
+    
+    def _calculate_memory_metrics(self, node_data):
+        """Calculate Memory metrics for a single node"""
+        try:
+            memory_capacity = node_data.get('memory_capacity', '')
+            memory_usage = node_data.get('memory_usage', None)
+            capacity_str = memory_capacity if memory_capacity else ''
+            return {'usage': memory_usage, 'capacity': capacity_str}
+        except Exception as e:
+            logging.error(f"Error calculating memory metrics: {e}")
+            return {'usage': None, 'capacity': ''}
+    
+    def _calculate_disk_metrics(self, node_data):
+        """Calculate Disk metrics for a single node"""
+        try:
+            disk_capacity = node_data.get('disk_capacity', '')
+            disk_usage = node_data.get('disk_usage', None)
+            capacity_str = disk_capacity if disk_capacity else ''
+            return {'usage': disk_usage, 'capacity': capacity_str}
+        except Exception as e:
+            logging.error(f"Error calculating disk metrics: {e}")
+            return {'usage': None, 'capacity': ''}
+    
+    def _parse_cpu_value(self, cpu_str):
+        """Parse CPU string to numeric value"""
+        try:
+            if not cpu_str:
+                return 0
+            cpu_str = str(cpu_str).lower()
+            if 'm' in cpu_str:
+                return float(cpu_str.replace('m', '')) / 1000.0
+            else:
+                return float(cpu_str)
+        except (ValueError, AttributeError):
+            return 0
+
+# ====================================================================
 # UI STYLE CLASSES - Custom Header and Cell Styling
 # ====================================================================
 class CustomHeaderStyle(QProxyStyle):
@@ -682,75 +783,63 @@ class NodesTableModel(QAbstractTableModel):
         logging.info(f"NodesTableModel: Updated with {len(self._nodes_data)} nodes")
     
     def _start_async_calculations(self):
-        """Start async calculations for all nodes with optimized staggered timing"""
+        """Start optimized batch async calculations for all nodes"""
         if not hasattr(self, 'threadpool'):
             self.threadpool = QThreadPool()
-            self.threadpool.setMaxThreadCount(2)  # Limit to 2 concurrent calculations
+            self.threadpool.setMaxThreadCount(3)  # Allow 3 concurrent workers (CPU, Memory, Disk)
         
-        # Optimize scheduling based on number of nodes
         node_count = len(self._nodes_data)
-        
-        logging.info(f"Starting async calculations for {node_count} nodes")
+        logging.info(f"Starting optimized batch calculations for {node_count} nodes")
         
         if node_count == 0:
             logging.info("No nodes to calculate, skipping async calculations")
             return
         
-        # Calculate optimal delay based on load
-        if node_count <= 5:
-            base_delay = 50  # Fast for few nodes
-        elif node_count <= 20:
-            base_delay = 100  # Medium for moderate load
+        # Determine optimal batch size based on node count
+        if node_count <= 10:
+            batch_size = node_count  # Process all at once for small counts
+            delay = 0
+        elif node_count <= 50:
+            batch_size = 15  # Medium batches
+            delay = 25
         else:
-            base_delay = 200  # Slower for heavy load
+            batch_size = 25  # Large batches for heavy loads
+            delay = 50
         
-        # Schedule calculations in batches to prevent overwhelming
-        batch_size = 5  # Process 5 nodes at a time
-        
+        # Process in optimized batches
+        batch_count = 0
         for batch_start in range(0, node_count, batch_size):
             batch_end = min(batch_start + batch_size, node_count)
-            batch_delay = batch_start * base_delay // batch_size
+            batch_nodes = []
             
-            # Schedule this batch
-            QTimer.singleShot(batch_delay, lambda start=batch_start, end=batch_end: self._process_node_batch(start, end))
+            # Collect nodes for this batch
+            for i in range(batch_start, batch_end):
+                if i < len(self._nodes_data):
+                    node = self._nodes_data[i]
+                    node_name = node.get('name')
+                    if node_name:
+                        batch_nodes.append((node_name, node))
+            
+            # Schedule batch processing with minimal delay
+            batch_delay = batch_count * delay
+            QTimer.singleShot(batch_delay, lambda nodes=batch_nodes: self._process_batch_async(nodes))
+            batch_count += 1
     
-    def _process_node_batch(self, start_idx: int, end_idx: int):
-        """Process a batch of nodes for calculation"""
-        logging.info(f"Processing node batch {start_idx}-{end_idx}")
-        for i in range(start_idx, end_idx):
-            if i < len(self._nodes_data):
-                node = self._nodes_data[i]
-                node_name = node.get('name')
-                if node_name:
-                    # Small delay within batch to stagger individual node calculations
-                    delay_ms = (i - start_idx) * 50  # 50ms between nodes in same batch
-                    QTimer.singleShot(delay_ms, lambda name=node_name, node_data=node: self._calculate_node_metrics(name, node_data))
+    def _process_batch_async(self, batch_nodes):
+        """Process a batch of nodes using optimized batch workers"""
+        if not batch_nodes:
+            return
+            
+        logging.info(f"Processing batch of {len(batch_nodes)} nodes with batch workers")
+        
+        # Create one worker per metric type for the entire batch
+        for metric_type in ['cpu', 'memory', 'disk']:
+            batch_worker = NodeBatchMetricsWorker(batch_nodes, metric_type)
+            batch_worker.signals.batch_finished.connect(self._on_batch_metrics_calculated)
+            batch_worker.signals.batch_error.connect(self._on_batch_metrics_error)
+            if hasattr(self, 'threadpool'):
+                self.threadpool.start(batch_worker)
     
-    def _calculate_node_metrics(self, node_name: str, node_data: dict):
-        """Calculate metrics for a single node asynchronously"""
-        try:
-            # Calculate CPU metrics immediately
-            cpu_worker = NodeMetricsWorker(node_name, node_data, 'cpu')
-            cpu_worker.signals.finished.connect(lambda name, metric, result: self._on_metric_calculated(name, metric, result))
-            if hasattr(self, 'threadpool'):
-                self.threadpool.start(cpu_worker)
-            
-            # Calculate memory metrics immediately
-            memory_worker = NodeMetricsWorker(node_name, node_data, 'memory')
-            memory_worker.signals.finished.connect(lambda name, metric, result: self._on_metric_calculated(name, metric, result))
-            if hasattr(self, 'threadpool'):
-                self.threadpool.start(memory_worker)
-            
-            # Calculate disk metrics immediately
-            disk_worker = NodeMetricsWorker(node_name, node_data, 'disk')
-            disk_worker.signals.finished.connect(lambda name, metric, result: self._on_metric_calculated(name, metric, result))
-            if hasattr(self, 'threadpool'):
-                self.threadpool.start(disk_worker)
-                
-            logging.info(f"Started async calculations for node {node_name}")
-            
-        except Exception as e:
-            logging.error(f"Error starting calculations for node {node_name}: {e}")
     
     
     def _on_metric_calculated(self, node_name: str, metric_type: str, result: dict):
@@ -790,8 +879,88 @@ class NodesTableModel(QAbstractTableModel):
             return self._nodes_data[row]
         return None
     
+    def _on_batch_metrics_calculated(self, metric_type: str, batch_results: dict):
+        """Handle batch metric calculation completion - optimized bulk updates"""
+        logging.info(f"Received batch {metric_type} results for {len(batch_results)} nodes")
+        
+        # Update affected rows in bulk for better performance
+        updated_rows = set()
+        
+        try:
+            for node_name, result in batch_results.items():
+                # Update node data
+                for node in self._nodes_data:
+                    if node.get('name') == node_name:
+                        if metric_type == 'cpu':
+                            node.update({
+                                'cpu_usage': result.get('usage'),
+                                'cpu_capacity': result.get('capacity')
+                            })
+                        elif metric_type == 'memory':
+                            node.update({
+                                'memory_usage': result.get('usage'),
+                                'memory_capacity': result.get('capacity')
+                            })
+                        elif metric_type == 'disk':
+                            node.update({
+                                'disk_usage': result.get('usage'),
+                                'disk_capacity': result.get('capacity')
+                            })
+                        
+                        # Mark calculation as complete
+                        if node_name not in self._calculation_status:
+                            self._calculation_status[node_name] = {}
+                        self._calculation_status[node_name][f'{metric_type}_complete'] = True
+                        
+                        # Track updated row
+                        for row, n in enumerate(self._nodes_data):
+                            if n.get('name') == node_name:
+                                updated_rows.add(row)
+                                break
+                        break
+            
+            # Emit optimized bulk dataChanged signals
+            if updated_rows:
+                col = 1 if metric_type == 'cpu' else 2 if metric_type == 'memory' else 3
+                sorted_rows = sorted(updated_rows)
+                
+                # Group consecutive rows for efficient updates
+                if len(sorted_rows) > 1:
+                    # Emit range signals for consecutive rows
+                    start_row = sorted_rows[0]
+                    end_row = sorted_rows[0]
+                    
+                    for row in sorted_rows[1:]:
+                        if row == end_row + 1:
+                            end_row = row
+                        else:
+                            # Emit for previous range
+                            top_left = self.createIndex(start_row, col)
+                            bottom_right = self.createIndex(end_row, col)
+                            self.dataChanged.emit(top_left, bottom_right)
+                            start_row = end_row = row
+                    
+                    # Emit for final range
+                    top_left = self.createIndex(start_row, col)
+                    bottom_right = self.createIndex(end_row, col)
+                    self.dataChanged.emit(top_left, bottom_right)
+                else:
+                    # Single row update
+                    row = sorted_rows[0]
+                    index = self.createIndex(row, col)
+                    self.dataChanged.emit(index, index)
+                
+                logging.info(f"Updated {len(updated_rows)} rows for {metric_type} metrics")
+            
+        except Exception as e:
+            logging.error(f"Error processing batch {metric_type} results: {e}")
+    
+    def _on_batch_metrics_error(self, metric_type: str, error_msg: str):
+        """Handle batch metric calculation error"""
+        logging.error(f"Batch metrics error for {metric_type}: {error_msg}")
+    
     def mark_calculation_complete(self, node_name: str, metric_type: str):
-        """Mark a metric calculation as complete for a node"""
+        """Mark a metric calculation as complete for a node (legacy method)"""
         if node_name not in self._calculation_status:
             self._calculation_status[node_name] = {}
         self._calculation_status[node_name][f'{metric_type}_complete'] = True
@@ -2374,7 +2543,7 @@ class NodesPage(BaseResourcePage):
             # Use virtual model for heavy data (including empty data)
             logging.info(f"NodesPage: Using virtual model for {len(resources_to_use)} nodes")
             self.virtual_model.update_nodes_data(resources_to_use)
-            self._configure_virtual_table_columns()
+            self._setup_responsive_columns()
             # Only add action buttons if there are resources
             if resources_to_use:
                 self._add_virtual_action_buttons(resources_to_use)
@@ -2386,49 +2555,6 @@ class NodesPage(BaseResourcePage):
         raise Exception("NodesPage populate_table called but virtual table not available")
     
     
-    def _configure_virtual_table_columns(self):
-        """Configure columns for virtual table"""
-        if not hasattr(self, 'table') or not self.table:
-            return
-            
-        header = self.table.horizontalHeader()
-        available_width = self.table.viewport().width() - 20
-        
-        if available_width <= 0:
-            # Use default width if viewport not ready yet
-            available_width = 1200  # Default assumption for column calculation
-        
-        # Column configuration - ensure Name column is always visible properly
-        column_config = [
-            (0, 160, 120, "priority"), # Name - increased width and minimum for visibility
-            (1, 110, 80, "normal"),    # CPU
-            (2, 110, 80, "normal"),    # Memory
-            (3, 110, 80, "normal"),    # Disk
-            (4, 60, 50, "compact"),    # Taints
-            (5, 120, 80, "normal"),    # Roles
-            (6, 90, 60, "compact"),    # Version
-            (7, 60, 50, "compact"),    # Age
-            (8, 90, 70, "stretch"),    # Conditions
-            (9, 60, 60, "fixed")       # Actions
-        ]
-        
-        # No columns need to be hidden - checkbox column removed, action column is visible
-        
-        # Apply column configuration
-        for col_index, default_width, min_width, col_type in column_config:
-            if col_index >= self.table.model().columnCount():
-                continue
-                
-            if col_type == "fixed":
-                header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Fixed)
-                self.table.setColumnWidth(col_index, min_width)
-            elif col_type == "stretch":
-                header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Stretch)
-            else:
-                header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Interactive)
-                self.table.setColumnWidth(col_index, max(default_width, min_width))
-        
-        logging.debug("NodesPage: Virtual table columns configured")
 
     def _update_selected_node_metrics(self, resource, node_name):
         """Update graph metrics for the currently selected node"""
@@ -2683,64 +2809,22 @@ class NodesPage(BaseResourcePage):
         # NodesPage uses virtual layout with its own refresh button - no duplicate needed
         pass
         
-    def _add_filter_controls(self, header_layout):
-        """Override to remove namespace dropdown for nodes (cluster-scoped resources)"""
-        from PyQt6.QtWidgets import QLineEdit, QLabel
-        from UI.Styles import AppStyles
-        
-        # Create a separate layout for filters with proper spacing
-        filters_layout = QHBoxLayout()
-        filters_layout.setSpacing(12)  # Add space between elements
-        
-        # Search bar with label - only search, no namespace dropdown for nodes
-        search_label = QLabel("Search:")
-        search_label.setStyleSheet("color: #ffffff; font-size: 12px; font-weight: normal;")
-        search_label.setMinimumWidth(50)
-        
-        self.search_bar = QLineEdit()
-        self.search_bar.setPlaceholderText("Search nodes...")
-        self.search_bar.textChanged.connect(self._on_search_text_changed)
-        self.search_bar.setFixedWidth(200)
-        self.search_bar.setFixedHeight(32)
-        
-        # Apply consistent styling
-        search_style = getattr(AppStyles, 'SEARCH_INPUT', 
-            """QLineEdit {
-                background-color: #2d2d2d;
-                color: #ffffff;
-                border: 1px solid #3d3d3d;
-                border-radius: 4px;
-                padding: 6px 12px;
-                font-size: 12px;
-            }
-            QLineEdit:focus {
-                border-color: #0078d4;
-                background-color: #353535;
-            }""")
-        self.search_bar.setStyleSheet(search_style)
-        
-        # Add widgets to layout - no namespace dropdown
-        filters_layout.addWidget(search_label)
-        filters_layout.addWidget(self.search_bar)
-        
-        # Add the filters layout directly to header layout
-        header_layout.addLayout(filters_layout)
-        
-        # Set namespace_combo to None since nodes don't use namespaces
-        self.namespace_combo = None
         
     
     # Disable inherited methods that aren't needed for nodes
     def _handle_checkbox_change(self, state, item_name):
         """Override to disable checkbox functionality"""
+        _ = state, item_name  # Unused parameters
         pass
         
     def _handle_select_all(self, state):
         """Override to disable select all functionality"""
+        _ = state  # Unused parameter
         pass
     
     def _create_checkbox_container(self, row, item_name):
         """Override to create empty container for nodes (no checkbox needed)"""
+        _ = row, item_name  # Unused parameters
         from PyQt6.QtWidgets import QWidget
         container = QWidget()
         container.setStyleSheet("background-color: transparent;")

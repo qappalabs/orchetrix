@@ -421,8 +421,8 @@ class OverviewPage(QWidget):
         if self.thread() == QApplication.instance().thread():
             self.refresh_timer = QTimer(self)  # Set parent to ensure proper cleanup
             self.refresh_timer.timeout.connect(self.refresh_data)
-            # Refresh every 2 minutes to reduce load on slow Docker Desktop
-            self.refresh_timer.start(120000)
+            # Refresh every 3 minutes for heavy loads (optimized for performance)
+            self.refresh_timer.start(180000)
         else:
             logging.warning("OverviewPage: Timer setup called from non-main thread")
 
@@ -581,10 +581,28 @@ class OverviewPage(QWidget):
             for card in self.metric_cards.values():
                 card.show_loading()
             
-            # Load all resource types immediately without staggering for faster response
+            # Load all resource types in parallel for maximum performance
             resource_types = list(self.metric_cards.keys())
-            for resource_type in resource_types:
-                self.load_resource_async(resource_type)
+            
+            # For heavy loads, process in smaller concurrent batches
+            if len(resource_types) > 4:
+                # Process high-priority resources first (pods, deployments)
+                priority_resources = ['pods', 'deployments']
+                secondary_resources = [r for r in resource_types if r not in priority_resources]
+                
+                # Load priority resources immediately
+                for resource_type in priority_resources:
+                    if resource_type in resource_types:
+                        self.load_resource_async(resource_type)
+                
+                # Load secondary resources with minimal delay to prevent overwhelming
+                for i, resource_type in enumerate(secondary_resources):
+                    delay = i * 100  # 100ms stagger for secondary resources
+                    QTimer.singleShot(delay, lambda rt=resource_type: self.load_resource_async(rt))
+            else:
+                # Small number of resources - load all immediately
+                for resource_type in resource_types:
+                    self.load_resource_async(resource_type)
                     
         except Exception as e:
             logging.error(f"Error in fetch_kubernetes_data: {e}")
@@ -627,15 +645,15 @@ class OverviewPage(QWidget):
                 self.handle_resource_error(resource_type, "No Kubernetes client")
                 return
                 
-            logging.info(f"OverviewPage: Scalable loading {resource_type}")
+            logging.info(f"OverviewPage: Optimized scalable loading {resource_type}")
             
             # For overview page, we only need counts, not full resource details
-            # Use efficient pagination to handle 1000+ resources
-            batch_size = 500  # Larger batches for efficiency
+            # Use larger batches and parallel processing for heavy loads
+            batch_size = 1000  # Increased batch size for better efficiency
             all_items = []
             continue_token = None
             total_fetched = 0
-            max_total_items = 5000  # Safety limit to prevent memory issues
+            max_total_items = 10000  # Increased safety limit for heavy loads
             
             while total_fetched < max_total_items:
                 try:
@@ -677,8 +695,8 @@ class OverviewPage(QWidget):
                         total_fetched += len(batch_items.items)
                         
                         # Update with progressive count for very large datasets
-                        if total_fetched > 1000 and total_fetched % 500 == 0:
-                            # Show progressive update for large datasets
+                        if total_fetched > 2000 and total_fetched % 1000 == 0:
+                            # Show progressive update for large datasets - less frequent updates
                             partial_running = self._calculate_running_count(resource_type, all_items)
                             self.update_card_data(resource_type, (partial_running, f"{total_fetched}+"))
                     
