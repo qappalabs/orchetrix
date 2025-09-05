@@ -115,11 +115,25 @@ create_package_structure() {
 copy_application_files() {
     print_status "Copying application files..."
     
-    # Copy the entire PyInstaller dist directory
-    cp -r dist/Orchetrix/* debian-package/usr/lib/${APP_NAME}/
+    # Verify source directory exists
+    if [[ ! -d "dist/Orchetrix" ]]; then
+        print_error "PyInstaller dist directory not found: dist/Orchetrix"
+        exit 1
+    fi
     
-    # Make the main executable... executable
-    chmod +x debian-package/usr/lib/${APP_NAME}/Orchetrix
+    # Copy the entire PyInstaller dist directory
+    if ! cp -r dist/Orchetrix/* debian-package/usr/lib/${APP_NAME}/ 2>/dev/null; then
+        print_error "Failed to copy application files"
+        exit 1
+    fi
+    
+    # Verify the main executable exists and make it executable
+    if [[ -f "debian-package/usr/lib/${APP_NAME}/Orchetrix" ]]; then
+        chmod +x debian-package/usr/lib/${APP_NAME}/Orchetrix
+    else
+        print_error "Main executable not found after copying"
+        exit 1
+    fi
     
     # Create symlink in /usr/bin
     ln -sf "/usr/lib/${APP_NAME}/Orchetrix" "debian-package/usr/bin/${APP_NAME}"
@@ -283,32 +297,71 @@ EOF
     print_status "Copyright file created"
 }
 
+# Function to safely display package contents
+display_package_contents() {
+    local package_name="$1"
+    
+    # Count total files first
+    local total_files=$(dpkg-deb --contents "${package_name}" 2>/dev/null | wc -l || echo "unknown")
+    
+    if [[ "$total_files" != "unknown" ]]; then
+        echo "Total files in package: ${total_files}"
+        
+        # Show first 20 files only if there are files
+        if [[ "$total_files" -gt 0 ]]; then
+            echo "Showing first 20 files:"
+            dpkg-deb --contents "${package_name}" 2>/dev/null | head -20 2>/dev/null || echo "Could not display file list"
+            
+            if [[ "$total_files" -gt 20 ]]; then
+                echo "... and $((total_files - 20)) more files"
+            fi
+        fi
+    else
+        echo "Could not determine package contents"
+    fi
+}
+
 # Build the .deb package
 build_deb_package() {
     print_status "Building .deb package..."
     
     PACKAGE_NAME="${APP_NAME}_${APP_VERSION}_${ARCHITECTURE}.deb"
     
-    # Build the package
-    dpkg-deb --root-owner-group --build debian-package "${PACKAGE_NAME}"
+    # Build the package with better error handling
+    if ! dpkg-deb --root-owner-group --build debian-package "${PACKAGE_NAME}" 2>&1; then
+        print_error "Failed to build Debian package"
+        exit 1
+    fi
     
     if [[ -f "${PACKAGE_NAME}" ]]; then
         print_status "Package built successfully: ${PACKAGE_NAME}"
         
-        # Show package info
+        # Show package info with error handling
         echo -e "\n${BLUE}Package Information:${NC}"
-        dpkg-deb --info "${PACKAGE_NAME}"
+        if ! dpkg-deb --info "${PACKAGE_NAME}" 2>/dev/null; then
+            print_warning "Could not display package information"
+        fi
         
-        # Show package contents
+        # Show package contents safely
         echo -e "\n${BLUE}Package Contents:${NC}"
-        dpkg-deb --contents "${PACKAGE_NAME}" 2>/dev/null | head -20 || true
+        display_package_contents "${PACKAGE_NAME}"
         
-        # Check for errors
+        # Validate package integrity
         echo -e "\n${BLUE}Package Validation:${NC}"
-        if command -v lintian >/dev/null 2>&1; then
-            lintian "${PACKAGE_NAME}" || true
+        
+        # Basic integrity check
+        if dpkg-deb --fsys-tarfile "${PACKAGE_NAME}" >/dev/null 2>&1; then
+            print_status "Package integrity check: PASSED"
         else
-            print_warning "lintian not available for package validation"
+            print_warning "Package integrity check: FAILED"
+        fi
+        
+        # Lintian validation if available
+        if command -v lintian >/dev/null 2>&1; then
+            print_status "Running lintian validation..."
+            timeout 30s lintian "${PACKAGE_NAME}" 2>/dev/null || print_warning "Package validation completed with warnings (non-critical)"
+        else
+            print_warning "lintian not available for detailed package validation"
         fi
         
     else

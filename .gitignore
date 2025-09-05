@@ -14,6 +14,7 @@ console_launcher.py
 debug_launcher.py
 Orchestrix_Enhanced.spec
 version.txt
+logs
 
 # Distribution / packaging
 dist/

@@ -144,7 +144,8 @@ def method_logger(
             
             # Log method entry
             start_time = time.time()
-            start_datetime = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            from Utils import get_full_timestamp_with_ms
+            start_datetime = get_full_timestamp_with_ms()
             
             # Prepare input logging
             input_info = ""
@@ -207,7 +208,7 @@ def method_logger(
                 # Calculate execution time for failed calls
                 end_time = time.time()
                 execution_time = (end_time - start_time) * 1000
-                end_datetime = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                end_datetime = get_full_timestamp_with_ms()
                 
                 # Log exception (always log exceptions)
                 if log_exceptions:
@@ -326,7 +327,8 @@ def log_method_call(func_name: str, inputs: Dict[str, Any] = None, outputs: Any 
     """
     logger = logging.getLogger(__name__)
     call_id = f"{func_name}_{int(time.time() * 1000000) % 1000000}"
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+    from Utils import get_full_timestamp_with_ms
+    timestamp = get_full_timestamp_with_ms()
     
     # Log inputs
     if inputs:

@@ -1066,16 +1066,17 @@ class ResourceLoadWorker(EnhancedBaseWorker):
         import time
         process_start = time.time()
         node_name = processed_item.get('name', 'unknown')
-        logging.info(f"🔄 [PROCESSING] {time.strftime('%H:%M:%S.%f')[:-3]} - Unified Resource Loader: Starting to process node '{node_name}' fields")
+        from Utils import get_timestamp_with_ms
+        logging.info(f"🔄 [PROCESSING] {get_timestamp_with_ms()} - Unified Resource Loader: Starting to process node '{node_name}' fields")
         
         status = node.status
         
         # Log raw node data structure
-        logging.debug(f"📊 [RAW DATA] {time.strftime('%H:%M:%S.%f')[:-3]} - Node '{node_name}': metadata={hasattr(node, 'metadata')}, status={status is not None}, spec={hasattr(node, 'spec')}")
+        logging.debug(f"📊 [RAW DATA] {get_timestamp_with_ms()} - Node '{node_name}': metadata={hasattr(node, 'metadata')}, status={status is not None}, spec={hasattr(node, 'spec')}")
         
         # Quick exit for invalid nodes
         if not status:
-            logging.warning(f"⚠️  [MISSING STATUS] {time.strftime('%H:%M:%S.%f')[:-3]} - Unified Resource Loader: Node '{node_name}' has no status - using defaults")
+            logging.warning(f"⚠️  [MISSING STATUS] {get_timestamp_with_ms()} - Unified Resource Loader: Node '{node_name}' has no status - using defaults")
             processed_item.update({
                 'status': 'Unknown',
                 'conditions': 'Unknown',
@@ -1211,8 +1212,8 @@ class ResourceLoadWorker(EnhancedBaseWorker):
         
         # Log completion of node processing
         process_time = (time.time() - process_start) * 1000
-        logging.info(f"✅ [PROCESSED] {time.strftime('%H:%M:%S.%f')[:-3]} - Node '{node_name}' processed in {process_time:.1f}ms: status={processed_item.get('status')}, roles={processed_item.get('roles')}, cpu={processed_item.get('cpu_capacity')}, memory={processed_item.get('memory_capacity')}")
-        logging.debug(f"📦 [FINAL DATA] {time.strftime('%H:%M:%S.%f')[:-3]} - Node '{node_name}' final processed data: {processed_item}")
+        logging.info(f"✅ [PROCESSED] {get_timestamp_with_ms()} - Node '{node_name}' processed in {process_time:.1f}ms: status={processed_item.get('status')}, roles={processed_item.get('roles')}, cpu={processed_item.get('cpu_capacity')}, memory={processed_item.get('memory_capacity')}")
+        logging.debug(f"📦 [FINAL DATA] {get_timestamp_with_ms()} - Node '{node_name}' final processed data: {processed_item}")
     
     def _add_service_fields(self, processed_item: Dict[str, Any], service: Any):
         """Add service-specific fields efficiently"""
@@ -2008,12 +2009,13 @@ class HighPerformanceResourceLoader(QObject):
         try:
             if resource_type == 'nodes':
                 import time
-                logging.info(f"🚀 [UI EMIT] {time.strftime('%H:%M:%S.%f')[:-3]} - Unified Resource Loader: Emitting node data to UI - {result.total_count} nodes loaded in {result.load_time_ms:.1f}ms")
+                from Utils import get_timestamp_with_ms
+                logging.info(f"🚀 [UI EMIT] {get_timestamp_with_ms()} - Unified Resource Loader: Emitting node data to UI - {result.total_count} nodes loaded in {result.load_time_ms:.1f}ms")
                 # Log sample of node data being sent to UI
                 if result.items and len(result.items) > 0:
                     sample_node = result.items[0]
-                    logging.debug(f"📤 [UI SAMPLE] {time.strftime('%H:%M:%S.%f')[:-3]} - Sample node data being sent: name={sample_node.get('name')}, status={sample_node.get('status')}, cpu={sample_node.get('cpu_capacity')}")
-                    logging.debug(f"📤 [UI COUNT] {time.strftime('%H:%M:%S.%f')[:-3]} - Sending {len(result.items)} nodes to UI: {[item.get('name', 'unnamed') for item in result.items[:5]]}{'...' if len(result.items) > 5 else ''}")
+                    logging.debug(f"📤 [UI SAMPLE] {get_timestamp_with_ms()} - Sample node data being sent: name={sample_node.get('name')}, status={sample_node.get('status')}, cpu={sample_node.get('cpu_capacity')}")
+                    logging.debug(f"📤 [UI COUNT] {get_timestamp_with_ms()} - Sending {len(result.items)} nodes to UI: {[item.get('name', 'unnamed') for item in result.items[:5]]}{'...' if len(result.items) > 5 else ''}")
             
             self.loading_completed.emit(resource_type, result)
             logging.info(
