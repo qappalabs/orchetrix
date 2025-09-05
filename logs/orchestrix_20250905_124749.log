@@ -1,0 +1,191 @@
+12:47:49 | INFO     | root                 | Application started. Log file: D:\Qappalabs\Product_OX\logs\orchestrix_20250905_124749.log
+12:47:49 | INFO     | root                 | Initializing application...
+12:47:52 | INFO     | root                 | All modules imported successfully
+12:47:52 | INFO     | root                 | Running in normal Python environment
+12:47:52 | INFO     | root                 | Python version: 3.13.5 (tags/v3.13.5:6cb20a2, Jun 11 2025, 16:15:46) [MSC v.1943 64 bit (AMD64)]
+12:47:52 | INFO     | root                 | PyQt version: 6.8.2
+12:47:52 | INFO     | root                 | Working directory: D:\Qappalabs\Product_OX
+12:47:52 | INFO     | root                 | Process ID: 18000
+12:47:52 | INFO     | root                 | Creating QApplication with consistent styling
+12:47:53 | INFO     | root                 | Application icon set from: D:\Qappalabs\Product_OX\Icons/logoIcon.ico
+12:47:53 | INFO     | root                 | Windows AppUserModelID set to: Orchestrix.KubernetesManager.1.0
+12:47:53 | INFO     | root                 | Creating splash screen
+12:47:53 | INFO     | root                 | Creating main window...
+12:47:53 | INFO     | root                 | Unified cache system initialized with specialized caches
+12:47:53 | INFO     | root                 | KubernetesService initialized with modular architecture
+12:47:53 | INFO     | root                 | KubernetesClient initialized with new service architecture
+12:47:53 | INFO     | root                 | Unified Resource Loader: Enabled heavy data optimizations for pods
+12:47:53 | INFO     | root                 | Unified Resource Loader: Enabled heavy data optimizations for nodes
+12:47:53 | INFO     | root                 | High-Performance Resource Loader initialized
+12:47:53 | INFO     | root                 | Connected to unified resource loader signals
+12:47:53 | INFO     | root                 | Enhanced Cluster Connector initialized
+12:47:53 | INFO     | root                 | Cluster state manager initialized in HomePage
+12:47:55 | INFO     | Pages.HomePage       | OrchestrixGUI.create_main_content() completed
+12:47:55 | INFO     | Pages.HomePage       | OrchestrixGUI.setup_ui() completed
+12:47:55 | INFO     | root                 | HomePage: Set up periodic cluster status refresh (5min interval)
+12:47:56 | INFO     | root                 | ClusterPage: Successfully connected cluster connector signals
+12:47:56 | INFO     | root                 | ClusterPage: Charts initialized and CPU chart set as current
+12:47:56 | INFO     | root                 | Loading application settings...
+12:47:56 | INFO     | root                 | Starting application main event loop.
+12:47:56 | INFO     | root                 | HomePage: Loading Kubernetes clusters...
+12:47:56 | INFO     | root                 | HomePage: Received 1 clusters from kubernetes client
+12:47:56 | INFO     | root                 | Loaded 1 clusters from kubeconfig
+12:47:58 | INFO     | root                 | Showing main window...
+12:47:58 | INFO     | root                 | Closing splash screen...
+12:47:58 | INFO     | root                 | Main window shown successfully.
+12:48:23 | INFO     | root                 | Optimized all caches
+12:48:24 | INFO     | root                 | Requesting cluster switch to: docker-desktop
+12:48:24 | INFO     | root                 | Updated HomePage status for docker-desktop: connecting
+12:48:24 | INFO     | root                 | Updated HomePage status for docker-desktop: connecting
+12:48:24 | INFO     | root                 | Connecting to cluster: docker-desktop
+12:48:24 | INFO     | root                 | Loaded kubeconfig for context: docker-desktop
+12:48:26 | WARNING  | urllib3.connectionpool | Retrying (Retry(total=2, connect=None, read=None, redirect=0, status=None)) after connection broken by 'NewConnectionError('<urllib3.connection.HTTPSConnection object at 0x00000196B877BA10>: Failed to establish a new connection: [WinError 10061] No connection could be made because the target machine actively refused it')': /version/
+12:48:28 | WARNING  | urllib3.connectionpool | Retrying (Retry(total=1, connect=None, read=None, redirect=0, status=None)) after connection broken by 'NewConnectionError('<urllib3.connection.HTTPSConnection object at 0x00000196B87A3890>: Failed to establish a new connection: [WinError 10061] No connection could be made because the target machine actively refused it')': /version/
+12:48:30 | WARNING  | urllib3.connectionpool | Retrying (Retry(total=0, connect=None, read=None, redirect=0, status=None)) after connection broken by 'NewConnectionError('<urllib3.connection.HTTPSConnection object at 0x00000196B87A39D0>: Failed to establish a new connection: [WinError 10061] No connection could be made because the target machine actively refused it')': /version/
+12:48:33 | WARNING  | root                 | API Service: Kubernetes API connection refused - cluster may be down: HTTPSConnectionPool(host='kubernetes.docker.internal', port=6443): Max retries exceeded with url: /version/ (Caused by NewConnectionError('<urllib3.connection.HTTPSConnection object at 0x00000196B87A3B10>: Failed to establish a new connection: [WinError 10061] No connection could be made because the target machine actively refused it'))
+12:48:33 | ERROR    | root                 | Failed to connect to cluster API: docker-desktop. Check if the cluster is running and accessible.
+12:48:33 | ERROR    | root                 | ClusterConnectionWorker failed for docker-desktop: Failed to connect to cluster: docker-desktop
+12:48:33 | WARNING  | root                 | Kubernetes client error (suppressed): Failed to connect to cluster API: docker-desktop. Check if the cluster is running and accessible.
+12:48:33 | ERROR    | root                 | Worker cluster_connect_docker-desktop failed: Failed to connect to cluster: docker-desktop
+12:48:33 | ERROR    | root                 | Showing error dialog: Failed to connect to cluster API: docker-desktop. Check if the cluster is running and accessible.
+12:48:33 | ERROR    | root                 | Failed to connect to cluster: docker-desktop
+12:48:33 | INFO     | root                 | Updated HomePage status for docker-desktop: available
+12:48:33 | INFO     | root                 | Updated HomePage status for docker-desktop: available
+12:48:33 | ERROR    | root                 | Failed to connect to cluster: docker-desktop
+12:48:38 | INFO     | root                 | Cluster docker-desktop connection failed, status reset to available
+12:48:38 | INFO     | root                 | Cluster docker-desktop connection failed, status reset to available
+12:48:38 | ERROR    | root                 | Connection failed for docker-desktop: Failed to connect to cluster: docker-desktop
+12:48:39 | INFO     | Pages.HomePage       | OrchestrixGUI.show_error_message() completed
+12:48:53 | INFO     | root                 | Optimized all caches
+12:49:24 | INFO     | root                 | Optimized all caches
+12:49:34 | INFO     | Pages.HomePage       | OrchestrixGUI.filter_content() completed
+12:49:34 | INFO     | Pages.HomePage       | OrchestrixGUI.update_content_view() completed
+12:49:34 | INFO     | root                 | Requesting cluster switch to: docker-desktop
+12:49:34 | INFO     | root                 | Updated HomePage status for docker-desktop: connecting
+12:49:34 | INFO     | root                 | Updated HomePage status for docker-desktop: connecting
+12:49:34 | INFO     | Pages.HomePage       | OrchestrixGUI.navigate_to_cluster() completed
+12:49:34 | INFO     | Pages.HomePage       | OrchestrixGUI.handle_item_single_click() completed
+12:49:34 | INFO     | root                 | Connecting to cluster: docker-desktop
+12:49:34 | INFO     | root                 | Loaded kubeconfig for context: docker-desktop
+12:49:34 | INFO     | root                 | API Service: Successfully connected to Kubernetes API - nodes API ready
+12:49:34 | INFO     | root                 | Cleared all resource cache
+12:49:34 | INFO     | root                 | Successfully connected to cluster: docker-desktop
+12:49:34 | WARNING  | root                 | Failed to load nodes: Invalid format string
+12:49:34 | INFO     | root                 | Keeping existing cache for successful connection: docker-desktop
+12:49:34 | INFO     | root                 | Successfully connected to cluster: docker-desktop
+12:49:34 | INFO     | root                 | Updated HomePage status for docker-desktop: connected
+12:49:34 | INFO     | root                 | Updated HomePage status for docker-desktop: connected
+12:49:34 | INFO     | root                 | Switching to cluster view for docker-desktop
+12:49:34 | INFO     | root                 | ClusterPage: force_load_data called - requesting fresh metrics and issues
+12:49:34 | INFO     | root                 | ClusterPage: Successfully connected cluster connector signals
+12:49:34 | INFO     | root                 | ClusterPage: Refreshing metrics and issues data
+12:49:34 | INFO     | root                 | Loading cluster metrics...
+12:49:34 | INFO     | root                 | Loading cluster issues...
+12:49:34 | INFO     | root                 | ClusterView: Setting active cluster to docker-desktop
+12:49:34 | INFO     | root                 | Setting current cluster to docker-desktop
+12:49:34 | INFO     | root                 | ClusterView: Set cluster connector current cluster to docker-desktop
+12:49:34 | INFO     | root                 | ClusterView: Set active cluster to docker-desktop, waiting for connection events
+12:49:34 | INFO     | root                 | Cluster docker-desktop successfully connected
+12:49:34 | INFO     | root                 | Cluster docker-desktop successfully connected
+12:49:34 | INFO     | root                 | Calculated real cluster metrics: CPU 7.1%, Memory 6.7%, Pods 8.2%
+12:49:34 | INFO     | root                 | Found 7 real cluster issues
+12:49:34 | INFO     | root                 | Calculated fresh metrics for docker-desktop
+12:49:34 | INFO     | root                 | ClusterPage: force_load_data called - requesting fresh metrics and issues
+12:49:34 | INFO     | root                 | ClusterPage: Successfully connected cluster connector signals
+12:49:34 | INFO     | root                 | ClusterPage: Refreshing metrics and issues data
+12:49:34 | INFO     | root                 | Loading cluster metrics...
+12:49:34 | INFO     | root                 | Loading cluster issues...
+12:49:34 | INFO     | root                 | Post-switch operations completed for docker-desktop
+12:49:34 | INFO     | root                 | ClusterPage: update_issues called with 7 issues
+12:49:34 | INFO     | root                 | ClusterPage: Displaying 7 issues
+12:49:34 | INFO     | root                 | ClusterPage: update_metrics called with data: {'cpu': {'usage': 7.08, 'requests': 0.85, 'limits': 0.0, 'allocatable': 12.0, 'capacity': 12.0}, 'memory': {'usage': 6.72, 'requests': 240.0, 'limits': 340.0, 'allocatable': 3473.21, 'capacity': 3573.21}, 'pods': {'usage': 8.18, 'count': 9, 'capacity': 110}}
+12:49:34 | INFO     | root                 | ClusterPage: Processing metrics with keys: ['cpu', 'memory', 'pods']
+12:49:34 | INFO     | root                 | ClusterPage: Updating CPU - usage=7.08%, capacity=12.0
+12:49:34 | INFO     | root                 | ClusterPage: CPU status widget updated successfully
+12:49:35 | INFO     | root                 | ClusterPage: CPU chart updated successfully with 1 points
+12:49:35 | INFO     | root                 | ClusterPage: Updating Memory - usage=6.72%, capacity=3573.21
+12:49:35 | INFO     | root                 | ClusterPage: Memory status widget updated successfully
+12:49:35 | INFO     | root                 | ClusterPage: Memory chart updated successfully with 1 points
+12:49:35 | INFO     | root                 | ClusterPage: Updating Pods - usage=8.18%, count=9, capacity=110
+12:49:35 | INFO     | root                 | ClusterPage: Pod status widget updated successfully
+12:49:35 | INFO     | root                 | ClusterPage: All metrics widgets updated successfully
+12:49:35 | INFO     | Pages.HomePage       | OrchestrixGUI.filter_content() completed
+12:49:35 | INFO     | Pages.HomePage       | OrchestrixGUI.update_content_view() completed
+12:49:35 | INFO     | root                 | Successfully connected to cluster: docker-desktop
+12:49:35 | INFO     | root                 | ClusterPage: update_metrics called with data: {'cpu': {'usage': 7.08, 'requests': 0.85, 'limits': 0.0, 'allocatable': 12.0, 'capacity': 12.0}, 'memory': {'usage': 6.72, 'requests': 240.0, 'limits': 340.0, 'allocatable': 3473.21, 'capacity': 3573.21}, 'pods': {'usage': 8.18, 'count': 9, 'capacity': 110}}
+12:49:35 | INFO     | root                 | ClusterPage: Processing metrics with keys: ['cpu', 'memory', 'pods']
+12:49:35 | INFO     | root                 | ClusterPage: Updating CPU - usage=7.08%, capacity=12.0
+12:49:35 | INFO     | root                 | ClusterPage: CPU status widget updated successfully
+12:49:35 | INFO     | root                 | ClusterPage: CPU chart updated successfully with 2 points
+12:49:35 | INFO     | root                 | ClusterPage: Updating Memory - usage=6.72%, capacity=3573.21
+12:49:35 | INFO     | root                 | ClusterPage: Memory status widget updated successfully
+12:49:35 | INFO     | root                 | ClusterPage: Memory chart updated successfully with 2 points
+12:49:35 | INFO     | root                 | ClusterPage: Updating Pods - usage=8.18%, count=9, capacity=110
+12:49:35 | INFO     | root                 | ClusterPage: Pod status widget updated successfully
+12:49:35 | INFO     | root                 | ClusterPage: All metrics widgets updated successfully
+12:49:35 | INFO     | root                 | ClusterPage: update_issues called with 7 issues
+12:49:35 | INFO     | root                 | ClusterPage: Displaying 7 issues
+12:49:35 | INFO     | root                 | ClusterPage: force_load_data called - requesting fresh metrics and issues
+12:49:35 | INFO     | root                 | ClusterPage: Successfully connected cluster connector signals
+12:49:35 | INFO     | root                 | ClusterPage: Refreshing metrics and issues data
+12:49:35 | INFO     | root                 | Loading cluster metrics...
+12:49:35 | INFO     | root                 | Loading cluster issues...
+12:49:35 | INFO     | root                 | ClusterPage: update_metrics called with data: {'cpu': {'usage': 7.08, 'requests': 0.85, 'limits': 0.0, 'allocatable': 12.0, 'capacity': 12.0}, 'memory': {'usage': 6.72, 'requests': 240.0, 'limits': 340.0, 'allocatable': 3473.21, 'capacity': 3573.21}, 'pods': {'usage': 8.18, 'count': 9, 'capacity': 110}}
+12:49:35 | INFO     | root                 | ClusterPage: Processing metrics with keys: ['cpu', 'memory', 'pods']
+12:49:35 | INFO     | root                 | ClusterPage: Updating CPU - usage=7.08%, capacity=12.0
+12:49:35 | INFO     | root                 | ClusterPage: CPU status widget updated successfully
+12:49:35 | INFO     | root                 | ClusterPage: CPU chart updated successfully with 3 points
+12:49:35 | INFO     | root                 | ClusterPage: Updating Memory - usage=6.72%, capacity=3573.21
+12:49:35 | INFO     | root                 | ClusterPage: Memory status widget updated successfully
+12:49:35 | INFO     | root                 | ClusterPage: Memory chart updated successfully with 3 points
+12:49:35 | INFO     | root                 | ClusterPage: Updating Pods - usage=8.18%, count=9, capacity=110
+12:49:35 | INFO     | root                 | ClusterPage: Pod status widget updated successfully
+12:49:35 | INFO     | root                 | ClusterPage: All metrics widgets updated successfully
+12:49:35 | INFO     | root                 | ClusterPage: update_issues called with 7 issues
+12:49:35 | INFO     | root                 | ClusterPage: Displaying 7 issues
+12:49:36 | INFO     | root                 | ClusterPage: Refreshing metrics and issues data
+12:49:36 | INFO     | root                 | Loading cluster metrics...
+12:49:36 | INFO     | root                 | Loading cluster issues...
+12:49:36 | INFO     | root                 | ClusterPage: update_metrics called with data: {'cpu': {'usage': 7.08, 'requests': 0.85, 'limits': 0.0, 'allocatable': 12.0, 'capacity': 12.0}, 'memory': {'usage': 6.72, 'requests': 240.0, 'limits': 340.0, 'allocatable': 3473.21, 'capacity': 3573.21}, 'pods': {'usage': 8.18, 'count': 9, 'capacity': 110}}
+12:49:36 | INFO     | root                 | ClusterPage: Processing metrics with keys: ['cpu', 'memory', 'pods']
+12:49:36 | INFO     | root                 | ClusterPage: Updating CPU - usage=7.08%, capacity=12.0
+12:49:36 | INFO     | root                 | ClusterPage: CPU status widget updated successfully
+12:49:36 | INFO     | root                 | ClusterPage: CPU chart updated successfully with 4 points
+12:49:36 | INFO     | root                 | ClusterPage: Updating Memory - usage=6.72%, capacity=3573.21
+12:49:36 | INFO     | root                 | ClusterPage: Memory status widget updated successfully
+12:49:36 | INFO     | root                 | ClusterPage: Memory chart updated successfully with 4 points
+12:49:36 | INFO     | root                 | ClusterPage: Updating Pods - usage=8.18%, count=9, capacity=110
+12:49:36 | INFO     | root                 | ClusterPage: Pod status widget updated successfully
+12:49:36 | INFO     | root                 | ClusterPage: All metrics widgets updated successfully
+12:49:36 | INFO     | root                 | ClusterPage: update_issues called with 7 issues
+12:49:36 | INFO     | root                 | ClusterPage: Displaying 7 issues
+12:49:36 | INFO     | root                 | NodesPage: Setting up virtual scrolling mode
+12:49:36 | INFO     | root                 | NodesPage: Virtual table setup completed
+12:49:37 | INFO     | root                 | NodesPage: Virtual layout setup completed successfully with Node title, count, refresh button and search bar above table
+12:49:37 | INFO     | root                 | NodesPage: Virtual table and graphs created successfully
+12:49:37 | INFO     | root                 | NodesPage: force_load_data() called
+12:49:37 | INFO     | root                 | NodesPage: load_data() called, is_loading=False
+12:49:37 | INFO     | root                 | NodesPage: Using cluster_connector to load nodes data
+12:49:37 | INFO     | root                 | Cluster Connector: Initiating node data loading process
+12:49:37 | INFO     | root                 | Unified Resource Loader: Starting async load for resource_type='nodes', namespace='all'
+12:49:37 | INFO     | root                 | Unified Resource Loader: Successfully initiated async loading for nodes with operation_id: nodes_all_1757056777137
+12:49:37 | INFO     | root                 | Cluster Connector: Started loading nodes with operation_id: nodes_all_1757056777137
+12:49:37 | INFO     | root                 | NodesPage: force_load_data() called
+12:49:37 | INFO     | root                 | Unified Resource Loader: Processing 1 nodes in chunks of 200
+12:49:37 | INFO     | root                 | Unified Resource Loader: Chunked processing completed - 0 items processed
+12:49:37 | INFO     | root                 | Unified Resource Loader: Loaded 0 nodes in 18.9ms
+12:49:37 | INFO     | root                 | Unified Resource Loader: Load completed successfully for nodes (operation_id: nodes_all_1757056777137)
+12:49:37 | ERROR    | root                 | Unified Resource Loader: Error emitting load completion signal for nodes: Invalid format string
+12:49:37 | INFO     | root                 | NodesPage: _initial_load_data() called
+12:49:37 | INFO     | root                 | NodesPage: load_data() called, is_loading=True
+12:49:42 | INFO     | root                 | NodesPage: No data loaded yet, showing startup loading message
+12:49:42 | INFO     | root                 | NodesPage: load_data() called, is_loading=True
+12:49:53 | INFO     | root                 | Optimized all caches
+12:50:24 | INFO     | root                 | Optimized all caches
+12:50:53 | INFO     | root                 | Optimized all caches
+12:51:16 | INFO     | root                 | Starting application shutdown sequence...
+12:51:16 | INFO     | root                 | Starting resource cleanup...
+12:51:16 | INFO     | root                 | Resource cleanup completed: 3 resources cleaned, 0 objects collected
+12:51:16 | INFO     | root                 | Application shutdown completed successfully.
+12:51:17 | INFO     | root                 | Application event loop finished. Exit code: 0
+12:51:17 | INFO     | root                 | Exiting application with status code: 0
