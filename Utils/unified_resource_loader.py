@@ -486,9 +486,16 @@ class SearchResourceLoadWorker(EnhancedBaseWorker):
             logging.debug(f"Error adding basic resource fields: {e}")
     
     def _generate_cache_key(self) -> str:
-        """Generate cache key for search results"""
-        namespace_key = self.config.namespace or "all_namespaces"
-        return f"{self.config.resource_type}_{namespace_key}"
+        """Generate cache key for search results - FIXED to include cluster"""
+        # FIXED: Include cluster information in search cache key
+        try:
+            kube_client = get_kubernetes_client()
+            cluster_name = kube_client.current_cluster if kube_client else 'unknown-cluster'
+        except:
+            cluster_name = 'unknown-cluster'
+            
+        namespace_key = f"ns_{self.config.namespace}" if self.config.namespace else "all_namespaces"
+        return f"{cluster_name}_{self.config.resource_type}_{namespace_key}"
 
 
 class ResourceLoadWorker(EnhancedBaseWorker):
@@ -1056,14 +1063,19 @@ class ResourceLoadWorker(EnhancedBaseWorker):
     
     def _add_node_fields(self, processed_item: Dict[str, Any], node: Any):
         """Add node-specific fields efficiently - optimized for heavy data"""
+        import time
+        process_start = time.time()
         node_name = processed_item.get('name', 'unknown')
-        logging.debug(f"Unified Resource Loader: Processing node fields for {node_name}")
+        logging.info(f"🔄 [PROCESSING] {time.strftime('%H:%M:%S.%f')[:-3]} - Unified Resource Loader: Starting to process node '{node_name}' fields")
         
         status = node.status
         
+        # Log raw node data structure
+        logging.debug(f"📊 [RAW DATA] {time.strftime('%H:%M:%S.%f')[:-3]} - Node '{node_name}': metadata={hasattr(node, 'metadata')}, status={status is not None}, spec={hasattr(node, 'spec')}")
+        
         # Quick exit for invalid nodes
         if not status:
-            logging.warning(f"Unified Resource Loader: Node {node_name} has no status - using defaults")
+            logging.warning(f"⚠️  [MISSING STATUS] {time.strftime('%H:%M:%S.%f')[:-3]} - Unified Resource Loader: Node '{node_name}' has no status - using defaults")
             processed_item.update({
                 'status': 'Unknown',
                 'conditions': 'Unknown',
@@ -1196,6 +1208,11 @@ class ResourceLoadWorker(EnhancedBaseWorker):
                 logging.debug(f"Unified Resource Loader: Metrics service not available for node {processed_item['name']}")
         except Exception as e:
             logging.warning(f"Unified Resource Loader: Could not get real metrics for node {processed_item['name']}: {e}")
+        
+        # Log completion of node processing
+        process_time = (time.time() - process_start) * 1000
+        logging.info(f"✅ [PROCESSED] {time.strftime('%H:%M:%S.%f')[:-3]} - Node '{node_name}' processed in {process_time:.1f}ms: status={processed_item.get('status')}, roles={processed_item.get('roles')}, cpu={processed_item.get('cpu_capacity')}, memory={processed_item.get('memory_capacity')}")
+        logging.debug(f"📦 [FINAL DATA] {time.strftime('%H:%M:%S.%f')[:-3]} - Node '{node_name}' final processed data: {processed_item}")
     
     def _add_service_fields(self, processed_item: Dict[str, Any], service: Any):
         """Add service-specific fields efficiently"""
@@ -1543,10 +1560,18 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             logging.debug(f"Error processing CRD fields: {e}")
     
     def _generate_cache_key(self) -> str:
-        """Generate cache key for this resource loading operation"""
+        """Generate cache key for this resource loading operation - FIXED to include cluster"""
+        # FIXED: Include cluster information in cache key to prevent cross-cluster data mixing
+        try:
+            kube_client = get_kubernetes_client()
+            cluster_name = kube_client.current_cluster if kube_client else 'unknown-cluster'
+        except:
+            cluster_name = 'unknown-cluster'
+            
         key_parts = [
+            cluster_name,  # FIXED: Add cluster name to prevent cross-cluster cache pollution
             self.config.resource_type,
-            self.config.namespace or 'all-namespaces',
+            f"ns_{self.config.namespace}" if self.config.namespace else 'all-namespaces',  # FIXED: Add ns_ prefix
             str(self.config.batch_size),
         ]
         return ':'.join(key_parts)
@@ -1982,7 +2007,13 @@ class HighPerformanceResourceLoader(QObject):
         logging.info(f"Unified Resource Loader: Load completed successfully for {resource_type} (operation_id: {operation_id})")
         try:
             if resource_type == 'nodes':
-                logging.info(f"Unified Resource Loader: Emitting node data to UI - {result.total_count} nodes loaded in {result.load_time_ms:.1f}ms")
+                import time
+                logging.info(f"🚀 [UI EMIT] {time.strftime('%H:%M:%S.%f')[:-3]} - Unified Resource Loader: Emitting node data to UI - {result.total_count} nodes loaded in {result.load_time_ms:.1f}ms")
+                # Log sample of node data being sent to UI
+                if result.items and len(result.items) > 0:
+                    sample_node = result.items[0]
+                    logging.debug(f"📤 [UI SAMPLE] {time.strftime('%H:%M:%S.%f')[:-3]} - Sample node data being sent: name={sample_node.get('name')}, status={sample_node.get('status')}, cpu={sample_node.get('cpu_capacity')}")
+                    logging.debug(f"📤 [UI COUNT] {time.strftime('%H:%M:%S.%f')[:-3]} - Sending {len(result.items)} nodes to UI: {[item.get('name', 'unnamed') for item in result.items[:5]]}{'...' if len(result.items) > 5 else ''}")
             
             self.loading_completed.emit(resource_type, result)
             logging.info(

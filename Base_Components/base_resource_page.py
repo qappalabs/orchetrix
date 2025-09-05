@@ -6,6 +6,7 @@ Consolidated from multiple duplicate implementations for better maintainability
 import os
 import logging
 import weakref
+import time  # FIXED: Add missing time import
 from PyQt6.QtWidgets import (
     QMessageBox, QWidget, QVBoxLayout, QLineEdit, QComboBox,
     QLabel, QProgressBar, QHBoxLayout, QPushButton, QApplication, QTableWidgetItem,
@@ -29,13 +30,14 @@ from Utils.thread_manager import get_thread_manager
 from Utils.kubernetes_client import get_kubernetes_client
 from log_handler import method_logger, class_logger
 
-# Constants for performance tuning - optimized for large datasets
-BATCH_SIZE = 50  # Reduced batch size to prevent UI freezing with large datasets
-SCROLL_DEBOUNCE_MS = 100   # Increased debounce for stability with large data
-SEARCH_DEBOUNCE_MS = 300  # Increased debounce for better performance
-CACHE_TTL_SECONDS = 300   # Reduced cache time to prevent memory bloat
-MAX_ITEMS_IN_MEMORY = 1000  # Maximum items to keep in memory
-LARGE_DATASET_THRESHOLD = 500  # Threshold to activate large dataset optimizations
+# Constants for performance tuning - optimized for large datasets - FIXED
+BATCH_SIZE = 100  # FIXED: Increased batch size for better large data performance
+SCROLL_DEBOUNCE_MS = 150   # FIXED: Optimized debounce for large data stability
+SEARCH_DEBOUNCE_MS = 500  # FIXED: Longer debounce for large dataset search performance
+CACHE_TTL_SECONDS = 600   # FIXED: Longer cache time for large dataset stability
+MAX_ITEMS_IN_MEMORY = 2000  # FIXED: Increased memory limit for large datasets
+LARGE_DATASET_THRESHOLD = 200  # FIXED: Lower threshold to activate optimizations earlier
+MAX_TABLE_ROWS_BEFORE_VIRTUAL = 100  # FIXED: New constant for virtual scrolling
 
 # Import performance components  
 from Utils.unified_cache_system import get_unified_cache
@@ -61,17 +63,20 @@ class BaseResourcePage(BaseTablePage):
         self.delete_thread = None
         self.batch_delete_thread = None
 
-        # Performance optimizations for large datasets
+        # Performance optimizations for large datasets - FIXED
         self.is_loading_initial = False
         self.is_loading_more = False
         self.all_data_loaded = False
         self.current_continue_token = None
-        self.items_per_page = 50  # Reduced for better memory management
+        self.items_per_page = 200  # FIXED: Increased for better large data performance
         self.selected_items = set()
         self.reload_on_show = True
         self._large_dataset_mode = False
         self._total_item_count = 0
         self._loaded_item_count = 0
+        self._enable_virtual_scrolling = False  # FIXED: Add virtual scrolling control
+        self._progressive_loading = True  # FIXED: Enable progressive loading
+        self._last_load_time = 0  # FIXED: Track last load time
 
         self.is_showing_skeleton = False
 
@@ -200,10 +205,17 @@ class BaseResourcePage(BaseTablePage):
             QTimer.singleShot(200, self._auto_load_data)  # Load data after namespaces
 
     def _auto_load_data(self):
-        """Auto-load data when page is shown"""
+        """Auto-load data when page is shown - FIXED for large data performance"""
         if hasattr(self, 'resource_type') and self.resource_type and not self.is_loading_initial:
+            # FIXED: Check if we have recent data to avoid redundant loads
+            if (hasattr(self, '_last_load_time') and self._last_load_time > 0 and 
+                time.time() - self._last_load_time < 5.0):  # 5 second throttle
+                logging.debug(f"Recent data available for {self.__class__.__name__}, skipping auto-load")
+                return
+                
             logging.debug(f"Auto-loading data for {self.__class__.__name__}")  # Reduced to debug
             self._initial_load_done = True  # Mark as done to prevent repeated attempts
+            self._last_load_time = time.time()  # FIXED: Track load time
             self.load_data()
 
     def setup_ui(self, title, headers, sortable_columns=None):
@@ -784,59 +796,68 @@ class BaseResourcePage(BaseTablePage):
         self._display_resources(filtered)
 
     def _load_namespaces_async(self):
-        """Load available namespaces dynamically with minimal startup impact"""
+        """Load available namespaces dynamically using unified loader for better performance"""
         try:
             # Quick fallback during startup to avoid any lag
             if self._is_app_starting():
                 self._on_namespaces_loaded(["default", "kube-system", "kube-public"])
                 return
+
+            # Use unified resource loader for better performance and caching (like AppsChart)
+            from Utils.unified_resource_loader import get_unified_resource_loader
+            unified_loader = get_unified_resource_loader()
             
-            # Use thread manager to load namespaces asynchronously (only after startup)
-            from Utils.enhanced_worker import EnhancedBaseWorker
+            # Connect signals if not already connected
+            if not hasattr(self, '_namespace_signals_connected'):
+                unified_loader.loading_completed.connect(self._on_namespaces_loaded_unified)
+                unified_loader.loading_error.connect(self._on_namespace_error_unified)
+                self._namespace_signals_connected = True
             
-            class NamespaceLoader(EnhancedBaseWorker):
-                def __init__(self):
-                    super().__init__("namespace_loader")
-                
-                def execute(self):
-                    try:
-                        kube_client = get_kubernetes_client()
-                        if not kube_client or not kube_client.v1:
-                            return ["default", "kube-system", "kube-public"]
-                        
-                        # Get namespaces with pagination for performance
-                        namespaces_response = kube_client.v1.list_namespace(limit=100)
-                        namespace_names = [ns.metadata.name for ns in namespaces_response.items]
-                        
-                        # Sort namespaces with default first, then alphabetically
-                        important_namespaces = ["default", "kube-system", "kube-public", "kube-node-lease"]
-                        other_namespaces = sorted([ns for ns in namespace_names if ns not in important_namespaces])
-                        
-                        return important_namespaces + other_namespaces
-                        
-                    except Exception as e:
-                        return ["default", "kube-system", "kube-public"]
-            
-            # Create and submit worker
-            worker = NamespaceLoader()
-            worker.signals.finished.connect(self._on_namespaces_loaded)
-            worker.signals.error.connect(lambda error: self._on_namespaces_loaded(["default", "kube-system", "kube-public"]))
-            
-            thread_manager = get_thread_manager()
-            thread_manager.submit_worker("namespace_loader", worker)
+            # Load namespaces using unified loader (same as AppsChart for fast performance)
+            self._namespace_operation_id = unified_loader.load_resources_async('namespaces')
             
         except Exception as e:
             logging.error(f"Failed to start namespace loading: {e}")
             # Fallback to default namespaces
             self._on_namespaces_loaded(["default", "kube-system", "kube-public"])
+
+    def _on_namespaces_loaded_unified(self, resource_type: str, result):
+        """Handle namespaces loaded from unified loader"""
+        if resource_type != 'namespaces':
+            return
+        
+        if result.success:
+            # Extract namespace names from the processed results
+            namespaces = [item.get('name', '') for item in result.items if item.get('name')]
+            
+            # Sort namespaces with default first, then alphabetically  
+            important_namespaces = ["default", "kube-system", "kube-public", "kube-node-lease"]
+            other_namespaces = sorted([ns for ns in namespaces if ns not in important_namespaces])
+            sorted_namespaces = [ns for ns in important_namespaces if ns in namespaces] + other_namespaces
+            
+            self._on_namespaces_loaded(sorted_namespaces)
+        else:
+            self._on_namespace_error_unified('namespaces', result.error_message or "Failed to load namespaces")
+
+    def _on_namespace_error_unified(self, resource_type: str, error_message: str):
+        """Handle namespace loading errors from unified loader"""
+        if resource_type == 'namespaces':
+            logging.error(f"Failed to load namespaces via unified loader: {error_message}")
+            self._on_namespaces_loaded(["default", "kube-system", "kube-public"])
     
     def _on_namespaces_loaded(self, namespaces):
-        """Handle loaded namespaces and populate dropdown"""
+        """Handle loaded namespaces and populate dropdown - FIXED to prevent confusion"""
         try:
             if not self.namespace_combo:
                 # For cluster-scoped resources, set namespace filter to All Namespaces
                 self.namespace_filter = "All Namespaces"
                 return
+            
+            # FIXED: Temporarily disconnect the signal to prevent recursive calls
+            try:
+                self.namespace_combo.currentTextChanged.disconnect(self._on_namespace_changed)
+            except:
+                pass  # Signal might not be connected yet
             
             # Clear existing items
             self.namespace_combo.clear()
@@ -849,20 +870,46 @@ class BaseResourcePage(BaseTablePage):
                 if namespace:  # Ensure namespace is not empty
                     self.namespace_combo.addItem(namespace)
             
-            # Set default selection to "default" namespace if available
-            default_index = self.namespace_combo.findText("default")
-            if default_index >= 0:
-                self.namespace_combo.setCurrentIndex(default_index)
-                self.namespace_filter = "default"
+            # FIXED: Set default selection more carefully
+            if not hasattr(self, 'namespace_filter') or self.namespace_filter == "default":
+                # Set to default namespace if it exists
+                default_index = self.namespace_combo.findText("default")
+                if default_index >= 0:
+                    self.namespace_combo.setCurrentIndex(default_index)
+                    self.namespace_filter = "default"
+                    logging.info(f"Set namespace dropdown to 'default' (index {default_index})")
+                else:
+                    # If no default namespace, use "All Namespaces"
+                    self.namespace_combo.setCurrentIndex(0)
+                    self.namespace_filter = "All Namespaces"
+                    logging.info(f"Set namespace dropdown to 'All Namespaces' (no default found)")
             else:
-                # If no default namespace, use "All Namespaces"
-                self.namespace_combo.setCurrentIndex(0)
-                self.namespace_filter = "All Namespaces"
+                # Try to restore the current namespace filter
+                current_index = self.namespace_combo.findText(self.namespace_filter)
+                if current_index >= 0:
+                    self.namespace_combo.setCurrentIndex(current_index)
+                    logging.info(f"Restored namespace dropdown to '{self.namespace_filter}' (index {current_index})")
+                else:
+                    # Fallback to All Namespaces if current filter not found
+                    self.namespace_combo.setCurrentIndex(0)
+                    self.namespace_filter = "All Namespaces"
+                    logging.info(f"Fallback: Set namespace dropdown to 'All Namespaces'")
+            
+            # FIXED: Reconnect the signal after setting the dropdown
+            self.namespace_combo.currentTextChanged.connect(self._on_namespace_changed)
                 
-            logging.info(f"Loaded {len(namespaces)} namespaces into dropdown")
+            logging.info(f"Loaded {len(namespaces)} namespaces into dropdown, current filter: {self.namespace_filter}")
             
         except Exception as e:
             logging.error(f"Error updating namespace dropdown: {e}")
+            # FIXED: Ensure signal is reconnected even on error
+            try:
+                if self.namespace_combo:
+                    self.namespace_combo.currentTextChanged.connect(self._on_namespace_changed)
+            except:
+                pass
+            # Set a default filter to prevent issues
+            self.namespace_filter = "All Namespaces"
     
     def refresh_namespaces(self):
         """Refresh the namespace dropdown - can be called externally"""
@@ -870,11 +917,48 @@ class BaseResourcePage(BaseTablePage):
         self._load_namespaces_async()
 
     def _on_namespace_changed(self, namespace):
-        """Handle namespace filter changes"""
+        """Handle namespace filter changes - FIXED with minimal cache clearing"""
         if namespace == "Loading namespaces...":
             return  # Ignore the loading placeholder
             
+        old_namespace = getattr(self, 'namespace_filter', 'default')
+        
+        # FIXED: Only proceed if namespace actually changed
+        if old_namespace == namespace:
+            logging.debug(f"Namespace unchanged ({namespace}), skipping reload")
+            return
+            
+        logging.info(f"Namespace changed from '{old_namespace}' to '{namespace}'")
+        
+        # FIXED: Minimal cache clearing - only clear current resource cache
+        try:
+            from Utils.unified_cache_system import get_unified_cache
+            from Utils.kubernetes_client import get_kubernetes_client
+            
+            cache_system = get_unified_cache()
+            kube_client = get_kubernetes_client()
+            
+            if kube_client and hasattr(kube_client, 'current_cluster') and kube_client.current_cluster:
+                # FIXED: Only clear cache for current resource type and old namespace
+                resource_cache_key = f"{kube_client.current_cluster}:{self.resource_type}:ns_{old_namespace}" if old_namespace != "All Namespaces" else f"{kube_client.current_cluster}:{self.resource_type}:all-namespaces"
+                
+                # Clear only the specific cache entry we need to refresh
+                if hasattr(cache_system, '_resource_cache'):
+                    cache_system._resource_cache.delete(resource_cache_key)
+                    logging.debug(f"Cleared specific cache key: {resource_cache_key}")
+                    
+        except Exception as e:
+            logging.error(f"Error clearing cache during namespace switch: {e}")
+            
+        # Update namespace filter BEFORE clearing resources
         self.namespace_filter = namespace
+        
+        # FIXED: Clear current resource data to prevent showing stale data
+        self.resources.clear()
+        self.current_continue_token = None
+        self.all_data_loaded = False
+        
+        # FIXED: Force immediate reload with new namespace
         self.force_load_data()
 
     def _load_more_data_batch(self):
@@ -1313,6 +1397,36 @@ class BaseResourcePage(BaseTablePage):
                 self.selected_items.add(resource_key)
                 
         logging.debug(f"Select all: {state == Qt.CheckState.Checked.value}, Selected items: {len(self.selected_items)}")
+
+    def _validate_resource_name(self, resource_name):
+        """Validate that resource name is appropriate for the current resource type"""
+        if not resource_name or not isinstance(resource_name, str):
+            return False
+        
+        # Skip validation for cluster-scoped resources that don't have namespaces
+        cluster_scoped_resources = {
+            'nodes', 'clusterroles', 'clusterrolebindings', 
+            'storageclasses', 'customresourcedefinitions',
+            'ingressclasses', 'persistentvolumes',
+            'validatingwebhookconfigurations', 'mutatingwebhookconfigurations',
+            'priorityclasses', 'runtimeclasses'
+        }
+        
+        if hasattr(self, 'resource_type') and self.resource_type in cluster_scoped_resources:
+            return True  # Allow all names for cluster-scoped resources
+            
+        # For namespaced resources, check for common pod naming patterns that shouldn't appear in other resource types
+        if hasattr(self, 'resource_type') and self.resource_type != 'pods':
+            # Check for ReplicaSet hash patterns (pod names like "deployment-abc123-xyz789")
+            import re
+            # Pattern for pod names generated by ReplicaSets/Deployments
+            pod_pattern = r'^.+-[a-f0-9]{8,10}-[a-z0-9]{5}$'
+            if re.match(pod_pattern, resource_name):
+                logging.warning(f"Resource name '{resource_name}' appears to be a pod name but resource type is '{self.resource_type}'")
+                return False
+                
+        return True
+
 
     def delete_selected_resources(self):
         """Delete selected resources"""
@@ -2368,35 +2482,6 @@ class ResourcePageHelpers:
             
         except Exception as e:
             logging.error(f"Error setting up standard table: {e}")
-    
-    def _validate_resource_name(self, resource_name):
-        """Validate that resource name is appropriate for the current resource type"""
-        if not resource_name or not isinstance(resource_name, str):
-            return False
-        
-        # Skip validation for cluster-scoped resources that don't have namespaces
-        cluster_scoped_resources = {
-            'nodes', 'clusterroles', 'clusterrolebindings', 
-            'storageclasses', 'customresourcedefinitions',
-            'ingressclasses', 'persistentvolumes',
-            'validatingwebhookconfigurations', 'mutatingwebhookconfigurations',
-            'priorityclasses', 'runtimeclasses'
-        }
-        
-        if hasattr(self, 'resource_type') and self.resource_type in cluster_scoped_resources:
-            return True  # Allow all names for cluster-scoped resources
-            
-        # For namespaced resources, check for common pod naming patterns that shouldn't appear in other resource types
-        if hasattr(self, 'resource_type') and self.resource_type != 'pods':
-            # Check for ReplicaSet hash patterns (pod names like "deployment-abc123-xyz789")
-            import re
-            # Pattern for pod names generated by ReplicaSets/Deployments
-            pod_pattern = r'^.+-[a-f0-9]{8,10}-[a-z0-9]{5}$'
-            if re.match(pod_pattern, resource_name):
-                logging.warning(f"Resource name '{resource_name}' appears to be a pod name but resource type is '{self.resource_type}'")
-                return False
-                
-        return True
 
 
 __all__ = [

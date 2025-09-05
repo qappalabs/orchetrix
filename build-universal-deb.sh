@@ -301,7 +301,7 @@ build_deb_package() {
         
         # Show package contents
         echo -e "\n${BLUE}Package Contents:${NC}"
-        dpkg-deb --contents "${PACKAGE_NAME}" | head -20
+        dpkg-deb --contents "${PACKAGE_NAME}" 2>/dev/null | head -20 || true
         
         # Check for errors
         echo -e "\n${BLUE}Package Validation:${NC}"

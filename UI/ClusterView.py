@@ -782,7 +782,7 @@ class ClusterView(QWidget):
             return False
 
     def set_active_cluster(self, cluster_name: str) -> None:
-        """Set the active cluster and update the UI accordingly - FIXED"""
+        """Set the active cluster and update the UI accordingly - FIXED for proper cluster switching"""
         if self.active_cluster == cluster_name:
             logging.info(f"ClusterView: Already active cluster {cluster_name}, ensuring data is loaded")
             
@@ -793,6 +793,12 @@ class ClusterView(QWidget):
                     QTimer.singleShot(100, cluster_page.refresh_data)
             return
 
+        # FIXED: Clear data from all loaded pages when switching clusters
+        old_cluster = self.active_cluster
+        if old_cluster and old_cluster != cluster_name:
+            logging.info(f"ClusterView: Switching from cluster '{old_cluster}' to '{cluster_name}'")
+            self._clear_all_page_data()
+            
         self.active_cluster = cluster_name
         logging.info(f"ClusterView: Setting active cluster to {cluster_name}")
 
@@ -1093,6 +1099,30 @@ class ClusterView(QWidget):
 
         # Load data with delay to allow UI update
         QTimer.singleShot(50, lambda: self._load_page_data(page_widget))    
+    def _clear_all_page_data(self):
+        """Clear data from all loaded pages when switching clusters - FIXED"""
+        try:
+            logging.info("ClusterView: Clearing data from all loaded pages for cluster switch")
+            
+            for page_name, page_widget in self.pages.items():
+                if hasattr(page_widget, 'clear_for_cluster_change'):
+                    try:
+                        page_widget.clear_for_cluster_change()
+                        logging.debug(f"Cleared data for page: {page_name}")
+                    except Exception as e:
+                        logging.error(f"Error clearing data for page {page_name}: {e}")
+                elif hasattr(page_widget, 'resources') and hasattr(page_widget.resources, 'clear'):
+                    # Fallback: directly clear resources if available
+                    page_widget.resources.clear()
+                    if hasattr(page_widget, 'table') and hasattr(page_widget.table, 'setRowCount'):
+                        page_widget.table.setRowCount(0)
+                    logging.debug(f"Cleared resources for page: {page_name}")
+            
+            logging.info("ClusterView: Completed clearing page data for cluster switch")
+            
+        except Exception as e:
+            logging.error(f"Error clearing page data for cluster switch: {e}")
+    
     def cleanup_on_destroy(self):
         """Cleanup method called when ClusterView is being destroyed"""
         try:

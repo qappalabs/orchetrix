@@ -638,6 +638,9 @@ class GraphWidget(QFrame):
 class NodesTableModel(QAbstractTableModel):
     """High-performance table model specifically optimized for node data"""
     
+    # Signal emitted when data count changes
+    data_count_changed = pyqtSignal(int)
+    
     def __init__(self, parent=None):
         super().__init__(parent)
         self._nodes_data = []
@@ -684,36 +687,66 @@ class NodesTableModel(QAbstractTableModel):
             return name if name else None
         elif col == 1:  # CPU
             node_name = node.get("name", "")
-            # Check if calculations are complete for this node
-            if self._calculation_status.get(node_name, {}).get('cpu_complete', False):
-                cpu_usage = node.get("cpu_usage")
-                cpu_capacity = node.get("cpu_capacity", "")
-                if cpu_usage is not None and cpu_capacity:
-                    return f"{cpu_capacity} ({cpu_usage:.1f}%)"
-                return cpu_capacity if cpu_capacity else ""
+            cpu_usage = node.get("cpu_usage")
+            cpu_capacity = node.get("cpu_capacity", "")
+            
+            # Add debug logging to understand data flow
+            logging.debug(f"NodesPage: CPU data for {node_name}: usage={cpu_usage}, capacity='{cpu_capacity}'")
+            
+            # If unified loader provided complete data, use it directly 
+            if cpu_usage is not None and cpu_capacity:
+                return f"{cpu_capacity} ({cpu_usage:.1f}%)"
+            elif cpu_capacity:  # Has capacity but no usage yet
+                # Show loading indicator for nodes that have capacity but no usage data yet
+                logging.debug(f"NodesPage: Showing loading indicator for {node_name} CPU (has capacity, waiting for usage)")
+                return f"{cpu_capacity} (⏳)"
+            
+            # Check if async calculations are complete
+            cpu_complete = self._calculation_status.get(node_name, {}).get('cpu_complete', False)
+            if cpu_complete:
+                # Calculation completed but no data - show empty
+                return ""
             else:
+                # Show loading indicator while calculations are pending
+                logging.debug(f"NodesPage: Showing loading indicator for {node_name} CPU (waiting for calculations)")
                 return "⏳"  # Loading indicator
         elif col == 2:  # Memory 
             node_name = node.get("name", "")
-            # Check if calculations are complete for this node
-            if self._calculation_status.get(node_name, {}).get('memory_complete', False):
-                memory_usage = node.get("memory_usage")
-                memory_capacity = node.get("memory_capacity", "")
-                if memory_usage is not None and memory_capacity:
-                    return f"{memory_capacity} ({memory_usage:.1f}%)"
-                return memory_capacity if memory_capacity else ""
+            memory_usage = node.get("memory_usage")
+            memory_capacity = node.get("memory_capacity", "")
+            
+            # If unified loader provided complete data, use it directly
+            if memory_usage is not None and memory_capacity:
+                return f"{memory_capacity} ({memory_usage:.1f}%)"
+            elif memory_capacity:  # Has capacity but no usage yet
+                return f"{memory_capacity} (⏳)"
+            
+            # Check if async calculations are complete
+            memory_complete = self._calculation_status.get(node_name, {}).get('memory_complete', False)
+            if memory_complete:
+                # Calculation completed but no data - show empty
+                return ""
             else:
+                logging.debug(f"NodesPage: Showing loading indicator for {node_name} Memory")
                 return "⏳"  # Loading indicator
         elif col == 3:  # Disk
             node_name = node.get("name", "")
-            # Check if calculations are complete for this node
-            if self._calculation_status.get(node_name, {}).get('disk_complete', False):
-                disk_usage = node.get("disk_usage")
-                disk_capacity = node.get("disk_capacity", "")
-                if disk_usage is not None and disk_capacity:
-                    return f"{disk_capacity} ({disk_usage:.1f}%)"
-                return disk_capacity if disk_capacity else ""
+            disk_usage = node.get("disk_usage")
+            disk_capacity = node.get("disk_capacity", "")
+            
+            # If unified loader provided complete data, use it directly
+            if disk_usage is not None and disk_capacity:
+                return f"{disk_capacity} ({disk_usage:.1f}%)"
+            elif disk_capacity:  # Has capacity but no usage yet
+                return f"{disk_capacity} (⏳)"
+            
+            # Check if async calculations are complete
+            disk_complete = self._calculation_status.get(node_name, {}).get('disk_complete', False)
+            if disk_complete:
+                # Calculation completed but no data - show empty
+                return ""
             else:
+                logging.debug(f"NodesPage: Showing loading indicator for {node_name} Disk")
                 return "⏳"  # Loading indicator
         elif col == 4:  # Taints (was col 5)
             return str(node.get("taints", "0"))
@@ -773,28 +806,66 @@ class NodesTableModel(QAbstractTableModel):
         self.reset_calculation_status()  # Reset calculation status for new data
         self.endResetModel()
         
-        # Start async calculations for the new nodes
+        # Emit signal to update item count display
+        self.data_count_changed.emit(len(self._nodes_data))
+        
+        # Start async calculations immediately after model reset
         if self._nodes_data:
             logging.info(f"CALLING _start_async_calculations() for {len(self._nodes_data)} nodes")
-            self._start_async_calculations()
+            # Use immediate timer (0ms) to start calculations right after UI update
+            if hasattr(self.parent(), 'safe_timer_call'):
+                self.parent().safe_timer_call(0, self._start_async_calculations)
+            else:
+                from PyQt6.QtCore import QTimer
+                QTimer.singleShot(0, self._start_async_calculations)
         else:
             logging.info("No nodes data provided, skipping async calculations")
         
         logging.info(f"NodesTableModel: Updated with {len(self._nodes_data)} nodes")
     
     def _start_async_calculations(self):
-        """Start optimized batch async calculations for all nodes"""
+        """Start optimized batch async calculations for nodes that need them"""
+        # Prevent duplicate calculations
+        if hasattr(self, '_calculations_running') and self._calculations_running:
+            logging.info("NodesPage: Calculations already running, skipping duplicate request")
+            return
+        
+        if not self._nodes_data:
+            logging.info("No nodes data available for calculations")
+            return
+            
         if not hasattr(self, 'threadpool'):
             self.threadpool = QThreadPool()
             self.threadpool.setMaxThreadCount(3)  # Allow 3 concurrent workers (CPU, Memory, Disk)
         
-        node_count = len(self._nodes_data)
-        logging.info(f"Starting optimized batch calculations for {node_count} nodes")
+        self._calculations_running = True
+        
+        # Filter out nodes that already have complete unified data
+        nodes_needing_calculation = []
+        for node in self._nodes_data:
+            node_name = node.get("name", "")
+            has_cpu = node.get("cpu_usage") is not None and node.get("cpu_capacity")
+            has_memory = node.get("memory_usage") is not None and node.get("memory_capacity")  
+            has_disk = node.get("disk_usage") is not None and node.get("disk_capacity")
+            
+            if not (has_cpu and has_memory and has_disk):
+                nodes_needing_calculation.append(node)
+            else:
+                # Mark as complete since unified data is available
+                if node_name not in self._calculation_status:
+                    self._calculation_status[node_name] = {}
+                self._calculation_status[node_name]['cpu_complete'] = has_cpu
+                self._calculation_status[node_name]['memory_complete'] = has_memory
+                self._calculation_status[node_name]['disk_complete'] = has_disk
+        
+        node_count = len(nodes_needing_calculation)
+        total_nodes = len(self._nodes_data)
         
         if node_count == 0:
-            logging.info("No nodes to calculate, skipping async calculations")
+            logging.info(f"All {total_nodes} nodes have unified data - skipping calculations")
+            self._calculations_running = False
             return
-        
+            
         # Determine optimal batch size based on node count
         if node_count <= 10:
             batch_size = node_count  # Process all at once for small counts
@@ -806,24 +877,38 @@ class NodesTableModel(QAbstractTableModel):
             batch_size = 25  # Large batches for heavy loads
             delay = 50
         
-        # Process in optimized batches
+        # Process in optimized batches using filtered nodes
         batch_count = 0
         for batch_start in range(0, node_count, batch_size):
             batch_end = min(batch_start + batch_size, node_count)
             batch_nodes = []
             
-            # Collect nodes for this batch
+            # Collect nodes for this batch from filtered list
             for i in range(batch_start, batch_end):
-                if i < len(self._nodes_data):
-                    node = self._nodes_data[i]
+                if i < len(nodes_needing_calculation):
+                    node = nodes_needing_calculation[i]
                     node_name = node.get('name')
                     if node_name:
                         batch_nodes.append((node_name, node))
             
-            # Schedule batch processing with minimal delay
+            # Schedule batch processing with minimal delay using safe timer
             batch_delay = batch_count * delay
-            QTimer.singleShot(batch_delay, lambda nodes=batch_nodes: self._process_batch_async(nodes))
+            if hasattr(self.parent(), 'safe_timer_call'):
+                self.parent().safe_timer_call(batch_delay, lambda nodes=batch_nodes: self._process_batch_async(nodes))
+            else:
+                # Fallback to regular QTimer
+                from PyQt6.QtCore import QTimer
+                QTimer.singleShot(batch_delay, lambda nodes=batch_nodes: self._process_batch_async(nodes))
             batch_count += 1
+        
+        # Reset calculation flag after estimated completion time
+        total_batches = (node_count + batch_size - 1) // batch_size  # Ceiling division
+        estimated_completion_time = (total_batches * delay) + 2000  # Add 2 second buffer
+        if hasattr(self.parent(), 'safe_timer_call'):
+            self.parent().safe_timer_call(estimated_completion_time, lambda: setattr(self, '_calculations_running', False))
+        else:
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(estimated_completion_time, lambda: setattr(self, '_calculations_running', False))
     
     def _process_batch_async(self, batch_nodes):
         """Process a batch of nodes using optimized batch workers"""
@@ -977,6 +1062,9 @@ class NodesTableModel(QAbstractTableModel):
     def reset_calculation_status(self):
         """Reset all calculation statuses when new data is loaded"""
         self._calculation_status.clear()
+        
+        # Don't clear unified loader data - we want to use it when available
+        # Loading indicators will show for nodes without unified data
     
     def cleanup_calculations(self):
         """Cleanup calculation resources"""
@@ -994,6 +1082,8 @@ class NodesPage(BaseResourcePage):
     """
     Displays Kubernetes Nodes with live data and resource operations.
     """
+    # Signal for thread-safe timer operations
+    safe_timer_signal = pyqtSignal(int, object)  # delay, callback
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1003,12 +1093,21 @@ class NodesPage(BaseResourcePage):
         self.has_loaded_data = False
         self.is_loading = False
         
+        # Pagination properties
+        self.page_size = 25  # Load 25 nodes at a time for better performance
+        self.current_page = 0
+        self.total_nodes = 0
+        self.has_more_data = True
+        
         # Get performance configuration and debounced updater
         self.perf_config = get_performance_config()
         self.debounced_updater = get_debounced_updater()
         
         # Get the cluster connector
         self.cluster_connector = get_cluster_connector()
+        
+        # Connect the safe timer signal to handler
+        self.safe_timer_signal.connect(self._handle_safe_timer)
         
         # Connect to node data signal with error handling
         if self.cluster_connector:
@@ -1145,9 +1244,16 @@ class NodesPage(BaseResourcePage):
             # Create the virtual table model
             self.virtual_model = NodesTableModel(self)
             
+            # Connect model signals to update item count
+            self.virtual_model.data_count_changed.connect(self._update_item_count_display)
+            
             # Create QTableView for virtual scrolling
             self.table = QTableView(self)
             self.table.setModel(self.virtual_model)
+            
+            # Connect scroll bar to load more data automatically
+            scroll_bar = self.table.verticalScrollBar()
+            scroll_bar.valueChanged.connect(self._on_scroll)
         
             # Configure virtual table properties with PyQt6 compatibility
             self.table.setAlternatingRowColors(True)
@@ -1562,7 +1668,7 @@ class NodesPage(BaseResourcePage):
     def _apply_virtual_table_styling(self):
         """Apply proper styling to virtual table (QTableView) matching other pages"""
         try:
-            from UI.Styles import AppColors
+            from UI.Styles import AppColors, AppStyles
             
             # Create QTableView-specific styling (adapted from TABLE_STYLE in UI/Styles.py)
             virtual_table_style = f"""
@@ -1629,6 +1735,8 @@ class NodesPage(BaseResourcePage):
                     outline: none;
                     border: none;
                 }}
+                
+                {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
             """
             
             self.table.setStyleSheet(virtual_table_style)
@@ -1782,7 +1890,6 @@ class NodesPage(BaseResourcePage):
             # Update table with filtered data
             logging.info(f"NodesPage: Search '{search_query}' found {len(filtered_nodes)} matches")
             self.populate_table(filtered_nodes)
-            self.items_count.setText(f"{len(filtered_nodes)} items (filtered)")
             
         except Exception as e:
             logging.error(f"NodesPage: Error filtering nodes: {e}")
@@ -1795,7 +1902,6 @@ class NodesPage(BaseResourcePage):
         if hasattr(self, 'nodes_data') and self.nodes_data:
             # Reload full data
             self.populate_table(self.nodes_data)
-            self.items_count.setText(f"{len(self.nodes_data)} items")
     
     
     def _handle_action(self, action, row):
@@ -1950,6 +2056,7 @@ class NodesPage(BaseResourcePage):
             refresh_btn.setStyleSheet(refresh_style)
             refresh_btn.clicked.connect(self.force_load_data)
             table_header_layout.addWidget(refresh_btn)
+            
             
             # Create header container
             table_header_container = QWidget()
@@ -2286,10 +2393,22 @@ class NodesPage(BaseResourcePage):
             self._is_searching = False
             self._current_search_query = None
             self.show_no_data_message()
-            self.items_count.setText("0 items")
             return
         
         logging.info(f"NodesPage: Processing {len(nodes_data)} nodes for UI display")
+        
+        # Update total count for pagination
+        self.total_nodes = len(nodes_data)
+        
+        # For progressive loading, show only a page of data initially
+        if not hasattr(self, '_showing_all_data') or not self._showing_all_data:
+            displayed_data = nodes_data[:self.page_size]
+            self.has_more_data = len(nodes_data) > self.page_size
+            logging.info(f"NodesPage: Showing {len(displayed_data)} of {len(nodes_data)} nodes initially")
+        else:
+            displayed_data = nodes_data
+            self.has_more_data = False
+            logging.info(f"NodesPage: Showing all {len(displayed_data)} nodes")
         
         # Check if this is the same data to prevent redundant updates
         if (hasattr(self, 'nodes_data') and self.nodes_data and 
@@ -2308,14 +2427,14 @@ class NodesPage(BaseResourcePage):
             self._last_data_hash = hashlib.md5(str(nodes_data).encode()).hexdigest()
         
         # Store the data
-        self.nodes_data = nodes_data
-        self.resources = nodes_data
+        self.nodes_data = nodes_data  # Keep full dataset for searches and graphs
+        self.resources = displayed_data  # Use paginated data for table display
         self.has_loaded_data = True
         logging.debug(f"NodesPage: Stored node data - has_loaded_data: {self.has_loaded_data}")
         
         # Update graphs only once to reduce load
         if not hasattr(self, '_graphs_initialized') or not self._graphs_initialized:
-            QTimer.singleShot(100, lambda: self._update_graphs_async(nodes_data))
+            self.safe_timer_call(100, lambda: self._update_graphs_async(nodes_data))
             self._graphs_initialized = True
         
         # Check if we're in search mode and apply search filter
@@ -2323,13 +2442,12 @@ class NodesPage(BaseResourcePage):
             logging.debug(f"NodesPage: Applying search filter for query: {self._current_search_query}")
             self._filter_nodes_by_search(self._current_search_query)
         else:
-            logging.debug("NodesPage: No search active - showing all nodes")
+            logging.debug("NodesPage: No search active - showing paginated nodes")
             self.show_table()
-            # Populate table with optimized method
-            logging.debug(f"NodesPage: Starting to populate table with {len(nodes_data)} nodes")
-            self.populate_table(nodes_data)
-            self.items_count.setText(f"{len(nodes_data)} items")
-            logging.info(f"NodesPage: Successfully populated table with {len(nodes_data)} nodes and updated items count")
+            # Populate table with paginated data
+            logging.debug(f"NodesPage: Starting to populate table with {len(displayed_data)} of {len(nodes_data)} nodes")
+            self.populate_table(displayed_data)
+            logging.info(f"NodesPage: Successfully populated table with {len(displayed_data)} of {len(nodes_data)} nodes")
     
     def _update_graphs_async(self, nodes_data):
         """Update graphs asynchronously to avoid blocking UI"""
@@ -2391,9 +2509,7 @@ class NodesPage(BaseResourcePage):
                     # Don't call select_node_for_graphs here to avoid recursion
                     break
         
-        # Update items count
-        if hasattr(self, 'items_count') and self.items_count:
-            self.items_count.setText(f"{len(resources)} items")
+        # Item count will be updated automatically via model signal
     
     def _render_resources_batch(self, resources, append=False):
         """Override base class to use virtual table populate_table method"""
@@ -2517,9 +2633,15 @@ class NodesPage(BaseResourcePage):
                         widget.setParent(None)
                         widget.deleteLater()
         
-        # Clear virtual model data
+        # Clear virtual model data - but don't trigger calculations for empty data
         if hasattr(self, 'virtual_model') and self.virtual_model:
-            self.virtual_model.update_nodes_data([])  # Clear data
+            # Clear data directly without triggering calculations
+            self.virtual_model.beginResetModel()
+            self.virtual_model._nodes_data = []
+            self.virtual_model._performance_cache.clear()
+            self.virtual_model.reset_calculation_status()
+            self.virtual_model.endResetModel()
+            self.virtual_model.data_count_changed.emit(0)
         else:
             # Only use QTableWidget methods if we have a QTableWidget
             if hasattr(self.table, 'clearContents'):
@@ -2583,7 +2705,7 @@ class NodesPage(BaseResourcePage):
         # Update virtual model progressively
         for i, resource in enumerate(resources):
             delay = 100 + (i * 20)  # Staggered updates every 20ms
-            QTimer.singleShot(delay, lambda res=resource, idx=i: self._update_virtual_metrics(idx, res))
+            self.safe_timer_call(delay, lambda res=resource, idx=i: self._update_virtual_metrics(idx, res))
     
     
     def _update_virtual_metrics(self, index, resource):
@@ -2738,8 +2860,8 @@ class NodesPage(BaseResourcePage):
         if column != model_col_count - 1:
             self.table.selectRow(row)
             logging.debug(f"NodesPage: Selected table row {row}, triggering graph update")
-            # Use QTimer.singleShot to ensure immediate graph display
-            QTimer.singleShot(0, lambda: self.select_node_for_graphs(row))
+            # Use safe timer to ensure immediate graph display
+            self.safe_timer_call(0, lambda: self.select_node_for_graphs(row))
     
     def handle_row_double_click(self, row, column):
         """Handle double-click to show node detail page"""
@@ -2793,6 +2915,16 @@ class NodesPage(BaseResourcePage):
     def force_load_data(self):
         """Override base class force_load_data to use cluster connector"""
         logging.info("NodesPage: force_load_data() called")
+        
+        # Prevent multiple concurrent force loads
+        if self.is_loading:
+            logging.debug("NodesPage: Already loading data, skipping force load request")
+            return
+            
+        # Reset pagination state for fresh load
+        self.current_page = 0
+        self._showing_all_data = False
+        
         # Reset throttling for forced refresh
         self._last_load_time = 0
         self.load_data()
@@ -2803,6 +2935,80 @@ class NodesPage(BaseResourcePage):
         if not hasattr(self, 'has_loaded_data') or not self.has_loaded_data:
             self._last_load_time = 0  # Bypass throttling for initial load
             self.load_data()
+    
+    def _handle_safe_timer(self, delay: int, callback):
+        """Handle safe timer operations from any thread"""
+        try:
+            QTimer.singleShot(delay, callback)
+        except Exception as e:
+            logging.warning(f"NodesPage: Error handling safe timer: {e}")
+    
+    def safe_timer_call(self, delay: int, callback):
+        """Emit safe timer signal from any thread"""
+        self.safe_timer_signal.emit(delay, callback)
+    
+    def _update_item_count_display(self, count: int):
+        """Update the item count display when model data changes"""
+        if hasattr(self, 'items_count') and self.items_count:
+            if self._is_searching and hasattr(self, '_current_search_query') and self._current_search_query:
+                self.items_count.setText(f"{count} items (filtered)")
+            else:
+                if hasattr(self, 'total_nodes') and self.total_nodes > count:
+                    self.items_count.setText(f"{count} of {self.total_nodes} items")
+                else:
+                    self.items_count.setText(f"{count} items")
+            logging.debug(f"NodesPage: Updated item count display to {count} items")
+    
+    def _on_scroll(self, value):
+        """Handle scroll events to load more data automatically"""
+        if not hasattr(self, 'nodes_data') or not self.nodes_data:
+            return
+        
+        # Don't load more if we're already showing all data
+        if hasattr(self, '_showing_all_data') and self._showing_all_data:
+            return
+        
+        # Prevent immediate triggering when table is first loaded
+        if not hasattr(self, '_scroll_initialized'):
+            self._scroll_initialized = True
+            return
+        
+        # Get the scroll bar
+        scroll_bar = self.table.verticalScrollBar()
+        
+        # Only trigger if scrollbar exists and has meaningful range
+        if scroll_bar.maximum() <= 10:  # Need minimum range to prevent immediate triggering
+            return
+        
+        # Add minimum delay between scroll triggers
+        import time
+        current_time = time.time()
+        if hasattr(self, '_last_scroll_trigger'):
+            if current_time - self._last_scroll_trigger < 1.0:  # 1 second cooldown
+                return
+        
+        # Check if we're near the bottom (98% threshold for better control)
+        scroll_percentage = value / scroll_bar.maximum() if scroll_bar.maximum() > 0 else 0
+        
+        if scroll_percentage >= 0.98:  # 98% threshold for more precise control
+            current_display_count = len(self.resources) if self.resources else 0
+            new_display_count = min(current_display_count + self.page_size, len(self.nodes_data))
+            
+            # Only load if there's actually more data to show
+            if new_display_count > current_display_count:
+                # Record this scroll trigger
+                self._last_scroll_trigger = current_time
+                
+                # Show more data
+                displayed_data = self.nodes_data[:new_display_count]
+                self.resources = displayed_data
+                self.populate_table(displayed_data)
+                
+                # Check if we've shown all data
+                if new_display_count >= len(self.nodes_data):
+                    self._showing_all_data = True
+                
+                logging.info(f"NodesPage: Auto-loaded more nodes on scroll - now showing {new_display_count} of {len(self.nodes_data)} nodes")
     
     def _add_controls_to_header(self, header_layout):
         """Override to add custom controls for nodes page without delete button"""

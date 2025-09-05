@@ -362,15 +362,21 @@ class UnifiedCacheSystem:
     def clear_cluster_cache(self, cluster_name: str):
         """Clear all cache entries for a specific cluster to prevent stale data"""
         try:
-            # FIXED: Only clear cache entries specifically for this cluster
+            # FIXED: Clear ALL resource cache entries when switching clusters
+            # This ensures no stale data from previous cluster persists
             for cache_name, cache_instance in self._caches.items():
                 with cache_instance._lock:
                     keys_to_remove = []
-                    for key in cache_instance._cache.keys():
-                        # Only remove entries that explicitly contain the cluster name
-                        # Don't remove general resource cache entries that might be shared
-                        if cluster_name in key:
-                            keys_to_remove.append(key)
+                    
+                    # For resource caches, clear everything when switching clusters
+                    if cache_name == 'resource_cache':
+                        keys_to_remove = list(cache_instance._cache.keys())
+                        logging.info(f"Clearing ALL resource cache entries for cluster switch to {cluster_name}")
+                    else:
+                        # For other caches, only clear cluster-specific entries
+                        for key in cache_instance._cache.keys():
+                            if cluster_name in key:
+                                keys_to_remove.append(key)
                     
                     for key in keys_to_remove:
                         cache_instance.delete(key)
@@ -453,6 +459,38 @@ class UnifiedCacheSystem:
         gc.collect()
         
         logging.info("Optimized all caches")
+    
+    def clear_namespace_cache(self, cluster_name: str, namespace: str = None):
+        """Clear cache entries for a specific namespace or all namespaces"""
+        try:
+            for cache_name, cache_instance in self._caches.items():
+                with cache_instance._lock:
+                    keys_to_remove = []
+                    
+                    for key in cache_instance._cache.keys():
+                        # Clear entries that contain both cluster and namespace info
+                        if cluster_name in key:
+                            if namespace:
+                                # Clear specific namespace
+                                if f"ns_{namespace}" in key or f"namespace_{namespace}" in key:
+                                    keys_to_remove.append(key)
+                            else:
+                                # Clear all namespace-related entries for this cluster
+                                if "ns_" in key or "namespace_" in key:
+                                    keys_to_remove.append(key)
+                    
+                    for key in keys_to_remove:
+                        cache_instance.delete(key)
+                    
+                    if keys_to_remove:
+                        ns_text = f" namespace {namespace}" if namespace else " all namespaces"
+                        logging.info(f"Cleared {len(keys_to_remove)} cache entries for{ns_text} in cluster {cluster_name} from {cache_name}")
+            
+            ns_text = f" namespace {namespace}" if namespace else " all namespaces"
+            logging.info(f"Cleared cache data for{ns_text} in cluster: {cluster_name}")
+            
+        except Exception as e:
+            logging.error(f"Error clearing namespace cache for {cluster_name}/{namespace}: {e}")
     
     def clear_expired_entries(self):
         """Clear expired entries from all caches"""

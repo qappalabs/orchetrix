@@ -722,15 +722,38 @@ class KubernetesClient(QObject):
     
     def _get_nodes(self):
         """Legacy compatibility method for getting nodes"""
-        logging.info("Kubernetes Client: Starting to fetch nodes from API")
+        import time
+        start_time = time.time()
+        logging.info(f"🚀 [API FETCH] {time.strftime('%H:%M:%S.%f')[:-3]} - Kubernetes Client: Starting to fetch nodes from API")
         try:
-            logging.debug("Kubernetes Client: Calling v1.list_node() API")
+            api_call_start = time.time()
+            logging.debug(f"📡 [API CALL] {time.strftime('%H:%M:%S.%f')[:-3]} - Kubernetes Client: Calling v1.list_node() API")
             nodes = self.v1.list_node().items
-            logging.info(f"Kubernetes Client: Successfully fetched {len(nodes)} nodes from API")
-            logging.debug(f"Kubernetes Client: Node names: {[node.metadata.name for node in nodes]}")
+            api_call_time = (time.time() - api_call_start) * 1000
+            
+            logging.info(f"✅ [API SUCCESS] {time.strftime('%H:%M:%S.%f')[:-3]} - Kubernetes Client: Successfully fetched {len(nodes)} nodes from API in {api_call_time:.1f}ms")
+            
+            # Log detailed node data
+            for i, node in enumerate(nodes[:5]):  # Log first 5 nodes in detail
+                node_name = node.metadata.name if hasattr(node.metadata, 'name') else f'unknown-{i}'
+                node_status = 'Unknown'
+                if hasattr(node, 'status') and node.status and hasattr(node.status, 'conditions'):
+                    for condition in node.status.conditions:
+                        if condition.type == 'Ready':
+                            node_status = 'Ready' if condition.status == 'True' else 'NotReady'
+                            break
+                
+                logging.debug(f"📊 [NODE DATA] {time.strftime('%H:%M:%S.%f')[:-3]} - Node {i+1}: name='{node_name}', status='{node_status}', has_capacity={hasattr(node.status, 'capacity') if hasattr(node, 'status') and node.status else False}")
+            
+            if len(nodes) > 5:
+                logging.debug(f"📊 [NODE DATA] {time.strftime('%H:%M:%S.%f')[:-3]} - ... and {len(nodes) - 5} more nodes")
+                
+            total_time = (time.time() - start_time) * 1000
+            logging.info(f"⏱️  [API COMPLETE] {time.strftime('%H:%M:%S.%f')[:-3]} - Total API fetch time: {total_time:.1f}ms")
             return nodes
         except Exception as e:
-            logging.error(f'Kubernetes Client: Failed to get nodes from API: {e}')
+            error_time = (time.time() - start_time) * 1000
+            logging.error(f'❌ [API ERROR] {time.strftime('%H:%M:%S.%f')[:-3]} - Kubernetes Client: Failed to get nodes from API after {error_time:.1f}ms: {e}')
             return []
     
     def _get_namespaces(self):
