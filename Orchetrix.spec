@@ -55,6 +55,16 @@ def collect_data_files():
     data_files.extend(icon_data)
     data_files.extend(ui_data)
     
+    # Ensure Icons are also copied to root level for fallback (Windows fix)
+    icons_fallback = []
+    for src, dest in icon_data:
+       if 'Icons' in src:
+            filename = os.path.basename(src)
+            icons_fallback.append((src, '.'))  
+     # Copy to root level as well
+    data_files.extend(icons_fallback)
+    
+
     # Add directories that exist
     directories_to_check = [
         ('Icons', 'Icons'),

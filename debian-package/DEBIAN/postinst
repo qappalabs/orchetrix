@@ -1,0 +1,117 @@
+#!/bin/bash
+# Remove 'set -e' to prevent script failure from terminating installation
+
+# Function to log messages
+log_message() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
+}
+
+log_message "Starting Orchetrix post-installation setup..."
+
+# Check if this is a reinstall/upgrade
+INSTALL_TYPE="install"
+if [ "$1" = "configure" ] && [ -n "$2" ]; then
+    INSTALL_TYPE="upgrade"
+    log_message "Detected upgrade from version $2"
+fi
+
+# Always stop any running instances before installation/upgrade
+log_message "Stopping any running Orchetrix instances..."
+pkill -f "Orchetrix" 2>/dev/null || true
+pkill -f "orchetrix" 2>/dev/null || true
+sleep 2 || true
+
+# Fix icon path issues by creating proper symlinks
+log_message "Creating icon path symlinks..."
+if [ -d "/opt/orchetrix/_internal/Icons" ] && [ ! -d "/opt/orchetrix/Icons" ]; then
+    ln -sf /opt/orchetrix/_internal/Icons /opt/orchetrix/Icons 2>/dev/null || true
+    log_message "✓ Created Icons symlink"
+fi
+
+# Clean up any leftover files from previous installations
+if [ -d "/opt/orchetrix" ]; then
+    log_message "Cleaning up previous installation files..."
+    # Remove old symlinks that might cause issues
+    find /opt/orchetrix -type l -delete 2>/dev/null || true
+    # Remove any .pyc files that might cause issues
+    find /opt/orchetrix -name "*.pyc" -delete 2>/dev/null || true
+    # Remove any lock files
+    find /opt/orchetrix -name "*.lock" -delete 2>/dev/null || true
+    # Remove old configuration that might conflict
+    find /opt/orchetrix -name "*.old" -delete 2>/dev/null || true
+fi
+
+# Ensure proper ownership and permissions
+if [ -d "/opt/orchetrix" ]; then
+    log_message "Setting proper file ownership and permissions..."
+    chown -R root:root /opt/orchetrix
+    find /opt/orchetrix -type f -exec chmod 644 {} \; 2>/dev/null || true
+    find /opt/orchetrix -type d -exec chmod 755 {} \; 2>/dev/null || true
+    # Make main binary executable
+    chmod +x /opt/orchetrix/Orchetrix 2>/dev/null || true
+    # Make logs directory writable by all users
+    if [ -d "/opt/orchetrix/logs" ]; then
+        chmod 777 /opt/orchetrix/logs 2>/dev/null || true
+        log_message "✓ Set logs directory permissions (777)"
+    fi
+    log_message "✓ Set execute permissions on main binary"
+fi
+
+# Ensure launcher script is executable
+if [ -f "/usr/bin/orchetrix" ]; then
+    chmod +x /usr/bin/orchetrix
+    log_message "✓ Launcher script is executable"
+fi
+
+# Create/update symlink for backward compatibility
+ln -sf /usr/bin/orchetrix /usr/local/bin/orchetrix 2>/dev/null || true
+
+# Update desktop database
+if command -v update-desktop-database &> /dev/null; then
+    update-desktop-database /usr/share/applications 2>/dev/null || true
+    log_message "✓ Updated desktop database"
+fi
+
+# Update icon cache
+if command -v gtk-update-icon-cache &> /dev/null; then
+    gtk-update-icon-cache -f -t /usr/share/pixmaps 2>/dev/null || true
+    log_message "✓ Updated icon cache"
+fi
+
+# Verify installation
+if [ -f "/opt/orchetrix/Orchetrix" ] && [ -x "/opt/orchetrix/Orchetrix" ]; then
+    log_message "✓ Main binary verification passed"
+else
+    log_message "✗ Main binary verification failed - but continuing installation"
+    log_message "Note: Binary may still work from terminal"
+fi
+
+if command -v orchetrix &> /dev/null; then
+    log_message "✓ Command 'orchetrix' is available"
+else
+    log_message "✗ Command 'orchetrix' not found in PATH"
+fi
+
+echo ""
+echo "============================================"
+if [ "$INSTALL_TYPE" = "upgrade" ]; then
+    echo "Orchetrix has been successfully upgraded!"
+    echo "Previous version $2 has been replaced."
+else
+    echo "Orchetrix has been successfully installed!"
+fi
+echo "============================================"
+echo "You can run it from:"
+echo "  - Applications menu (search for 'Orchetrix')"
+echo "  - Terminal: type 'orchetrix'"
+echo ""
+echo "Installation details:"
+echo "  - Version: $(dpkg-query -W -f='${Version}' orchetrix 2>/dev/null || echo 'Unknown')"
+echo "  - Binary: /opt/orchetrix/Orchetrix"
+echo "  - Launcher: /usr/bin/orchetrix"
+echo ""
+echo "Note: This is a self-contained application that"
+echo "includes all required dependencies."
+echo "============================================"
+
+exit 0

@@ -18,9 +18,20 @@ def setup_logging():
         # Running in normal Python environment
         base_dir = os.path.dirname(os.path.abspath(__file__))
     
-    # Create logs directory
+    # Try to create logs directory in app directory first
     logs_dir = os.path.join(base_dir, "logs")
-    os.makedirs(logs_dir, exist_ok=True)
+    try:
+        os.makedirs(logs_dir, exist_ok=True)
+        # Test write permission
+        test_file = os.path.join(logs_dir, "test_write.tmp")
+        with open(test_file, 'w') as f:
+            f.write("test")
+        os.remove(test_file)
+    except (OSError, PermissionError):
+        # Fallback to user's home directory
+        home_dir = os.path.expanduser("~")
+        logs_dir = os.path.join(home_dir, ".orchetrix", "logs")
+        os.makedirs(logs_dir, exist_ok=True)
     
     # Create log filename with timestamp
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')

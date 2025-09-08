@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import (
     QGraphicsDropShadowEffect, QSizePolicy, QStyle, QStyleOptionHeader,
     QProxyStyle, QTableView, QAbstractItemView, QStyledItemDelegate
 )
-from PyQt6.QtCore import Qt, QTimer, QRectF, pyqtSignal, QAbstractTableModel, QModelIndex, QThreadPool, QRunnable, QObject
+from PyQt6.QtCore import Qt, QTimer, QRectF, pyqtSignal, QAbstractTableModel, QModelIndex, QThreadPool, QRunnable, QObject, pyqtSlot
 from PyQt6.QtGui import QColor, QPainter, QPen, QFont
 
 from UI.Styles import AppStyles, AppColors
@@ -1082,8 +1082,6 @@ class NodesPage(BaseResourcePage):
     """
     Displays Kubernetes Nodes with live data and resource operations.
     """
-    # Signal for thread-safe timer operations
-    safe_timer_signal = pyqtSignal(int, object)  # delay, callback
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1105,9 +1103,6 @@ class NodesPage(BaseResourcePage):
         
         # Get the cluster connector
         self.cluster_connector = get_cluster_connector()
-        
-        # Connect the safe timer signal to handler
-        self.safe_timer_signal.connect(self._handle_safe_timer)
         
         # Connect to node data signal with error handling
         if self.cluster_connector:
@@ -2936,16 +2931,44 @@ class NodesPage(BaseResourcePage):
             self._last_load_time = 0  # Bypass throttling for initial load
             self.load_data()
     
-    def _handle_safe_timer(self, delay: int, callback):
-        """Handle safe timer operations from any thread"""
-        try:
-            QTimer.singleShot(delay, callback)
-        except Exception as e:
-            logging.warning(f"NodesPage: Error handling safe timer: {e}")
-    
     def safe_timer_call(self, delay: int, callback):
-        """Emit safe timer signal from any thread"""
-        self.safe_timer_signal.emit(delay, callback)
+        """Thread-safe timer call - schedule callback to run in main thread"""
+        try:
+            from PyQt6.QtCore import QMetaObject, Qt, Q_ARG
+            # Store callback in a way that can be accessed by method name
+            callback_id = str(id(callback))
+            setattr(self, f'_timer_callback_{callback_id}', callback)
+            
+            # Use QMetaObject to invoke a method in the main thread
+            QMetaObject.invokeMethod(
+                self, 
+                "_execute_stored_timer_callback", 
+                Qt.ConnectionType.QueuedConnection,
+                Q_ARG(int, delay),
+                Q_ARG(str, callback_id)
+            )
+        except Exception as e:
+            logging.warning(f"NodesPage: Error with safe timer call: {e}")
+            # Fallback: try direct timer call (may fail in worker thread)
+            try:
+                QTimer.singleShot(delay, callback)
+            except Exception as e2:
+                logging.error(f"NodesPage: Timer fallback also failed: {e2}")
+    
+    @pyqtSlot(int, str)
+    def _execute_stored_timer_callback(self, delay: int, callback_id: str):
+        """Execute stored timer callback in main thread"""
+        try:
+            callback_attr = f'_timer_callback_{callback_id}'
+            if hasattr(self, callback_attr):
+                callback = getattr(self, callback_attr)
+                QTimer.singleShot(delay, callback)
+                # Clean up stored callback
+                delattr(self, callback_attr)
+            else:
+                logging.warning(f"NodesPage: Stored callback {callback_id} not found")
+        except Exception as e:
+            logging.warning(f"NodesPage: Error executing stored timer callback: {e}")
     
     def _update_item_count_display(self, count: int):
         """Update the item count display when model data changes"""

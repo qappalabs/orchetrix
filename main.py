@@ -131,7 +131,7 @@ class MainWindow(QMainWindow):
         self._shutting_down = False
         self._is_switching_to_cluster = False
         self._target_cluster_for_switch = None
-        self._cleanup_timer = QTimer()
+        self._cleanup_timer = QTimer(self)  # Parent timer to main window
         self._cleanup_timer.timeout.connect(self._periodic_cleanup)
         self._cleanup_timer.start(30000)  # Cleanup every 30 seconds
 
