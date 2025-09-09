@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import (
     QGraphicsDropShadowEffect, QSizePolicy, QStyle, QStyleOptionHeader,
     QProxyStyle, QTableView, QAbstractItemView, QStyledItemDelegate
 )
-from PyQt6.QtCore import Qt, QTimer, QRectF, pyqtSignal, QAbstractTableModel, QModelIndex, QThreadPool, QRunnable, QObject, pyqtSlot
+from PyQt6.QtCore import Qt, QTimer, QRectF, pyqtSignal, QAbstractTableModel, QModelIndex, QThreadPool, QRunnable, QObject
 from PyQt6.QtGui import QColor, QPainter, QPen, QFont
 
 from UI.Styles import AppStyles, AppColors
@@ -689,17 +689,25 @@ class NodesTableModel(QAbstractTableModel):
             node_name = node.get("name", "")
             cpu_usage = node.get("cpu_usage")
             cpu_capacity = node.get("cpu_capacity", "")
+            cpu_display = node.get("cpu_display")
             
             # Add debug logging to understand data flow
-            logging.debug(f"NodesPage: CPU data for {node_name}: usage={cpu_usage}, capacity='{cpu_capacity}'")
+            logging.debug(f"NodesPage: CPU data for {node_name}: usage={cpu_usage}, capacity='{cpu_capacity}', display='{cpu_display}'")
             
+            # Use custom display if available (for "Calculating..." messages)
+            if cpu_display:
+                if cpu_capacity and 'Calculating' not in cpu_display:
+                    return f"{cpu_capacity} ({cpu_display})"
+                else:
+                    return cpu_display
+                    
             # If unified loader provided complete data, use it directly 
             if cpu_usage is not None and cpu_capacity:
                 return f"{cpu_capacity} ({cpu_usage:.1f}%)"
             elif cpu_capacity:  # Has capacity but no usage yet
                 # Show loading indicator for nodes that have capacity but no usage data yet
                 logging.debug(f"NodesPage: Showing loading indicator for {node_name} CPU (has capacity, waiting for usage)")
-                return f"{cpu_capacity} (⏳)"
+                return f"{cpu_capacity} (...)"
             
             # Check if async calculations are complete
             cpu_complete = self._calculation_status.get(node_name, {}).get('cpu_complete', False)
@@ -709,17 +717,25 @@ class NodesTableModel(QAbstractTableModel):
             else:
                 # Show loading indicator while calculations are pending
                 logging.debug(f"NodesPage: Showing loading indicator for {node_name} CPU (waiting for calculations)")
-                return "⏳"  # Loading indicator
+                return "..."  # Loading indicator
         elif col == 2:  # Memory 
             node_name = node.get("name", "")
             memory_usage = node.get("memory_usage")
             memory_capacity = node.get("memory_capacity", "")
+            memory_display = node.get("memory_display")
             
+            # Use custom display if available (for "Calculating..." messages)
+            if memory_display:
+                if memory_capacity and 'Calculating' not in memory_display:
+                    return f"{memory_capacity} ({memory_display})"
+                else:
+                    return memory_display
+                    
             # If unified loader provided complete data, use it directly
             if memory_usage is not None and memory_capacity:
                 return f"{memory_capacity} ({memory_usage:.1f}%)"
             elif memory_capacity:  # Has capacity but no usage yet
-                return f"{memory_capacity} (⏳)"
+                return f"{memory_capacity} (...)"
             
             # Check if async calculations are complete
             memory_complete = self._calculation_status.get(node_name, {}).get('memory_complete', False)
@@ -728,17 +744,25 @@ class NodesTableModel(QAbstractTableModel):
                 return ""
             else:
                 logging.debug(f"NodesPage: Showing loading indicator for {node_name} Memory")
-                return "⏳"  # Loading indicator
+                return "..."  # Loading indicator
         elif col == 3:  # Disk
             node_name = node.get("name", "")
             disk_usage = node.get("disk_usage")
             disk_capacity = node.get("disk_capacity", "")
+            disk_display = node.get("disk_display")
             
+            # Use custom display if available (for "Calculating..." messages)
+            if disk_display:
+                if disk_capacity and 'Calculating' not in disk_display:
+                    return f"{disk_capacity} ({disk_display})"
+                else:
+                    return disk_display
+                    
             # If unified loader provided complete data, use it directly
             if disk_usage is not None and disk_capacity:
                 return f"{disk_capacity} ({disk_usage:.1f}%)"
             elif disk_capacity:  # Has capacity but no usage yet
-                return f"{disk_capacity} (⏳)"
+                return f"{disk_capacity} (...)"
             
             # Check if async calculations are complete
             disk_complete = self._calculation_status.get(node_name, {}).get('disk_complete', False)
@@ -747,7 +771,7 @@ class NodesTableModel(QAbstractTableModel):
                 return ""
             else:
                 logging.debug(f"NodesPage: Showing loading indicator for {node_name} Disk")
-                return "⏳"  # Loading indicator
+                return "..."  # Loading indicator
         elif col == 4:  # Taints (was col 5)
             return str(node.get("taints", "0"))
         elif col == 5:  # Roles (was col 6)
@@ -766,7 +790,7 @@ class NodesTableModel(QAbstractTableModel):
             return ""  # Empty for action column - handled by widget
         return ""
     
-    def _get_node_background_color(self, node: dict, col: int):
+    def _get_node_background_color(self, _node: dict, _col: int):
         """Get background color for node status - removed for conditions column"""
         # No background colors for conditions column anymore
         return None
@@ -812,12 +836,8 @@ class NodesTableModel(QAbstractTableModel):
         # Start async calculations immediately after model reset
         if self._nodes_data:
             logging.info(f"CALLING _start_async_calculations() for {len(self._nodes_data)} nodes")
-            # Use immediate timer (0ms) to start calculations right after UI update
-            if hasattr(self.parent(), 'safe_timer_call'):
-                self.parent().safe_timer_call(0, self._start_async_calculations)
-            else:
-                from PyQt6.QtCore import QTimer
-                QTimer.singleShot(0, self._start_async_calculations)
+            # Start calculations immediately after UI update
+            self._safe_timer(0, self._start_async_calculations)
         else:
             logging.info("No nodes data provided, skipping async calculations")
         
@@ -893,22 +913,13 @@ class NodesTableModel(QAbstractTableModel):
             
             # Schedule batch processing with minimal delay using safe timer
             batch_delay = batch_count * delay
-            if hasattr(self.parent(), 'safe_timer_call'):
-                self.parent().safe_timer_call(batch_delay, lambda nodes=batch_nodes: self._process_batch_async(nodes))
-            else:
-                # Fallback to regular QTimer
-                from PyQt6.QtCore import QTimer
-                QTimer.singleShot(batch_delay, lambda nodes=batch_nodes: self._process_batch_async(nodes))
+            self._safe_timer(batch_delay, lambda nodes=batch_nodes: self._process_batch_async(nodes))
             batch_count += 1
         
         # Reset calculation flag after estimated completion time
         total_batches = (node_count + batch_size - 1) // batch_size  # Ceiling division
         estimated_completion_time = (total_batches * delay) + 2000  # Add 2 second buffer
-        if hasattr(self.parent(), 'safe_timer_call'):
-            self.parent().safe_timer_call(estimated_completion_time, lambda: setattr(self, '_calculations_running', False))
-        else:
-            from PyQt6.QtCore import QTimer
-            QTimer.singleShot(estimated_completion_time, lambda: setattr(self, '_calculations_running', False))
+        self._safe_timer(estimated_completion_time, lambda: setattr(self, '_calculations_running', False))
     
     def _process_batch_async(self, batch_nodes):
         """Process a batch of nodes using optimized batch workers"""
@@ -1062,6 +1073,14 @@ class NodesTableModel(QAbstractTableModel):
     def reset_calculation_status(self):
         """Reset all calculation statuses when new data is loaded"""
         self._calculation_status.clear()
+    
+    def _safe_timer(self, delay, callback):
+        """Consolidated timer method"""
+        if hasattr(self.parent(), 'safe_timer_call'):
+            self.parent().safe_timer_call(delay, callback)
+        else:
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(delay, callback)
         
         # Don't clear unified loader data - we want to use it when available
         # Loading indicators will show for nodes without unified data
@@ -1583,7 +1602,7 @@ class NodesPage(BaseResourcePage):
             from PyQt6.QtWidgets import QMessageBox
             QMessageBox.critical(self, 'Error', f'Error deleting node: {str(e)}')
     
-    def _create_nodes_action_button(self, row, node_name, node_namespace):
+    def _create_nodes_action_button(self, row, node_name, _node_namespace):
         """Create action button with nodes-specific menu - matches BaseResourcePage style exactly"""
         from PyQt6.QtWidgets import QToolButton, QMenu
         from PyQt6.QtGui import QIcon
@@ -2353,18 +2372,17 @@ class NodesPage(BaseResourcePage):
             self._table_stack.setCurrentWidget(self.table)
 
     def _debounced_update_nodes(self, nodes_data):
-        """Debounced wrapper for update_nodes to prevent excessive updates"""
+        """Update with real node data from the cluster - consolidated debounced method"""
         self.debounced_updater.schedule_update(
             "nodes_update", 
-            self.update_nodes, 
+            self._update_nodes_immediate, 
             300,  # 300ms delay
             nodes_data
         )
 
-    def update_nodes(self, nodes_data):
-        """Update with real node data from the cluster - optimized for speed"""
-        logging.info(f"NodesPage: update_nodes() called with {len(nodes_data) if nodes_data else 0} nodes")
-        logging.debug(f"NodesPage: Received nodes data type: {type(nodes_data)}")
+    def _update_nodes_immediate(self, nodes_data):
+        """Internal method to handle immediate node updates"""
+        logging.info(f"NodesPage: Updating nodes with {len(nodes_data) if nodes_data else 0} nodes")
         
         # Debounce rapid update calls
         current_time = time.time()
@@ -2374,75 +2392,246 @@ class NodesPage(BaseResourcePage):
             return
         self._last_update_time = current_time
         
-        self.is_loading = False
-        self.is_showing_skeleton = False
         
-        if hasattr(self, 'skeleton_timer') and self.skeleton_timer.isActive():
-            self.skeleton_timer.stop()
+        # Directly populate table with consolidated logic
+        self.populate_table(nodes_data)
+    
+    def _show_basic_nodes_data(self, nodes_data):
+        """Immediately show basic node data without waiting for metric calculations"""
+        logging.info(f"NodesPage: Immediately displaying basic data for {len(nodes_data)} nodes")
         
+        # Prepare basic node data with placeholders for metrics
+        basic_nodes = []
+        for node in nodes_data:
+            basic_node = node.copy()
+            
+            # Set loading placeholders for metrics that aren't calculated yet
+            if not basic_node.get('cpu_usage'):
+                basic_node['cpu_usage'] = None
+                basic_node['cpu_display'] = '...'
+            
+            if not basic_node.get('memory_usage'):
+                basic_node['memory_usage'] = None 
+                basic_node['memory_display'] = '...'
+                
+            if not basic_node.get('disk_usage'):
+                basic_node['disk_usage'] = None
+                basic_node['disk_display'] = '...'
+            
+            basic_nodes.append(basic_node)
+        
+        # Store the data and show immediately
+        self.nodes_data = nodes_data  # Keep full dataset
+        self.resources = basic_nodes[:self.page_size]  # Show first page with placeholders
+        self.has_loaded_data = True
+        
+        # Show the table immediately with basic data - directly update virtual model
+        self.show_table()
+        if hasattr(self, 'virtual_model') and self.virtual_model:
+            self.virtual_model.update_nodes_data(self.resources)
+            self._setup_responsive_columns()
+            if self.resources:
+                self._add_virtual_action_buttons(self.resources)
+        
+        logging.info("NodesPage: Basic node data displayed immediately")
+    
+    def _start_background_metrics_calculation(self, nodes_data):
+        """Start calculating CPU, memory, disk metrics in background - persistent across navigation"""
         if not nodes_data:
-            logging.warning("NodesPage: No nodes data received - will display empty state")
-            self.nodes_data = []
-            self.resources = []
-            # Clear search state when no data is available
-            self._is_searching = False
-            self._current_search_query = None
-            self.show_no_data_message()
+            return
+            
+        logging.info(f"NodesPage: Starting persistent background metric calculations for {len(nodes_data)} nodes")
+        
+        # Use cluster_connector for persistent background processing if available
+        if hasattr(self, 'cluster_connector') and self.cluster_connector:
+            # Let cluster_connector handle background processing
+            logging.info("NodesPage: Delegating background calculations to cluster_connector")
+            return
+            
+        # Fallback to local processing with persistence flags
+        if not hasattr(self.__class__, '_global_calc_running'):
+            self.__class__._global_calc_running = False
+            self.__class__._global_calc_nodes = []
+            self.__class__._global_calc_index = 0
+            self.__class__._global_calc_instances = set()
+        
+        # Don't start if already running globally
+        if self.__class__._global_calc_running:
+            logging.info("NodesPage: Global background calculations already running")
+            # Add this instance to get updates
+            self.__class__._global_calc_instances.add(self)
+            return
+            
+        # Start global background processing
+        self.__class__._global_calc_running = True
+        self.__class__._global_calc_nodes = nodes_data.copy()
+        self.__class__._global_calc_index = 0
+        self.__class__._global_calc_instances = {self}
+        
+        # Start with a small delay to let UI render
+        QTimer.singleShot(500, self._process_next_node_metrics_global)
+    
+    @classmethod
+    def _process_next_node_metrics_global(cls):
+        """Process metrics for the next node in background - class method for persistence"""
+        if not hasattr(cls, '_global_calc_nodes') or not cls._global_calc_nodes:
+            cls._global_calc_running = False
+            return
+            
+        if cls._global_calc_index >= len(cls._global_calc_nodes):
+            logging.info("NodesPage: Global background metric calculations completed")
+            cls._global_calc_running = False
+            # Clean up instances that may have been destroyed
+            cls._global_calc_instances = {inst for inst in cls._global_calc_instances if hasattr(inst, 'virtual_model')}
+            return
+            
+        # Process current node
+        node = cls._global_calc_nodes[cls._global_calc_index] 
+        node_name = node.get('name', f'node_{cls._global_calc_index}')
+        
+        logging.info(f"NodesPage: Processing metrics for node {node_name} ({cls._global_calc_index + 1}/{len(cls._global_calc_nodes)})")
+        
+        # Calculate metrics for this node and update all active instances
+        cls._calculate_node_metrics_global(node, cls._global_calc_index)
+        
+        # Move to next node
+        cls._global_calc_index += 1
+        
+        # Continue with next node after small delay (non-blocking)
+        QTimer.singleShot(100, cls._process_next_node_metrics_global)
+    
+    @classmethod  
+    def _calculate_node_metrics_global(cls, node, node_index):
+        """Calculate and update metrics for a single node across all instances - staggered approach"""
+        node_name = node.get('name', f'node_{node_index}')
+        
+        try:
+            # STAGGERED CALCULATION: Calculate CPU first, then Memory, then Disk with delays
+            # This makes each column populate progressively for better UX
+            
+            # Step 1: Calculate CPU metrics immediately
+            if not node.get('cpu_usage'):
+                cpu_result = cls._calculate_cpu_metrics_sync_static(node)
+                if cpu_result and cpu_result.get('usage') is not None:
+                    node['cpu_usage'] = cpu_result['usage']
+                    node['cpu_display'] = f"{cpu_result['usage']:.1f}%"
+                    
+                    # Update all active instances
+                    for instance in list(cls._global_calc_instances):
+                        if hasattr(instance, 'virtual_model') and instance.virtual_model:
+                            instance._update_node_in_table(node_name, 'cpu', cpu_result['usage'])
+                    
+                    logging.info(f"NodesPage: CPU calculated for {node_name}: {cpu_result['usage']:.1f}%")
+            
+            # Step 2: Calculate Memory metrics with small delay
+            QTimer.singleShot(150, lambda: cls._calculate_memory_for_node(node, node_name))
+                    
+            # Step 3: Calculate Disk metrics with longer delay  
+            QTimer.singleShot(300, lambda: cls._calculate_disk_for_node(node, node_name))
+                    
+        except Exception as e:
+            logging.error(f"NodesPage: Error calculating metrics for {node_name}: {e}")
+    
+    @classmethod
+    def _calculate_memory_for_node(cls, node, node_name):
+        """Calculate memory metrics for a single node - delayed calculation"""
+        try:
+            if not node.get('memory_usage'):
+                memory_result = cls._calculate_memory_metrics_sync_static(node)
+                if memory_result and memory_result.get('usage') is not None:
+                    node['memory_usage'] = memory_result['usage']
+                    node['memory_display'] = f"{memory_result['usage']:.1f}%"
+                    
+                    # Update all active instances
+                    for instance in list(cls._global_calc_instances):
+                        if hasattr(instance, 'virtual_model') and instance.virtual_model:
+                            instance._update_node_in_table(node_name, 'memory', memory_result['usage'])
+                    
+                    logging.info(f"NodesPage: Memory calculated for {node_name}: {memory_result['usage']:.1f}%")
+        except Exception as e:
+            logging.error(f"NodesPage: Error calculating memory for {node_name}: {e}")
+    
+    @classmethod  
+    def _calculate_disk_for_node(cls, node, node_name):
+        """Calculate disk metrics for a single node - delayed calculation"""
+        try:
+            if not node.get('disk_usage'):
+                disk_result = cls._calculate_disk_metrics_sync_static(node)  
+                if disk_result and disk_result.get('usage') is not None:
+                    node['disk_usage'] = disk_result['usage']
+                    node['disk_display'] = f"{disk_result['usage']:.1f}%"
+                    
+                    # Update all active instances
+                    for instance in list(cls._global_calc_instances):
+                        if hasattr(instance, 'virtual_model') and instance.virtual_model:
+                            instance._update_node_in_table(node_name, 'disk', disk_result['usage'])
+                    
+                    logging.info(f"NodesPage: Disk calculated for {node_name}: {disk_result['usage']:.1f}%")
+        except Exception as e:
+            logging.error(f"NodesPage: Error calculating disk for {node_name}: {e}")
+    
+    def _process_next_node_metrics(self):
+        """Process metrics for the next node in background - DEPRECATED: Use global version"""
+        # Redirect to global processing
+        if hasattr(self.__class__, '_global_calc_running') and self.__class__._global_calc_running:
             return
         
-        logging.info(f"NodesPage: Processing {len(nodes_data)} nodes for UI display")
+        if not hasattr(self, '_background_calc_nodes') or not self._background_calc_nodes:
+            self._background_calc_running = False
+            return
+            
+        if self._background_calc_index >= len(self._background_calc_nodes):
+            logging.info("NodesPage: Background metric calculations completed")
+            self._background_calc_running = False
+            return
+            
+        # Process current node
+        node = self._background_calc_nodes[self._background_calc_index] 
+        node_name = node.get('name', f'node_{self._background_calc_index}')
         
-        # Update total count for pagination
-        self.total_nodes = len(nodes_data)
+        logging.info(f"NodesPage: Processing metrics for node {node_name} ({self._background_calc_index + 1}/{len(self._background_calc_nodes)})")
         
-        # For progressive loading, show only a page of data initially
-        if not hasattr(self, '_showing_all_data') or not self._showing_all_data:
-            displayed_data = nodes_data[:self.page_size]
-            self.has_more_data = len(nodes_data) > self.page_size
-            logging.info(f"NodesPage: Showing {len(displayed_data)} of {len(nodes_data)} nodes initially")
-        else:
-            displayed_data = nodes_data
-            self.has_more_data = False
-            logging.info(f"NodesPage: Showing all {len(displayed_data)} nodes")
+        # Calculate metrics for this node
+        self._calculate_node_metrics(node, self._background_calc_index)
         
-        # Check if this is the same data to prevent redundant updates
-        if (hasattr(self, 'nodes_data') and self.nodes_data and 
-            len(self.nodes_data) == len(nodes_data) and
-            hasattr(self, '_last_data_hash')):
-            # Compare data hash to avoid unnecessary updates
-            import hashlib
-            current_hash = hashlib.md5(str(nodes_data).encode()).hexdigest()
-            if current_hash == self._last_data_hash:
-                logging.debug("NodesPage: Identical data received, skipping update")
-                return
-            self._last_data_hash = current_hash
-        else:
-            # Store hash for future comparisons
-            import hashlib
-            self._last_data_hash = hashlib.md5(str(nodes_data).encode()).hexdigest()
+        # Move to next node
+        self._background_calc_index += 1
         
-        # Store the data
-        self.nodes_data = nodes_data  # Keep full dataset for searches and graphs
-        self.resources = displayed_data  # Use paginated data for table display
-        self.has_loaded_data = True
-        logging.debug(f"NodesPage: Stored node data - has_loaded_data: {self.has_loaded_data}")
+        # Continue with next node after small delay (non-blocking)
+        QTimer.singleShot(100, self._process_next_node_metrics)
+    
+    def _calculate_node_metrics(self, node, node_index):
+        """Calculate and update metrics for a single node"""
+        node_name = node.get('name', f'node_{node_index}')
         
-        # Update graphs only once to reduce load
-        if not hasattr(self, '_graphs_initialized') or not self._graphs_initialized:
-            self.safe_timer_call(100, lambda: self._update_graphs_async(nodes_data))
-            self._graphs_initialized = True
-        
-        # Check if we're in search mode and apply search filter
-        if self._is_searching and self._current_search_query:
-            logging.debug(f"NodesPage: Applying search filter for query: {self._current_search_query}")
-            self._filter_nodes_by_search(self._current_search_query)
-        else:
-            logging.debug("NodesPage: No search active - showing paginated nodes")
-            self.show_table()
-            # Populate table with paginated data
-            logging.debug(f"NodesPage: Starting to populate table with {len(displayed_data)} of {len(nodes_data)} nodes")
-            self.populate_table(displayed_data)
-            logging.info(f"NodesPage: Successfully populated table with {len(displayed_data)} of {len(nodes_data)} nodes")
+        try:
+            # Calculate CPU metrics using static method
+            if not node.get('cpu_usage'):
+                cpu_result = self._calculate_cpu_metrics_sync_static(node)
+                if cpu_result and cpu_result.get('usage') is not None:
+                    node['cpu_usage'] = cpu_result['usage']
+                    node['cpu_display'] = f"{cpu_result['usage']:.1f}%"
+                    self._update_node_in_table(node_name, 'cpu', cpu_result['usage'])
+                    
+            # Calculate Memory metrics using static method
+            if not node.get('memory_usage'):
+                memory_result = self._calculate_memory_metrics_sync_static(node)
+                if memory_result and memory_result.get('usage') is not None:
+                    node['memory_usage'] = memory_result['usage']
+                    node['memory_display'] = f"{memory_result['usage']:.1f}%"
+                    self._update_node_in_table(node_name, 'memory', memory_result['usage'])
+                    
+            # Calculate Disk metrics using static method
+            if not node.get('disk_usage'):
+                disk_result = self._calculate_disk_metrics_sync_static(node)  
+                if disk_result and disk_result.get('usage') is not None:
+                    node['disk_usage'] = disk_result['usage']
+                    node['disk_display'] = f"{disk_result['usage']:.1f}%"
+                    self._update_node_in_table(node_name, 'disk', disk_result['usage'])
+                    
+        except Exception as e:
+            logging.error(f"NodesPage: Error calculating metrics for {node_name}: {e}")
+    # Duplicate method removed - using the one at line 2731
     
     def _update_graphs_async(self, nodes_data):
         """Update graphs asynchronously to avoid blocking UI"""
@@ -2491,8 +2680,15 @@ class NodesPage(BaseResourcePage):
             self.table.item(self.selected_row, 1)):
             selected_node_name = self.table.item(self.selected_row, 1).text()
         
-        # Use the nodes-specific populate_table method
-        self.populate_table(resources)
+        # Direct virtual model update to avoid recursion
+        if hasattr(self, 'virtual_model') and self.virtual_model:
+            self.virtual_model.update_nodes_data(resources)
+            self._setup_responsive_columns()
+            if resources:
+                self._add_virtual_action_buttons(resources)
+            self._schedule_virtual_metrics_updates(resources)
+        else:
+            logging.warning("NodesPage: Virtual model not available in _display_resources")
         
         # Restore selection if possible
         if selected_node_name:
@@ -2506,12 +2702,116 @@ class NodesPage(BaseResourcePage):
         
         # Item count will be updated automatically via model signal
     
-    def _render_resources_batch(self, resources, append=False):
+    def _render_resources_batch(self, resources, _append=False):
         """Override base class to use virtual table populate_table method"""
         if not resources:
             return
         # Virtual table mode only - no traditional table support
         self.populate_table(resources)
+    
+    def _update_node_in_table(self, node_name, metric_type, value):
+        """Update specific metric for a node in the table - progressive column updates"""
+        try:
+            if not hasattr(self, 'virtual_model') or not self.virtual_model:
+                return
+                
+            # Find the node in the model data and update it
+            for i, node in enumerate(self.virtual_model._nodes_data):
+                if node.get('name') == node_name:
+                    if metric_type == 'cpu':
+                        node['cpu_usage'] = value
+                        node['cpu_display'] = f"{value:.1f}%"
+                        # Emit data changed for CPU column (column 1)
+                        index = self.virtual_model.index(i, 1)
+                        self.virtual_model.dataChanged.emit(index, index)
+                        logging.debug(f"NodesPage: Updated CPU for {node_name}: {value:.1f}%")
+                    elif metric_type == 'memory':
+                        node['memory_usage'] = value  
+                        node['memory_display'] = f"{value:.1f}%"
+                        # Emit data changed for Memory column (column 2)
+                        index = self.virtual_model.index(i, 2)
+                        self.virtual_model.dataChanged.emit(index, index)
+                        logging.debug(f"NodesPage: Updated Memory for {node_name}: {value:.1f}%")
+                    elif metric_type == 'disk':
+                        node['disk_usage'] = value
+                        node['disk_display'] = f"{value:.1f}%"
+                        # Emit data changed for Disk column (column 3)
+                        index = self.virtual_model.index(i, 3)
+                        self.virtual_model.dataChanged.emit(index, index)
+                        logging.debug(f"NodesPage: Updated Disk for {node_name}: {value:.1f}%")
+                    break
+                    
+        except Exception as e:
+            logging.error(f"NodesPage: Error updating {metric_type} for {node_name}: {e}")
+    
+    @staticmethod
+    def _calculate_cpu_metrics_sync_static(node_data):
+        """Static version of CPU metrics calculation for global processing"""
+        try:
+            cpu_capacity = node_data.get('cpu_capacity', '')
+            cpu_usage = node_data.get('cpu_usage', None)
+            
+            if cpu_usage is not None:
+                return {'usage': float(cpu_usage), 'capacity': cpu_capacity}
+                
+            # Try to extract from raw metrics if available
+            raw_metrics = node_data.get('metrics', {})
+            if raw_metrics:
+                cpu_percent = raw_metrics.get('cpu_percentage')
+                if cpu_percent is not None:
+                    return {'usage': float(cpu_percent), 'capacity': cpu_capacity}
+                    
+            return {'usage': 0.0, 'capacity': cpu_capacity}
+            
+        except Exception as e:
+            logging.error(f"Error calculating CPU metrics: {e}")
+            return {'usage': 0.0, 'capacity': 'N/A'}
+    
+    @staticmethod
+    def _calculate_memory_metrics_sync_static(node_data):
+        """Static version of Memory metrics calculation for global processing"""
+        try:
+            memory_capacity = node_data.get('memory_capacity', '')
+            memory_usage = node_data.get('memory_usage', None)
+            
+            if memory_usage is not None:
+                return {'usage': float(memory_usage), 'capacity': memory_capacity}
+                
+            # Try to extract from raw metrics if available  
+            raw_metrics = node_data.get('metrics', {})
+            if raw_metrics:
+                memory_percent = raw_metrics.get('memory_percentage')
+                if memory_percent is not None:
+                    return {'usage': float(memory_percent), 'capacity': memory_capacity}
+                    
+            return {'usage': 0.0, 'capacity': memory_capacity}
+            
+        except Exception as e:
+            logging.error(f"Error calculating Memory metrics: {e}")
+            return {'usage': 0.0, 'capacity': 'N/A'}
+    
+    @staticmethod
+    def _calculate_disk_metrics_sync_static(node_data):
+        """Static version of Disk metrics calculation for global processing"""
+        try:
+            disk_capacity = node_data.get('disk_capacity', '')
+            disk_usage = node_data.get('disk_usage', None)
+            
+            if disk_usage is not None:
+                return {'usage': float(disk_usage), 'capacity': disk_capacity}
+                
+            # Try to extract from raw metrics if available
+            raw_metrics = node_data.get('metrics', {})  
+            if raw_metrics:
+                disk_percent = raw_metrics.get('disk_percentage')
+                if disk_percent is not None:
+                    return {'usage': float(disk_percent), 'capacity': disk_capacity}
+                    
+            return {'usage': 0.0, 'capacity': disk_capacity}
+            
+        except Exception as e:
+            logging.error(f"Error calculating Disk metrics: {e}")
+            return {'usage': 0.0, 'capacity': 'N/A'}
     
     def _perform_global_search(self, search_text):
         """Override to perform node-specific search"""
@@ -2644,32 +2944,74 @@ class NodesPage(BaseResourcePage):
             if hasattr(self.table, 'setRowCount'):
                 self.table.setRowCount(0)
 
-    def populate_table(self, resources_to_populate):
-        """Populate table with resource data - supports both traditional and virtual tables"""
-        logging.debug(f"NodesPage: populate_table() called with table: {self.table is not None}, resources: {len(resources_to_populate) if resources_to_populate else 0}")
-        if not self.table: 
-            logging.warning(f"NodesPage: Cannot populate table - table not found")
+    def populate_table(self, nodes_data):
+        """Populate table with node data - handles both full updates and filtered results"""
+        logging.info(f"NodesPage: populate_table() called with {len(nodes_data) if nodes_data else 0} nodes")
+        
+        if not self.table:
+            logging.warning("NodesPage: Cannot populate table - table not found")
             return
         
-        # Handle empty resources - still need to update the model
-        resources_to_use = resources_to_populate or []
-        logging.info(f"NodesPage: Starting table population with {len(resources_to_use)} resources")
-        
-        # Check if using virtual scrolling
-        if hasattr(self, 'virtual_model') and self.virtual_model:
-            # Use virtual model for heavy data (including empty data)
-            logging.info(f"NodesPage: Using virtual model for {len(resources_to_use)} nodes")
-            self.virtual_model.update_nodes_data(resources_to_use)
-            self._setup_responsive_columns()
-            # Only add action buttons if there are resources
-            if resources_to_use:
-                self._add_virtual_action_buttons(resources_to_use)
-            # Schedule async metrics updates for virtual model
-            self._schedule_virtual_metrics_updates(resources_to_use)
+        # Handle empty data
+        if not nodes_data:
+            logging.info("NodesPage: No nodes data - showing empty state")
+            if hasattr(self, 'virtual_model') and self.virtual_model:
+                self.virtual_model.update_nodes_data([])
+            self.show_no_data_message()
             return
         
-        # NodesPage only supports virtual tables - no traditional table fallback
-        raise Exception("NodesPage populate_table called but virtual table not available")
+        # For filtered/search results, don't update main data or do full processing
+        if hasattr(self, '_is_searching') and self._is_searching:
+            logging.info("NodesPage: Updating table with filtered search results")
+            if hasattr(self, 'virtual_model') and self.virtual_model:
+                self.virtual_model.update_nodes_data(nodes_data)
+                self._setup_responsive_columns()
+                if nodes_data:
+                    self._add_virtual_action_buttons(nodes_data)
+            return
+        
+        # Full data update - do complete processing
+        self._perform_full_data_update(nodes_data)
+    
+    def _perform_full_data_update(self, nodes_data):
+        """Handle complete data update with all processing steps"""
+        # Stop loading states
+        self.is_loading = False
+        self.is_showing_skeleton = False
+        
+        if hasattr(self, 'skeleton_timer') and self.skeleton_timer.isActive():
+            self.skeleton_timer.stop()
+        
+        # Check for duplicate data early
+        if (hasattr(self, 'nodes_data') and self.nodes_data and 
+            len(self.nodes_data) == len(nodes_data) and
+            hasattr(self, '_last_data_hash')):
+            import hashlib
+            current_hash = hashlib.md5(str(nodes_data).encode()).hexdigest()
+            if current_hash == self._last_data_hash:
+                logging.debug("NodesPage: Identical data received, skipping update")
+                return
+            self._last_data_hash = current_hash
+        else:
+            import hashlib
+            self._last_data_hash = hashlib.md5(str(nodes_data).encode()).hexdigest()
+        
+        # Store data and setup pagination
+        self.total_nodes = len(nodes_data)
+        self.nodes_data = nodes_data
+        self.has_loaded_data = True
+        
+        # Update graphs once
+        if not hasattr(self, '_graphs_initialized') or not self._graphs_initialized:
+            self.safe_timer_call(100, lambda: self._update_graphs_async(nodes_data))
+            self._graphs_initialized = True
+        
+        # Show basic node data immediately - this handles the table display
+        logging.info("NodesPage: Showing basic node information immediately")
+        self._show_basic_nodes_data(nodes_data)
+        
+        # Start background calculations after display
+        self._start_background_metrics_calculation(nodes_data)
     
     
 
@@ -2881,48 +3223,46 @@ class NodesPage(BaseResourcePage):
             
     def load_data(self, load_more=False):
         """Override to fetch node data from cluster connector"""
-        logging.info(f"NodesPage: load_data() called, is_loading={self.is_loading}")
+        return self._perform_data_load(force=False)
+    
+    def force_load_data(self):
+        """Override base class force_load_data to use cluster connector"""
+        return self._perform_data_load(force=True)
+    
+    def _perform_data_load(self, force=False):
+        """Consolidated data loading logic"""
+        logging.info(f"NodesPage: _perform_data_load(force={force}) called, is_loading={self.is_loading}")
         
+        # Check loading state
         if self.is_loading:
-            logging.debug("NodesPage: Already loading data, skipping duplicate request")
+            logging.debug("NodesPage: Already loading data, skipping request")
             return
-            
-        # Check if we have recent data to avoid redundant loads
-        if (hasattr(self, 'nodes_data') and self.nodes_data and 
+        
+        # Check throttling (unless forced)
+        if not force and (hasattr(self, 'nodes_data') and self.nodes_data and 
             hasattr(self, '_last_load_time') and self._last_load_time and
-            time.time() - self._last_load_time < 3.0):  # 3 second throttle
+            time.time() - self._last_load_time < 3.0):
             logging.info("NodesPage: Recent data available, skipping load due to throttling")
             return
-            
+        
+        # Reset state for forced refresh
+        if force:
+            self.current_page = 0
+            self._showing_all_data = False
+            self._last_load_time = 0
+        
+        # Start loading
         self.is_loading = True
         self._last_load_time = time.time()
-        logging.debug("NodesPage: Set is_loading=True, starting data fetch process")
+        logging.debug("NodesPage: Starting data fetch process")
         
         if hasattr(self, 'cluster_connector') and self.cluster_connector:
             logging.info("NodesPage: Using cluster_connector to load nodes data")
             self.cluster_connector.load_nodes()
-            logging.debug("NodesPage: load_nodes() call completed, waiting for data")
         else:
             logging.warning("NodesPage: No cluster_connector available - cannot load nodes")
             self.is_loading = False
             self.show_no_data_message()
-    
-    def force_load_data(self):
-        """Override base class force_load_data to use cluster connector"""
-        logging.info("NodesPage: force_load_data() called")
-        
-        # Prevent multiple concurrent force loads
-        if self.is_loading:
-            logging.debug("NodesPage: Already loading data, skipping force load request")
-            return
-            
-        # Reset pagination state for fresh load
-        self.current_page = 0
-        self._showing_all_data = False
-        
-        # Reset throttling for forced refresh
-        self._last_load_time = 0
-        self.load_data()
     
     def _initial_load_data(self):
         """Initial data load with proper state management"""
@@ -2932,43 +3272,11 @@ class NodesPage(BaseResourcePage):
             self.load_data()
     
     def safe_timer_call(self, delay: int, callback):
-        """Thread-safe timer call - schedule callback to run in main thread"""
+        """Thread-safe timer call - simplified version"""
         try:
-            from PyQt6.QtCore import QMetaObject, Qt, Q_ARG
-            # Store callback in a way that can be accessed by method name
-            callback_id = str(id(callback))
-            setattr(self, f'_timer_callback_{callback_id}', callback)
-            
-            # Use QMetaObject to invoke a method in the main thread
-            QMetaObject.invokeMethod(
-                self, 
-                "_execute_stored_timer_callback", 
-                Qt.ConnectionType.QueuedConnection,
-                Q_ARG(int, delay),
-                Q_ARG(str, callback_id)
-            )
+            QTimer.singleShot(delay, callback)
         except Exception as e:
-            logging.warning(f"NodesPage: Error with safe timer call: {e}")
-            # Fallback: try direct timer call (may fail in worker thread)
-            try:
-                QTimer.singleShot(delay, callback)
-            except Exception as e2:
-                logging.error(f"NodesPage: Timer fallback also failed: {e2}")
-    
-    @pyqtSlot(int, str)
-    def _execute_stored_timer_callback(self, delay: int, callback_id: str):
-        """Execute stored timer callback in main thread"""
-        try:
-            callback_attr = f'_timer_callback_{callback_id}'
-            if hasattr(self, callback_attr):
-                callback = getattr(self, callback_attr)
-                QTimer.singleShot(delay, callback)
-                # Clean up stored callback
-                delattr(self, callback_attr)
-            else:
-                logging.warning(f"NodesPage: Stored callback {callback_id} not found")
-        except Exception as e:
-            logging.warning(f"NodesPage: Error executing stored timer callback: {e}")
+            logging.warning(f"NodesPage: Error with timer call: {e}")
     
     def _update_item_count_display(self, count: int):
         """Update the item count display when model data changes"""
@@ -3022,10 +3330,18 @@ class NodesPage(BaseResourcePage):
                 # Record this scroll trigger
                 self._last_scroll_trigger = current_time
                 
-                # Show more data
+                # Show more data - direct virtual model update for pagination
                 displayed_data = self.nodes_data[:new_display_count]
                 self.resources = displayed_data
-                self.populate_table(displayed_data)
+                
+                # Direct update to avoid full populate_table processing
+                if hasattr(self, 'virtual_model') and self.virtual_model:
+                    self.virtual_model.update_nodes_data(displayed_data)
+                    self._setup_responsive_columns()
+                    if displayed_data:
+                        self._add_virtual_action_buttons(displayed_data)
+                else:
+                    logging.warning("NodesPage: Virtual model not available for pagination update")
                 
                 # Check if we've shown all data
                 if new_display_count >= len(self.nodes_data):
