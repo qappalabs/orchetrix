@@ -379,16 +379,19 @@ Version: $APP_VERSION-1
 Section: $APP_CATEGORY
 Priority: optional
 Architecture: $ARCH
-Depends: libc6 (>= 2.17),
-         libssl3 | libssl1.1 | libssl1.0.0,
-         zlib1g (>= 1:1.1.4),
-         libx11-6,
-         libxext6,
-         libxrender1,
-         libxrandr2,
-         libxss1,
-         libglib2.0-0,
-         libgtk-3-0 | libqt6core6 | libqt5core5a
+Depends: python3 (>= 3.8),
+         python3-pyqt6 | python3-pyqt5,
+         python3-kubernetes,
+         python3-yaml,
+         python3-requests,
+         python3-psutil,
+         libc6 (>= 2.17),
+         libqt6core6 | libqt5core5a,
+         libqt6gui6 | libqt5gui5,
+         libqt6widgets6 | libqt5widgets5,
+         libqt6svg6 | libqt5svg5,
+         libssl3 | libssl1.1,
+         zlib1g (>= 1:1.1.4)
 Recommends: kubectl,
            docker.io | docker-ce,
            curl,
@@ -401,9 +404,6 @@ Description: $APP_DESCRIPTION
  Orchetrix is a comprehensive Kubernetes management desktop application
  that provides an intuitive graphical interface for managing Kubernetes
  clusters, resources, and workloads.
- .
- This package is self-contained and includes all Python dependencies.
- No additional Python packages need to be installed.
  .
  Features include:
   * Multi-cluster management
@@ -418,142 +418,40 @@ Description: $APP_DESCRIPTION
 Homepage: $APP_HOMEPAGE
 EOF
 
-    # Create postinst script (post-installation)
+    # Create postinst script (post-installation) - SIMPLE VERSION
     cat > "$control_dir/postinst" << 'EOF'
 #!/bin/bash
-set -e
 
 case "$1" in
     configure)
-        echo "Configuring Orchetrix..."
-        
-        # Update desktop database
-        if command -v update-desktop-database >/dev/null 2>&1; then
-            echo "Updating desktop applications database..."
-            update-desktop-database -q /usr/share/applications 2>/dev/null || true
-        fi
-        
-        # Update icon cache
-        if command -v gtk-update-icon-cache >/dev/null 2>&1; then
-            echo "Updating icon cache..."
-            gtk-update-icon-cache -q /usr/share/pixmaps 2>/dev/null || true
-        fi
-        
-        # Make sure the executable is properly executable
-        chmod +x /opt/orchetrix/Orchetrix 2>/dev/null || true
-        
-        # Create symlink if it doesn't exist
-        if [ ! -e /usr/bin/orchetrix ]; then
-            ln -sf /opt/orchetrix/Orchetrix /usr/bin/orchetrix 2>/dev/null || true
-        fi
-        
-        echo ""
-        echo "✅ Orchetrix installation completed successfully!"
-        echo ""
-        echo "🚀 Launch Options:"
-        echo "  • From Applications Menu: Search for 'Orchetrix'"
-        echo "  • From Terminal: orchetrix"
-        echo ""
-        echo "📋 Next Steps:"
-        echo "  • Ensure kubectl is configured for your Kubernetes cluster"
-        echo "  • Run 'kubectl cluster-info' to verify cluster access"
-        echo ""
-        echo "📖 For help and documentation, check the built-in help system"
+        update-desktop-database -q /usr/share/applications 2>/dev/null || true
+        gtk-update-icon-cache -q /usr/share/pixmaps 2>/dev/null || true
+        echo "Orchetrix installed successfully!"
         ;;
 esac
-
-exit 0
 EOF
 
-    # Create prerm script (pre-removal)
+    # Create prerm script (pre-removal) - SIMPLE VERSION
     cat > "$control_dir/prerm" << 'EOF'
 #!/bin/bash
-set -e
 
 case "$1" in
     remove|upgrade|deconfigure)
-        echo "Stopping Orchetrix application..."
-        
-        # Stop any running instances gracefully
-        if pgrep -f "Orchetrix" > /dev/null 2>&1; then
-            echo "Found running Orchetrix processes, stopping..."
-            pkill -f "Orchetrix" || true
-            # Wait for graceful shutdown
-            for i in {1..10}; do
-                if ! pgrep -f "Orchetrix" > /dev/null 2>&1; then
-                    break
-                fi
-                sleep 1
-            done
-            
-            # Force kill if still running
-            if pgrep -f "Orchetrix" > /dev/null 2>&1; then
-                echo "Force stopping remaining processes..."
-                pkill -9 -f "Orchetrix" || true
-            fi
-        fi
-        
-        # Also check for lowercase
-        if pgrep -f "orchetrix" > /dev/null 2>&1; then
-            pkill -f "orchetrix" || true
-            pkill -9 -f "orchetrix" || true
-        fi
-        
-        echo "Orchetrix processes stopped."
+        pkill -f "Orchetrix" 2>/dev/null || true
         ;;
 esac
-
-exit 0
 EOF
 
-    # Create postrm script (post-removal)
+    # Create postrm script (post-removal) - SIMPLE VERSION
     cat > "$control_dir/postrm" << 'EOF'
 #!/bin/bash
-# Don't exit on errors to prevent package removal issues
-set +e
 
 case "$1" in
     remove|purge)
-        echo "Cleaning up Orchetrix installation..."
-        
-        # Update desktop database
-        if command -v update-desktop-database >/dev/null 2>&1; then
-            echo "Updating desktop database..."
-            update-desktop-database -q /usr/share/applications 2>/dev/null || true
-        fi
-        
-        # Update icon cache  
-        if command -v gtk-update-icon-cache >/dev/null 2>&1; then
-            echo "Updating icon cache..."
-            gtk-update-icon-cache -q /usr/share/pixmaps 2>/dev/null || true
-        fi
-        
-        # Clean up any remaining temporary files
-        rm -rf /tmp/orchetrix-* 2>/dev/null || true
-        
-        if [ "$1" = "purge" ]; then
-            echo "Orchetrix has been completely removed from the system."
-            echo ""
-            echo "Note: User configuration files may still exist in:"
-            echo "  ~/.config/orchetrix/ (user settings)"
-            echo "  ~/.cache/orchetrix/ (cached data)"
-            echo ""
-            echo "To remove all user data, each user should run:"
-            echo "  rm -rf ~/.config/orchetrix/ ~/.cache/orchetrix/"
-        else
-            echo "Orchetrix removed. User settings preserved."
-            echo "To completely remove including user data, run:"
-            echo "  sudo apt-get purge orchetrix"
-        fi
-        ;;
-        
-    upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
-        # Don't do anything special for these cases
+        update-desktop-database -q /usr/share/applications 2>/dev/null || true
+        gtk-update-icon-cache -q /usr/share/pixmaps 2>/dev/null || true
         ;;
 esac
-
-# Always exit successfully to prevent package manager issues
-exit 0
 EOF
 
     # Make scripts executable
