@@ -8,7 +8,7 @@ from PyQt6.QtGui import QColor
 
 from Base_Components.base_components import SortableTableWidgetItem
 from Base_Components.base_resource_page import BaseResourcePage
-from UI.Styles import AppStyles
+from UI.Styles import AppStyles, AppConstants
 
 
 class EndpointsPage(BaseResourcePage):
@@ -123,7 +123,6 @@ class EndpointsPage(BaseResourcePage):
         
         # Create and add action button using base class method with proper styling
         from PyQt6.QtWidgets import QWidget, QHBoxLayout
-        from UI.Styles import AppStyles, AppConstants
         
         action_button = self._create_action_button(row, resource["name"])
         action_button.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE +
