@@ -124,11 +124,8 @@ class BaseResourcePage(BaseTablePage):
         """Override showEvent to automatically load data when page becomes visible"""
         super().showEvent(event)
         
-        # Check if app is still in startup/splash screen mode
-        if self._is_app_starting():
-            # Defer loading until after splash screen to prevent startup lag
-            QTimer.singleShot(5000, self._deferred_startup_load)  # Wait 5 seconds after startup
-            return
+        # OPTIMIZED: Load immediately for better performance like AppChart
+        # Removed startup delay that was causing slow namespace loading
         
         # Normal show event handling - load immediately if app is already started
         self._handle_normal_show_event()
@@ -194,15 +191,15 @@ class BaseResourcePage(BaseTablePage):
             logging.debug(f"Error showing startup loading message: {e}")
     
     def _handle_normal_show_event(self):
-        """Handle normal show event loading (after startup)"""
-        # Load namespaces dynamically on first show
+        """Handle normal show event loading (after startup) - OPTIMIZED for fast namespace loading"""
+        # Load namespaces dynamically on first show - REMOVED TIMER DELAY for performance
         if not hasattr(self, '_namespaces_loaded'):
             self._namespaces_loaded = True
-            QTimer.singleShot(100, self._load_namespaces_async)  # Load namespaces first
+            self._load_namespaces_async()  # Load namespaces immediately like AppChart
         
         # Always try to load data when page becomes visible if we don't have current data
         if not self.is_loading_initial and (not self.resources or not self._initial_load_done):
-            QTimer.singleShot(200, self._auto_load_data)  # Load data after namespaces
+            QTimer.singleShot(50, self._auto_load_data)  # Reduced delay for faster loading
 
     def _auto_load_data(self):
         """Auto-load data when page is shown - FIXED for large data performance"""
@@ -798,10 +795,7 @@ class BaseResourcePage(BaseTablePage):
     def _load_namespaces_async(self):
         """Load available namespaces dynamically using unified loader for better performance"""
         try:
-            # Quick fallback during startup to avoid any lag
-            if self._is_app_starting():
-                self._on_namespaces_loaded(["default", "kube-system", "kube-public"])
-                return
+            # REMOVED startup check for better performance - load namespaces immediately like AppChart
 
             # Use unified resource loader for better performance and caching (like AppsChart)
             from Utils.unified_resource_loader import get_unified_resource_loader
