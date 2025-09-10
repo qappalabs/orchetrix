@@ -73,6 +73,15 @@ class StyleConstants:
             border-color: {AppColors.ACCENT_BLUE};
         }}
     """
+    # DEPRECATED: Use AppStyles.get_dropdown_style_with_icon() instead
+    # This style has the same icon path issue and should be replaced
+    @staticmethod
+    def get_shell_dropdown_style():
+        """Get shell dropdown style with proper icon resolution"""
+        from UI.Styles import AppStyles
+        return AppStyles.get_dropdown_style_with_icon()
+    
+    # Keep old constant for backward compatibility but mark as deprecated
     SHELL_DROPDOWN = f"""
         QComboBox {{
             background-color: {AppColors.BG_DARKER};
@@ -91,10 +100,9 @@ class StyleConstants:
             width: 20px;
         }}
         QComboBox::down-arrow {{
-            image: url(Icons/down_btn.svg);
-            width: 12px;
-            height: 12px;
-            margin-right: 8px;
+            width: 0px;
+            height: 0px;
+            border: none;
         }}
     """
     TAB_CLOSE_BUTTON = f"""

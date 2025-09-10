@@ -1,4 +1,5 @@
 from PyQt6.QtCore import QSize
+import os
 
 class AppColors:
     # Base colors
@@ -1417,9 +1418,9 @@ class AppStyles:
             width: 20px;
         }}
         QComboBox::down-arrow {{
-            image: url(Icons/down_btn.svg);
-            width: 12px;
-            height: 12px;
+            width: 0px;
+            height: 0px;
+            border: none;
         }}
         QComboBox QAbstractItemView {{
             background-color: {AppColors.BG_DARKER};
@@ -1952,6 +1953,57 @@ class AppStyles:
         font-family: 'Segoe UI';
     """
 
+    @staticmethod
+    def get_dropdown_style_with_icon():
+        """Generate dropdown style with properly resolved icon path"""
+        try:
+            from UI.Icons import resource_path
+            down_arrow_icon = resource_path("Icons/down_btn.svg")
+            
+            return f"""
+            QComboBox {{ 
+                background-color: #2d2d2d; 
+                color: #ffffff; 
+                border: 1px solid #3d3d3d;
+                border-radius: 4px; 
+                padding: 5px 10px; 
+                font-size: 13px; 
+            }}
+            QComboBox:hover {{ 
+                border: 1px solid #555555; 
+            }}
+            QComboBox::drop-down {{ 
+                border: none; 
+                width: 20px;
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+            }}
+            QComboBox::down-arrow {{
+                image: url({down_arrow_icon.replace(os.sep, '/')});
+                width: 12px;
+                height: 12px;
+                margin-right: 4px;
+            }}
+            QComboBox::down-arrow:hover {{
+                opacity: 0.8;
+            }}
+            QComboBox QAbstractItemView {{ 
+                background-color: #2d2d2d; 
+                color: #ffffff; 
+                selection-background-color: #0078d7;
+                border: none;
+                outline: none;
+                padding: 0px;
+            }}
+            QComboBox QFrame {{
+                border: none;
+                background-color: #2d2d2d;
+            }}
+            """
+        except Exception as e:
+            # Fallback to style without icon if there are issues
+            return AppStyles.COMBO_BOX_STYLE
+
 
     COMBO_BOX_STYLE = f"""
         QComboBox {{ 
@@ -1971,7 +2023,9 @@ class AppStyles:
             width: 20px; 
         }}
         QComboBox::down-arrow {{ 
-            image: url(Icons/down_btn.svg) ; 
+            width: 0px;
+            height: 0px;
+            border: none;
         }}
         QComboBox QAbstractItemView {{ 
             background-color: #2d2d2d; 
@@ -2205,3 +2259,8 @@ def get_style_loader():
 def get_component_styles(component_name):
     """Convenience function to get component styles"""
     return _style_loader.get_component_styles(component_name)
+
+# Convenience function for backward compatibility
+def get_dropdown_style_with_icon():
+    """Generate dropdown style with properly resolved icon path"""
+    return AppStyles.get_dropdown_style_with_icon()

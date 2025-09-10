@@ -163,8 +163,8 @@ class AppsPage(QWidget):
         # Configure dropdown behavior to prevent upward opening
         self._configure_dropdown_behavior(self.namespace_combo)
         
-        # Use the exact same style as other pages from AppStyles
-        self.namespace_combo.setStyleSheet(AppStyles.COMBO_BOX_STYLE)
+        # Use the centralized dropdown style utility from AppStyles class
+        self.namespace_combo.setStyleSheet(AppStyles.get_dropdown_style_with_icon())
         self.namespace_combo.addItem("Loading...")
         self.namespace_combo.setEnabled(False)
         filters_layout.addWidget(self.namespace_combo)
@@ -183,8 +183,8 @@ class AppsPage(QWidget):
         # Configure dropdown behavior to prevent upward opening
         self._configure_dropdown_behavior(self.workload_combo)
         
-        # Use the exact same style as other pages from AppStyles
-        self.workload_combo.setStyleSheet(AppStyles.COMBO_BOX_STYLE)
+        # Use the centralized dropdown style utility from AppStyles class
+        self.workload_combo.setStyleSheet(AppStyles.get_dropdown_style_with_icon())
         
         # Add workload items
         workload_items = [
@@ -215,8 +215,8 @@ class AppsPage(QWidget):
         # Configure dropdown behavior to prevent upward opening
         self._configure_dropdown_behavior(self.resource_combo)
         
-        # Use the exact same style as other pages from AppStyles
-        self.resource_combo.setStyleSheet(AppStyles.COMBO_BOX_STYLE)
+        # Use the centralized dropdown style utility from AppStyles class
+        self.resource_combo.setStyleSheet(AppStyles.get_dropdown_style_with_icon())
         self.resource_combo.addItem("Select namespace and workload first")
         self.resource_combo.setEnabled(False)
         # Connect resource selection change
@@ -235,6 +235,7 @@ class AppsPage(QWidget):
             combo_box.setMaxVisibleItems(10)
         except Exception as e:
             logging.debug(f"Could not configure dropdown behavior: {e}")
+    
     
     # Diagram functionality added above
     
@@ -1380,7 +1381,7 @@ class AppsPage(QWidget):
         return export_data
     
     def get_resource_icon_path(self, resource_type: ResourceType, status: str = None) -> str:
-        """Get icon path for resource type, with dynamic pod icons based on status"""
+        """Get icon path for resource type, with dynamic pod icons based on status - fixed for build"""
         if resource_type == ResourceType.POD and status:
             # Dynamic pod icon selection based on status
             return self.get_pod_icon_path(status)
@@ -1396,10 +1397,11 @@ class AppsPage(QWidget):
         }
         
         icon_name = icon_mapping.get(resource_type, "workloads.png")
-        return os.path.join("Icons", icon_name)
+        # Use resource_path to properly resolve icon paths for packaged app
+        return resource_path(os.path.join("Icons", icon_name))
     
     def get_pod_icon_path(self, status: str) -> str:
-        """Get appropriate pod icon based on status"""
+        """Get appropriate pod icon based on status - fixed for build"""
         # Running/healthy pods
         healthy_statuses = ["Running", "Succeeded", "Ready"]
         
@@ -1419,7 +1421,8 @@ class AppsPage(QWidget):
             # Pending, ContainerCreating, etc.
             icon_name = os.path.join("k8s_chart_icon", "pod_pending.svg")
         
-        return os.path.join("Icons", icon_name)
+        # Use resource_path to properly resolve icon paths for packaged app
+        return resource_path(os.path.join("Icons", icon_name))
     
     def draw_horizontal_connection(self, from_pos: tuple, to_pos: tuple, connection_type: str):
         """Draw enhanced horizontal connection between resources"""

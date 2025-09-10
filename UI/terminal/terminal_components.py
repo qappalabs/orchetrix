@@ -183,7 +183,8 @@ class UnifiedTerminalHeader(QWidget):
         # Shell dropdown (for regular terminals)
         self.shell_dropdown = QComboBox()
         self.shell_dropdown.setFixedSize(160, 24)
-        self.shell_dropdown.setStyleSheet(StyleConstants.SHELL_DROPDOWN)
+        # Use the centralized dropdown style with proper icon resolution
+        self.shell_dropdown.setStyleSheet(AppStyles.get_dropdown_style_with_icon())
         self.shell_dropdown.setCursor(Qt.CursorShape.PointingHandCursor)
 
         for name, _ in self.available_shells:
