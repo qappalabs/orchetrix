@@ -433,7 +433,7 @@ class OverviewPage(QWidget):
         main_layout.setSpacing(0)
 
         # Page title
-        title_label = QLabel("Workload Overview")
+        title_label = QLabel("Overview")
         title_font = QFont()
         title_font.setFamily("Segoe UI")
         title_font.setPointSize(28)

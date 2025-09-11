@@ -1202,7 +1202,12 @@ class ResourceLoadWorker(EnhancedBaseWorker):
                 if node_metrics:
                     processed_item['cpu_usage'] = node_metrics['cpu']['usage']
                     processed_item['memory_usage'] = node_metrics['memory']['usage']
-                    logging.info(f"Unified Resource Loader: Added real metrics for node {processed_item['name']}: CPU {node_metrics['cpu']['usage']:.1f}%, Memory {node_metrics['memory']['usage']:.1f}%")
+                    # Add disk metrics if available
+                    if 'disk' in node_metrics:
+                        processed_item['disk_usage'] = node_metrics['disk']['usage']
+                        logging.info(f"Unified Resource Loader: Added real metrics for node {processed_item['name']}: CPU {node_metrics['cpu']['usage']:.1f}%, Memory {node_metrics['memory']['usage']:.1f}%, Disk {node_metrics['disk']['usage']:.1f}%")
+                    else:
+                        logging.info(f"Unified Resource Loader: Added real metrics for node {processed_item['name']}: CPU {node_metrics['cpu']['usage']:.1f}%, Memory {node_metrics['memory']['usage']:.1f}%")
                 else:
                     logging.debug(f"Unified Resource Loader: No metrics available for node {processed_item['name']}")
             else:
