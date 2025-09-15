@@ -15,14 +15,15 @@ from datetime import datetime, timezone
 import time
 from collections import deque
 
-from PyQt6.QtWidgets import QHBoxLayout, QLabel, QFrame, QTableWidgetItem, QMessageBox, QVBoxLayout, QWidget, QSizePolicy
+from PyQt6.QtWidgets import QHBoxLayout, QLabel, QFrame, QTableWidgetItem, QMessageBox, QVBoxLayout, QWidget, QSizePolicy, QApplication
 from PyQt6.QtCore import Qt, QTimer, QRect, pyqtSignal
 from PyQt6.QtGui import QColor, QBrush, QPainter, QPen, QFont, QLinearGradient
 
 from Base_Components.base_resource_page import BaseResourcePage
-from UI.Styles import AppColors, AppStyles
+from UI.Styles import AppColors
 from UI.Icons import Icons, resource_path
 from Utils.data_formatters import format_age
+
 
 
 class MetricGraph(QWidget):
@@ -182,6 +183,8 @@ class NodesPage(BaseResourcePage):
         # Timer for updating graphs
         self.graph_update_timer = QTimer()
         self.graph_update_timer.timeout.connect(self._update_graphs)
+        
+# Removed complex progressive loading components
         
         self._setup_ui()
         self._setup_table_styling()
@@ -367,6 +370,8 @@ class NodesPage(BaseResourcePage):
         except Exception as e:
             logging.error(f"NodesPage: Error in _create_metrics_graphs: {e}")
     
+# Removed complex graph visibility method
+    
     def _create_metrics_widget(self):
         """Create the actual metrics widget"""
         try:
@@ -417,6 +422,7 @@ class NodesPage(BaseResourcePage):
         """Create the actual graphs widget"""
         try:
             logging.info("NodesPage: _create_graphs_widget called - starting graph creation")
+            
             # Create container frame
             self.graphs_container = QFrame()
             self.graphs_container.setStyleSheet(f"""
@@ -445,15 +451,10 @@ class NodesPage(BaseResourcePage):
             self.graphs_title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             main_layout.addWidget(self.graphs_title_label)
             
-            # Create metric graphs with proper parent
+            # Create metric graphs
             self.cpu_graph = MetricGraph("CPU Usage", AppColors.STATUS_WARNING)
             self.memory_graph = MetricGraph("Memory Usage", AppColors.ACCENT_BLUE) 
             self.disk_graph = MetricGraph("Disk Usage", AppColors.ACCENT_PURPLE)
-            
-            # Set parent to ensure they don't get deleted
-            self.cpu_graph.setParent(self.graphs_container)
-            self.memory_graph.setParent(self.graphs_container)
-            self.disk_graph.setParent(self.graphs_container)
             
             # Create horizontal layout for graphs
             graphs_layout = QHBoxLayout()
@@ -472,17 +473,8 @@ class NodesPage(BaseResourcePage):
             if page_layout:
                 logging.info(f"NodesPage: Page layout found with {page_layout.count()} items")
                 page_layout.insertWidget(1, self.graphs_container)
-                self.graphs_container.show()
-                
-                # Make sure graphs are visible
-                self.cpu_graph.show()
-                self.memory_graph.show()
-                self.disk_graph.show()
-                
-                # Graphs start empty - will show data when node is selected
                 
                 logging.info("NodesPage: Created metrics graphs widget with 3 graphs")
-                logging.debug(f"NodesPage: Graphs created - CPU: {self.cpu_graph is not None}, Memory: {self.memory_graph is not None}, Disk: {self.disk_graph is not None}")
             else:
                 logging.error("NodesPage: Page layout not found, cannot add graphs")
                 
@@ -507,7 +499,7 @@ class NodesPage(BaseResourcePage):
             self.disk_graph.clear_data()
             
             # Add a few baseline data points for smooth graph start
-            for i in range(3):
+            for _ in range(3):
                 self.cpu_graph.add_data_point(0.0)
                 self.memory_graph.add_data_point(0.0)
                 self.disk_graph.add_data_point(0.0)
@@ -586,8 +578,8 @@ class NodesPage(BaseResourcePage):
             # Column 2: Memory Usage  
             self._populate_usage_column(row, 2, node.get("memory_usage"), "Memory")
             
-            # Column 3: Disk Usage
-            self._populate_usage_column(row, 3, node.get("disk_usage"), "Disk")
+            # Column 3: Disk Usage - get fresh metrics if needed
+            self._populate_disk_usage_column(row, 3, node)
             
             # Column 4: Roles
             roles = node.get("roles", [])
@@ -620,23 +612,27 @@ class NodesPage(BaseResourcePage):
             logging.error(f"NodesPage: Error populating row {row}: {e}")
     
     def _populate_usage_column(self, row, col, usage_value, metric_type):
-        """Populate a usage column (CPU/Memory/Disk) with colored percentage"""
+        """Populate a usage column (CPU/Memory/Disk) with colored percentage - IMPROVED"""
         try:
             if usage_value is not None:
                 try:
                     usage_num = float(usage_value)
                     text = f"{usage_num:.1f}%"
                     color = self._get_usage_color(usage_num)
+                    tooltip = f"{metric_type} usage: {usage_num:.1f}%"
                 except (ValueError, TypeError):
-                    text = "N/A"
-                    color = AppColors.TEXT_SUBTLE
+                    text = "⚠️"  # Warning symbol for invalid data
+                    color = AppColors.STATUS_WARNING
+                    tooltip = f"Invalid {metric_type} data"
             else:
-                text = "N/A"
+                text = "⏳"  # Loading symbol for missing data
                 color = AppColors.TEXT_SUBTLE
+                tooltip = f"Loading {metric_type} metrics..."
             
             item = QTableWidgetItem(text)
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+            item.setToolTip(tooltip)
             
             # Apply color with multiple methods for compatibility
             brush = QBrush(QColor(color))
@@ -647,6 +643,50 @@ class NodesPage(BaseResourcePage):
             
         except Exception as e:
             logging.error(f"NodesPage: Error populating {metric_type} column: {e}")
+    
+    def _populate_disk_usage_column(self, row, col, node):
+        """Populate disk usage column with fresh metrics if needed"""
+        try:
+            disk_usage = node.get("disk_usage") if node else None
+            
+            # Always try to get fresh metrics for disk usage to ensure real data
+            fresh_usage = self._get_fresh_disk_usage(row)
+            if fresh_usage is not None:
+                disk_usage = fresh_usage
+                # Update the node data with the fresh value for consistency
+                if node:
+                    node["disk_usage"] = fresh_usage
+                logging.debug(f"NodesPage: Updated disk usage with fresh data: {fresh_usage:.1f}%")
+            elif disk_usage is None:
+                # If we can't get fresh data and have no cached data, show loading
+                disk_usage = None
+            
+            self._populate_usage_column(row, col, disk_usage, "Disk")
+            
+        except Exception as e:
+            logging.error(f"NodesPage: Error populating disk usage column: {e}")
+    
+    def _get_fresh_disk_usage(self, row):
+        """Get fresh disk usage for a specific node row"""
+        try:
+            node_name = self._get_node_name_from_row(row)
+            if not node_name:
+                return None
+            
+            from Services.kubernetes.kubernetes_service import get_kubernetes_service
+            kube_service = get_kubernetes_service()
+            
+            if kube_service and kube_service.metrics_service:
+                node_metrics = kube_service.metrics_service.get_node_metrics(node_name)
+                if node_metrics and 'disk' in node_metrics:
+                    disk_usage = node_metrics['disk']['usage']
+                    logging.debug(f"NodesPage: Fresh disk usage for {node_name}: {disk_usage:.1f}%")
+                    return disk_usage
+            
+            return None
+        except Exception as e:
+            logging.error(f"NodesPage: Error getting fresh disk usage: {e}")
+            return None
     
     def _populate_status_column(self, row, col, status):
         """Populate status column with colored status text"""
@@ -752,7 +792,7 @@ class NodesPage(BaseResourcePage):
             return "Unknown"
     
     def populate_table(self, resources_data):
-        """Populate the table with nodes data and update metrics"""
+        """Populate the table with nodes data - PROGRESSIVE LOADING OPTIMIZED"""
         try:
             if not hasattr(self, 'table') or not self.table:
                 logging.error("NodesPage: Table not available")
@@ -770,24 +810,155 @@ class NodesPage(BaseResourcePage):
             # Setup table
             self.table.setRowCount(len(resources_data))
             
-            # Populate rows
+            # PROGRESSIVE LOADING: Show basic data first, then metrics
+            start_time = time.time()
+            logging.info(f"🚀 [PROGRESSIVE] Starting progressive loading for {len(resources_data)} nodes")
+            
+            # Phase 1: Populate basic node info (fast)
             for row, node in enumerate(resources_data):
                 try:
                     self.table.setRowHeight(row, 32)
-                    self.populate_table_row(row, node)
+                    self.populate_table_row_basic(row, node)  # Basic info only
                     self._create_action_button_for_row(row, node)
                 except Exception as e:
                     logging.error(f"NodesPage: Error processing row {row}: {e}")
+            
+            basic_time = (time.time() - start_time) * 1000
+            logging.info(f"✅ [BASIC DATA] Loaded basic info for {len(resources_data)} nodes in {basic_time:.1f}ms")
             
             # Update metrics and configure columns
             self._update_metrics_summary(resources_data)
             self.configure_columns()
             self._update_items_count()
             
-            logging.info(f"NodesPage: Populated table with {len(resources_data)} nodes")
+            # Phase 2: Load metrics progressively (if available)
+            if self._has_metrics_in_data(resources_data):
+                self._update_metrics_progressively(resources_data)
+            else:
+                logging.info("⏳ [METRICS] No metrics available in data - showing placeholders")
+            
+            total_time = (time.time() - start_time) * 1000
+            logging.info(f"✅ [COMPLETE] Progressive loading completed in {total_time:.1f}ms")
             
         except Exception as e:
             logging.error(f"NodesPage: Error populating table: {e}")
+    
+    def populate_table_row_basic(self, row, node):
+        """Populate a single table row with basic node data (no metrics) - FAST"""
+        try:
+            # Column 0: Name
+            name_item = QTableWidgetItem(node.get("name", ""))
+            name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            name_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            self.table.setItem(row, 0, name_item)
+            
+            # Column 1-2: CPU, Memory Usage - Show loading placeholder if needed
+            for col in [1, 2]:
+                metric_type = ["CPU", "Memory"][col-1]
+                usage_value = node.get(f"{metric_type.lower()}_usage")
+                if usage_value is not None:
+                    self._populate_usage_column(row, col, usage_value, metric_type)
+                else:
+                    self._populate_loading_column(row, col, metric_type)
+            
+            # Column 3: Disk Usage - handle specially with fresh metrics
+            self._populate_disk_usage_column(row, 3, node)
+            
+            # Column 4: Roles
+            roles = node.get("roles", [])
+            roles_text = ", ".join(roles) if isinstance(roles, list) else str(roles) or "Worker"
+            roles_item = QTableWidgetItem(roles_text)
+            roles_item.setFlags(roles_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            roles_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+            self.table.setItem(row, 4, roles_item)
+            
+            # Column 5: Version
+            version = node.get("kubelet_version", node.get("version", "Unknown"))
+            version_item = QTableWidgetItem(version)
+            version_item.setFlags(version_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            version_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+            self.table.setItem(row, 5, version_item)
+            
+            # Column 6: Age
+            age_text = self._format_node_age(node)
+            age_item = QTableWidgetItem(age_text)
+            age_item.setFlags(age_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            age_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+            self.table.setItem(row, 6, age_item)
+            
+            # Column 7: Status
+            self._populate_status_column(row, 7, node.get("status", "Unknown"))
+            
+        except Exception as e:
+            logging.error(f"NodesPage: Error populating basic row {row}: {e}")
+    
+    def _populate_loading_column(self, row, col, metric_type):
+        """Populate a column with loading indicator"""
+        try:
+            item = QTableWidgetItem("⏳")  # Loading indicator
+            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+            
+            # Use subtle color for loading indicator
+            brush = QBrush(QColor(AppColors.TEXT_SUBTLE))
+            item.setForeground(brush)
+            item.setData(Qt.ItemDataRole.ForegroundRole, QColor(AppColors.TEXT_SUBTLE))
+            
+            # Set tooltip
+            item.setToolTip(f"Loading {metric_type} metrics...")
+            
+            self.table.setItem(row, col, item)
+            
+        except Exception as e:
+            logging.error(f"NodesPage: Error populating loading {metric_type} column: {e}")
+    
+    def _has_metrics_in_data(self, resources_data):
+        """Check if any node in the data has metrics"""
+        try:
+            for node in resources_data:
+                if (node.get("cpu_usage") is not None or 
+                    node.get("memory_usage") is not None or 
+                    node.get("disk_usage") is not None):
+                    return True
+            return False
+        except Exception:
+            return False
+    
+    def _update_metrics_progressively(self, resources_data):
+        """Update metrics columns progressively"""
+        try:
+            metrics_start = time.time()
+            updated_count = 0
+            
+            for row, node in enumerate(resources_data):
+                try:
+                    # Update CPU column if metrics available
+                    if node.get("cpu_usage") is not None:
+                        self._populate_usage_column(row, 1, node.get("cpu_usage"), "CPU")
+                    
+                    # Update Memory column if metrics available  
+                    if node.get("memory_usage") is not None:
+                        self._populate_usage_column(row, 2, node.get("memory_usage"), "Memory")
+                    
+                    # Update Disk column - use consolidated method
+                    self._populate_disk_usage_column(row, 3, node)
+                    
+                    updated_count += 1
+                    
+                    # Process UI events every 10 rows to keep UI responsive
+                    if updated_count % 10 == 0:
+                        QApplication.processEvents()
+                        
+                except Exception as e:
+                    logging.error(f"NodesPage: Error updating metrics for row {row}: {e}")
+            
+            metrics_time = (time.time() - metrics_start) * 1000
+            logging.info(f"✅ [METRICS UPDATE] Updated metrics for {updated_count} nodes in {metrics_time:.1f}ms")
+            
+        except Exception as e:
+            logging.error(f"NodesPage: Error in progressive metrics update: {e}")
+
+# Removed complex background metrics loading methods
     
     def _show_empty_state(self):
         """Show empty state when no nodes are available"""
@@ -854,10 +1025,8 @@ class NodesPage(BaseResourcePage):
                 return
             
             action_btn = self._create_action_button(node_name)
-            action_btn.setStyleSheet(AppStyles.ACTION_BUTTON_STYLE)
             
             # Create container for positioning
-            from PyQt6.QtWidgets import QWidget
             container = QWidget()
             container.setStyleSheet("QWidget { background-color: transparent; border: none; }")
             container.setFixedSize(40, 32)
@@ -926,9 +1095,12 @@ class NodesPage(BaseResourcePage):
             cordon_action = menu.addAction("Cordon Node")
             cordon_action.triggered.connect(lambda: self._handle_menu_action("Cordon Node", resource_name))
             
-            button.setMenu(menu)
-            button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-            button.clicked.connect(lambda: button.showMenu())
+            # Don't set menu directly to avoid automatic arrow
+            # button.setMenu(menu)  # This causes the arrow to appear
+            
+            # Store menu reference and show manually
+            button._menu = menu
+            button.clicked.connect(lambda: self._show_button_menu(button, menu))
             
             return button
             
@@ -940,6 +1112,15 @@ class NodesPage(BaseResourcePage):
             button.setText("⋮")
             button.setFixedSize(24, 24)
             return button
+    
+    def _show_button_menu(self, button, menu):
+        """Show menu at button position without arrow"""
+        try:
+            # Calculate position to show menu below the button
+            global_pos = button.mapToGlobal(button.rect().bottomLeft())
+            menu.exec(global_pos)
+        except Exception as e:
+            logging.error(f"NodesPage: Error showing button menu: {e}")
     
     def _handle_menu_action(self, action, resource_name):
         """Handle menu action selection"""
@@ -1186,13 +1367,20 @@ class NodesPage(BaseResourcePage):
             return Icons.create_text_icon("📟")
     
     def _on_unified_resources_loaded(self, resource_type, result):
-        """Override to handle unified resource loading properly"""
+        """Override to handle unified resource loading properly - WITH PERFORMANCE MONITORING"""
         try:
             if resource_type != self.resource_type:
                 return
-                
+            
+            load_start_time = time.time()
+            
             if result.success:
-                logging.info(f"NodesPage: Successfully loaded {len(result.items)} {resource_type}")
+                # PERFORMANCE MONITORING
+                data_load_time = result.load_time_ms if hasattr(result, 'load_time_ms') else 0
+                total_nodes = len(result.items)
+                from_cache = result.from_cache if hasattr(result, 'from_cache') else False
+                
+                logging.info(f"📊 [PERFORMANCE] NodesPage: Loaded {total_nodes} nodes in {data_load_time:.1f}ms ({'from cache' if from_cache else 'from API'})")
                 
                 # Store the resources for search functionality
                 self.resources = result.items
@@ -1200,24 +1388,39 @@ class NodesPage(BaseResourcePage):
                 # Only show results if we're not in search mode or this is search results
                 if not getattr(self, '_is_searching', False):
                     # Normal load - show all results
+                    ui_start_time = time.time()
                     self.populate_table(result.items)
-                    logging.info(f"NodesPage: Displayed {len(result.items)} nodes normally")
+                    ui_time = (time.time() - ui_start_time) * 1000
+                    
+                    total_time = (time.time() - load_start_time) * 1000
+                    
+                    # PERFORMANCE SUMMARY
+                    logging.info(f"🎯 [PERFORMANCE SUMMARY] NodesPage: "
+                               f"Data: {data_load_time:.1f}ms, "
+                               f"UI: {ui_time:.1f}ms, "
+                               f"Total: {total_time:.1f}ms, "
+                               f"Nodes: {total_nodes}, "
+                               f"Speed: {(total_nodes/total_time*1000):.1f} nodes/sec")
                 else:
                     # We're in search mode - let search handler deal with it
                     logging.info(f"NodesPage: Received {len(result.items)} nodes during search mode")
             else:
-                logging.error(f"NodesPage: Failed to load {resource_type}: {result.error_message}")
+                logging.error(f"❌ [ERROR] NodesPage: Failed to load {resource_type}: {result.error_message}")
                 # Show empty message using populate_table to ensure proper cleanup
                 self.populate_table([])
                 
         except Exception as e:
-            logging.error(f"NodesPage: Error processing unified resources: {e}")
+            error_time = (time.time() - load_start_time) * 1000 if 'load_start_time' in locals() else 0
+            logging.error(f"❌ [EXCEPTION] NodesPage: Error processing unified resources after {error_time:.1f}ms: {e}")
+            import traceback
+            logging.debug(f"NodesPage: Full error traceback: {traceback.format_exc()}")
     
     def _on_search_text_changed(self, text):
-        """Override base class search to use local filtering for nodes"""
+        """Override base class search to use local filtering for nodes - WITH PERFORMANCE MONITORING"""
         try:
+            search_start_time = time.time()
             text = text.strip()
-            logging.info(f"NodesPage: Search text changed to: '{text}'")
+            logging.info(f"🔍 [SEARCH] NodesPage: Search text changed to: '{text}'")
             
             if not text:
                 # Search cleared - restore original data
@@ -1225,21 +1428,30 @@ class NodesPage(BaseResourcePage):
             else:
                 # Perform local search to avoid duplicates
                 if hasattr(self, 'resources') and self.resources:
+                    filter_start_time = time.time()
                     filtered_results = self._filter_resources(text)
+                    filter_time = (time.time() - filter_start_time) * 1000
                     
+                    ui_start_time = time.time()
                     if filtered_results:
                         self.populate_table(filtered_results)
-                        logging.info(f"NodesPage: Local search '{text}' showing {len(filtered_results)} results")
+                        ui_time = (time.time() - ui_start_time) * 1000
+                        total_time = (time.time() - search_start_time) * 1000
+                        
+                        logging.info(f"✅ [SEARCH] NodesPage: Found {len(filtered_results)} results for '{text}' "
+                                   f"(Filter: {filter_time:.1f}ms, UI: {ui_time:.1f}ms, Total: {total_time:.1f}ms)")
                     else:
                         # No results found - show empty message
                         self.populate_table([])
-                        logging.info(f"NodesPage: Local search '{text}' found no matching results")
+                        total_time = (time.time() - search_start_time) * 1000
+                        logging.info(f"🔍 [SEARCH] NodesPage: No matches for '{text}' in {total_time:.1f}ms")
                 else:
-                    logging.warning("NodesPage: No cached resources for search")
+                    logging.warning("⚠️ [SEARCH] NodesPage: No cached resources for search")
                     # Show empty message when no cached resources
                     self.populate_table([])
         except Exception as e:
-            logging.error(f"NodesPage: Error handling search text change: {e}")
+            search_time = (time.time() - search_start_time) * 1000 if 'search_start_time' in locals() else 0
+            logging.error(f"❌ [SEARCH ERROR] NodesPage: Error handling search after {search_time:.1f}ms: {e}")
     
     def _on_search_cleared(self):
         """Handle when search is cleared - ensure data is restored"""
@@ -1357,7 +1569,8 @@ class NodesPage(BaseResourcePage):
     # Override parent methods that are not applicable for nodes
     def _create_checkbox_container(self, row, resource_name):
         """Override to prevent checkbox creation for nodes"""
-        # Parameters unused as checkboxes are not applicable for nodes
+        # Explicitly mark parameters as unused to prevent warnings
+        _ = row, resource_name
         return None
     
     def _add_select_all_to_header(self):

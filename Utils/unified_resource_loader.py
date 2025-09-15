@@ -871,7 +871,7 @@ class ResourceLoadWorker(EnhancedBaseWorker):
         return processed_items
     
     def _process_items_chunked(self, raw_items: List[Any]) -> List[Dict[str, Any]]:
-        """Process raw Kubernetes objects in chunks for heavy data scenarios"""
+        """Process raw Kubernetes objects in chunks for heavy data scenarios - OPTIMIZED FOR NODES"""
         if not raw_items:
             return []
         
@@ -881,6 +881,34 @@ class ResourceLoadWorker(EnhancedBaseWorker):
         
         logging.info(f"Unified Resource Loader: Processing {total_items} {self.config.resource_type} in chunks of {chunk_size}")
         
+        # PERFORMANCE OPTIMIZATION: For nodes, batch load all metrics first
+        all_node_metrics = {}
+        if self.config.resource_type == 'nodes':
+            metrics_start_time = time.time()
+            logging.info(f"🚀 [BATCH METRICS] Starting batch metrics loading for {total_items} nodes...")
+            
+            try:
+                from Services.kubernetes.kubernetes_service import get_kubernetes_service
+                kube_service = get_kubernetes_service()
+                if kube_service and kube_service.metrics_service:
+                    # Get all node names for batch loading
+                    node_names = []
+                    for item in raw_items:
+                        if hasattr(item, 'metadata') and item.metadata and item.metadata.name:
+                            node_names.append(item.metadata.name)
+                    
+                    # Batch load all metrics at once - SINGLE API CALL PATTERN
+                    all_node_metrics = kube_service.metrics_service.get_all_node_metrics(node_names)
+                    
+                    metrics_time = (time.time() - metrics_start_time) * 1000
+                    logging.info(f"✅ [BATCH METRICS] Loaded metrics for {len(all_node_metrics)} nodes in {metrics_time:.1f}ms")
+                else:
+                    logging.warning("⚠️ [BATCH METRICS] Metrics service not available - nodes will show default metrics")
+            except Exception as e:
+                logging.error(f"❌ [BATCH METRICS] Error batch loading node metrics: {e}")
+                all_node_metrics = {}
+        
+        # Process chunks with pre-loaded metrics
         for start_idx in range(0, total_items, chunk_size):
             if self.is_cancelled():
                 break
@@ -897,9 +925,18 @@ class ResourceLoadWorker(EnhancedBaseWorker):
                     break
                     
                 try:
-                    processed_item = self._process_single_item(item)
+                    # Pass pre-loaded metrics for nodes
+                    if self.config.resource_type == 'nodes':
+                        node_name = getattr(getattr(item, 'metadata', None), 'name', None)
+                        node_metrics = all_node_metrics.get(node_name) if node_name else None
+                        processed_item = self._process_single_item(item, preloaded_metrics=node_metrics)
+                    else:
+                        processed_item = self._process_single_item(item)
+                    
                     if processed_item:  # Only add valid items
                         processed_items.append(processed_item)
+                    else:
+                        logging.warning(f"❌ [SKIPPED] Processed item is None/empty for {self.config.resource_type} {getattr(getattr(item, 'metadata', None), 'name', 'unknown')}")
                 except Exception as e:
                     item_name = getattr(getattr(item, 'metadata', None), 'name', 'unknown')
                     logging.warning(f"Error processing {self.config.resource_type} {item_name}: {e}")
@@ -932,12 +969,20 @@ class ResourceLoadWorker(EnhancedBaseWorker):
         
         return processed_batch
     
-    def _process_single_item(self, item: Any) -> Optional[Dict[str, Any]]:
+    def _process_single_item(self, item: Any, preloaded_metrics: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
         """Process a single Kubernetes resource item"""
         try:
             # Extract common fields efficiently
             metadata = item.metadata
+            if not metadata:
+                logging.error(f"❌ [PROCESS] Item has no metadata: {item}")
+                return None
+                
             name = metadata.name
+            if not name:
+                logging.error(f"❌ [PROCESS] Item has no name in metadata: {metadata}")
+                return None
+                
             namespace = getattr(metadata, 'namespace', None)
             creation_timestamp = metadata.creation_timestamp
             
@@ -957,7 +1002,7 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             }
             
             # Add resource-specific fields for performance
-            self._add_resource_specific_fields(processed_item, item)
+            self._add_resource_specific_fields(processed_item, item, preloaded_metrics)
             
             # Add raw_data for UI components that need detailed information
             # Serialize the raw Kubernetes object for components that need it
@@ -975,10 +1020,12 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             return processed_item
             
         except Exception as e:
-            logging.debug(f"Error processing single item: {e}")
+            logging.error(f"❌ [PROCESS ERROR] Error processing single {self.config.resource_type} item: {e}")
+            import traceback
+            logging.error(f"Full traceback: {traceback.format_exc()}")
             return None
     
-    def _add_resource_specific_fields(self, processed_item: Dict[str, Any], item: Any):
+    def _add_resource_specific_fields(self, processed_item: Dict[str, Any], item: Any, preloaded_metrics: Optional[Dict[str, Any]] = None):
         """Add resource-specific fields efficiently"""
         resource_type = self.config.resource_type
         
@@ -986,7 +1033,7 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             self._add_pod_fields(processed_item, item)
         elif resource_type == 'nodes':
             logging.debug(f"Unified Resource Loader: Adding node-specific fields for {processed_item.get('name', 'unknown')}")
-            self._add_node_fields(processed_item, item)
+            self._add_node_fields(processed_item, item, preloaded_metrics)
         elif resource_type == 'services':
             self._add_service_fields(processed_item, item)
         elif resource_type in ['deployments', 'replicasets', 'statefulsets', 'daemonsets']:
@@ -1061,7 +1108,7 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             'init_containers': len(spec.init_containers) if spec and spec.init_containers else 0,
         })
     
-    def _add_node_fields(self, processed_item: Dict[str, Any], node: Any):
+    def _add_node_fields(self, processed_item: Dict[str, Any], node: Any, preloaded_metrics: Optional[Dict[str, Any]] = None):
         """Add node-specific fields efficiently - optimized for heavy data"""
         import time
         process_start = time.time()
@@ -1157,18 +1204,8 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             else:
                 disk_capacity = disk_raw
         
-        # Simulate basic disk usage if disk capacity is available (for development/demo)
+        # Don't simulate disk usage - leave as None to be filled by real metrics
         estimated_disk_usage = None
-        if disk_capacity and disk_capacity != '':
-            try:
-                # Simple estimation: assume 10-80% disk usage for active nodes
-                import random
-                if node_status == 'Ready':
-                    estimated_disk_usage = round(random.uniform(10, 80), 1)
-                else:
-                    estimated_disk_usage = 0
-            except Exception:
-                estimated_disk_usage = None
         
         processed_item.update({
             'status': node_status,
@@ -1192,28 +1229,43 @@ class ResourceLoadWorker(EnhancedBaseWorker):
                 'pods_capacity': status.capacity.get('pods', ''),
             })
         
-        # Get real node metrics using the metrics service
-        logging.debug(f"Unified Resource Loader: Attempting to load metrics for node {processed_item['name']}")
-        try:
-            from Services.kubernetes.kubernetes_service import get_kubernetes_service
-            kube_service = get_kubernetes_service()
-            if kube_service and kube_service.metrics_service:
-                node_metrics = kube_service.metrics_service.get_node_metrics(processed_item['name'])
-                if node_metrics:
-                    processed_item['cpu_usage'] = node_metrics['cpu']['usage']
-                    processed_item['memory_usage'] = node_metrics['memory']['usage']
-                    # Add disk metrics if available
-                    if 'disk' in node_metrics:
-                        processed_item['disk_usage'] = node_metrics['disk']['usage']
-                        logging.info(f"Unified Resource Loader: Added real metrics for node {processed_item['name']}: CPU {node_metrics['cpu']['usage']:.1f}%, Memory {node_metrics['memory']['usage']:.1f}%, Disk {node_metrics['disk']['usage']:.1f}%")
-                    else:
-                        logging.info(f"Unified Resource Loader: Added real metrics for node {processed_item['name']}: CPU {node_metrics['cpu']['usage']:.1f}%, Memory {node_metrics['memory']['usage']:.1f}%")
-                else:
-                    logging.debug(f"Unified Resource Loader: No metrics available for node {processed_item['name']}")
+        # Get real node metrics - OPTIMIZED to use preloaded metrics
+        node_name = processed_item['name']
+        logging.debug(f"Unified Resource Loader: Processing metrics for node {node_name}")
+        
+        # Check if we have preloaded metrics (batch optimization)
+        if preloaded_metrics:
+            # preloaded_metrics is already the individual node's metrics dict
+            # Use preloaded metrics - FAST PATH
+            node_metrics = preloaded_metrics
+            processed_item['cpu_usage'] = node_metrics['cpu']['usage']
+            processed_item['memory_usage'] = node_metrics['memory']['usage']
+            if 'disk' in node_metrics:
+                processed_item['disk_usage'] = node_metrics['disk']['usage']
+                logging.debug(f"✅ [PRELOADED] Node {node_name}: CPU {node_metrics['cpu']['usage']:.1f}%, Memory {node_metrics['memory']['usage']:.1f}%, Disk {node_metrics['disk']['usage']:.1f}%")
             else:
-                logging.debug(f"Unified Resource Loader: Metrics service not available for node {processed_item['name']}")
-        except Exception as e:
-            logging.warning(f"Unified Resource Loader: Could not get real metrics for node {processed_item['name']}: {e}")
+                logging.debug(f"✅ [PRELOADED] Node {node_name}: CPU {node_metrics['cpu']['usage']:.1f}%, Memory {node_metrics['memory']['usage']:.1f}%")
+        else:
+            # Fallback to individual API call - SLOW PATH
+            try:
+                from Services.kubernetes.kubernetes_service import get_kubernetes_service
+                kube_service = get_kubernetes_service()
+                if kube_service and kube_service.metrics_service:
+                    node_metrics = kube_service.metrics_service.get_node_metrics(node_name)
+                    if node_metrics:
+                        processed_item['cpu_usage'] = node_metrics['cpu']['usage']
+                        processed_item['memory_usage'] = node_metrics['memory']['usage']
+                        if 'disk' in node_metrics:
+                            processed_item['disk_usage'] = node_metrics['disk']['usage']
+                            logging.debug(f"🔄 [INDIVIDUAL] Node {node_name}: CPU {node_metrics['cpu']['usage']:.1f}%, Memory {node_metrics['memory']['usage']:.1f}%, Disk {node_metrics['disk']['usage']:.1f}%")
+                        else:
+                            logging.debug(f"🔄 [INDIVIDUAL] Node {node_name}: CPU {node_metrics['cpu']['usage']:.1f}%, Memory {node_metrics['memory']['usage']:.1f}%")
+                    else:
+                        logging.warning(f"⚠️ [NO METRICS] No metrics available for node {node_name}")
+                else:
+                    logging.warning(f"⚠️ [NO SERVICE] Metrics service not available for node {node_name}")
+            except Exception as e:
+                logging.error(f"❌ [METRICS ERROR] Could not get metrics for node {node_name}: {e}")
         
         # Log completion of node processing
         process_time = (time.time() - process_start) * 1000
