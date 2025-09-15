@@ -12,15 +12,154 @@ Features:
 
 import logging
 from datetime import datetime, timezone
+import time
+from collections import deque
 
-from PyQt6.QtWidgets import QHBoxLayout, QLabel, QFrame, QTableWidgetItem, QMessageBox
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QColor, QBrush
+from PyQt6.QtWidgets import QHBoxLayout, QLabel, QFrame, QTableWidgetItem, QMessageBox, QVBoxLayout, QWidget, QSizePolicy
+from PyQt6.QtCore import Qt, QTimer, QRect, pyqtSignal
+from PyQt6.QtGui import QColor, QBrush, QPainter, QPen, QFont, QLinearGradient
 
 from Base_Components.base_resource_page import BaseResourcePage
 from UI.Styles import AppColors, AppStyles
 from UI.Icons import Icons, resource_path
 from Utils.data_formatters import format_age
+
+
+class MetricGraph(QWidget):
+    """Custom line graph widget for displaying node metrics over time"""
+    
+    def __init__(self, title: str, color: str, max_data_points: int = 20):
+        super().__init__()
+        self.title = title
+        self.color = QColor(color)
+        self.max_data_points = max_data_points
+        self.data_points = deque(maxlen=max_data_points)
+        self.timestamps = deque(maxlen=max_data_points)
+        self.current_value = 0.0
+        
+        self.setMinimumSize(250, 140)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setStyleSheet(f"""
+            QWidget {{
+                background-color: {AppColors.CARD_BG};
+                border: 1px solid {AppColors.BORDER_COLOR};
+                border-radius: 6px;
+            }}
+        """)
+    
+    def add_data_point(self, value: float):
+        """Add a new data point to the graph"""
+        self.current_value = value
+        self.data_points.append(value)
+        self.timestamps.append(time.time())
+        self.update()  # Trigger repaint
+    
+    def clear_data(self):
+        """Clear all data points"""
+        self.data_points.clear()
+        self.timestamps.clear()
+        self.current_value = 0.0
+        self.update()
+    
+    def paintEvent(self, event):
+        """Custom paint event to draw the line graph"""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        rect = self.rect()
+        margin = 15
+        left_margin = 40  # Extra space for Y-axis labels
+        bottom_margin = 40  # Extra space for time labels
+        graph_rect = QRect(left_margin, margin + 20, rect.width() - left_margin - margin, rect.height() - margin - 20 - bottom_margin)
+        
+        # Draw background
+        painter.fillRect(rect, QColor(AppColors.CARD_BG))
+        
+        # Draw title
+        painter.setPen(QPen(QColor(AppColors.TEXT_LIGHT), 1))
+        painter.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        painter.drawText(margin, 15, self.title)
+        
+        # Draw current value
+        painter.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        painter.setPen(QPen(self.color, 1))
+        value_text = f"{self.current_value:.1f}%"
+        painter.drawText(rect.width() - 60, 15, value_text)
+        
+        if len(self.data_points) == 0:
+            # No data to draw
+            painter.setPen(QPen(QColor(AppColors.TEXT_SUBTLE), 1))
+            painter.setFont(QFont("Arial", 9))
+            painter.drawText(graph_rect.center().x() - 30, graph_rect.center().y(), "Click node to view metrics")
+            return
+        elif len(self.data_points) == 1:
+            # Single data point - draw as a point with label
+            painter.setPen(QPen(self.color, 2))
+            painter.setBrush(self.color)
+            
+            x = graph_rect.center().x()
+            y = graph_rect.bottom() - int((self.data_points[0] * graph_rect.height()) // 100)
+            painter.drawEllipse(int(x) - 4, int(y) - 4, 8, 8)
+            
+            # Draw connecting line to show trend start
+            painter.setPen(QPen(self.color, 1))
+            painter.drawLine(graph_rect.left() + 20, int(y), graph_rect.right() - 20, int(y))
+            return
+        
+        # Draw grid lines
+        painter.setPen(QPen(QColor(AppColors.BORDER_COLOR), 1))
+        for i in range(5):
+            y = graph_rect.top() + i * graph_rect.height() // 4
+            painter.drawLine(graph_rect.left(), y, graph_rect.right(), y)
+        
+        # Draw Y-axis labels (0%, 25%, 50%, 75%, 100%)
+        painter.setPen(QPen(QColor(AppColors.TEXT_SUBTLE), 1))
+        painter.setFont(QFont("Arial", 8))
+        for i in range(5):
+            y = graph_rect.top() + i * graph_rect.height() // 4
+            label = f"{100 - i * 25}%"
+            painter.drawText(5, y + 3, label)
+        
+        # Draw X-axis time labels if we have data points with timestamps
+        if len(self.data_points) > 1 and len(self.timestamps) > 1:
+            painter.setPen(QPen(QColor(AppColors.TEXT_SUBTLE), 1))
+            painter.setFont(QFont("Arial", 7))
+            
+            import datetime
+            
+            # Show real time labels for first, middle, and last points
+            for i in [0, len(self.data_points) // 2, len(self.data_points) - 1]:
+                if i < len(self.timestamps):
+                    # Convert timestamp to real time format
+                    dt = datetime.datetime.fromtimestamp(self.timestamps[i])
+                    time_label = dt.strftime("%H:%M:%S")
+                    
+                    x = graph_rect.left() + (i * graph_rect.width()) // (len(self.data_points) - 1)
+                    painter.drawText(x - 15, graph_rect.bottom() + 15, time_label)
+        
+        # Draw the line graph
+        if len(self.data_points) > 1:
+            painter.setPen(QPen(self.color, 2))
+            
+            points = []
+            for i, value in enumerate(self.data_points):
+                if len(self.data_points) == 1:
+                    x = graph_rect.center().x()
+                else:
+                    x = graph_rect.left() + (i * graph_rect.width()) // (len(self.data_points) - 1)
+                y = graph_rect.bottom() - int((value * graph_rect.height()) // 100)
+                points.append((int(x), int(y)))
+            
+            # Draw the line
+            for i in range(len(points) - 1):
+                painter.drawLine(int(points[i][0]), int(points[i][1]), int(points[i + 1][0]), int(points[i + 1][1]))
+            
+            # Draw data points
+            painter.setBrush(self.color)
+            for x, y in points:
+                painter.drawEllipse(int(x) - 2, int(y) - 2, 4, 4)
+        
+        painter.end()
 
 
 class NodesPage(BaseResourcePage):
@@ -33,6 +172,16 @@ class NodesPage(BaseResourcePage):
         self.show_namespace_dropdown = False
         
         self.metrics_widget = None
+        self.selected_node_name = None
+        
+        # Create metric graphs - these will be added to layout later
+        self.cpu_graph = None
+        self.memory_graph = None
+        self.disk_graph = None
+        
+        # Timer for updating graphs
+        self.graph_update_timer = QTimer()
+        self.graph_update_timer.timeout.connect(self._update_graphs)
         
         self._setup_ui()
         self._setup_table_styling()
@@ -57,8 +206,8 @@ class NodesPage(BaseResourcePage):
             QTimer.singleShot(300, self._hide_node_specific_elements)  # Second attempt
             QTimer.singleShot(500, self._hide_node_specific_elements)  # Third attempt
             
-            # Create metrics summary
-            self._create_metrics_summary()
+            # Create graphs only (no metrics summary)
+            QTimer.singleShot(200, self._create_metrics_graphs)
             
             # Hide namespace dropdown (nodes are cluster-scoped)
             if hasattr(self, 'namespace_combo') and self.namespace_combo:
@@ -188,12 +337,13 @@ class NodesPage(BaseResourcePage):
             logging.error(f"NodesPage: Error handling row double-click: {e}")
     
     def _on_row_single_click(self, item):
-        """Handle single-click for selection feedback"""
+        """Handle single-click for selection feedback and graph update"""
         try:
             if item and item.row() >= 0:
                 node_name = self._get_node_name_from_row(item.row())
                 if node_name:
                     logging.debug(f"NodesPage: Selected node '{node_name}'")
+                    self._select_node_for_graphs(node_name)
         except Exception as e:
             logging.error(f"NodesPage: Error handling row single-click: {e}")
     
@@ -208,6 +358,14 @@ class NodesPage(BaseResourcePage):
     def _create_metrics_summary(self):
         """Create metrics summary widget showing cluster node stats"""
         QTimer.singleShot(100, self._create_metrics_widget)
+    
+    def _create_metrics_graphs(self):
+        """Create the metrics graphs for the selected node"""
+        try:
+            logging.info("NodesPage: _create_metrics_graphs called")
+            self._create_graphs_widget()  # Call directly instead of using timer
+        except Exception as e:
+            logging.error(f"NodesPage: Error in _create_metrics_graphs: {e}")
     
     def _create_metrics_widget(self):
         """Create the actual metrics widget"""
@@ -244,13 +402,167 @@ class NodesPage(BaseResourcePage):
             layout.addStretch()
             
             # Add to main layout
-            if hasattr(self, 'main_layout') and self.main_layout:
-                self.main_layout.insertWidget(1, self.metrics_widget)
+            page_layout = self.layout()
+            if page_layout:
+                page_layout.insertWidget(1, self.metrics_widget)
                 self.metrics_widget.show()
                 logging.info("NodesPage: Created metrics summary widget")
+            else:
+                logging.error("NodesPage: Page layout not found for metrics widget")
                 
         except Exception as e:
             logging.error(f"NodesPage: Failed to create metrics widget: {e}")
+    
+    def _create_graphs_widget(self):
+        """Create the actual graphs widget"""
+        try:
+            logging.info("NodesPage: _create_graphs_widget called - starting graph creation")
+            # Create container frame
+            self.graphs_container = QFrame()
+            self.graphs_container.setStyleSheet(f"""
+                QFrame {{
+                    background-color: {AppColors.BG_MEDIUM};
+                    border: 1px solid {AppColors.BORDER_COLOR};
+                    border-radius: 8px;
+                    margin: 8px 0px;
+                    padding: 15px;
+                    min-height: 170px;
+                }}
+            """)
+            
+            # Create main vertical layout
+            main_layout = QVBoxLayout(self.graphs_container)
+            
+            # Add title label
+            self.graphs_title_label = QLabel("Selected Node Metrics")
+            self.graphs_title_label.setStyleSheet(f"""
+                color: {AppColors.TEXT_LIGHT}; 
+                font-weight: bold; 
+                font-size: 16px;
+                padding: 0px 0px 5px 0px;
+                margin: 0px;
+            """)
+            self.graphs_title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            main_layout.addWidget(self.graphs_title_label)
+            
+            # Create metric graphs with proper parent
+            self.cpu_graph = MetricGraph("CPU Usage", AppColors.STATUS_WARNING)
+            self.memory_graph = MetricGraph("Memory Usage", AppColors.ACCENT_BLUE) 
+            self.disk_graph = MetricGraph("Disk Usage", AppColors.ACCENT_PURPLE)
+            
+            # Set parent to ensure they don't get deleted
+            self.cpu_graph.setParent(self.graphs_container)
+            self.memory_graph.setParent(self.graphs_container)
+            self.disk_graph.setParent(self.graphs_container)
+            
+            # Create horizontal layout for graphs
+            graphs_layout = QHBoxLayout()
+            graphs_layout.setSpacing(15)
+            graphs_layout.setContentsMargins(0, 5, 0, 5)
+            
+            # Add the three graphs - each takes equal width
+            graphs_layout.addWidget(self.cpu_graph, 1)  # stretch factor 1
+            graphs_layout.addWidget(self.memory_graph, 1)  # stretch factor 1
+            graphs_layout.addWidget(self.disk_graph, 1)  # stretch factor 1
+            
+            main_layout.addLayout(graphs_layout)
+            
+            # Add to main layout at position 1 (right after header controls)
+            page_layout = self.layout()
+            if page_layout:
+                logging.info(f"NodesPage: Page layout found with {page_layout.count()} items")
+                page_layout.insertWidget(1, self.graphs_container)
+                self.graphs_container.show()
+                
+                # Make sure graphs are visible
+                self.cpu_graph.show()
+                self.memory_graph.show()
+                self.disk_graph.show()
+                
+                # Graphs start empty - will show data when node is selected
+                
+                logging.info("NodesPage: Created metrics graphs widget with 3 graphs")
+                logging.debug(f"NodesPage: Graphs created - CPU: {self.cpu_graph is not None}, Memory: {self.memory_graph is not None}, Disk: {self.disk_graph is not None}")
+            else:
+                logging.error("NodesPage: Page layout not found, cannot add graphs")
+                
+        except Exception as e:
+            logging.error(f"NodesPage: Failed to create graphs widget: {e}")
+            import traceback
+            logging.error(f"NodesPage: Stack trace: {traceback.format_exc()}")
+    
+    def _select_node_for_graphs(self, node_name: str):
+        """Select a node and start updating its graphs"""
+        try:
+            self.selected_node_name = node_name
+            
+            # Check if graphs exist before using them
+            if not (self.cpu_graph and self.memory_graph and self.disk_graph):
+                logging.warning("NodesPage: Graphs not initialized yet, skipping selection")
+                return
+            
+            # Clear existing data and add starting baseline
+            self.cpu_graph.clear_data()
+            self.memory_graph.clear_data()
+            self.disk_graph.clear_data()
+            
+            # Add a few baseline data points for smooth graph start
+            for i in range(3):
+                self.cpu_graph.add_data_point(0.0)
+                self.memory_graph.add_data_point(0.0)
+                self.disk_graph.add_data_point(0.0)
+            
+            # Update title to show selected node
+            if hasattr(self, 'graphs_title_label') and self.graphs_title_label:
+                self.graphs_title_label.setText(f"Node Metrics: {node_name}")
+            
+            # Start the update timer (update every 5 seconds)
+            self.graph_update_timer.start(5000)
+            
+            # Get initial data point
+            self._update_graphs()
+            
+            logging.info(f"NodesPage: Started monitoring metrics for node '{node_name}'")
+            
+        except Exception as e:
+            logging.error(f"NodesPage: Error selecting node for graphs: {e}")
+    
+    def _update_graphs(self):
+        """Update the graphs with current node metrics"""
+        try:
+            if not self.selected_node_name:
+                return
+            
+            # Check if graphs exist before using them
+            if not (self.cpu_graph and self.memory_graph and self.disk_graph):
+                logging.warning("NodesPage: Graphs not available for update")
+                return
+            
+            # Get metrics for the selected node
+            from Services.kubernetes.kubernetes_service import get_kubernetes_service
+            kube_service = get_kubernetes_service()
+            
+            if kube_service and kube_service.metrics_service:
+                node_metrics = kube_service.metrics_service.get_node_metrics(self.selected_node_name)
+                if node_metrics:
+                    # Add data points to graphs
+                    self.cpu_graph.add_data_point(node_metrics['cpu']['usage'])
+                    self.memory_graph.add_data_point(node_metrics['memory']['usage'])
+                    
+                    # Add disk usage if available
+                    if 'disk' in node_metrics:
+                        self.disk_graph.add_data_point(node_metrics['disk']['usage'])
+                    else:
+                        self.disk_graph.add_data_point(0.0)  # No disk data available
+                        
+                    logging.debug(f"NodesPage: Updated graphs for node '{self.selected_node_name}': CPU {node_metrics['cpu']['usage']:.1f}%, Memory {node_metrics['memory']['usage']:.1f}%")
+                else:
+                    logging.warning(f"NodesPage: No metrics available for node '{self.selected_node_name}'")
+            else:
+                logging.warning("NodesPage: Metrics service not available")
+                
+        except Exception as e:
+            logging.error(f"NodesPage: Error updating graphs: {e}")
     
     def get_headers(self):
         """Return table column headers"""
@@ -1081,3 +1393,19 @@ class NodesPage(BaseResourcePage):
     def _on_delete_button_clicked(self):
         """Override to prevent delete button clicks"""
         self.delete_selected_resources()
+    
+    def cleanup(self):
+        """Clean up resources when page is destroyed"""
+        try:
+            if hasattr(self, 'graph_update_timer') and self.graph_update_timer:
+                self.graph_update_timer.stop()
+                logging.debug("NodesPage: Stopped graph update timer")
+        except Exception as e:
+            logging.error(f"NodesPage: Error during cleanup: {e}")
+    
+    def __del__(self):
+        """Destructor to ensure cleanup"""
+        try:
+            self.cleanup()
+        except Exception as e:
+            logging.error(f"NodesPage: Error in destructor: {e}")

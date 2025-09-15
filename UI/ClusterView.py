@@ -72,6 +72,9 @@ from Pages.CustomResources.DefinitionsPage import DefinitionsPage
 # Apps page
 from Pages.AppsChartPage import AppsPage
 
+# AI Assistant page
+from Pages.AIAssistantPage import AIAssistantPage
+
 # Page configuration with direct class references (PyInstaller compatible)
 PAGE_CONFIG = {
     # Core pages
@@ -133,6 +136,9 @@ PAGE_CONFIG = {
     
     # Apps page
     'AppsChart': AppsPage,
+    
+    # AI Assistant page
+    'AI Assistant': AIAssistantPage,
 }
 
 # Dropdown menu configuration

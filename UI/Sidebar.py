@@ -683,7 +683,7 @@ class Sidebar(QWidget):
 
         ai_assis_btn = NavIconButton(
             "ai_assis", "AI Assistant", False, False,
-            self.parent_window, self.sidebar_expanded, coming_soon=True  # Add this parameter
+            self.parent_window, self.sidebar_expanded, coming_soon=False  # Enable AI Assistant
         )
 
         self.nav_buttons.append(compare_btn)
