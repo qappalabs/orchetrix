@@ -194,6 +194,7 @@ class NodesPage(BaseResourcePage):
         self.is_disk_usage_enabled = True
         self.is_lazy_loading_enabled = True
         self.is_disk_loading_in_progress = False
+        self.is_table_population_in_progress = False
         
         # Node metrics graphs for real-time monitoring
         self.cpu_metrics_graph = None
@@ -206,6 +207,8 @@ class NodesPage(BaseResourcePage):
         
         self._setup_ui()
         self._setup_table_styling()
+        
+        # Debug wrapper removed - table sorting issue was fixed
         self._setup_table_interactions()
         
         # Ensure unified resource loader connection is active
@@ -402,8 +405,14 @@ class NodesPage(BaseResourcePage):
         """Get node name from table row"""
         try:
             name_item = self.table.item(row, 0)  # Name is in column 0
-            return name_item.text() if name_item else None
-        except Exception:
+            if name_item:
+                node_name = name_item.text().strip()
+                logging.debug(f"NodesPage: Extracted node name '{node_name}' from row {row}")
+                return node_name
+            logging.warning(f"NodesPage: No name item found in row {row}")
+            return None
+        except Exception as e:
+            logging.error(f"NodesPage: Error getting node name from row {row}: {e}")
             return None
     
     def _create_metrics_summary(self):
@@ -539,7 +548,8 @@ class NodesPage(BaseResourcePage):
                 logging.debug(f"NodesPage: Already monitoring node '{node_name}', continuing existing session")
                 return
             
-            # Store the new selection
+            # Update the selection only if different
+            logging.info(f"NodesPage: Switching graph monitoring from '{self.selected_node_name}' to '{node_name}'")
             self.selected_node_name = node_name
             
             # Check if graphs exist before using them
@@ -589,19 +599,19 @@ class NodesPage(BaseResourcePage):
             kube_service = get_kubernetes_service()
             
             if kube_service and kube_service.metrics_service:
+                logging.debug(f"NodesPage: Fetching real-time metrics for selected node '{self.selected_node_name}'")
                 node_metrics = kube_service.metrics_service.get_node_metrics(self.selected_node_name)
                 if node_metrics:
                     # Add data points to graphs
-                    self.cpu_metrics_graph.add_data_point(node_metrics['cpu']['usage'])
-                    self.memory_metrics_graph.add_data_point(node_metrics['memory']['usage'])
+                    cpu_usage = node_metrics['cpu']['usage']
+                    memory_usage = node_metrics['memory']['usage']
+                    disk_usage = node_metrics.get('disk', {}).get('usage', 0.0)
                     
-                    # Add disk usage if available
-                    if 'disk' in node_metrics:
-                        self.disk_metrics_graph.add_data_point(node_metrics['disk']['usage'])
-                    else:
-                        self.disk_metrics_graph.add_data_point(0.0)  # No disk data available
-                        
-                    logging.debug(f"NodesPage: Updated graphs for node '{self.selected_node_name}': CPU {node_metrics['cpu']['usage']:.1f}%, Memory {node_metrics['memory']['usage']:.1f}%")
+                    self.cpu_metrics_graph.add_data_point(cpu_usage)
+                    self.memory_metrics_graph.add_data_point(memory_usage)
+                    self.disk_metrics_graph.add_data_point(disk_usage)
+                    
+                    logging.info(f"NodesPage: Updated graphs for node '{self.selected_node_name}': CPU {cpu_usage:.1f}%, Memory {memory_usage:.1f}%, Disk {disk_usage:.1f}%")
                 else:
                     logging.warning(f"NodesPage: No metrics available for node '{self.selected_node_name}'")
             else:
@@ -730,7 +740,8 @@ class NodesPage(BaseResourcePage):
             if node_name in self.metrics_cache:
                 node_metrics = self.metrics_cache[node_name]
                 if metric_type in node_metrics and metric_field in node_metrics[metric_type]:
-                    return node_metrics[metric_type][metric_field]
+                    value = node_metrics[metric_type][metric_field]
+                    return value
             return None
         except Exception as e:
             logging.debug(f"NodesPage: Error getting cached metric: {e}")
@@ -849,7 +860,6 @@ class NodesPage(BaseResourcePage):
                 include_disk_usage = self.is_disk_usage_enabled and not self.is_lazy_loading_enabled
             
             # Check if metrics cache is still valid
-            cache_key = f"{'with_disk' if include_disk_usage else 'no_disk'}"
             if (current_time - self.last_cache_update_time) < self.cache_ttl_seconds and self.metrics_cache:
                 logging.debug(f"NodesPage: Using cached metrics for {len(self.metrics_cache)} nodes")
                 return
@@ -967,11 +977,31 @@ class NodesPage(BaseResourcePage):
                 logging.error("NodesPage: Table not available")
                 return
             
+            logging.debug(f"NodesPage: populate_table called with {len(resources_data) if resources_data else 0} nodes")
+            
+            # Prevent duplicate population calls
+            if self.is_table_population_in_progress:
+                logging.debug("NodesPage: Table population already in progress, skipping duplicate call")
+                return
+            
+            self.is_table_population_in_progress = True
+            
             self._clear_table_widgets()
             
             if not resources_data:
                 self._show_empty_state()
+                self.is_table_population_in_progress = False
                 return
+            
+            # Remove duplicate nodes by name
+            unique_nodes = {}
+            for node in resources_data:
+                node_name = node.get("name")
+                if node_name and node_name not in unique_nodes:
+                    unique_nodes[node_name] = node
+            
+            resources_data = list(unique_nodes.values())
+            logging.info(f"NodesPage: Filtered to {len(resources_data)} unique nodes")
             
             # Store resources for search
             self.resources = resources_data
@@ -980,10 +1010,19 @@ class NodesPage(BaseResourcePage):
             node_names = [node.get("name") for node in resources_data if node.get("name")]
             if node_names:
                 # Initial fast load without disk usage for performance
+                logging.info(f"NodesPage: Loading fast metrics for nodes: {node_names}")
                 self._load_metrics_batch(node_names, include_disk_usage=False)
+                logging.info(f"NodesPage: Metrics cache now has {len(self.metrics_cache)} nodes")
             
             # Setup table
             self.table.setRowCount(len(resources_data))
+            
+            # CRITICAL FIX: Disable sorting during population to prevent row shuffling
+            sorting_was_enabled = self.table.isSortingEnabled()
+            self.table.setSortingEnabled(False)
+            logging.debug(f"NodesPage: Disabled sorting during table population (was {sorting_was_enabled})")
+            
+            logging.debug(f"NodesPage: Table setup - Row count: {self.table.rowCount()}, Column count: {self.table.columnCount()}")
             
             # PROGRESSIVE LOADING: Show basic data first, then metrics
             start_time = time.time()
@@ -996,7 +1035,9 @@ class NodesPage(BaseResourcePage):
                     self.populate_table_row_basic(row, node)  # Basic info only
                     self._create_action_button_for_row(row, node)
                 except Exception as e:
-                    logging.error(f"NodesPage: Error processing row {row}: {e}")
+                    logging.error(f"NodesPage: Error processing row {row} for node {node.get('name', 'unknown')}: {e}")
+                    import traceback
+                    logging.error(f"NodesPage: Traceback: {traceback.format_exc()}")
             
             basic_time = (time.time() - start_time) * 1000
             logging.info(f"✅ [BASIC DATA] Loaded basic info for {len(resources_data)} nodes in {basic_time:.1f}ms")
@@ -1015,18 +1056,36 @@ class NodesPage(BaseResourcePage):
             total_time = (time.time() - start_time) * 1000
             logging.info(f"✅ [COMPLETE] Progressive loading completed in {total_time:.1f}ms")
             
-            # Start background disk usage loading if enabled
-            if self.is_disk_usage_enabled and self.is_lazy_loading_enabled and node_names:
+            # CRITICAL FIX: Re-enable sorting after population is complete (delayed to prevent immediate sorting)
+            if sorting_was_enabled:
+                def re_enable_sorting():
+                    self.table.setSortingEnabled(True)
+                    logging.debug("NodesPage: Re-enabled table sorting after population (delayed)")
+                
+                # Delay sorting re-enable to prevent immediate sorting of populated data
+                QTimer.singleShot(100, re_enable_sorting)
+            
+            # Start background disk usage loading if enabled and not already in progress
+            if self.is_disk_usage_enabled and self.is_lazy_loading_enabled and node_names and not self.is_disk_loading_in_progress:
                 QTimer.singleShot(500, lambda: self._load_disk_usage_in_background(node_names))
             
         except Exception as e:
             logging.error(f"NodesPage: Error populating table: {e}")
+            # CRITICAL FIX: Ensure sorting is re-enabled even on error (delayed)
+            if 'sorting_was_enabled' in locals() and sorting_was_enabled:
+                def re_enable_sorting_on_error():
+                    self.table.setSortingEnabled(True)
+                    logging.debug("NodesPage: Re-enabled table sorting after error (delayed)")
+                QTimer.singleShot(100, re_enable_sorting_on_error)
+        finally:
+            self.is_table_population_in_progress = False
     
     def populate_table_row_basic(self, row, node):
         """Populate a single table row with basic node data (no metrics) - FAST"""
         try:
             # Column 0: Name
-            name_item = QTableWidgetItem(node.get("name", ""))
+            node_name = node.get("name", "")
+            name_item = QTableWidgetItem(node_name)
             name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             name_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             self.table.setItem(row, 0, name_item)
@@ -1115,6 +1174,7 @@ class NodesPage(BaseResourcePage):
             metrics_start = time.time()
             updated_count = 0
             
+            
             for row, node in enumerate(resources_data):
                 try:
                     node_name = node.get("name")
@@ -1148,6 +1208,7 @@ class NodesPage(BaseResourcePage):
                         
                 except Exception as e:
                     logging.error(f"NodesPage: Error updating metrics for row {row}: {e}")
+            
             
             metrics_time = (time.time() - metrics_start) * 1000
             logging.info(f"✅ [METRICS UPDATE] Updated metrics for {updated_count} nodes in {metrics_time:.1f}ms")
@@ -1222,6 +1283,8 @@ class NodesPage(BaseResourcePage):
                 return
             
             action_btn = self._create_action_button(node_name)
+            if not action_btn:
+                return
             
             # Create container for positioning
             container = QWidget()
