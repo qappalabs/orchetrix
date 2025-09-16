@@ -27,13 +27,13 @@ from UI.Icons import Icons, resource_path
 
 
 
-class MetricGraph(QWidget):
+class NodeMetricsGraph(QWidget):
     """Custom line graph widget for displaying node metrics over time"""
     
     def __init__(self, title: str, color: str, max_data_points: int = 20):
         super().__init__()
-        self.title = title
-        self.color = QColor(color)
+        self.graph_title = title
+        self.graph_color = QColor(color)
         self.max_data_points = max_data_points
         self.data_points = deque(maxlen=max_data_points)
         self.timestamps = deque(maxlen=max_data_points)
@@ -81,11 +81,11 @@ class MetricGraph(QWidget):
         # Draw title
         painter.setPen(QPen(QColor(AppColors.TEXT_LIGHT), 1))
         painter.setFont(QFont("Arial", 10, QFont.Weight.Bold))
-        painter.drawText(margin, 15, self.title)
+        painter.drawText(margin, 15, self.graph_title)
         
         # Draw current value
         painter.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        painter.setPen(QPen(self.color, 1))
+        painter.setPen(QPen(self.graph_color, 1))
         value_text = f"{self.current_value:.1f}%"
         painter.drawText(rect.width() - 60, 15, value_text)
         
@@ -97,8 +97,8 @@ class MetricGraph(QWidget):
             return
         elif len(self.data_points) == 1:
             # Single data point - draw as a point with label
-            painter.setPen(QPen(self.color, 2))
-            painter.setBrush(self.color)
+            painter.setPen(QPen(self.graph_color, 2))
+            painter.setBrush(self.graph_color)
             
             x = graph_rect.center().x()
             y = graph_rect.bottom() - int((self.data_points[0] * graph_rect.height()) // 100)
@@ -142,7 +142,7 @@ class MetricGraph(QWidget):
         
         # Draw the line graph
         if len(self.data_points) > 1:
-            painter.setPen(QPen(self.color, 2))
+            painter.setPen(QPen(self.graph_color, 2))
             
             points = []
             for i, value in enumerate(self.data_points):
@@ -158,7 +158,7 @@ class MetricGraph(QWidget):
                 painter.drawLine(int(points[i][0]), int(points[i][1]), int(points[i + 1][0]), int(points[i + 1][1]))
             
             # Draw data points
-            painter.setBrush(self.color)
+            painter.setBrush(self.graph_color)
             for x, y in points:
                 painter.drawEllipse(int(x) - 2, int(y) - 2, 4, 4)
         
@@ -166,7 +166,15 @@ class MetricGraph(QWidget):
 
 
 class NodesPage(BaseResourcePage):
-    """Production-ready Nodes page for Kubernetes cluster management"""
+    """
+    Kubernetes Nodes Management Page
+    
+    High-performance implementation with:
+    - Lazy-loading disk usage for sub-second table loading
+    - Batch metrics caching for 50+ nodes optimization
+    - Real-time node metrics graphs
+    - Progressive loading with background data fetching
+    """
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -177,19 +185,24 @@ class NodesPage(BaseResourcePage):
         self.metrics_widget = None
         self.selected_node_name = None
         
-        # Batch metrics cache for performance optimization
-        self.batch_metrics_cache = {}
-        self.last_batch_fetch_time = 0
-        self.batch_cache_ttl = 30  # 30 seconds cache TTL
+        # Performance optimization - batch metrics caching
+        self.metrics_cache = {}
+        self.last_cache_update_time = 0
+        self.cache_ttl_seconds = 30
         
-        # Create metric graphs - these will be added to layout later
-        self.cpu_graph = None
-        self.memory_graph = None
-        self.disk_graph = None
+        # Lazy loading configuration for optimal performance
+        self.is_disk_usage_enabled = True
+        self.is_lazy_loading_enabled = True
+        self.is_disk_loading_in_progress = False
         
-        # Timer for updating graphs
-        self.graph_update_timer = QTimer()
-        self.graph_update_timer.timeout.connect(self._update_graphs)
+        # Node metrics graphs for real-time monitoring
+        self.cpu_metrics_graph = None
+        self.memory_metrics_graph = None
+        self.disk_metrics_graph = None
+        
+        # Timer for real-time graph updates
+        self.metrics_update_timer = QTimer()
+        self.metrics_update_timer.timeout.connect(self._update_node_metrics_graphs)
         
         self._setup_ui()
         self._setup_table_styling()
@@ -401,7 +414,7 @@ class NodesPage(BaseResourcePage):
         """Create the metrics graphs for the selected node"""
         try:
             logging.info("NodesPage: _create_metrics_graphs called")
-            self._create_graphs_widget()  # Call directly instead of using timer
+            self._create_node_metrics_graphs_widget()  # Call directly instead of using timer
         except Exception as e:
             logging.error(f"NodesPage: Error in _create_metrics_graphs: {e}")
     
@@ -453,12 +466,12 @@ class NodesPage(BaseResourcePage):
         except Exception as e:
             logging.error(f"NodesPage: Failed to create metrics widget: {e}")
     
-    def _create_graphs_widget(self):
-        """Create the actual graphs widget"""
+    def _create_node_metrics_graphs_widget(self):
+        """Create the node metrics graphs widget container"""
         try:
-            logging.info("NodesPage: _create_graphs_widget called - starting graph creation")
+            logging.info("NodesPage: Creating node metrics graphs widget")
             
-            # Create container frame
+            # Create container frame for graphs
             self.graphs_container = QFrame()
             self.graphs_container.setStyleSheet(f"""
                 QFrame {{
@@ -486,22 +499,22 @@ class NodesPage(BaseResourcePage):
             self.graphs_title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             main_layout.addWidget(self.graphs_title_label)
             
-            # Create metric graphs
-            self.cpu_graph = MetricGraph("CPU Usage", AppColors.STATUS_WARNING)
-            self.memory_graph = MetricGraph("Memory Usage", AppColors.ACCENT_BLUE) 
-            self.disk_graph = MetricGraph("Disk Usage", AppColors.ACCENT_PURPLE)
+            # Create individual metric graphs
+            self.cpu_metrics_graph = NodeMetricsGraph("CPU Usage", AppColors.STATUS_WARNING)
+            self.memory_metrics_graph = NodeMetricsGraph("Memory Usage", AppColors.ACCENT_BLUE) 
+            self.disk_metrics_graph = NodeMetricsGraph("Disk Usage", AppColors.ACCENT_PURPLE)
             
-            # Create horizontal layout for graphs
-            graphs_layout = QHBoxLayout()
-            graphs_layout.setSpacing(15)
-            graphs_layout.setContentsMargins(0, 5, 0, 5)
+            # Create horizontal layout for metric graphs
+            metrics_graphs_layout = QHBoxLayout()
+            metrics_graphs_layout.setSpacing(15)
+            metrics_graphs_layout.setContentsMargins(0, 5, 0, 5)
             
-            # Add the three graphs - each takes equal width
-            graphs_layout.addWidget(self.cpu_graph, 1)  # stretch factor 1
-            graphs_layout.addWidget(self.memory_graph, 1)  # stretch factor 1
-            graphs_layout.addWidget(self.disk_graph, 1)  # stretch factor 1
+            # Add metric graphs with equal width distribution
+            metrics_graphs_layout.addWidget(self.cpu_metrics_graph, 1)
+            metrics_graphs_layout.addWidget(self.memory_metrics_graph, 1)
+            metrics_graphs_layout.addWidget(self.disk_metrics_graph, 1)
             
-            main_layout.addLayout(graphs_layout)
+            main_layout.addLayout(metrics_graphs_layout)
             
             # Add to main layout at position 1 (right after header controls)
             page_layout = self.layout()
@@ -522,7 +535,7 @@ class NodesPage(BaseResourcePage):
         """Select a node and start updating its graphs - optimized to avoid restarts"""
         try:
             # Check if we're already monitoring this node
-            if self.selected_node_name == node_name and self.graph_update_timer.isActive():
+            if self.selected_node_name == node_name and self.metrics_update_timer.isActive():
                 logging.debug(f"NodesPage: Already monitoring node '{node_name}', continuing existing session")
                 return
             
@@ -530,44 +543,44 @@ class NodesPage(BaseResourcePage):
             self.selected_node_name = node_name
             
             # Check if graphs exist before using them
-            if not (self.cpu_graph and self.memory_graph and self.disk_graph):
+            if not (self.cpu_metrics_graph and self.memory_metrics_graph and self.disk_metrics_graph):
                 logging.warning("NodesPage: Graphs not initialized yet, skipping selection")
                 return
             
             # Clear data and reset graphs for new node selection
-            self.cpu_graph.clear_data()
-            self.memory_graph.clear_data()
-            self.disk_graph.clear_data()
+            self.cpu_metrics_graph.clear_data()
+            self.memory_metrics_graph.clear_data()
+            self.disk_metrics_graph.clear_data()
             
             # Add a few baseline data points for smooth graph start
             for _ in range(3):
-                self.cpu_graph.add_data_point(0.0)
-                self.memory_graph.add_data_point(0.0)
-                self.disk_graph.add_data_point(0.0)
+                self.cpu_metrics_graph.add_data_point(0.0)
+                self.memory_metrics_graph.add_data_point(0.0)
+                self.disk_metrics_graph.add_data_point(0.0)
             
             # Update title to show selected node
             if hasattr(self, 'graphs_title_label') and self.graphs_title_label:
                 self.graphs_title_label.setText(f"Node Metrics: {node_name}")
             
             # Start the update timer (update every 5 seconds)
-            self.graph_update_timer.start(5000)
+            self.metrics_update_timer.start(5000)
             
             # Get initial data point
-            self._update_graphs()
+            self._update_node_metrics_graphs()
             
             logging.info(f"NodesPage: Started monitoring metrics for node '{node_name}'")
             
         except Exception as e:
             logging.error(f"NodesPage: Error selecting node for graphs: {e}")
     
-    def _update_graphs(self):
-        """Update the graphs with current node metrics - uses individual calls for real-time data"""
+    def _update_node_metrics_graphs(self):
+        """Update node metrics graphs with current data - uses individual calls for real-time data"""
         try:
             if not self.selected_node_name:
                 return
             
             # Check if graphs exist before using them
-            if not (self.cpu_graph and self.memory_graph and self.disk_graph):
+            if not (self.cpu_metrics_graph and self.memory_metrics_graph and self.disk_metrics_graph):
                 logging.warning("NodesPage: Graphs not available for update")
                 return
             
@@ -579,14 +592,14 @@ class NodesPage(BaseResourcePage):
                 node_metrics = kube_service.metrics_service.get_node_metrics(self.selected_node_name)
                 if node_metrics:
                     # Add data points to graphs
-                    self.cpu_graph.add_data_point(node_metrics['cpu']['usage'])
-                    self.memory_graph.add_data_point(node_metrics['memory']['usage'])
+                    self.cpu_metrics_graph.add_data_point(node_metrics['cpu']['usage'])
+                    self.memory_metrics_graph.add_data_point(node_metrics['memory']['usage'])
                     
                     # Add disk usage if available
                     if 'disk' in node_metrics:
-                        self.disk_graph.add_data_point(node_metrics['disk']['usage'])
+                        self.disk_metrics_graph.add_data_point(node_metrics['disk']['usage'])
                     else:
-                        self.disk_graph.add_data_point(0.0)  # No disk data available
+                        self.disk_metrics_graph.add_data_point(0.0)  # No disk data available
                         
                     logging.debug(f"NodesPage: Updated graphs for node '{self.selected_node_name}': CPU {node_metrics['cpu']['usage']:.1f}%, Memory {node_metrics['memory']['usage']:.1f}%")
                 else:
@@ -712,10 +725,10 @@ class NodesPage(BaseResourcePage):
             logging.error(f"NodesPage: Error populating disk usage column: {e}")
     
     def _get_cached_metric_value(self, node_name, metric_type, metric_field):
-        """Get a specific metric value from batch cache"""
+        """Get a specific metric value from metrics cache"""
         try:
-            if node_name in self.batch_metrics_cache:
-                node_metrics = self.batch_metrics_cache[node_name]
+            if node_name in self.metrics_cache:
+                node_metrics = self.metrics_cache[node_name]
                 if metric_type in node_metrics and metric_field in node_metrics[metric_type]:
                     return node_metrics[metric_type][metric_field]
             return None
@@ -826,45 +839,126 @@ class NodesPage(BaseResourcePage):
             logging.debug(f"Error formatting detailed age: {e}")
             return "Unknown"
     
-    def _load_batch_metrics(self, node_names):
+    def _load_metrics_batch(self, node_names, include_disk_usage=None):
         """Load all node metrics in batch for performance optimization"""
         try:
             current_time = time.time()
             
-            # Check if cache is still valid
-            if (current_time - self.last_batch_fetch_time) < self.batch_cache_ttl and self.batch_metrics_cache:
-                logging.debug(f"NodesPage: Using cached batch metrics for {len(self.batch_metrics_cache)} nodes")
+            # Determine if we should include disk usage
+            if include_disk_usage is None:
+                include_disk_usage = self.is_disk_usage_enabled and not self.is_lazy_loading_enabled
+            
+            # Check if metrics cache is still valid
+            cache_key = f"{'with_disk' if include_disk_usage else 'no_disk'}"
+            if (current_time - self.last_cache_update_time) < self.cache_ttl_seconds and self.metrics_cache:
+                logging.debug(f"NodesPage: Using cached metrics for {len(self.metrics_cache)} nodes")
                 return
+            
+            from Services.kubernetes.kubernetes_service import get_kubernetes_service
+            kubernetes_service = get_kubernetes_service()
+            
+            if kubernetes_service and kubernetes_service.metrics_service:
+                metrics_type = "with disk usage" if include_disk_usage else "fast (no disk)"
+                logging.info(f"🚀 [BATCH METRICS] Loading {metrics_type} metrics for {len(node_names)} nodes...")
+                start_time = time.time()
+                
+                # Use the optimized batch method with disk usage control
+                if hasattr(kubernetes_service.metrics_service, 'get_all_node_metrics_fast'):
+                    node_metrics = kubernetes_service.metrics_service.get_all_node_metrics_fast(node_names, include_disk_usage)
+                else:
+                    # Fallback to existing method
+                    node_metrics = kubernetes_service.metrics_service.get_all_node_metrics(node_names)
+                
+                if node_metrics:
+                    self.metrics_cache = node_metrics
+                    self.last_cache_update_time = current_time
+                    
+                    processing_time = (time.time() - start_time) * 1000
+                    logging.info(f"✅ [BATCH METRICS] Loaded {metrics_type} metrics for {len(node_metrics)} nodes in {processing_time:.1f}ms")
+                else:
+                    logging.warning("NodesPage: No node metrics returned")
+            else:
+                logging.warning("NodesPage: Kubernetes service not available for metrics loading")
+                
+        except Exception as e:
+            logging.error(f"NodesPage: Error loading batch metrics: {e}")
+
+    def _load_disk_usage_in_background(self, node_names):
+        """Load disk usage in background and update table progressively"""
+        try:
+            if self.is_disk_loading_in_progress:
+                logging.debug("NodesPage: Disk loading already in progress, skipping")
+                return
+            
+            self.is_disk_loading_in_progress = True
+            logging.info(f"🔄 [BACKGROUND] Loading disk usage for {len(node_names)} nodes...")
             
             from Services.kubernetes.kubernetes_service import get_kubernetes_service
             kube_service = get_kubernetes_service()
             
             if kube_service and kube_service.metrics_service:
-                logging.info(f"🚀 [BATCH METRICS] Loading metrics for {len(node_names)} nodes...")
                 start_time = time.time()
                 
-                # Use the optimized batch method
-                batch_metrics = kube_service.metrics_service.get_all_node_metrics(node_names)
+                # Load disk usage in background
+                disk_metrics = kube_service.metrics_service.get_all_node_metrics_fast(node_names, include_disk_usage=True)
                 
-                if batch_metrics:
-                    self.batch_metrics_cache = batch_metrics
-                    self.last_batch_fetch_time = current_time
+                if disk_metrics:
+                    # Update the existing cache with disk data
+                    for node_name, metrics in disk_metrics.items():
+                        if node_name in self.metrics_cache and 'disk' in metrics:
+                            self.metrics_cache[node_name]['disk'] = metrics['disk']
+                    
+                    # Update the disk column in the table
+                    self._update_disk_columns_from_cache()
                     
                     processing_time = (time.time() - start_time) * 1000
-                    logging.info(f"✅ [BATCH METRICS] Loaded metrics for {len(batch_metrics)} nodes in {processing_time:.1f}ms")
+                    logging.info(f"✅ [BACKGROUND] Loaded disk usage for {len(disk_metrics)} nodes in {processing_time:.1f}ms")
                 else:
-                    logging.warning("NodesPage: No batch metrics returned")
+                    logging.warning("NodesPage: No disk metrics returned from background loading")
             else:
-                logging.warning("NodesPage: Kubernetes service not available for batch metrics")
+                logging.warning("NodesPage: Kubernetes service not available for background disk loading")
                 
         except Exception as e:
-            logging.error(f"NodesPage: Error loading batch metrics: {e}")
+            logging.error(f"NodesPage: Error loading disk usage in background: {e}")
+        finally:
+            self.is_disk_loading_in_progress = False
+
+    def _update_disk_columns_from_cache(self):
+        """Update disk usage columns in the table from cached data"""
+        try:
+            if not hasattr(self, 'table') or not self.table:
+                return
+            
+            row_count = self.table.rowCount()
+            updated_count = 0
+            
+            for row in range(row_count):
+                try:
+                    # Get node name from first column
+                    name_item = self.table.item(row, 0)
+                    if name_item:
+                        node_name = name_item.text()
+                        
+                        # Get disk usage from cache
+                        disk_usage = self._get_cached_metric_value(node_name, "disk", "usage")
+                        if disk_usage is not None:
+                            self._populate_usage_column(row, 3, disk_usage, "Disk")
+                            updated_count += 1
+                            
+                except Exception as e:
+                    logging.debug(f"NodesPage: Error updating disk for row {row}: {e}")
+            
+            if updated_count > 0:
+                logging.info(f"🔄 [DISK UPDATE] Updated disk usage for {updated_count} nodes in table")
+            
+        except Exception as e:
+            logging.error(f"NodesPage: Error updating disk columns from cache: {e}")
 
     def clear_metrics_cache(self):
-        """Clear the metrics cache to force fresh data"""
-        self.batch_metrics_cache.clear()
-        self.last_batch_fetch_time = 0
-        logging.debug("NodesPage: Cleared metrics cache")
+        """Clear the node metrics cache to force fresh data loading"""
+        self.metrics_cache.clear()
+        self.last_cache_update_time = 0
+        logging.debug("NodesPage: Node metrics cache cleared")
 
     def populate_table(self, resources_data):
         """Populate the table with nodes data - BATCH OPTIMIZED FOR 50+ NODES"""
@@ -885,7 +979,8 @@ class NodesPage(BaseResourcePage):
             # Extract node names and load batch metrics BEFORE table population
             node_names = [node.get("name") for node in resources_data if node.get("name")]
             if node_names:
-                self._load_batch_metrics(node_names)
+                # Initial fast load without disk usage for performance
+                self._load_metrics_batch(node_names, include_disk_usage=False)
             
             # Setup table
             self.table.setRowCount(len(resources_data))
@@ -919,6 +1014,10 @@ class NodesPage(BaseResourcePage):
             
             total_time = (time.time() - start_time) * 1000
             logging.info(f"✅ [COMPLETE] Progressive loading completed in {total_time:.1f}ms")
+            
+            # Start background disk usage loading if enabled
+            if self.is_disk_usage_enabled and self.is_lazy_loading_enabled and node_names:
+                QTimer.singleShot(500, lambda: self._load_disk_usage_in_background(node_names))
             
         except Exception as e:
             logging.error(f"NodesPage: Error populating table: {e}")
@@ -1737,8 +1836,8 @@ class NodesPage(BaseResourcePage):
     def cleanup(self):
         """Clean up resources when page is destroyed"""
         try:
-            if hasattr(self, 'graph_update_timer') and self.graph_update_timer:
-                self.graph_update_timer.stop()
+            if hasattr(self, 'graph_update_timer') and self.metrics_update_timer:
+                self.metrics_update_timer.stop()
                 logging.debug("NodesPage: Stopped graph update timer")
         except Exception as e:
             logging.error(f"NodesPage: Error during cleanup: {e}")

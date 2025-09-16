@@ -256,6 +256,65 @@ class KubernetesMetricsService:
             "pods": {"usage": 0, "count": 0, "capacity": 100}
         }
     
+    def get_all_node_metrics_fast(self, node_names: list = None, include_disk_usage: bool = False) -> Dict[str, Dict[str, Any]]:
+        """Get metrics for all nodes efficiently in batch - ULTRA FAST VERSION"""
+        try:
+            start_time = time.time()
+            
+            # Check cache first for full batch
+            cache_key = f"all_nodes_fast_{'_'.join(sorted(node_names)) if node_names else 'all'}_{include_disk_usage}"
+            cached_metrics = self.cache_service.get_cached_resources('node_metrics_fast', cache_key)
+            if cached_metrics and time.time() - cached_metrics.get('timestamp', 0) < 30:  # 30 second cache
+                logging.info(f"Using cached fast node metrics for {len(cached_metrics.get('data', {}))} nodes")
+                return cached_metrics.get('data', {})
+            
+            # Get all nodes at once
+            nodes_list = self.api_service.v1.list_node()
+            if not nodes_list.items:
+                return {}
+            
+            # Filter nodes if specific names provided
+            if node_names:
+                nodes_list.items = [node for node in nodes_list.items if node.metadata.name in node_names]
+            
+            # Get ALL pods for all namespaces at once (single API call)
+            all_pods = self.api_service.v1.list_pod_for_all_namespaces()
+            
+            # Group pods by node for efficient lookup
+            pods_by_node = {}
+            for pod in all_pods.items:
+                if pod.spec and pod.spec.node_name:
+                    node_name = pod.spec.node_name
+                    if node_name not in pods_by_node:
+                        pods_by_node[node_name] = []
+                    pods_by_node[node_name].append(pod)
+            
+            # Calculate metrics for all nodes
+            all_metrics = {}
+            for node in nodes_list.items:
+                node_name = node.metadata.name
+                try:
+                    metrics = self._calculate_single_node_metrics_fast(node, pods_by_node.get(node_name, []), include_disk_usage)
+                    if metrics:
+                        all_metrics[node_name] = metrics
+                except Exception as e:
+                    logging.warning(f"Error calculating fast metrics for node {node_name}: {e}")
+                    # Set default metrics for failed nodes
+                    all_metrics[node_name] = self._get_default_node_metrics(node_name)
+            
+            # Cache the results
+            cache_data = {'data': all_metrics, 'timestamp': time.time()}
+            self.cache_service.cache_resources('node_metrics_fast', cache_key, cache_data)
+            
+            processing_time = (time.time() - start_time) * 1000
+            disk_text = "with disk" if include_disk_usage else "no disk"
+            logging.info(f"🚀 [FAST BATCH] Calculated {disk_text} metrics for {len(all_metrics)} nodes in {processing_time:.1f}ms")
+            return all_metrics
+            
+        except Exception as e:
+            logging.error(f"Error in fast batch node metrics calculation: {e}")
+            return {}
+
     def get_all_node_metrics(self, node_names: list = None) -> Dict[str, Dict[str, Any]]:
         """Get metrics for all nodes efficiently in batch - PERFORMANCE OPTIMIZED"""
         try:
@@ -393,6 +452,102 @@ class KubernetesMetricsService:
             logging.error(f"Error calculating metrics for node {node.metadata.name}: {e}")
             return self._get_default_node_metrics(node.metadata.name)
     
+    def _calculate_single_node_metrics_fast(self, node, node_pods: list, include_disk_usage: bool = False) -> Optional[Dict[str, Any]]:
+        """Calculate metrics for a single node using pre-fetched pods - FAST VERSION (optional disk)"""
+        try:
+            node_name = node.metadata.name
+            
+            if not node.status or not node.status.capacity:
+                return self._get_default_node_metrics(node_name)
+            
+            # Parse node capacity and allocatable resources
+            cpu_capacity = self._parse_cpu_value(node.status.capacity.get('cpu', '0'))
+            memory_capacity = self._parse_memory_value(node.status.capacity.get('memory', '0Ki'))
+            pods_capacity = int(node.status.capacity.get('pods', '110'))
+            storage_capacity = self._parse_storage_value(node.status.capacity.get('ephemeral-storage', '0Ki'))
+            
+            cpu_allocatable = cpu_capacity
+            memory_allocatable = memory_capacity
+            storage_allocatable = storage_capacity
+            
+            if node.status.allocatable:
+                cpu_allocatable = self._parse_cpu_value(node.status.allocatable.get('cpu', '0'))
+                memory_allocatable = self._parse_memory_value(node.status.allocatable.get('memory', '0Ki'))
+                storage_allocatable = self._parse_storage_value(node.status.allocatable.get('ephemeral-storage', '0Ki'))
+            
+            # Calculate resource usage from pre-fetched pods
+            cpu_requests = 0
+            memory_requests = 0
+            storage_requests = 0
+            running_pods = 0
+            
+            for pod in node_pods:
+                if pod.status and pod.status.phase == "Running":
+                    running_pods += 1
+                    
+                    if pod.spec and pod.spec.containers:
+                        for container in pod.spec.containers:
+                            if container.resources and container.resources.requests:
+                                cpu_requests += self._parse_cpu_value(container.resources.requests.get('cpu', '0'))
+                                memory_requests += self._parse_memory_value(container.resources.requests.get('memory', '0'))
+                                storage_requests += self._parse_storage_value(container.resources.requests.get('ephemeral-storage', '0'))
+            
+            # Calculate usage percentages
+            cpu_usage_percent = (cpu_requests / cpu_capacity * 100) if cpu_capacity > 0 else 0
+            memory_usage_percent = (memory_requests / memory_capacity * 100) if memory_capacity > 0 else 0
+            pods_usage_percent = (running_pods / pods_capacity * 100) if pods_capacity > 0 else 0
+            
+            # Handle disk usage based on parameter
+            if include_disk_usage:
+                # Get real disk usage (slower)
+                real_disk_usage = self._get_node_disk_usage(node_name, storage_capacity)
+                if real_disk_usage is not None:
+                    disk_usage_percent = real_disk_usage
+                else:
+                    # Fallback to storage requests calculation
+                    disk_usage_percent = (storage_requests / storage_capacity * 100) if storage_capacity > 0 else 0
+            else:
+                # Skip disk calculation for speed - use placeholder
+                disk_usage_percent = None  # Will show loading indicator
+            
+            # Ensure percentages are reasonable
+            cpu_usage_percent = min(cpu_usage_percent, 100)
+            memory_usage_percent = min(memory_usage_percent, 100)
+            pods_usage_percent = min(pods_usage_percent, 100)
+            if disk_usage_percent is not None:
+                disk_usage_percent = min(disk_usage_percent, 100)
+            
+            return {
+                "name": node_name,
+                "cpu": {
+                    "usage": round(cpu_usage_percent, 2),
+                    "requests": round(cpu_requests, 2),
+                    "capacity": round(cpu_capacity, 2),
+                    "allocatable": round(cpu_allocatable, 2)
+                },
+                "memory": {
+                    "usage": round(memory_usage_percent, 2),
+                    "requests": round(memory_requests / (1024**2), 2),
+                    "capacity": round(memory_capacity / (1024**2), 2),
+                    "allocatable": round(memory_allocatable / (1024**2), 2)
+                },
+                "disk": {
+                    "usage": round(disk_usage_percent, 2) if disk_usage_percent is not None else None,
+                    "requests": round(storage_requests / (1024**3), 2),
+                    "capacity": round(storage_capacity / (1024**3), 2),
+                    "allocatable": round(storage_allocatable / (1024**3), 2)
+                },
+                "pods": {
+                    "usage": round(pods_usage_percent, 2),
+                    "count": running_pods,
+                    "capacity": pods_capacity
+                }
+            }
+            
+        except Exception as e:
+            logging.error(f"Error calculating fast metrics for node {node.metadata.name}: {e}")
+            return self._get_default_node_metrics(node.metadata.name)
+
     def _get_default_node_metrics(self, node_name: str) -> Dict[str, Any]:
         """Return default metrics when calculation fails"""
         return {
