@@ -347,7 +347,14 @@ class KubernetesMetricsService:
             cpu_usage_percent = (cpu_requests / cpu_capacity * 100) if cpu_capacity > 0 else 0
             memory_usage_percent = (memory_requests / memory_capacity * 100) if memory_capacity > 0 else 0
             pods_usage_percent = (running_pods / pods_capacity * 100) if pods_capacity > 0 else 0
-            disk_usage_percent = (storage_requests / storage_capacity * 100) if storage_capacity > 0 else 0
+            
+            # Get real disk usage instead of just storage requests
+            real_disk_usage = self._get_node_disk_usage(node_name, storage_capacity)
+            if real_disk_usage is not None:
+                disk_usage_percent = real_disk_usage
+            else:
+                # Fallback to storage requests calculation
+                disk_usage_percent = (storage_requests / storage_capacity * 100) if storage_capacity > 0 else 0
             
             # Ensure percentages are reasonable
             cpu_usage_percent = min(cpu_usage_percent, 100)

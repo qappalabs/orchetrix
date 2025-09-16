@@ -1,13 +1,14 @@
 """
-NodesPage - Production Kubernetes Nodes Management Interface
+NodesPage - Kubernetes Nodes Management Interface
 
-A clean, efficient implementation for managing Kubernetes cluster nodes.
+Clean, efficient implementation for managing Kubernetes cluster nodes.
 Features:
-- Real-time node metrics (CPU, Memory, Disk usage)
-- Colored status indicators and usage percentages
-- Interactive detail page integration
+- Real-time node metrics with accurate disk usage from cluster data
+- Colored status indicators and usage percentages  
+- Interactive graphs and detail pages
 - Node management actions (drain, cordon)
-- Comprehensive search and filtering
+- Optimized search and filtering
+- No dummy data - all metrics from real Kubernetes APIs
 """
 
 import logging
@@ -16,13 +17,13 @@ import time
 from collections import deque
 
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QFrame, QTableWidgetItem, QMessageBox, QVBoxLayout, QWidget, QSizePolicy, QApplication
-from PyQt6.QtCore import Qt, QTimer, QRect, pyqtSignal
-from PyQt6.QtGui import QColor, QBrush, QPainter, QPen, QFont, QLinearGradient
+from PyQt6.QtCore import Qt, QTimer, QRect
+from PyQt6.QtGui import QColor, QBrush, QPainter, QPen, QFont
 
 from Base_Components.base_resource_page import BaseResourcePage
 from UI.Styles import AppColors
 from UI.Icons import Icons, resource_path
-from Utils.data_formatters import format_age
+# Removed unused format_age import
 
 
 
@@ -62,8 +63,9 @@ class MetricGraph(QWidget):
         self.current_value = 0.0
         self.update()
     
-    def paintEvent(self, event):
+    def paintEvent(self, event):  
         """Custom paint event to draw the line graph"""
+        del event  # Required by PyQt6 but not used
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
@@ -175,6 +177,11 @@ class NodesPage(BaseResourcePage):
         self.metrics_widget = None
         self.selected_node_name = None
         
+        # Batch metrics cache for performance optimization
+        self.batch_metrics_cache = {}
+        self.last_batch_fetch_time = 0
+        self.batch_cache_ttl = 30  # 30 seconds cache TTL
+        
         # Create metric graphs - these will be added to layout later
         self.cpu_graph = None
         self.memory_graph = None
@@ -184,11 +191,12 @@ class NodesPage(BaseResourcePage):
         self.graph_update_timer = QTimer()
         self.graph_update_timer.timeout.connect(self._update_graphs)
         
-# Removed complex progressive loading components
-        
         self._setup_ui()
         self._setup_table_styling()
         self._setup_table_interactions()
+        
+        # Ensure unified resource loader connection is active
+        self._connect_to_unified_loader()
         
         logging.info("NodesPage: Initialized successfully")
     
@@ -204,13 +212,11 @@ class NodesPage(BaseResourcePage):
             self.show_select_all = False
             self.show_delete_button = False
             
-            # Hide elements with multiple delays to ensure they exist
+            # Initialize UI components with proper timing
+            QTimer.singleShot(50, self._verify_table_setup)
             QTimer.singleShot(100, self._hide_node_specific_elements)
-            QTimer.singleShot(300, self._hide_node_specific_elements)  # Second attempt
-            QTimer.singleShot(500, self._hide_node_specific_elements)  # Third attempt
-            
-            # Create graphs only (no metrics summary)
             QTimer.singleShot(200, self._create_metrics_graphs)
+            QTimer.singleShot(500, self._finalize_ui_setup)
             
             # Hide namespace dropdown (nodes are cluster-scoped)
             if hasattr(self, 'namespace_combo') and self.namespace_combo:
@@ -218,6 +224,38 @@ class NodesPage(BaseResourcePage):
                 
         except Exception as e:
             logging.error(f"NodesPage: Failed to setup UI: {e}")
+    
+    def _verify_table_setup(self):
+        """Verify table is properly set up"""
+        try:
+            if not hasattr(self, 'table') or not self.table:
+                logging.error("NodesPage: Table not found during verification")
+                return
+            
+            headers = self.get_headers()
+            if self.table.columnCount() != len(headers):
+                logging.error(f"NodesPage: Column count mismatch - expected {len(headers)}, got {self.table.columnCount()}")
+                return
+            
+            # Verify headers are set correctly
+            for i, expected_header in enumerate(headers):
+                item = self.table.horizontalHeaderItem(i)
+                if not item or item.text() != expected_header:
+                    logging.warning(f"NodesPage: Header mismatch at column {i} - expected '{expected_header}', got '{item.text() if item else None}'")
+            
+            logging.info(f"NodesPage: Table verification complete - {len(headers)} columns configured")
+            
+        except Exception as e:
+            logging.error(f"NodesPage: Error during table verification: {e}")
+    
+    def _finalize_ui_setup(self):
+        """Final UI setup after all components are initialized"""
+        try:
+            # Ensure all node-specific elements are properly hidden
+            self._hide_node_specific_elements()
+            logging.info("NodesPage: UI setup finalized")
+        except Exception as e:
+            logging.error(f"NodesPage: Error in final UI setup: {e}")
     
     def _hide_node_specific_elements(self):
         """Hide UI elements not applicable for nodes"""
@@ -235,98 +273,95 @@ class NodesPage(BaseResourcePage):
             logging.error(f"NodesPage: Error hiding UI elements: {e}")
     
     def _find_and_hide_delete_elements(self):
-        """Comprehensively find and hide all delete-related elements"""
+        """Hide delete-related elements"""
         try:
             # Hide direct delete button reference
             if hasattr(self, 'delete_button') and self.delete_button:
-                self.delete_button.hide()
-                self.delete_button.setVisible(False)
-                self.delete_button.setEnabled(False)
-                logging.info("NodesPage: Hidden direct delete button")
+                self._hide_element(self.delete_button, "direct delete button")
             
-            # Search for delete buttons in the widget hierarchy
-            def hide_delete_widgets(widget):
-                try:
-                    if hasattr(widget, 'children'):
-                        for child in widget.children():
-                            # Check button text
-                            if hasattr(child, 'text') and child.text():
-                                text = child.text().lower()
-                                if any(keyword in text for keyword in ['delete', 'remove', 'selected']):
-                                    child.hide()
-                                    child.setVisible(False)
-                                    child.setEnabled(False)
-                                    logging.info(f"NodesPage: Hidden button with text: {child.text()}")
-                            
-                            # Check tooltip
-                            if hasattr(child, 'toolTip') and child.toolTip():
-                                tooltip = child.toolTip().lower()
-                                if any(keyword in tooltip for keyword in ['delete', 'remove', 'selected']):
-                                    child.hide()
-                                    child.setVisible(False)
-                                    child.setEnabled(False)
-                                    logging.info(f"NodesPage: Hidden button with tooltip: {child.toolTip()}")
-                            
-                            # Check object name
-                            if hasattr(child, 'objectName') and child.objectName():
-                                name = child.objectName().lower()
-                                if any(keyword in name for keyword in ['delete', 'remove']):
-                                    child.hide()
-                                    child.setVisible(False)
-                                    child.setEnabled(False)
-                                    logging.info(f"NodesPage: Hidden button with name: {child.objectName()}")
-                            
-                            # Recursively check children
-                            hide_delete_widgets(child)
-                except Exception:
-                    pass
-            
-            # Apply to the entire page
-            hide_delete_widgets(self)
+            # Hide delete elements recursively
+            self._hide_delete_widgets_recursive(self)
             
         except Exception as e:
-            logging.error(f"NodesPage: Error finding and hiding delete elements: {e}")
+            logging.error(f"NodesPage: Error hiding delete elements: {e}")
+    
+    def _hide_element(self, element, description="element"):
+        """Hide and disable a UI element"""
+        element.hide()
+        element.setVisible(False)
+        element.setEnabled(False)
+        logging.debug(f"NodesPage: Hidden {description}")
+    
+    def _hide_delete_widgets_recursive(self, widget):
+        """Recursively hide delete-related widgets"""
+        try:
+            if not hasattr(widget, 'children'):
+                return
+                
+            for child in widget.children():
+                # Check for delete-related keywords in various properties
+                keywords = ['delete', 'remove', 'selected']
+                
+                if self._widget_contains_keywords(child, keywords):
+                    self._hide_element(child, f"widget with delete keyword")
+                
+                # Continue recursively
+                self._hide_delete_widgets_recursive(child)
+                
+        except Exception:
+            pass  # Ignore errors in recursive traversal
+    
+    def _widget_contains_keywords(self, widget, keywords):
+        """Check if widget contains any of the specified keywords"""
+        properties_to_check = [
+            (hasattr(widget, 'text') and widget.text(), 'text'),
+            (hasattr(widget, 'toolTip') and widget.toolTip(), 'tooltip'),
+            (hasattr(widget, 'objectName') and widget.objectName(), 'objectName')
+        ]
+        
+        for prop_value, _ in properties_to_check:
+            if prop_value and any(keyword in prop_value.lower() for keyword in keywords):
+                return True
+        return False
     
     def _setup_table_styling(self):
-        """Setup custom table styling to support colored cells"""
-        QTimer.singleShot(200, self._apply_table_styles)
+        """Setup custom table styling and interactions"""
+        QTimer.singleShot(200, self._apply_table_configuration)
     
-    def _apply_table_styles(self):
-        """Apply custom styles that allow individual cell colors"""
+    def _apply_table_configuration(self):
+        """Apply table styles and connect events"""
         try:
-            if hasattr(self, 'table') and self.table:
-                custom_style = f"""
-                    QTableWidget {{
-                        background-color: {AppColors.CARD_BG};
-                        border: none;
-                        gridline-color: transparent;
-                        outline: none;
-                        selection-background-color: rgba(53, 132, 228, 0.15);
-                        alternate-background-color: transparent;
-                    }}
-                    QTableWidget::item {{
-                        border: none;
-                        padding: 8px;
-                    }}
-                """
-                self.table.setStyleSheet(custom_style)
-                logging.info("NodesPage: Applied custom table styling")
+            if not hasattr(self, 'table') or not self.table:
+                return
+                
+            # Apply custom styling
+            custom_style = f"""
+                QTableWidget {{
+                    background-color: {AppColors.CARD_BG};
+                    border: none;
+                    gridline-color: transparent;
+                    outline: none;
+                    selection-background-color: rgba(53, 132, 228, 0.15);
+                    alternate-background-color: transparent;
+                }}
+                QTableWidget::item {{
+                    border: none;
+                    padding: 8px;
+                }}
+            """
+            self.table.setStyleSheet(custom_style)
+            
+            # Connect interaction events
+            self.table.itemDoubleClicked.connect(self._on_row_double_click)
+            self.table.itemClicked.connect(self._on_row_single_click)
+            
+            logging.info("NodesPage: Applied table configuration")
         except Exception as e:
-            logging.error(f"NodesPage: Failed to apply table styling: {e}")
+            logging.error(f"NodesPage: Failed to configure table: {e}")
     
     def _setup_table_interactions(self):
-        """Setup table click handlers for node interaction"""
-        QTimer.singleShot(300, self._connect_table_events)
-    
-    def _connect_table_events(self):
-        """Connect table interaction events"""
-        try:
-            if hasattr(self, 'table') and self.table:
-                self.table.itemDoubleClicked.connect(self._on_row_double_click)
-                self.table.itemClicked.connect(self._on_row_single_click)
-                logging.info("NodesPage: Connected table interaction events")
-        except Exception as e:
-            logging.error(f"NodesPage: Failed to connect table events: {e}")
+        """Setup table interactions - now handled in _apply_table_configuration"""
+        pass  # Merged into _apply_table_configuration
     
     def _on_row_double_click(self, item):
         """Handle double-click to open node detail page"""
@@ -484,8 +519,14 @@ class NodesPage(BaseResourcePage):
             logging.error(f"NodesPage: Stack trace: {traceback.format_exc()}")
     
     def _select_node_for_graphs(self, node_name: str):
-        """Select a node and start updating its graphs"""
+        """Select a node and start updating its graphs - optimized to avoid restarts"""
         try:
+            # Check if we're already monitoring this node
+            if self.selected_node_name == node_name and self.graph_update_timer.isActive():
+                logging.debug(f"NodesPage: Already monitoring node '{node_name}', continuing existing session")
+                return
+            
+            # Store the new selection
             self.selected_node_name = node_name
             
             # Check if graphs exist before using them
@@ -493,7 +534,7 @@ class NodesPage(BaseResourcePage):
                 logging.warning("NodesPage: Graphs not initialized yet, skipping selection")
                 return
             
-            # Clear existing data and add starting baseline
+            # Clear data and reset graphs for new node selection
             self.cpu_graph.clear_data()
             self.memory_graph.clear_data()
             self.disk_graph.clear_data()
@@ -520,7 +561,7 @@ class NodesPage(BaseResourcePage):
             logging.error(f"NodesPage: Error selecting node for graphs: {e}")
     
     def _update_graphs(self):
-        """Update the graphs with current node metrics"""
+        """Update the graphs with current node metrics - uses individual calls for real-time data"""
         try:
             if not self.selected_node_name:
                 return
@@ -530,7 +571,7 @@ class NodesPage(BaseResourcePage):
                 logging.warning("NodesPage: Graphs not available for update")
                 return
             
-            # Get metrics for the selected node
+            # For graphs, we want real-time data so use individual calls
             from Services.kubernetes.kubernetes_service import get_kubernetes_service
             kube_service = get_kubernetes_service()
             
@@ -572,11 +613,17 @@ class NodesPage(BaseResourcePage):
             name_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             self.table.setItem(row, 0, name_item)
             
-            # Column 1: CPU Usage
-            self._populate_usage_column(row, 1, node.get("cpu_usage"), "CPU")
+            # Column 1: CPU Usage - use cached metrics for performance
+            cpu_usage = self._get_cached_metric_value(node.get("name"), "cpu", "usage")
+            if cpu_usage is None:
+                cpu_usage = node.get("cpu_usage")
+            self._populate_usage_column(row, 1, cpu_usage, "CPU")
             
-            # Column 2: Memory Usage  
-            self._populate_usage_column(row, 2, node.get("memory_usage"), "Memory")
+            # Column 2: Memory Usage - use cached metrics for performance
+            memory_usage = self._get_cached_metric_value(node.get("name"), "memory", "usage")
+            if memory_usage is None:
+                memory_usage = node.get("memory_usage")
+            self._populate_usage_column(row, 2, memory_usage, "Memory")
             
             # Column 3: Disk Usage - get fresh metrics if needed
             self._populate_disk_usage_column(row, 3, node)
@@ -645,47 +692,35 @@ class NodesPage(BaseResourcePage):
             logging.error(f"NodesPage: Error populating {metric_type} column: {e}")
     
     def _populate_disk_usage_column(self, row, col, node):
-        """Populate disk usage column with fresh metrics if needed"""
+        """Populate disk usage column with batch-cached metrics for performance"""
         try:
-            disk_usage = node.get("disk_usage") if node else None
+            node_name = node.get("name") if node else None
+            if not node_name:
+                self._populate_usage_column(row, col, None, "Disk")
+                return
             
-            # Always try to get fresh metrics for disk usage to ensure real data
-            fresh_usage = self._get_fresh_disk_usage(row)
-            if fresh_usage is not None:
-                disk_usage = fresh_usage
-                # Update the node data with the fresh value for consistency
-                if node:
-                    node["disk_usage"] = fresh_usage
-                logging.debug(f"NodesPage: Updated disk usage with fresh data: {fresh_usage:.1f}%")
-            elif disk_usage is None:
-                # If we can't get fresh data and have no cached data, show loading
-                disk_usage = None
+            # Use batch metrics cache for performance
+            disk_usage = self._get_cached_metric_value(node_name, "disk", "usage")
+            
+            # Fallback to node data if no cached metrics
+            if disk_usage is None:
+                disk_usage = node.get("disk_usage")
             
             self._populate_usage_column(row, col, disk_usage, "Disk")
             
         except Exception as e:
             logging.error(f"NodesPage: Error populating disk usage column: {e}")
     
-    def _get_fresh_disk_usage(self, row):
-        """Get fresh disk usage for a specific node row"""
+    def _get_cached_metric_value(self, node_name, metric_type, metric_field):
+        """Get a specific metric value from batch cache"""
         try:
-            node_name = self._get_node_name_from_row(row)
-            if not node_name:
-                return None
-            
-            from Services.kubernetes.kubernetes_service import get_kubernetes_service
-            kube_service = get_kubernetes_service()
-            
-            if kube_service and kube_service.metrics_service:
-                node_metrics = kube_service.metrics_service.get_node_metrics(node_name)
-                if node_metrics and 'disk' in node_metrics:
-                    disk_usage = node_metrics['disk']['usage']
-                    logging.debug(f"NodesPage: Fresh disk usage for {node_name}: {disk_usage:.1f}%")
-                    return disk_usage
-            
+            if node_name in self.batch_metrics_cache:
+                node_metrics = self.batch_metrics_cache[node_name]
+                if metric_type in node_metrics and metric_field in node_metrics[metric_type]:
+                    return node_metrics[metric_type][metric_field]
             return None
         except Exception as e:
-            logging.error(f"NodesPage: Error getting fresh disk usage: {e}")
+            logging.debug(f"NodesPage: Error getting cached metric: {e}")
             return None
     
     def _populate_status_column(self, row, col, status):
@@ -791,8 +826,48 @@ class NodesPage(BaseResourcePage):
             logging.debug(f"Error formatting detailed age: {e}")
             return "Unknown"
     
+    def _load_batch_metrics(self, node_names):
+        """Load all node metrics in batch for performance optimization"""
+        try:
+            current_time = time.time()
+            
+            # Check if cache is still valid
+            if (current_time - self.last_batch_fetch_time) < self.batch_cache_ttl and self.batch_metrics_cache:
+                logging.debug(f"NodesPage: Using cached batch metrics for {len(self.batch_metrics_cache)} nodes")
+                return
+            
+            from Services.kubernetes.kubernetes_service import get_kubernetes_service
+            kube_service = get_kubernetes_service()
+            
+            if kube_service and kube_service.metrics_service:
+                logging.info(f"🚀 [BATCH METRICS] Loading metrics for {len(node_names)} nodes...")
+                start_time = time.time()
+                
+                # Use the optimized batch method
+                batch_metrics = kube_service.metrics_service.get_all_node_metrics(node_names)
+                
+                if batch_metrics:
+                    self.batch_metrics_cache = batch_metrics
+                    self.last_batch_fetch_time = current_time
+                    
+                    processing_time = (time.time() - start_time) * 1000
+                    logging.info(f"✅ [BATCH METRICS] Loaded metrics for {len(batch_metrics)} nodes in {processing_time:.1f}ms")
+                else:
+                    logging.warning("NodesPage: No batch metrics returned")
+            else:
+                logging.warning("NodesPage: Kubernetes service not available for batch metrics")
+                
+        except Exception as e:
+            logging.error(f"NodesPage: Error loading batch metrics: {e}")
+
+    def clear_metrics_cache(self):
+        """Clear the metrics cache to force fresh data"""
+        self.batch_metrics_cache.clear()
+        self.last_batch_fetch_time = 0
+        logging.debug("NodesPage: Cleared metrics cache")
+
     def populate_table(self, resources_data):
-        """Populate the table with nodes data - PROGRESSIVE LOADING OPTIMIZED"""
+        """Populate the table with nodes data - BATCH OPTIMIZED FOR 50+ NODES"""
         try:
             if not hasattr(self, 'table') or not self.table:
                 logging.error("NodesPage: Table not available")
@@ -806,6 +881,11 @@ class NodesPage(BaseResourcePage):
             
             # Store resources for search
             self.resources = resources_data
+            
+            # Extract node names and load batch metrics BEFORE table population
+            node_names = [node.get("name") for node in resources_data if node.get("name")]
+            if node_names:
+                self._load_batch_metrics(node_names)
             
             # Setup table
             self.table.setRowCount(len(resources_data))
@@ -852,14 +932,20 @@ class NodesPage(BaseResourcePage):
             name_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             self.table.setItem(row, 0, name_item)
             
-            # Column 1-2: CPU, Memory Usage - Show loading placeholder if needed
-            for col in [1, 2]:
-                metric_type = ["CPU", "Memory"][col-1]
-                usage_value = node.get(f"{metric_type.lower()}_usage")
-                if usage_value is not None:
-                    self._populate_usage_column(row, col, usage_value, metric_type)
-                else:
-                    self._populate_loading_column(row, col, metric_type)
+            # Column 1-2: CPU, Memory Usage - Use cached metrics for performance
+            node_name = node.get("name")
+            
+            # CPU Usage
+            cpu_usage = self._get_cached_metric_value(node_name, "cpu", "usage")
+            if cpu_usage is None:
+                cpu_usage = node.get("cpu_usage")
+            self._populate_usage_column(row, 1, cpu_usage, "CPU")
+            
+            # Memory Usage  
+            memory_usage = self._get_cached_metric_value(node_name, "memory", "usage")
+            if memory_usage is None:
+                memory_usage = node.get("memory_usage")
+            self._populate_usage_column(row, 2, memory_usage, "Memory")
             
             # Column 3: Disk Usage - handle specially with fresh metrics
             self._populate_disk_usage_column(row, 3, node)
@@ -932,16 +1018,28 @@ class NodesPage(BaseResourcePage):
             
             for row, node in enumerate(resources_data):
                 try:
-                    # Update CPU column if metrics available
-                    if node.get("cpu_usage") is not None:
-                        self._populate_usage_column(row, 1, node.get("cpu_usage"), "CPU")
+                    node_name = node.get("name")
                     
-                    # Update Memory column if metrics available  
-                    if node.get("memory_usage") is not None:
-                        self._populate_usage_column(row, 2, node.get("memory_usage"), "Memory")
+                    # Update CPU column with cached metrics
+                    cpu_usage = self._get_cached_metric_value(node_name, "cpu", "usage")
+                    if cpu_usage is None:
+                        cpu_usage = node.get("cpu_usage")
+                    if cpu_usage is not None:
+                        self._populate_usage_column(row, 1, cpu_usage, "CPU")
                     
-                    # Update Disk column - use consolidated method
-                    self._populate_disk_usage_column(row, 3, node)
+                    # Update Memory column with cached metrics
+                    memory_usage = self._get_cached_metric_value(node_name, "memory", "usage")
+                    if memory_usage is None:
+                        memory_usage = node.get("memory_usage")
+                    if memory_usage is not None:
+                        self._populate_usage_column(row, 2, memory_usage, "Memory")
+                    
+                    # Update Disk column with cached metrics
+                    disk_usage = self._get_cached_metric_value(node_name, "disk", "usage")
+                    if disk_usage is None:
+                        disk_usage = node.get("disk_usage")
+                    if disk_usage is not None:
+                        self._populate_usage_column(row, 3, disk_usage, "Disk")
                     
                     updated_count += 1
                     
@@ -1569,29 +1667,11 @@ class NodesPage(BaseResourcePage):
     # Override parent methods that are not applicable for nodes
     def _create_checkbox_container(self, row, resource_name):
         """Override to prevent checkbox creation for nodes"""
-        # Explicitly mark parameters as unused to prevent warnings
-        _ = row, resource_name
+        del row, resource_name  # Mark as unused
         return None
-    
-    def _add_select_all_to_header(self):
-        """Override to prevent select-all checkbox for nodes"""
-        pass
-    
-    def _create_select_all_checkbox(self):
-        """Override to prevent select-all checkbox creation"""
-        return None
-    
-    def _create_delete_button(self):
-        """Override to prevent delete button creation"""
-        return None
-    
-    def _setup_delete_functionality(self):
-        """Override to prevent delete functionality setup"""
-        pass
     
     def delete_selected_resources(self):
         """Override to prevent delete operations on nodes"""
-        logging.warning("NodesPage: Delete operation not allowed on nodes")
         from PyQt6.QtWidgets import QMessageBox
         QMessageBox.information(
             self, "Operation Not Allowed",
@@ -1599,13 +1679,60 @@ class NodesPage(BaseResourcePage):
             "Node management should be done through cluster administration tools."
         )
     
-    def _handle_delete_selected(self):
-        """Override to prevent delete operations"""
-        self.delete_selected_resources()
+    # Additional overrides to prevent node deletion - simplified
+    def _add_select_all_to_header(self): pass
+    def _create_select_all_checkbox(self): return None
+    def _create_delete_button(self): return None
+    def _setup_delete_functionality(self): pass
+    def _handle_delete_selected(self): self.delete_selected_resources()
+    def _on_delete_button_clicked(self): self.delete_selected_resources()
     
-    def _on_delete_button_clicked(self):
-        """Override to prevent delete button clicks"""
-        self.delete_selected_resources()
+    def _connect_to_unified_loader(self):
+        """Ensure connection to unified resource loader for data loading"""
+        try:
+            from Utils.unified_resource_loader import get_unified_resource_loader
+            loader = get_unified_resource_loader()
+            if loader:
+                # Ensure signals are connected (base class might not have connected them yet)
+                try:
+                    loader.loading_completed.disconnect(self._on_unified_resources_loaded)
+                except:
+                    pass  # Connection doesn't exist, which is fine
+                
+                try:
+                    loader.loading_error.disconnect(self._on_unified_loading_error)
+                except:
+                    pass  # Connection doesn't exist, which is fine
+                
+                # Connect the signals
+                loader.loading_completed.connect(self._on_unified_resources_loaded)
+                loader.loading_error.connect(self._on_unified_loading_error)
+                
+                logging.info("NodesPage: Connected to unified resource loader")
+                
+                # Trigger initial load if not done already
+                if not getattr(self, '_initial_load_triggered', False):
+                    QTimer.singleShot(100, self._trigger_initial_load)
+                    self._initial_load_triggered = True
+            else:
+                logging.error("NodesPage: Could not get unified resource loader")
+        except Exception as e:
+            logging.error(f"NodesPage: Error connecting to unified loader: {e}")
+    
+    def _trigger_initial_load(self):
+        """Trigger initial data load"""
+        try:
+            self.refresh_data()
+            logging.info("NodesPage: Triggered initial data load")
+        except Exception as e:
+            logging.error(f"NodesPage: Error triggering initial load: {e}")
+    
+    def _on_unified_loading_error(self, resource_type, error_message):
+        """Handle unified loading errors"""
+        if resource_type == self.resource_type:
+            logging.error(f"NodesPage: Failed to load {resource_type}: {error_message}")
+            # Show empty state with error message
+            self.populate_table([])
     
     def cleanup(self):
         """Clean up resources when page is destroyed"""
