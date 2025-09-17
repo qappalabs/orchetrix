@@ -233,9 +233,11 @@ class OrchestrixGUI(QMainWindow):
             
             self.cluster_connector.connection_started.connect(self.on_cluster_connection_started)
             self.cluster_connector.connection_complete.connect(self.on_cluster_connection_complete)
-            self.cluster_connector.error_occurred.connect(
-                lambda error_type, error_msg: self.show_error_message(error_msg)
-            )
+            # Comment out duplicate error handling - kube_client.error_occurred already handles this
+            # Prevents duplicate error dialogs from both kube_client and cluster_connector
+            # self.cluster_connector.error_occurred.connect(
+            #     lambda error_type, error_msg: self.show_error_message(error_msg)
+            # )
             self.cluster_connector.metrics_data_loaded.connect(self.check_cluster_data_loaded)
             self.cluster_connector.issues_data_loaded.connect(self.check_cluster_data_loaded)
         except Exception as e:
@@ -644,8 +646,12 @@ class OrchestrixGUI(QMainWindow):
             logging.error(f"Error in connection timeout check for {cluster_name}: {e}")
 
     def show_error_message(self, error_message):
-        """Display error messages with better formatting"""
+        """Display error messages using centralized error handler to prevent duplicates"""
         try:
+            # Use centralized error handler instead of showing direct dialog
+            from Utils.error_handler import get_error_handler
+            error_handler = get_error_handler()
+            
             # Clean up the message
             if not error_message:
                 error_message = "An unknown error occurred."
@@ -653,52 +659,18 @@ class OrchestrixGUI(QMainWindow):
             error_message = str(error_message).strip()
             
             # Log for debugging
-            logging.error(f"Showing error dialog: {error_message}")
+            logging.error(f"HomePage error: {error_message}")
             
-            # Create message box
-            msg_box = QMessageBox(self)
-            msg_box.setIcon(QMessageBox.Icon.Critical)
-            msg_box.setWindowTitle("Connection Error")
-            msg_box.setText(error_message)
-            
-            # Add helpful suggestions for Docker Desktop issues
-            if "docker-desktop" in error_message.lower() and "refused" in error_message.lower():
-                msg_box.setInformativeText(
-                    "💡 Try these solutions:\n"
-                    "• Start Docker Desktop\n"
-                    "• Enable Kubernetes in Docker Desktop settings\n"
-                    "• Wait for Kubernetes to initialize completely"
-                )
-            
-            # Style the dialog
-            msg_box.setStyleSheet("""
-                QMessageBox {
-                    background-color: #2d2d2d;
-                    color: #ffffff;
-                    font-size: 12px;
-                    min-width: 400px;
-                }
-                QMessageBox QLabel {
-                    color: #ffffff;
-                    padding: 10px;
-                }
-                QMessageBox QPushButton {
-                    background-color: #404040;
-                    color: #ffffff;
-                    border: 1px solid #555555;
-                    padding: 8px 15px;
-                    border-radius: 3px;
-                }
-                QMessageBox QPushButton:hover {
-                    background-color: #505050;
-                }
-            """)
-            
-            msg_box.exec()
+            # Use centralized error handler - this prevents duplicate dialogs
+            error_handler.handle_error(
+                Exception(error_message), 
+                context="cluster connection", 
+                show_dialog=True
+            )
             
         except Exception as e:
-            logging.error(f"Error showing dialog: {e}")
-            # Fallback
+            logging.error(f"Error in centralized error handling: {e}")
+            # Only show fallback if centralized handler fails
             QMessageBox.critical(self, "Error", str(error_message))
 
     def add_table_item(self, name, kind, source, label, status, badge_color=None, original_data=None):

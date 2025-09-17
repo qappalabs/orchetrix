@@ -618,9 +618,13 @@ class MainWindow(QMainWindow):
             if hasattr(self, 'loading_overlay'):
                 self.loading_overlay.hide_loading()
             
-            # Use centralized error handler
+            # Use centralized error handler with proper context
             error_handler = get_error_handler()
-            error_handler._show_error_dialog("Application", error_message)
+            error_handler.handle_error(
+                Exception(error_message), 
+                context="application", 
+                show_dialog=True
+            )
             
         except Exception as e:
             logging.error(f"Error showing error message: {e}")

@@ -22,6 +22,8 @@ class ErrorHandler:
         self._error_lock = threading.RLock()
         self._last_error_time = 0
         self._error_cooldown = 2.0  # seconds between error dialogs
+        self._recent_errors = {}  # Track recent error messages to prevent duplicates
+        self._error_message_cooldown = 10.0  # seconds before showing same error again
         
     def handle_error(self, error: Exception, context: str = "", show_dialog: bool = True) -> None:
         """Handle errors with consistent logging and optional user notification"""
@@ -32,16 +34,34 @@ class ErrorHandler:
         logging.debug(f"Full traceback: {traceback.format_exc()}")
         
         # Show user dialog if requested and not recently shown
-        if show_dialog and self._should_show_dialog():
+        if show_dialog and self._should_show_dialog(error_message):
             self._show_error_dialog(context, error_message)
     
-    def _should_show_dialog(self) -> bool:
-        """Check if we should show error dialog (with cooldown)"""
+    def _should_show_dialog(self, error_message: str) -> bool:
+        """Check if we should show error dialog (with cooldown and duplicate prevention)"""
         import time
         with self._error_lock:
             current_time = time.time()
+            
+            # Check if this exact error message was shown recently
+            error_hash = hash(error_message)
+            if error_hash in self._recent_errors:
+                last_shown = self._recent_errors[error_hash]
+                if current_time - last_shown < self._error_message_cooldown:
+                    logging.debug(f"Suppressing duplicate error dialog: {error_message[:50]}...")
+                    return False
+            
+            # Check general cooldown
             if current_time - self._last_error_time > self._error_cooldown:
                 self._last_error_time = current_time
+                self._recent_errors[error_hash] = current_time
+                
+                # Clean up old entries
+                old_entries = [k for k, v in self._recent_errors.items() 
+                              if current_time - v > self._error_message_cooldown * 2]
+                for k in old_entries:
+                    del self._recent_errors[k]
+                
                 return True
             return False
     
@@ -185,7 +205,8 @@ class ErrorHandler:
                 countdown -= 1
                 QTimer.singleShot(1000, update_countdown)
             else:
-                msg.close()
+                # Use accept() instead of close() for exec'd dialogs
+                msg.accept()
         
         QTimer.singleShot(1000, update_countdown)
     
