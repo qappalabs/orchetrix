@@ -649,13 +649,15 @@ class OverviewPage(QWidget):
             
             # For overview page, we only need counts, not full resource details
             # Use larger batches and parallel processing for heavy loads
-            batch_size = 1000  # Increased batch size for better efficiency
+            batch_size = 500  # Reduced batch size to prevent UI freezing
             all_items = []
             continue_token = None
             total_fetched = 0
-            max_total_items = 10000  # Increased safety limit for heavy loads
+            max_total_items = 5000  # Reduced safety limit to prevent crashes
+            max_batches = 10  # Limit number of API calls to prevent hanging
+            batch_count = 0
             
-            while total_fetched < max_total_items:
+            while total_fetched < max_total_items and batch_count < max_batches:
                 try:
                     # Fetch batch with continuation token for pagination
                     batch_items = None
@@ -693,12 +695,16 @@ class OverviewPage(QWidget):
                     if batch_items.items:
                         all_items.extend(batch_items.items)
                         total_fetched += len(batch_items.items)
+                        batch_count += 1
                         
-                        # Update with progressive count for very large datasets
-                        if total_fetched > 2000 and total_fetched % 1000 == 0:
-                            # Show progressive update for large datasets - less frequent updates
+                        # Update with progressive count for large datasets - less frequent updates
+                        if total_fetched > 1000 and batch_count % 3 == 0:
+                            # Show progressive update every 3 batches to reduce UI load
                             partial_running = self._calculate_running_count(resource_type, all_items)
                             self.update_card_data(resource_type, (partial_running, f"{total_fetched}+"))
+                            
+                            # Process pending events to prevent UI freeze
+                            QApplication.processEvents()
                     
                     # Check for continuation token
                     continue_token = getattr(batch_items.metadata, 'continue', None) if hasattr(batch_items, 'metadata') else None
@@ -724,8 +730,14 @@ class OverviewPage(QWidget):
                 
         except Exception as e:
             logging.error(f"OverviewPage: Scalable load failed for {resource_type}: {e}")
+            # Don't crash the entire page - show partial data if available
+            if all_items:
+                partial_running = self._calculate_running_count(resource_type, all_items)
+                self.update_card_data(resource_type, (partial_running, f"{len(all_items)}+"))
+                logging.info(f"OverviewPage: Showing partial data for {resource_type}: {partial_running}/{len(all_items)}+")
+            else:
+                self.handle_resource_error(resource_type, str(e))
             self._loading_resources.discard(resource_type)
-            self.handle_resource_error(resource_type, str(e))
     
     def _process_remaining_chunks(self, resource_type, remaining_items, chunk_size, initial_running, total_count):
         """Process remaining items in chunks with timers to prevent UI blocking"""

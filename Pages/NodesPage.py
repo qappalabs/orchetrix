@@ -900,6 +900,11 @@ class NodesPage(BaseResourcePage):
                 logging.debug("NodesPage: Disk loading already in progress, skipping")
                 return
             
+            # Limit node count to prevent blocking
+            if len(node_names) > 50:
+                logging.warning(f"NodesPage: Too many nodes ({len(node_names)}), limiting disk loading to 50 for performance")
+                node_names = node_names[:50]
+            
             self.is_disk_loading_in_progress = True
             logging.info(f"🔄 [BACKGROUND] Loading disk usage for {len(node_names)} nodes...")
             
@@ -909,8 +914,16 @@ class NodesPage(BaseResourcePage):
             if kube_service and kube_service.metrics_service:
                 start_time = time.time()
                 
-                # Load disk usage in background
-                disk_metrics = kube_service.metrics_service.get_all_node_metrics_fast(node_names, include_disk_usage=True)
+                # Add timeout protection for disk loading
+                try:
+                    disk_metrics = kube_service.metrics_service.get_all_node_metrics_fast(node_names, include_disk_usage=True)
+                    
+                    # Check if operation took too long
+                    if (time.time() - start_time) > 30:  # 30 second timeout
+                        logging.warning("NodesPage: Disk loading took too long, may have incomplete data")
+                except Exception as e:
+                    logging.error(f"NodesPage: Disk loading failed with timeout/error: {e}")
+                    disk_metrics = None
                 
                 if disk_metrics:
                     # Update the existing cache with disk data
@@ -1028,12 +1041,17 @@ class NodesPage(BaseResourcePage):
             start_time = time.time()
             logging.info(f"🚀 [PROGRESSIVE] Starting progressive loading for {len(resources_data)} nodes")
             
-            # Phase 1: Populate basic node info (fast)
+            # Phase 1: Populate basic node info (fast) - with UI responsiveness
             for row, node in enumerate(resources_data):
                 try:
                     self.table.setRowHeight(row, 32)
                     self.populate_table_row_basic(row, node)  # Basic info only
                     self._create_action_button_for_row(row, node)
+                    
+                    # Process events every 10 rows to keep UI responsive for large clusters
+                    if row > 0 and row % 10 == 0:
+                        QApplication.processEvents()
+                        
                 except Exception as e:
                     logging.error(f"NodesPage: Error processing row {row} for node {node.get('name', 'unknown')}: {e}")
                     import traceback
