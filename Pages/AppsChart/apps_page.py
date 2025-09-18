@@ -1966,3 +1966,68 @@ class AppsPage(QWidget):
         text_item = self.diagram_scene.addText(text, QFont("Arial", 12))
         text_item.setDefaultTextColor(color)
         text_item.setPos(x, y)
+    
+    def clear_for_cluster_change(self):
+        """Clear namespace state when cluster changes to prevent stale namespace data"""
+        logging.debug("Clearing AppsPage state for cluster change")
+        
+        # Clear namespace dropdown to prevent showing stale namespaces
+        if hasattr(self, 'namespace_combo') and self.namespace_combo:
+            self.namespace_combo.blockSignals(True)
+            self.namespace_combo.clear()
+            self.namespace_combo.addItem("Loading namespaces...")
+            self.namespace_combo.setEnabled(False)
+            self.namespace_combo.blockSignals(False)
+            
+        # Clear workload-dependent dropdowns
+        if hasattr(self, 'resource_combo') and self.resource_combo:
+            self.resource_combo.clear()
+            self.resource_combo.addItem("Select namespace and workload first")
+            self.resource_combo.setEnabled(False)
+            
+        # Clear any cached namespace signal connections
+        if hasattr(self, '_namespace_signals_connected'):
+            delattr(self, '_namespace_signals_connected')
+            
+        # Clear current app flow data
+        self.current_app_flow_data = None
+        self.current_resource_positions = {}
+        
+        # Stop live monitoring if active
+        if self.live_monitoring_enabled:
+            self.live_monitor_timer.stop()
+            self.live_monitoring_enabled = False
+            self.live_monitor_btn.setText("▶ Start Live")
+            self.live_monitor_btn.setStyleSheet("""
+                QPushButton { 
+                    background-color: #28a745; 
+                    color: #ffffff; 
+                    border: 1px solid #34ce57;
+                    border-radius: 4px; 
+                    padding: 3px 8px; 
+                    font-weight: bold;
+                    font-size: 12px;
+                }
+                QPushButton:hover { 
+                    background-color: #34ce57; 
+                }
+                QPushButton:pressed { 
+                    background-color: #1e7e34; 
+                }
+                QPushButton:disabled {
+                    background-color: #6c757d;
+                    border-color: #6c757d;
+                    color: #dee2e6;
+                }
+            """)
+            
+        # Clear diagram
+        if hasattr(self, 'diagram_scene') and self.diagram_scene:
+            self.diagram_scene.clear()
+            
+        # Reset diagram title
+        if hasattr(self, 'diagram_title') and self.diagram_title:
+            self.diagram_title.setText("App Diagram")
+            
+        # Reload namespaces for the new cluster
+        QTimer.singleShot(200, self.load_namespaces)

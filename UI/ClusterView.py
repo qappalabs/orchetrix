@@ -738,54 +738,8 @@ class ClusterView(QWidget):
             page_widget.load_data()
 
     def _update_cached_cluster_data(self, cluster_name: str) -> bool:
-        """Update UI with cached cluster data if available"""
-        try:
-            if not (hasattr(self.cluster_connector, 'is_data_loaded') and
-                    self.cluster_connector.is_data_loaded(cluster_name)):
-                logging.info(f"ClusterView: No cached data available for {cluster_name}")
-                return False
-
-            cached_data = self.cluster_connector.get_cached_data(cluster_name)
-            
-            if not cached_data:
-                logging.info(f"ClusterView: Empty cached data for {cluster_name}")
-                return False
-
-            logging.info(f"ClusterView: Found cached data for {cluster_name}: {list(cached_data.keys())}")
-
-            # Update cluster info
-            if 'cluster_info' in cached_data:
-                self._on_cluster_data_loaded(cached_data['cluster_info'])
-                logging.info(f"ClusterView: Updated cluster info from cache")
-
-            # Update cluster page if loaded
-            if 'Cluster' in self.pages:
-                cluster_page = self.pages['Cluster']
-                
-                # FIXED: Ensure page is properly connected before updating
-                if hasattr(cluster_page, '_connect_cluster_signals'):
-                    cluster_page._connect_cluster_signals()
-                
-                if 'metrics' in cached_data:
-                    logging.info(f"ClusterView: Updating metrics from cache: {cached_data['metrics']}")
-                    cluster_page.update_metrics(cached_data['metrics'])
-                    
-                if 'issues' in cached_data:
-                    logging.info(f"ClusterView: Updating issues from cache: {len(cached_data['issues'])} issues")
-                    cluster_page.update_issues(cached_data['issues'])
-                
-                # FIXED: If no cached metrics/issues, request fresh data
-                if 'metrics' not in cached_data or 'issues' not in cached_data:
-                    logging.info(f"ClusterView: Missing cached data, requesting fresh data")
-                    if hasattr(cluster_page, 'refresh_data'):
-                        QTimer.singleShot(500, cluster_page.refresh_data)
-
-            self.loading_overlay.hide_loading()
-            return True
-            
-        except Exception as e:
-            logging.error(f"ClusterView: Error updating cached cluster data: {e}")
-            return False
+        """Cache system removed - always return False"""
+        return False
 
     def set_active_cluster(self, cluster_name: str) -> None:
         """Set the active cluster and update the UI accordingly - FIXED for proper cluster switching"""

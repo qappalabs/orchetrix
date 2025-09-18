@@ -34,13 +34,11 @@ from log_handler import method_logger, class_logger
 BATCH_SIZE = 100  # FIXED: Increased batch size for better large data performance
 SCROLL_DEBOUNCE_MS = 150   # FIXED: Optimized debounce for large data stability
 SEARCH_DEBOUNCE_MS = 500  # FIXED: Longer debounce for large dataset search performance
-CACHE_TTL_SECONDS = 600   # FIXED: Longer cache time for large dataset stability
 MAX_ITEMS_IN_MEMORY = 2000  # FIXED: Increased memory limit for large datasets
 LARGE_DATASET_THRESHOLD = 200  # FIXED: Lower threshold to activate optimizations earlier
 MAX_TABLE_ROWS_BEFORE_VIRTUAL = 100  # FIXED: New constant for virtual scrolling
 
-# Import performance components  
-from Utils.unified_cache_system import get_unified_cache
+# Cache system removed
 
 @class_logger(log_level=logging.INFO, exclude_methods=['__init__', 'clear_table', 'update_table_row', 'load_more_complete', 'all_items_loaded_signal', 'force_load_data'])
 class BaseResourcePage(BaseTablePage):
@@ -80,23 +78,13 @@ class BaseResourcePage(BaseTablePage):
 
         self.is_showing_skeleton = False
 
-        # Use unified cache system
-        from Utils.unified_cache_system import get_unified_cache
-        self._cache_manager = get_unified_cache()
-        
-        # Use specific caches for different data types  
-        self._data_cache = self._cache_manager._resource_cache
-        self._age_cache = self._cache_manager._formatted_data_cache
-        self._formatted_cache = self._cache_manager._formatted_data_cache
-        
+        # Cache system removed
         self._shutting_down = False
-        
         
         # Thread safety
         import threading
         self._data_lock = threading.RLock()  # Allow recursive locking
         self._loading_lock = threading.Lock()
-        self._cache_lock = threading.RLock()
 
         # Virtual scrolling - optimized thresholds
         self._visible_start = 0
@@ -192,10 +180,17 @@ class BaseResourcePage(BaseTablePage):
     
     def _handle_normal_show_event(self):
         """Handle normal show event loading (after startup) - OPTIMIZED for fast namespace loading"""
-        # Load namespaces dynamically on first show - REMOVED TIMER DELAY for performance
-        if not hasattr(self, '_namespaces_loaded'):
+        # Load namespaces dynamically - check if they need refreshing after cluster change
+        if not hasattr(self, '_namespaces_loaded') or not self._namespaces_loaded:
             self._namespaces_loaded = True
             self._load_namespaces_async()  # Load namespaces immediately like AppChart
+        else:
+            # Check if namespace dropdown is empty (could happen after cluster change)
+            if (hasattr(self, 'namespace_combo') and self.namespace_combo and 
+                self.namespace_combo.count() <= 1 and 
+                self.namespace_combo.itemText(0) == "Loading namespaces..."):
+                logging.debug(f"Detected empty namespace dropdown in {self.__class__.__name__}, refreshing")
+                self._load_namespaces_async()
         
         # Always try to load data when page becomes visible if we don't have current data
         if not self.is_loading_initial and (not self.resources or not self._initial_load_done):
@@ -252,20 +247,12 @@ class BaseResourcePage(BaseTablePage):
         self.installEventFilter(self)
         return page_main_layout
 
-    def _format_age_cached(self, timestamp):
-        """Format age with bounded caching to avoid repeated calculations"""
+    def _format_age(self, timestamp):
+        """Format age for display"""
         if not timestamp:
             return "Unknown"
         
-        # Use instance-level bounded cache
-        cache_key = f"age_{hash(str(timestamp))}"
-        
-        # Check cache first
-        cached_age = self._age_cache.get(cache_key)
-        if cached_age is not None:
-            return cached_age
-        
-        # Calculate age
+        # Calculate age directly (no caching)
         try:
             import datetime
             if isinstance(timestamp, str):
@@ -289,19 +276,11 @@ class BaseResourcePage(BaseTablePage):
             else:
                 result = f"{minutes}m"
             
-            # Cache result with TTL and size limits
-            self._age_cache.set(cache_key, result)
             return result
             
         except Exception as e:
             logging.error(f"Error formatting age: {e}")
             return "Unknown"
-
-    def _clean_age_cache(self):
-        """Clean old entries from age cache - now handled automatically by bounded cache"""
-        # Bounded cache handles cleanup automatically with TTL and size limits
-        # Manual cleanup is no longer needed
-        pass
 
     def _manage_memory_usage(self):
         """Manage memory usage to prevent crashes with large datasets"""
@@ -333,15 +312,7 @@ class BaseResourcePage(BaseTablePage):
             logging.error(f"Error in memory management: {e}")
 
     # Thread-safe data access methods
-    def get_cached_data(self, key: str) -> Any:
-        """Thread-safe cache data retrieval"""
-        with self._cache_lock:
-            return self._data_cache.get(key)
-    
-    def set_cached_data(self, key: str, value: Any) -> bool:
-        """Thread-safe cache data storage"""
-        with self._cache_lock:
-            return self._data_cache.set(key, value)
+    # Cache methods removed
     
     def get_resources_safely(self) -> List[Dict]:
         """Thread-safe resource list access"""
@@ -891,15 +862,19 @@ class BaseResourcePage(BaseTablePage):
             
             # FIXED: Reconnect the signal after setting the dropdown
             self.namespace_combo.currentTextChanged.connect(self._on_namespace_changed)
+            
+            # Re-enable the dropdown after successful loading
+            self.namespace_combo.setEnabled(True)
                 
             logging.info(f"Loaded {len(namespaces)} namespaces into dropdown, current filter: {self.namespace_filter}")
             
         except Exception as e:
             logging.error(f"Error updating namespace dropdown: {e}")
-            # FIXED: Ensure signal is reconnected even on error
+            # FIXED: Ensure signal is reconnected and dropdown enabled even on error
             try:
                 if self.namespace_combo:
                     self.namespace_combo.currentTextChanged.connect(self._on_namespace_changed)
+                    self.namespace_combo.setEnabled(True)
             except:
                 pass
             # Set a default filter to prevent issues
@@ -924,25 +899,7 @@ class BaseResourcePage(BaseTablePage):
             
         logging.info(f"Namespace changed from '{old_namespace}' to '{namespace}'")
         
-        # FIXED: Minimal cache clearing - only clear current resource cache
-        try:
-            from Utils.unified_cache_system import get_unified_cache
-            from Utils.kubernetes_client import get_kubernetes_client
-            
-            cache_system = get_unified_cache()
-            kube_client = get_kubernetes_client()
-            
-            if kube_client and hasattr(kube_client, 'current_cluster') and kube_client.current_cluster:
-                # FIXED: Only clear cache for current resource type and old namespace
-                resource_cache_key = f"{kube_client.current_cluster}:{self.resource_type}:ns_{old_namespace}" if old_namespace != "All Namespaces" else f"{kube_client.current_cluster}:{self.resource_type}:all-namespaces"
-                
-                # Clear only the specific cache entry we need to refresh
-                if hasattr(cache_system, '_resource_cache'):
-                    cache_system._resource_cache.delete(resource_cache_key)
-                    logging.debug(f"Cleared specific cache key: {resource_cache_key}")
-                    
-        except Exception as e:
-            logging.error(f"Error clearing cache during namespace switch: {e}")
+        # Cache system removed - no cache clearing needed
             
         # Update namespace filter BEFORE clearing resources
         self.namespace_filter = namespace
@@ -1089,10 +1046,7 @@ class BaseResourcePage(BaseTablePage):
             self.load_more_complete.emit()
             
             # Log performance info
-            if result.from_cache:
-                logging.info(f"Loaded {self._loaded_item_count}/{self._total_item_count} {resource_type} from cache instantly")
-            else:
-                logging.info(f"Loaded {self._loaded_item_count}/{self._total_item_count} {resource_type} in {result.load_time_ms:.1f}ms")
+            logging.info(f"Loaded {self._loaded_item_count}/{self._total_item_count} {resource_type} in {result.load_time_ms:.1f}ms")
             
         except Exception as e:
             logging.error(f"Error processing unified resources: {e}")
@@ -1349,11 +1303,31 @@ class BaseResourcePage(BaseTablePage):
             self.current_continue_token = None
             self._initial_load_done = False
             
+            # Reset namespace loading flag so namespaces get refreshed for new cluster
+            if hasattr(self, '_namespaces_loaded'):
+                self._namespaces_loaded = False
+                logging.debug(f"Reset namespace loading flag for {self.__class__.__name__}")
+            
+            # Clear namespace dropdown to prevent showing stale namespaces
+            if hasattr(self, 'namespace_combo') and self.namespace_combo:
+                self.namespace_combo.blockSignals(True)
+                self.namespace_combo.clear()
+                self.namespace_combo.addItem("Loading namespaces...")
+                self.namespace_combo.setEnabled(False)
+                self.namespace_combo.blockSignals(False)
+                self.namespace_filter = "default"  # Reset to default namespace, not "All Namespaces"
+                logging.debug(f"Cleared namespace dropdown for {self.__class__.__name__}")
+            
             # Clear selected items
             self.selected_items.clear()
             
             # Update UI
             self._update_items_count()
+            
+            # Trigger namespace reload for visible pages (fixes stuck "Loading namespaces..." issue)
+            if self.isVisible() and hasattr(self, 'namespace_combo') and self.namespace_combo:
+                QTimer.singleShot(100, self._load_namespaces_async)
+                logging.debug(f"Triggered namespace reload for visible page {self.__class__.__name__}")
             
             logging.info(f"Cleared {self.__class__.__name__} for cluster change")
             
@@ -2380,13 +2354,7 @@ class BaseResourcePage(BaseTablePage):
             # Cleanup threads
             self.cleanup_timers_and_threads()
             
-            # Clear cache references (bounded caches will handle memory cleanup)
-            if hasattr(self, '_data_cache'):
-                self._data_cache.clear()
-            if hasattr(self, '_age_cache'):
-                self._age_cache.clear()
-            if hasattr(self, '_formatted_cache'):
-                self._formatted_cache.clear()
+            # Cache system removed - no cache cleanup needed
                 
             logging.debug(f"Cleanup completed for {self.__class__.__name__}")
             

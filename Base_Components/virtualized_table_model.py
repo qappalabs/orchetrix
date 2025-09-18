@@ -31,15 +31,12 @@ class VirtualizedResourceModel(QAbstractTableModel):
         self._cache_misses = 0
         
         # Use unified cache system
-        from Utils.unified_cache_system import get_unified_cache
-        self._cache_manager = get_unified_cache()
+        # Cache system removed
         
-        # Use unified caches for formatted data and colors  
-        self._formatted_cache = self._cache_manager._formatted_data_cache
-        self._row_colors_cache = self._cache_manager._formatted_data_cache
+        # Cache system removed
         
-        # Configuration
-        self.enable_caching = True
+        # Configuration - caching disabled
+        self.enable_caching = False
         
         logging.info(f"VirtualizedResourceModel initialized with {len(self._data)} rows, {len(self._columns)} columns")
     

@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer, QThreadPool
 
 from .api_service import get_kubernetes_api_service, reset_kubernetes_api_service
-from Utils.unified_cache_system import get_unified_cache
 from .log_service import create_kubernetes_log_service
 from .metrics_service import create_kubernetes_metrics_service
 from .events_service import create_kubernetes_events_service
@@ -95,12 +94,11 @@ class KubernetesService(QObject):
         try:
             # Core services
             self.api_service = get_kubernetes_api_service()
-            self.cache_service = get_unified_cache()
             
             # Specialized services
             self.log_service = create_kubernetes_log_service(self.api_service)
-            self.metrics_service = create_kubernetes_metrics_service(self.api_service, self.cache_service)
-            self.events_service = create_kubernetes_events_service(self.api_service, self.cache_service)
+            self.metrics_service = create_kubernetes_metrics_service(self.api_service)
+            self.events_service = create_kubernetes_events_service(self.api_service)
             
             logging.debug("All Kubernetes services initialized successfully")
             
@@ -157,8 +155,7 @@ class KubernetesService(QObject):
             # Update current cluster
             self.current_cluster = cluster_name
             
-            # Clear cache for new cluster
-            self.cache_service.clear_resource_cache()
+            # Cache system removed
             
             # Start polling
             self.start_polling()
@@ -188,8 +185,7 @@ class KubernetesService(QObject):
                 old_cluster = self.current_cluster
                 self.current_cluster = None
                 
-                # Clear cache for disconnected cluster
-                self.cache_service.clear_resource_cache()
+                # Cache system removed
                 
                 logging.info(f"Disconnected from cluster: {old_cluster}")
                 
@@ -283,9 +279,8 @@ class KubernetesService(QObject):
             self.error_occurred.emit(error_msg)
     
     def _periodic_cache_cleanup(self):
-        """Periodic cache cleanup"""
-        if not self._shutting_down:
-            self.cache_service.optimize_caches()
+        """Cache cleanup removed"""
+        pass
     
     # Public API methods
     
@@ -389,8 +384,8 @@ class KubernetesService(QObject):
             self.error_occurred.emit(error_msg)
     
     def get_cache_stats(self) -> Dict[str, Any]:
-        """Get cache statistics"""
-        return self.cache_service.get_global_stats()
+        """Cache statistics removed"""
+        return {}
     
     def cleanup(self):
         """Cleanup all resources"""
@@ -412,8 +407,7 @@ class KubernetesService(QObject):
             self.log_service.cleanup()
             self.metrics_service.cleanup()
             self.events_service.cleanup()
-            # Skip cache clearing during shutdown - let natural cleanup handle this
-            # self.cache_service.clear_all_caches()  # Disabled to avoid performance hit during shutdown
+            # Cache system removed
             self.api_service.cleanup()
             
             # Clear active workers

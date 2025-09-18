@@ -6,34 +6,22 @@ Split from kubernetes_client.py for better architecture
 import logging
 import time
 from typing import Dict, Any, Optional
-from functools import lru_cache
 from kubernetes.client.rest import ApiException
 
 
 class KubernetesMetricsService:
     """Service for calculating and managing Kubernetes cluster metrics"""
     
-    def __init__(self, api_service, cache_service):
+    def __init__(self, api_service):
         self.api_service = api_service
-        self.cache_service = cache_service
         logging.debug("KubernetesMetricsService initialized")
     
     def get_cluster_metrics(self, cluster_name: str) -> Optional[Dict[str, Any]]:
-        """Get cluster metrics with caching"""
-        # Check cache first
-        cached_metrics = self.cache_service.get_cached_resources('metrics', f'cluster_{cluster_name}')
-        if cached_metrics:
-            logging.debug(f"Using cached metrics for {cluster_name}")
-            return cached_metrics
-        
+        """Get cluster metrics"""
         try:
-            # Calculate fresh metrics
+            # Calculate metrics directly
             metrics = self._calculate_cluster_metrics()
-            
-            # Cache the results
-            self.cache_service.cache_resources('metrics', f'cluster_{cluster_name}', metrics)
-            
-            logging.info(f"Calculated fresh metrics for {cluster_name}")
+            logging.info(f"Calculated metrics for {cluster_name}")
             return metrics
             
         except Exception as e:
@@ -151,9 +139,8 @@ class KubernetesMetricsService:
             logging.error(f"Error calculating cluster metrics: {e}")
             return self._get_default_metrics()
     
-    @lru_cache(maxsize=128)
     def _parse_cpu_value(self, cpu_str: str) -> float:
-        """Parse CPU values (cores, millicores) to cores with caching"""
+        """Parse CPU values (cores, millicores) to cores"""
         if not cpu_str or not isinstance(cpu_str, str):
             return 0.0
         
@@ -172,15 +159,13 @@ class KubernetesMetricsService:
         except ValueError:
             return 0.0
     
-    @lru_cache(maxsize=128)  
     def _parse_storage_value(self, storage_str: str) -> int:
-        """Parse storage values to bytes with caching"""
+        """Parse storage values to bytes"""
         # Storage parsing is same as memory parsing
         return self._parse_memory_value(storage_str)
     
-    @lru_cache(maxsize=128)
     def _parse_memory_value(self, memory_str: str) -> int:
-        """Parse memory values to bytes with caching"""
+        """Parse memory values to bytes"""
         if not memory_str or not isinstance(memory_str, str):
             return 0
         
@@ -213,40 +198,6 @@ class KubernetesMetricsService:
         except ValueError:
             return 0
 
-    @lru_cache(maxsize=128)
-    def _parse_storage_value(self, storage_str: str) -> int:
-        """Parse storage values to bytes with caching"""
-        if not storage_str or not isinstance(storage_str, str):
-            return 0
-        
-        storage_str = storage_str.strip()
-        
-        # Storage unit multipliers (same as memory)
-        multipliers = {
-            'Ki': 1024,
-            'Mi': 1024**2,
-            'Gi': 1024**3,
-            'Ti': 1024**4,
-            'K': 1000,
-            'M': 1000**2,
-            'G': 1000**3,
-            'T': 1000**4
-        }
-        
-        # Check for unit suffixes
-        for suffix, multiplier in multipliers.items():
-            if storage_str.endswith(suffix):
-                try:
-                    value = float(storage_str[:-len(suffix)])
-                    return int(value * multiplier)
-                except ValueError:
-                    return 0
-        
-        # Handle plain numbers (assume bytes)
-        try:
-            return int(float(storage_str))
-        except ValueError:
-            return 0
     
     def _get_default_metrics(self) -> Dict[str, Any]:
         """Return default metrics when calculation fails"""
@@ -261,12 +212,7 @@ class KubernetesMetricsService:
         try:
             start_time = time.time()
             
-            # Check cache first for full batch
-            cache_key = f"all_nodes_fast_{'_'.join(sorted(node_names)) if node_names else 'all'}_{include_disk_usage}"
-            cached_metrics = self.cache_service.get_cached_resources('node_metrics_fast', cache_key)
-            if cached_metrics and time.time() - cached_metrics.get('timestamp', 0) < 30:  # 30 second cache
-                logging.info(f"Using cached fast node metrics for {len(cached_metrics.get('data', {}))} nodes")
-                return cached_metrics.get('data', {})
+            # No caching - get fresh data
             
             # Get all nodes at once
             nodes_list = self.api_service.v1.list_node()
@@ -302,9 +248,7 @@ class KubernetesMetricsService:
                     # Set default metrics for failed nodes
                     all_metrics[node_name] = self._get_default_node_metrics(node_name)
             
-            # Cache the results
-            cache_data = {'data': all_metrics, 'timestamp': time.time()}
-            self.cache_service.cache_resources('node_metrics_fast', cache_key, cache_data)
+            # No caching
             
             processing_time = (time.time() - start_time) * 1000
             disk_text = "with disk" if include_disk_usage else "no disk"
@@ -779,17 +723,9 @@ class KubernetesMetricsService:
             logging.debug(f"Error getting disk usage for {node_name}: {e}")
             return None
 
-    def clear_cache(self):
-        """Clear all cached parsing results"""
-        self._parse_cpu_value.cache_clear()
-        self._parse_memory_value.cache_clear()
-        self._parse_storage_value.cache_clear()
-        logging.debug("Cleared metrics parsing cache")
-    
     def cleanup(self):
         """Cleanup metrics service resources"""
         logging.debug("Cleaning up KubernetesMetricsService")
-        self.clear_cache()
     
     def __del__(self):
         """Destructor to ensure cleanup"""
@@ -801,6 +737,6 @@ class KubernetesMetricsService:
 
 
 # Factory function
-def create_kubernetes_metrics_service(api_service, cache_service) -> KubernetesMetricsService:
+def create_kubernetes_metrics_service(api_service) -> KubernetesMetricsService:
     """Create a new Kubernetes metrics service instance"""
-    return KubernetesMetricsService(api_service, cache_service)
+    return KubernetesMetricsService(api_service)

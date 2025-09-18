@@ -12,7 +12,7 @@ import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Any, Callable, Union, Set
-from functools import lru_cache, wraps
+from functools import wraps
 from collections import defaultdict
 
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer
@@ -20,7 +20,6 @@ from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 from kubernetes.client.rest import ApiException
 from Utils.kubernetes_client import get_kubernetes_client
 from Utils.error_handler import get_error_handler, safe_execute, log_performance
-from Utils.unified_cache_system import get_unified_cache
 from Utils.enhanced_worker import EnhancedBaseWorker
 from Utils.thread_manager import get_thread_manager
 
@@ -41,7 +40,6 @@ class ResourceConfig:
     namespace: Optional[str] = None
     batch_size: int = 50  # Increased for heavy data handling
     timeout_seconds: int = 45  # Longer timeout for heavy data
-    cache_ttl: int = 900  # 15 minutes for heavy data caching
     enable_streaming: bool = False  # Keep disabled for stability
     enable_pagination: bool = True  # Enable for heavy data handling
     max_concurrent_requests: int = 3  # Slightly increased for heavy data
@@ -78,10 +76,7 @@ class SearchResourceLoadWorker(EnhancedBaseWorker):
         start_time = time.time()
         
         try:
-            # Check cache first (but search results are cached separately)
-            cached_result = self._try_search_cache_first()
-            if cached_result:
-                return cached_result
+            # Load directly from API (no caching)
             
             # Load from API with comprehensive search
             items = self._load_and_filter_from_api()
@@ -95,7 +90,6 @@ class SearchResourceLoadWorker(EnhancedBaseWorker):
             
             # Process search results using the parent loader's processing logic
             processed_items = self._process_search_items(items)
-            self._cache_search_results(processed_items)
             
             load_time = (time.time() - start_time) * 1000
             
@@ -141,35 +135,6 @@ class SearchResourceLoadWorker(EnhancedBaseWorker):
                 load_time_ms=(time.time() - start_time) * 1000
             )
     
-    def _try_search_cache_first(self) -> Optional[LoadResult]:
-        """Try to get search results from cache"""
-        try:
-            cache_service = get_unified_cache()
-            # Use search-specific cache key
-            cache_key = f"{self._generate_cache_key()}_search_{hash(self.search_query)}"
-            
-            cached_items = cache_service.get_cached_resources(
-                self.config.resource_type, 
-                cache_key,
-                max_age_seconds=self.config.cache_ttl
-            )
-            
-            if cached_items:
-                logging.debug(f"Search cache hit for {self.config.resource_type}: {len(cached_items)} items")
-                return LoadResult(
-                    success=True,
-                    resource_type=self.config.resource_type,
-                    items=cached_items,
-                    total_count=len(cached_items),
-                    load_time_ms=0,
-                    from_cache=True,
-                    metadata={'search_query': self.search_query}
-                )
-                
-        except Exception as e:
-            logging.debug(f"Search cache lookup failed for {self.config.resource_type}: {e}")
-        
-        return None
     
     def _load_and_filter_from_api(self) -> List[Any]:
         """Load from API and filter by search query"""
@@ -303,21 +268,6 @@ class SearchResourceLoadWorker(EnhancedBaseWorker):
         
         return False
     
-    def _cache_search_results(self, processed_items: List[Dict[str, Any]]):
-        """Cache search results separately from regular cache"""
-        try:
-            cache_service = get_unified_cache()
-            cache_key = f"{self._generate_cache_key()}_search_{hash(self.search_query)}"
-            
-            cache_service.cache_resources(
-                self.config.resource_type,
-                cache_key,
-                processed_items,
-                ttl_seconds=self.config.cache_ttl
-            )
-            
-        except Exception as e:
-            logging.debug(f"Failed to cache search results: {e}")
     
     def _process_search_items(self, items: List[Any]) -> List[Dict[str, Any]]:
         """Process search results using simplified processing for speed"""
@@ -512,10 +462,7 @@ class ResourceLoadWorker(EnhancedBaseWorker):
         start_time = time.time()
         
         try:
-            # Check cache first for speed
-            cached_result = self._try_cache_first()
-            if cached_result:
-                return cached_result
+            # Load directly from API (no caching)
             
             # Load from Kubernetes API with optimizations
             items = self._load_from_api()
@@ -527,9 +474,8 @@ class ResourceLoadWorker(EnhancedBaseWorker):
                     error_message="Operation cancelled"
                 )
             
-            # Process and cache results with chunking for heavy data
+            # Process results with chunking for heavy data  
             processed_items = self._process_items_chunked(items) if self.config.enable_chunking else self._process_items(items)
-            self._cache_results(processed_items)
             
             load_time = (time.time() - start_time) * 1000
             logging.info(f"Unified Resource Loader: Loaded {len(processed_items)} {self.config.resource_type} in {load_time:.1f}ms")
@@ -581,10 +527,8 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             # Handle specific timeout and connection errors gracefully
             if "timeout" in error_message.lower() or "read timed out" in error_message.lower():
                 # For timeout-prone resources, return cached data if available
-                cached_result = self._try_cache_first()
-                if cached_result and cached_result.success:
-                    logging.info(f"Using cached data for timed-out {self.config.resource_type}")
-                    return cached_result
+                # No cache fallback available
+                logging.info(f"No fallback available for timed-out {self.config.resource_type}")
                 
                 error_message = f"Connection timeout - {self.config.resource_type} may be slow to respond"
                 logging.warning(f"Timeout loading {self.config.resource_type}: {error_message}")
@@ -601,33 +545,6 @@ class ResourceLoadWorker(EnhancedBaseWorker):
                 load_time_ms=(time.time() - start_time) * 1000
             )
     
-    def _try_cache_first(self) -> Optional[LoadResult]:
-        """Try to get results from cache first for speed"""
-        try:
-            cache_service = get_unified_cache()
-            cache_key = self._generate_cache_key()
-            
-            cached_items = cache_service.get_cached_resources(
-                self.config.resource_type, 
-                cache_key,
-                max_age_seconds=self.config.cache_ttl
-            )
-            
-            if cached_items:
-                logging.debug(f"Cache hit for {self.config.resource_type}: {len(cached_items)} items")
-                return LoadResult(
-                    success=True,
-                    resource_type=self.config.resource_type,
-                    items=cached_items,
-                    total_count=len(cached_items),
-                    load_time_ms=0,
-                    from_cache=True
-                )
-                
-        except Exception as e:
-            logging.debug(f"Cache lookup failed for {self.config.resource_type}: {e}")
-        
-        return None
     
     def _load_from_api(self) -> List[Any]:
         """Load resources from Kubernetes API with performance optimizations"""
@@ -881,32 +798,12 @@ class ResourceLoadWorker(EnhancedBaseWorker):
         
         logging.info(f"Unified Resource Loader: Processing {total_items} {self.config.resource_type} in chunks of {chunk_size}")
         
-        # PERFORMANCE OPTIMIZATION: For nodes, batch load all metrics first
+        # PERFORMANCE OPTIMIZATION: For nodes, load metrics in background (non-blocking)
         all_node_metrics = {}
         if self.config.resource_type == 'nodes':
-            metrics_start_time = time.time()
-            logging.info(f"🚀 [BATCH METRICS] Starting batch metrics loading for {total_items} nodes...")
-            
-            try:
-                from Services.kubernetes.kubernetes_service import get_kubernetes_service
-                kube_service = get_kubernetes_service()
-                if kube_service and kube_service.metrics_service:
-                    # Get all node names for batch loading
-                    node_names = []
-                    for item in raw_items:
-                        if hasattr(item, 'metadata') and item.metadata and item.metadata.name:
-                            node_names.append(item.metadata.name)
-                    
-                    # Batch load all metrics at once - SINGLE API CALL PATTERN
-                    all_node_metrics = kube_service.metrics_service.get_all_node_metrics(node_names)
-                    
-                    metrics_time = (time.time() - metrics_start_time) * 1000
-                    logging.info(f"✅ [BATCH METRICS] Loaded metrics for {len(all_node_metrics)} nodes in {metrics_time:.1f}ms")
-                else:
-                    logging.warning("⚠️ [BATCH METRICS] Metrics service not available - nodes will show default metrics")
-            except Exception as e:
-                logging.error(f"❌ [BATCH METRICS] Error batch loading node metrics: {e}")
-                all_node_metrics = {}
+            logging.info(f"🚀 [ASYNC METRICS] Skipping synchronous metrics loading for {total_items} nodes - will load metrics async for better performance")
+            # Skip metrics loading to avoid 3+ minute delay blocking UI
+            # Metrics will be loaded separately and updated in UI when available
         
         # Process chunks with pre-loaded metrics
         for start_idx in range(0, total_items, chunk_size):
@@ -1110,20 +1007,10 @@ class ResourceLoadWorker(EnhancedBaseWorker):
     
     def _add_node_fields(self, processed_item: Dict[str, Any], node: Any, preloaded_metrics: Optional[Dict[str, Any]] = None):
         """Add node-specific fields efficiently - optimized for heavy data"""
-        import time
-        process_start = time.time()
-        node_name = processed_item.get('name', 'unknown')
-        from Utils import get_timestamp_with_ms
-        logging.info(f"🔄 [PROCESSING] {get_timestamp_with_ms()} - Unified Resource Loader: Starting to process node '{node_name}' fields")
-        
         status = node.status
-        
-        # Log raw node data structure
-        logging.debug(f"📊 [RAW DATA] {get_timestamp_with_ms()} - Node '{node_name}': metadata={hasattr(node, 'metadata')}, status={status is not None}, spec={hasattr(node, 'spec')}")
         
         # Quick exit for invalid nodes
         if not status:
-            logging.warning(f"⚠️  [MISSING STATUS] {get_timestamp_with_ms()} - Unified Resource Loader: Node '{node_name}' has no status - using defaults")
             processed_item.update({
                 'status': 'Unknown',
                 'conditions': 'Unknown',
@@ -1229,48 +1116,15 @@ class ResourceLoadWorker(EnhancedBaseWorker):
                 'pods_capacity': status.capacity.get('pods', ''),
             })
         
-        # Get real node metrics - OPTIMIZED to use preloaded metrics
-        node_name = processed_item['name']
-        logging.debug(f"Unified Resource Loader: Processing metrics for node {node_name}")
+        # Set default metrics values (no real metrics loading to avoid blocking)
+        processed_item.update({
+            'cpu_usage': 0.0,
+            'memory_usage': 0.0,
+            'disk_usage': 0.0
+        })
         
-        # Check if we have preloaded metrics (batch optimization)
-        if preloaded_metrics:
-            # preloaded_metrics is already the individual node's metrics dict
-            # Use preloaded metrics - FAST PATH
-            node_metrics = preloaded_metrics
-            processed_item['cpu_usage'] = node_metrics['cpu']['usage']
-            processed_item['memory_usage'] = node_metrics['memory']['usage']
-            if 'disk' in node_metrics:
-                processed_item['disk_usage'] = node_metrics['disk']['usage']
-                logging.debug(f"✅ [PRELOADED] Node {node_name}: CPU {node_metrics['cpu']['usage']:.1f}%, Memory {node_metrics['memory']['usage']:.1f}%, Disk {node_metrics['disk']['usage']:.1f}%")
-            else:
-                logging.debug(f"✅ [PRELOADED] Node {node_name}: CPU {node_metrics['cpu']['usage']:.1f}%, Memory {node_metrics['memory']['usage']:.1f}%")
-        else:
-            # Fallback to individual API call - SLOW PATH
-            try:
-                from Services.kubernetes.kubernetes_service import get_kubernetes_service
-                kube_service = get_kubernetes_service()
-                if kube_service and kube_service.metrics_service:
-                    node_metrics = kube_service.metrics_service.get_node_metrics(node_name)
-                    if node_metrics:
-                        processed_item['cpu_usage'] = node_metrics['cpu']['usage']
-                        processed_item['memory_usage'] = node_metrics['memory']['usage']
-                        if 'disk' in node_metrics:
-                            processed_item['disk_usage'] = node_metrics['disk']['usage']
-                            logging.debug(f"🔄 [INDIVIDUAL] Node {node_name}: CPU {node_metrics['cpu']['usage']:.1f}%, Memory {node_metrics['memory']['usage']:.1f}%, Disk {node_metrics['disk']['usage']:.1f}%")
-                        else:
-                            logging.debug(f"🔄 [INDIVIDUAL] Node {node_name}: CPU {node_metrics['cpu']['usage']:.1f}%, Memory {node_metrics['memory']['usage']:.1f}%")
-                    else:
-                        logging.warning(f"⚠️ [NO METRICS] No metrics available for node {node_name}")
-                else:
-                    logging.warning(f"⚠️ [NO SERVICE] Metrics service not available for node {node_name}")
-            except Exception as e:
-                logging.error(f"❌ [METRICS ERROR] Could not get metrics for node {node_name}: {e}")
-        
-        # Log completion of node processing
-        process_time = (time.time() - process_start) * 1000
-        logging.info(f"✅ [PROCESSED] {get_timestamp_with_ms()} - Node '{node_name}' processed in {process_time:.1f}ms: status={processed_item.get('status')}, roles={processed_item.get('roles')}, cpu={processed_item.get('cpu_capacity')}, memory={processed_item.get('memory_capacity')}")
-        logging.debug(f"📦 [FINAL DATA] {get_timestamp_with_ms()} - Node '{node_name}' final processed data: {processed_item}")
+        # Skip metrics loading for now to avoid 3+ minute delay
+        # Metrics will be loaded separately in background
     
     def _add_service_fields(self, processed_item: Dict[str, Any], service: Any):
         """Add service-specific fields efficiently"""
@@ -1299,7 +1153,6 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             'total_replicas': replicas,
         })
     
-    @lru_cache(maxsize=1000)
     def _format_age_fast(self, creation_timestamp) -> str:
         """Fast age calculation with caching"""
         if not creation_timestamp:
@@ -1634,21 +1487,6 @@ class ResourceLoadWorker(EnhancedBaseWorker):
         ]
         return ':'.join(key_parts)
     
-    def _cache_results(self, processed_items: List[Dict[str, Any]]):
-        """Cache processed results for performance"""
-        try:
-            cache_service = get_unified_cache()
-            cache_key = self._generate_cache_key()
-            
-            cache_service.cache_resources(
-                self.config.resource_type,
-                cache_key,
-                processed_items,
-                ttl_seconds=self.config.cache_ttl
-            )
-            
-        except Exception as e:
-            logging.debug(f"Failed to cache results: {e}")
     
     def _handle_timeout_fallback(self) -> Optional[LoadResult]:
         """Handle timeout fallback for timeout-prone resources"""
@@ -1656,27 +1494,17 @@ class ResourceLoadWorker(EnhancedBaseWorker):
         # Docker Desktop often has slow API responses
         
         try:
-            # Try to get stale cached data as a fallback
-            cache_service = get_unified_cache()
-            cache_key = self._generate_cache_key()
-            
-            # Look for stale cache data (up to 1 hour old)
-            stale_cached_items = cache_service.get_cached_resources(
-                self.config.resource_type, 
-                cache_key,
-                max_age_seconds=3600  # Allow 1 hour old data as fallback
+            # No cache fallback available, return empty result
+            logging.info(f"No fallback available for {self.config.resource_type}")
+            return LoadResult(
+                success=False,
+                resource_type=self.config.resource_type,
+                items=[],
+                total_count=0,
+                from_cache=False,
+                load_time_ms=0,
+                error_message="Timeout occurred and no fallback available"
             )
-            
-            if stale_cached_items:
-                logging.info(f"Using stale cache fallback for {self.config.resource_type}: {len(stale_cached_items)} items")
-                return LoadResult(
-                    success=True,
-                    resource_type=self.config.resource_type,
-                    items=stale_cached_items,
-                    total_count=len(stale_cached_items),
-                    from_cache=True,
-                    load_time_ms=0
-                )
             
             # If no cache available, return empty result for ALL resources to avoid blocking
             # This is better than showing nothing - at least the UI doesn't freeze
@@ -1754,7 +1582,6 @@ class HighPerformanceResourceLoader(QObject):
                 api_method=self._get_api_method(resource_type),
                 batch_size=100,
                 timeout_seconds=15,
-                cache_ttl=60,  # 1 minute cache
                 enable_streaming=True,
                 max_concurrent_requests=8
             )
@@ -1762,7 +1589,6 @@ class HighPerformanceResourceLoader(QObject):
             # Enable heavy data optimizations for large datasets
             if resource_type in heavy_data_resources:
                 config.timeout_seconds = 60  # Longer timeout for heavy data
-                config.cache_ttl = 900  # 15 minutes for heavy data
                 config.enable_chunking = True
                 config.chunk_size = 200 if resource_type == 'nodes' else 100
                 config.progressive_loading = True
@@ -1778,7 +1604,6 @@ class HighPerformanceResourceLoader(QObject):
                 api_method=self._get_api_method(resource_type),
                 batch_size=50,
                 timeout_seconds=20,
-                cache_ttl=300,  # 5 minute cache
                 enable_streaming=True,
                 max_concurrent_requests=5
             )
@@ -1790,7 +1615,6 @@ class HighPerformanceResourceLoader(QObject):
                 api_method=self._get_api_method(resource_type),
                 batch_size=25,
                 timeout_seconds=30,
-                cache_ttl=900,  # 15 minute cache
                 enable_streaming=False,
                 max_concurrent_requests=3
             )
@@ -1928,7 +1752,6 @@ class HighPerformanceResourceLoader(QObject):
             namespace=namespace,
             batch_size=50,  # Larger batch for search
             timeout_seconds=45,  # Longer timeout for search
-            cache_ttl=300,  # 5 minutes cache for search results
             enable_pagination=True,  # Enable pagination for comprehensive search
             max_concurrent_requests=3  # More requests for search
         )
@@ -2040,7 +1863,6 @@ class HighPerformanceResourceLoader(QObject):
                 namespace=namespace,
                 batch_size=base_config.batch_size,
                 timeout_seconds=base_config.timeout_seconds,
-                cache_ttl=base_config.cache_ttl,
                 enable_streaming=base_config.enable_streaming,
                 max_concurrent_requests=base_config.max_concurrent_requests
             )
@@ -2156,29 +1978,7 @@ class HighPerformanceResourceLoader(QObject):
         
         logging.info("Cancelled all active resource loading operations")
     
-    def get_cache_stats(self) -> Dict[str, Any]:
-        """Get cache performance statistics"""
-        try:
-            cache_service = get_unified_cache()
-            return cache_service.get_global_stats()
-        except Exception as e:
-            logging.error(f"Error getting cache stats: {e}")
-            return {}
-    
-    def clear_cache(self, resource_type: Optional[str] = None):
-        """Clear cache for specific resource type or optimize all caches"""
-        try:
-            cache_service = get_unified_cache()
-            if resource_type:
-                cache_service.clear_resource_cache(resource_type)
-                logging.info(f"Cleared cache for {resource_type}")
-            else:
-                # Don't clear all caches - this destroys performance
-                # Instead, optimize existing caches
-                cache_service.optimize_caches()
-                logging.info("Optimized resource caches instead of clearing all")
-        except Exception as e:
-            logging.error(f"Error clearing cache: {e}")
+    # Cache management functions removed (no more caching)
     
     def _get_api_client(self, kube_client, resource_type=None):
         """Get the appropriate API client for the resource type"""

@@ -191,15 +191,7 @@ class MainWindow(QMainWindow):
             except Exception as cache_error:
                 logging.debug(f"Could not cleanup age cache: {cache_error}")
             
-            # Optimize service caches instead of clearing them all
-            try:
-                from Utils.unified_cache_system import get_unified_cache
-                cache_service = get_unified_cache()
-                if hasattr(cache_service, 'optimize_caches'):
-                    cache_service.optimize_caches()
-                    logging.debug("Optimized caches instead of clearing")
-            except Exception as service_error:
-                logging.debug(f"Could not optimize service caches: {service_error}")
+            # Cache system removed - no optimization needed
                     
         except Exception as e:
             logging.error(f"Error during periodic cleanup: {e}")
@@ -531,6 +523,11 @@ class MainWindow(QMainWindow):
                 # FIXED: Set active cluster without triggering another connection
                 self.cluster_view.set_active_cluster(cluster_name)
                 
+                # FIXED: Update title bar ONLY after successful connection
+                if hasattr(self, 'title_bar'):
+                    self.title_bar.update_current_cluster(cluster_name)
+                    logging.info(f"Updated title bar cluster name to: {cluster_name}")
+                
                 # FIXED: Post-switch operations with error handling
                 QTimer.singleShot(50, lambda: self._post_switch_operations(cluster_name))
                 
@@ -539,6 +536,11 @@ class MainWindow(QMainWindow):
                 error_msg = f"Failed to connect to cluster: {cluster_name}"
                 logging.error(error_msg)
                 self.show_error_message(error_msg)
+                
+                # FIXED: Reset title bar to previous cluster or clear it
+                if hasattr(self, 'title_bar'):
+                    # Don't update title bar on failed connection
+                    logging.info(f"Connection failed for {cluster_name}, keeping existing title bar")
                 
                 # FIXED: Stay on home page when connection fails
                 if self.stacked_widget.currentWidget() != self.home_page:

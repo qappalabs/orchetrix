@@ -9,7 +9,7 @@ import logging
 import time
 from datetime import datetime, timezone
 import threading
-from Utils.unified_cache_system import get_unified_cache
+# Cache system removed
 from Utils.data_formatters import format_age
 
 
@@ -43,10 +43,7 @@ class ResourceProcessingWorker(QThread):
         self.end_time = None
         self.processed_count = 0
         
-        # Cache for processed data - use unified cache system
-        from Utils.unified_cache_system import get_unified_cache
-        unified_cache = get_unified_cache()
-        self.cache = unified_cache._formatted_data_cache
+        # Cache system removed
         
         logging.info(f"ResourceProcessingWorker created for {len(self.raw_resources)} {resource_type} items")
     
@@ -117,20 +114,11 @@ class ResourceProcessingWorker(QThread):
                 break
                 
             try:
-                # Check cache first
-                resource_hash = self._generate_resource_hash(resource)
-                cache_key = f"{self.resource_type}_{resource_hash}"
-                
-                processed = self.cache.get(cache_key)
-                if processed is None:
-                    # Process resource
-                    if self.process_func:
-                        processed = self.process_func(resource)
-                    else:
-                        processed = self._process_single_resource(resource)
-                    
-                    # Cache the result
-                    self.cache.set(cache_key, processed)
+                # Process resource directly (no caching)
+                if self.process_func:
+                    processed = self.process_func(resource)
+                else:
+                    processed = self._process_single_resource(resource)
                 
                 processed_batch.append(processed)
                 

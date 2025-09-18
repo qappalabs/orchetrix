@@ -648,20 +648,34 @@ class OrchestrixGUI(QMainWindow):
     def show_error_message(self, error_message):
         """Display error messages using centralized error handler to prevent duplicates"""
         try:
-            # Use centralized error handler instead of showing direct dialog
-            from Utils.error_handler import get_error_handler
-            error_handler = get_error_handler()
-            
             # Clean up the message
             if not error_message:
                 error_message = "An unknown error occurred."
             
             error_message = str(error_message).strip()
             
+            # Check if this error is for a cancelled cluster connection
+            # Extract cluster name from error message if possible
+            cancelled_cluster = None
+            for view_type in self.all_data:
+                for item in self.all_data[view_type]:
+                    cluster_name = item.get("name", "")
+                    if (cluster_name in error_message and 
+                        item.get("status") == "available" and 
+                        cluster_name not in self.connecting_clusters):
+                        cancelled_cluster = cluster_name
+                        break
+            
+            if cancelled_cluster:
+                logging.info(f"Suppressing error for cancelled cluster {cancelled_cluster}: {error_message}")
+                return
+            
             # Log for debugging
             logging.error(f"HomePage error: {error_message}")
             
             # Use centralized error handler - this prevents duplicate dialogs
+            from Utils.error_handler import get_error_handler
+            error_handler = get_error_handler()
             error_handler.handle_error(
                 Exception(error_message), 
                 context="cluster connection", 
@@ -1077,9 +1091,30 @@ class OrchestrixGUI(QMainWindow):
         cluster_name = item["name"]
         cluster_status = item["status"]
         
-        # Prevent multiple connection attempts
+        # Prevent multiple connection attempts - check both local and global state
         if cluster_status in ["connecting", "loading"]: 
+            logging.info(f"Cluster {cluster_name} already {cluster_status}, ignoring duplicate click")
             return
+            
+        # Check if any other cluster is currently connecting - cancel it and connect to new one
+        connecting_clusters = []
+        for view_type in self.all_data:
+            for data_item in self.all_data[view_type]:
+                if data_item.get("status") in ["connecting", "loading"] and data_item.get("name") != cluster_name:
+                    connecting_clusters.append(data_item.get("name"))
+                    logging.info(f"Cancelling connection to {data_item.get('name')} to switch to {cluster_name}")
+                    # Reset the previous cluster status
+                    data_item["status"] = "available"
+        
+        # Remove from connecting clusters set and update UI
+        for old_cluster in connecting_clusters:
+            self.connecting_clusters.discard(old_cluster)
+            if self.waiting_for_cluster_load == old_cluster:
+                self.waiting_for_cluster_load = None
+        
+        # Update UI to reflect cancellation of previous connections
+        if connecting_clusters:
+            self.update_content_view(self.current_view)
         
         # FIXED: Check actual cluster state before proceeding
         if self.cluster_state_manager:
@@ -1097,7 +1132,11 @@ class OrchestrixGUI(QMainWindow):
             for data_item in self.all_data[view_type]:
                 if data_item["name"] == cluster_name: 
                     data_item["status"] = "connecting"
+                    logging.info(f"HomePage: Set {cluster_name} status to connecting")
+        
+        self.connecting_clusters.add(cluster_name)
         self.update_content_view(self.current_view)
+        logging.info(f"HomePage: Updated UI to show {cluster_name} as connecting")
         
         # FIXED: Only emit signal to main window, don't call cluster_connector directly
         # Let the main window handle the connection through cluster state manager

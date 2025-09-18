@@ -9,7 +9,7 @@ import time
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import Union, Optional, Dict, Any, List
-from functools import lru_cache, wraps
+from functools import wraps
 from dataclasses import dataclass
 
 
@@ -29,13 +29,10 @@ class HighPerformanceFormatters:
     # Pre-compiled regex patterns for performance
     _CPU_PATTERN = re.compile(r'^(\d+(?:\.\d+)?)([m]?)$')
     _MEMORY_PATTERN = re.compile(r'^(\d+(?:\.\d+)?)([KMGTPE]?i?)$')
-    _AGE_CACHE_SIZE = 2000
-    _FORMAT_CACHE_SIZE = 1000
     
     @staticmethod
-    @lru_cache(maxsize=_AGE_CACHE_SIZE)
-    def format_age_cached(timestamp_str: str) -> str:
-        """Format age with aggressive caching for performance"""
+    def format_age(timestamp_str: str) -> str:
+        """Format age for display"""
         try:
             # Handle various timestamp formats
             if not timestamp_str or timestamp_str == 'Unknown':
@@ -97,12 +94,11 @@ class HighPerformanceFormatters:
         else:
             timestamp_str = dt.isoformat()
         
-        return HighPerformanceFormatters.format_age_cached(timestamp_str)
+        return HighPerformanceFormatters.format_age(timestamp_str)
     
     @staticmethod
-    @lru_cache(maxsize=_FORMAT_CACHE_SIZE)
-    def parse_cpu_value_cached(cpu_str: str) -> ResourceUsage:
-        """Parse CPU values with caching for performance"""
+    def parse_cpu_value(cpu_str: str) -> ResourceUsage:
+        """Parse CPU values"""
         if not cpu_str or not isinstance(cpu_str, str):
             return ResourceUsage(0.0, 'cores', cpu_str or '0', formatted='0 cores')
         
@@ -137,9 +133,8 @@ class HighPerformanceFormatters:
             return ResourceUsage(0.0, 'cores', cpu_str, formatted='0 cores')
     
     @staticmethod
-    @lru_cache(maxsize=_FORMAT_CACHE_SIZE)
-    def parse_memory_value_cached(memory_str: str) -> ResourceUsage:
-        """Parse memory values with caching and optimization"""
+    def parse_memory_value(memory_str: str) -> ResourceUsage:
+        """Parse memory values"""
         if not memory_str or not isinstance(memory_str, str):
             return ResourceUsage(0, 'bytes', memory_str or '0', formatted='0 B')
         
@@ -248,9 +243,8 @@ class HighPerformanceFormatters:
             return f"{used}/{total}"
     
     @staticmethod
-    @lru_cache(maxsize=_FORMAT_CACHE_SIZE)
-    def format_duration_cached(seconds: float) -> str:
-        """Format duration with caching"""
+    def format_duration(seconds: float) -> str:
+        """Format duration"""
         if seconds < 0:
             return '0s'
         
@@ -385,14 +379,14 @@ class HighPerformanceFormatters:
         try:
             # Parse used value
             if isinstance(used, str):
-                used_resource = HighPerformanceFormatters.parse_memory_value_cached(used)
+                used_resource = HighPerformanceFormatters.parse_memory_value(used)
                 used_val = used_resource.value
             else:
                 used_val = float(used or 0)
             
             # Parse total value
             if isinstance(total, str):
-                total_resource = HighPerformanceFormatters.parse_memory_value_cached(total)
+                total_resource = HighPerformanceFormatters.parse_memory_value(total)
                 total_val = total_resource.value
             else:
                 total_val = float(total or 0)
@@ -413,24 +407,24 @@ _formatter_instance = HighPerformanceFormatters()
 
 # Convenience functions that use the optimized formatter
 def format_age(timestamp: Optional[Union[str, datetime]]) -> str:
-    """Format age with high performance caching"""
+    """Format age for display"""
     if timestamp is None:
         return 'Unknown'
     
     if isinstance(timestamp, datetime):
         return _formatter_instance.format_age_from_datetime(timestamp)
     else:
-        return _formatter_instance.format_age_cached(str(timestamp))
+        return _formatter_instance.format_age(str(timestamp))
 
 
 def parse_cpu_value(cpu_str: str) -> ResourceUsage:
-    """Parse CPU value with high performance caching"""
-    return _formatter_instance.parse_cpu_value_cached(cpu_str)
+    """Parse CPU value"""
+    return _formatter_instance.parse_cpu_value(cpu_str)
 
 
 def parse_memory_value(memory_str: str) -> ResourceUsage:
-    """Parse memory value with high performance caching"""
-    return _formatter_instance.parse_memory_value_cached(memory_str)
+    """Parse memory value"""
+    return _formatter_instance.parse_memory_value(memory_str)
 
 
 def format_percentage(value: Optional[float], precision: int = 1) -> str:
@@ -444,8 +438,8 @@ def format_resource_ratio(used: Union[str, int, float], total: Union[str, int, f
 
 
 def format_duration(seconds: float) -> str:
-    """Format duration with caching"""
-    return _formatter_instance.format_duration_cached(seconds)
+    """Format duration"""
+    return _formatter_instance.format_duration(seconds)
 
 
 def format_status_with_color(status: str, status_mapping: Optional[Dict[str, str]] = None) -> Dict[str, str]:
@@ -478,21 +472,4 @@ def calculate_usage_percentage(used: Union[str, float], total: Union[str, float]
     return _formatter_instance.calculate_usage_percentage(used, total)
 
 
-# Performance monitoring function
-def get_formatter_cache_info() -> Dict[str, Any]:
-    """Get cache information for performance monitoring"""
-    return {
-        'age_cache_info': HighPerformanceFormatters.format_age_cached.cache_info()._asdict(),
-        'cpu_cache_info': HighPerformanceFormatters.parse_cpu_value_cached.cache_info()._asdict(),
-        'memory_cache_info': HighPerformanceFormatters.parse_memory_value_cached.cache_info()._asdict(),
-        'duration_cache_info': HighPerformanceFormatters.format_duration_cached.cache_info()._asdict(),
-    }
-
-
-def clear_formatter_caches():
-    """Clear all formatter caches"""
-    HighPerformanceFormatters.format_age_cached.cache_clear()
-    HighPerformanceFormatters.parse_cpu_value_cached.cache_clear()
-    HighPerformanceFormatters.parse_memory_value_cached.cache_clear()
-    HighPerformanceFormatters.format_duration_cached.cache_clear()
-    logging.info("Cleared all formatter caches")
+# Performance monitoring functions removed (no more caching)

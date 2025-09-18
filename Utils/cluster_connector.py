@@ -73,8 +73,7 @@ class ConnectionState:
                 self.last_error = None
 
 
-# DataCache class replaced by unified cache system
-# Now using get_unified_cache() for all caching needs
+# Cache system removed
 
 
 class ClusterConnectionWorker(EnhancedBaseWorker):
@@ -186,10 +185,7 @@ class EnhancedClusterConnector(QObject):
         self._current_cluster: Optional[str] = None
         self._state_lock = threading.RLock()
         
-        # Data management
-        # Use unified cache system instead of custom DataCache
-        from Utils.unified_cache_system import get_unified_cache
-        self._cache = get_unified_cache()
+        # Cache system removed
         
         # Polling management
         self._polling_active = False
@@ -227,7 +223,7 @@ class EnhancedClusterConnector(QObject):
         self._issues_timer.timeout.connect(self._poll_issues)
         
         # Cache cleanup timer - reduced frequency for better performance
-        self._cleanup_timer.timeout.connect(self._cleanup_cache)
+        # Cache system removed
         self._cleanup_timer.start(600000)  # Cleanup every 10 minutes for better performance
     
     def _setup_timers_on_main_thread(self):
@@ -422,9 +418,7 @@ class EnhancedClusterConnector(QObject):
         if data is None:
             return  # Some data types (metrics, issues) are handled via signals
         
-        # Cache the data
-        cache_key = f"{self.current_cluster}:{data_type}"
-        self._cache.cache_resources('cluster_data', cache_key, data)
+        # No caching
         
         # Emit appropriate signal
         if data_type == "cluster_info":
@@ -608,9 +602,7 @@ class EnhancedClusterConnector(QObject):
             return
         
         cluster_name = getattr(self.kube_client, 'current_cluster', self.current_cluster)
-        if cluster_name:
-            cache_key = f"{cluster_name}:cluster_info"
-            self._cache.cache_resources('cluster_info', cache_key, info)
+        # No caching
         
         self.cluster_data_loaded.emit(info)
     
@@ -619,10 +611,7 @@ class EnhancedClusterConnector(QObject):
         if self._shutting_down:
             return
         
-        cluster_name = getattr(self.kube_client, 'current_cluster', self.current_cluster)
-        if cluster_name:
-            cache_key = f"{cluster_name}:metrics"
-            self._cache.cache_resources('metrics', cache_key, metrics)
+        # No caching
         
         self.metrics_data_loaded.emit(metrics)
     
@@ -631,10 +620,7 @@ class EnhancedClusterConnector(QObject):
         if self._shutting_down:
             return
         
-        cluster_name = getattr(self.kube_client, 'current_cluster', self.current_cluster)
-        if cluster_name:
-            cache_key = f"{cluster_name}:issues"
-            self._cache.cache_resources('issues', cache_key, issues)
+        # No caching
         
         self.issues_data_loaded.emit(issues)
     
@@ -653,13 +639,7 @@ class EnhancedClusterConnector(QObject):
         else:
             logging.warning(f"Kubernetes client error (suppressed): {error_message}")
     
-    def _cleanup_cache(self) -> None:
-        """Periodic cache cleanup - handled by unified cache system"""
-        try:
-            self._cache.optimize_caches()
-            logging.debug("Cache optimization completed")
-        except Exception as e:
-            logging.error(f"Error during cache cleanup: {e}")
+    # Cache cleanup method removed
     
     def disconnect_cluster(self, cluster_name: str) -> None:
         """Disconnect from a cluster"""
@@ -672,8 +652,7 @@ class EnhancedClusterConnector(QObject):
                 self._stop_polling()
         
         # Clear cache for this cluster
-        # Clear cluster data from unified cache
-        self._cache.clear_resource_cache(f'cluster_{cluster_name}')
+        # Cache system removed
         
         logging.info(f"Disconnected from cluster: {cluster_name}")
     
@@ -717,18 +696,7 @@ class EnhancedClusterConnector(QObject):
             logging.error(error_msg)
             self.error_occurred.emit("issues", error_msg)
     
-    def get_cached_data(self, cluster_name: str) -> Dict[str, Any]:
-        """Get cached data for a cluster"""
-        cached_data = {}
-        
-        data_types = ["cluster_info", "metrics", "issues", "nodes"]
-        for data_type in data_types:
-            cache_key = f"{cluster_name}:{data_type}"
-            data = self._cache.get_cached_resources('cluster_data', cache_key)
-            if data:
-                cached_data[data_type] = data
-        
-        return cached_data
+    # Cache methods removed
     
     def get_connection_state(self, cluster_name: str) -> str:
         """Get current connection state for a cluster"""

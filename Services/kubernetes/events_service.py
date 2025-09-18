@@ -18,18 +18,12 @@ EVENT_MAX_AGE_HOURS = 24
 class KubernetesEventsService:
     """Service for managing Kubernetes events and issues"""
     
-    def __init__(self, api_service, cache_service):
+    def __init__(self, api_service):
         self.api_service = api_service
-        self.cache_service = cache_service
         logging.debug("KubernetesEventsService initialized")
     
     def get_cluster_issues(self, cluster_name: str) -> List[Dict[str, Any]]:
         """Get cluster issues with real data and improved filtering"""
-        # Check cache first
-        cached_issues = self.cache_service.get_cached_resources('issues', f'cluster_{cluster_name}')
-        if cached_issues:
-            logging.debug(f"Using cached issues for {cluster_name}")
-            return cached_issues
         
         try:
             issues = []
@@ -78,8 +72,7 @@ class KubernetesEventsService:
             # Limit to most recent issues
             issues = issues[:MAX_ISSUES_RETURNED]
             
-            # Cache the results
-            self.cache_service.cache_resources('issues', f'cluster_{cluster_name}', issues)
+            # No caching
             
             logging.info(f"Found {len(issues)} real cluster issues")
             return issues
@@ -236,9 +229,8 @@ class KubernetesEventsService:
             logging.error(f"Error getting critical events: {e}")
             return []
     
-    @lru_cache(maxsize=256)
     def _format_age(self, timestamp) -> str:
-        """Format age with caching"""
+        """Format age"""
         if not timestamp:
             return "Unknown"
         
@@ -346,6 +338,6 @@ class KubernetesEventsService:
 
 
 # Factory function
-def create_kubernetes_events_service(api_service, cache_service) -> KubernetesEventsService:
+def create_kubernetes_events_service(api_service) -> KubernetesEventsService:
     """Create a new Kubernetes events service instance"""
-    return KubernetesEventsService(api_service, cache_service)
+    return KubernetesEventsService(api_service)

@@ -1155,17 +1155,7 @@ class ClusterPage(QWidget):
             # Request fresh data
             self.refresh_data()
             
-            # Also try to get any cached data immediately
-            if hasattr(self, 'cluster_connector') and self.cluster_connector.current_cluster:
-                cached_data = self.cluster_connector.get_cached_data(self.cluster_connector.current_cluster)
-                if cached_data:
-                    logging.info(f"ClusterPage: Found cached data: {list(cached_data.keys())}")
-                    if 'metrics' in cached_data:
-                        self.update_metrics(cached_data['metrics'])
-                    if 'issues' in cached_data:
-                        self.update_issues(cached_data['issues'])
-                    if 'cluster_info' in cached_data:
-                        self.update_cluster_info(cached_data['cluster_info'])
+            # Cache system removed - data will be loaded fresh
         finally:
             self._loading = False
 
