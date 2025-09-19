@@ -22,7 +22,7 @@ class MemoryMonitor(QObject):
     def __init__(self, warning_threshold_mb: float = 500.0):
         super().__init__()
         self.warning_threshold = warning_threshold_mb * 1024 * 1024  # Convert to bytes
-        self.monitor_timer = QTimer()
+        self.monitor_timer = QTimer(self)  # Fixed: Added self as parent
         self.monitor_timer.timeout.connect(self._check_memory)
         self.last_gc_time = time.time()
         self.gc_interval = 60  # Run garbage collection every 60 seconds

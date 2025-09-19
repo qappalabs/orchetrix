@@ -210,7 +210,7 @@ class OrchestrixGUI(QMainWindow):
         # --- End of new properties ---
  
         self._pending_updates = []
-        self._update_timer = QTimer()
+        self._update_timer = QTimer(self)  # Fixed: Added self as parent
         self._update_timer.timeout.connect(self._process_pending_updates)
         self._update_timer.setSingleShot(True)
 
@@ -220,7 +220,7 @@ class OrchestrixGUI(QMainWindow):
         QTimer.singleShot(100, self.load_kubernetes_clusters)
         
         # Set up periodic cluster status refresh (every 5 minutes for Docker Desktop)
-        self.cluster_refresh_timer = QTimer()
+        self.cluster_refresh_timer = QTimer(self)  # Fixed: Added self as parent
         self.cluster_refresh_timer.timeout.connect(self.refresh_cluster_status)
         self.cluster_refresh_timer.start(300000)  # 5 minutes - much less aggressive
         logging.info("HomePage: Set up periodic cluster status refresh (5min interval)")

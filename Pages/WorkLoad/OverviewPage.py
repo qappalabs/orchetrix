@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QSizePolicy, QScrollArea, QFrame, QPushButton, QApplication
 )
 from PyQt6.QtGui import QFont
-from PyQt6.QtCore import Qt, QSize, QTimer, pyqtSignal, QObject
+from PyQt6.QtCore import Qt, QSize, QTimer, pyqtSignal, QObject, QThread
 
 from UI.Styles import AppStyles, AppColors
 from Utils.kubernetes_client import get_kubernetes_client
@@ -15,6 +15,176 @@ from Utils.enhanced_worker import EnhancedBaseWorker
 from Utils.thread_manager import get_thread_manager
 from kubernetes.client.rest import ApiException
 import logging
+
+
+class OverviewDataWorker(QThread):
+    """Background worker for loading overview data to prevent UI freezing"""
+    
+    data_loaded = pyqtSignal(dict)  # Emit loaded overview data
+    error_occurred = pyqtSignal(str)  # Emit error message
+    progress_update = pyqtSignal(int, str)  # Emit progress percentage and status
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.kube_client = None
+        self._should_stop = False
+        
+    def set_client(self, kube_client):
+        """Set the Kubernetes client"""
+        self.kube_client = kube_client
+        
+    def stop(self):
+        """Stop the worker thread"""
+        self._should_stop = True
+        
+    def run(self):
+        """Run the background data loading"""
+        try:
+            if not self.kube_client:
+                self.error_occurred.emit("Kubernetes client not available")
+                return
+                
+            if self._should_stop:
+                return
+                
+            self.progress_update.emit(10, "Connecting to Kubernetes API...")
+            
+            # Check if client is connected
+            if not self.kube_client.is_connected():
+                self.error_occurred.emit("Not connected to Kubernetes cluster")
+                return
+                
+            if self._should_stop:
+                return
+                
+            self.progress_update.emit(30, "Loading cluster metrics...")
+            
+            # Load overview data in background
+            overview_data = self._load_overview_data()
+            
+            if self._should_stop:
+                return
+                
+            self.progress_update.emit(100, "Data loaded successfully")
+            self.data_loaded.emit(overview_data)
+            
+        except Exception as e:
+            logging.error(f"Error in OverviewDataWorker: {e}")
+            self.error_occurred.emit(f"Failed to load overview data: {str(e)}")
+            
+    def _load_overview_data(self):
+        """Load overview data with progress updates - focused on workloads only"""
+        try:
+            overview_data = {}
+            
+            # Load workloads summary only (Overview page focus)
+            self.progress_update.emit(50, "Loading workloads summary...")
+            workloads_data = self._load_workloads_summary()
+            overview_data['workloads'] = workloads_data
+            
+            return overview_data
+            
+        except Exception as e:
+            logging.error(f"Error loading overview data: {e}")
+            raise
+            
+            
+    def _load_workloads_summary(self):
+        """Load workloads summary data with optimizations for heavy loads"""
+        import time
+        try:
+            from PyQt6.QtCore import QCoreApplication
+            
+            workloads_data = {}
+            start_time = time.time()
+            timeout = 30  # 30 second timeout for heavy clusters
+            
+            # Helper function to check timeout
+            def check_timeout():
+                if time.time() - start_time > timeout:
+                    logging.warning("OverviewPage: Workload loading timeout, returning partial data")
+                    return True
+                return False
+            
+            # Load deployments with timeout protection
+            self.progress_update.emit(72, "Loading deployments...")
+            try:
+                if check_timeout() or self._should_stop:
+                    workloads_data['deployments'] = 0
+                else:
+                    deployments = self.kube_client.service.api_service.apps_v1.list_deployment_for_all_namespaces()
+                    workloads_data['deployments'] = len(deployments.items)
+            except Exception as e:
+                logging.warning(f"Error loading deployments: {e}")
+                workloads_data['deployments'] = 0
+                
+            # Load pods with chunked processing for large datasets
+            self.progress_update.emit(74, "Loading pods...")
+            try:
+                if check_timeout() or self._should_stop:
+                    workloads_data['pods_total'] = 0
+                    workloads_data['pods_running'] = 0
+                else:
+                    pods = self.kube_client.service.api_service.v1.list_pod_for_all_namespaces()
+                    workloads_data['pods_total'] = len(pods.items)
+                    
+                    # Process pods in chunks to avoid blocking
+                    running_count = 0
+                    chunk_size = 100  # Process 100 pods at a time
+                    for i in range(0, len(pods.items), chunk_size):
+                        if check_timeout() or self._should_stop:
+                            break
+                        chunk = pods.items[i:i + chunk_size]
+                        running_count += sum(1 for pod in chunk 
+                                           if pod.status and pod.status.phase == "Running")
+                        # Allow UI to process events during heavy operations
+                        QCoreApplication.processEvents()
+                        time.sleep(0.001)  # 1ms pause to prevent UI freezing
+                    workloads_data['pods_running'] = running_count
+            except Exception as e:
+                logging.warning(f"Error loading pods: {e}")
+                workloads_data['pods_total'] = 0
+                workloads_data['pods_running'] = 0
+                
+            # Load other resources with timeout checks
+            resource_types = [
+                ('daemonsets', 76, 'apps_v1', 'list_daemon_set_for_all_namespaces'),
+                ('statefulsets', 78, 'apps_v1', 'list_stateful_set_for_all_namespaces'),  
+                ('replicasets', 80, 'apps_v1', 'list_replica_set_for_all_namespaces'),
+                ('jobs', 82, 'batch_v1', 'list_job_for_all_namespaces'),
+                ('cronjobs', 84, 'batch_v1', 'list_cron_job_for_all_namespaces')
+            ]
+            
+            for resource_name, progress, api_version, method_name in resource_types:
+                if check_timeout() or self._should_stop:
+                    workloads_data[resource_name] = 0
+                    continue
+                    
+                self.progress_update.emit(progress, f"Loading {resource_name}...")
+                # Allow UI to process events between resource loads
+                QCoreApplication.processEvents()
+                
+                try:
+                    api = getattr(self.kube_client.service.api_service, api_version)
+                    method = getattr(api, method_name)
+                    resources = method()
+                    workloads_data[resource_name] = len(resources.items)
+                except Exception as e:
+                    logging.warning(f"Error loading {resource_name}: {e}")
+                    workloads_data[resource_name] = 0
+            
+            load_time = (time.time() - start_time) * 1000
+            logging.info(f"OverviewPage: Loaded workloads summary in {load_time:.1f}ms")
+            return workloads_data
+            
+        except Exception as e:
+            logging.error(f"Error loading workloads summary: {e}")
+            return {
+                'deployments': 0, 'pods_total': 0, 'pods_running': 0, 
+                'daemonsets': 0, 'statefulsets': 0, 'replicasets': 0, 
+                'jobs': 0, 'cronjobs': 0
+            }
+            
 
 class OverviewResourceWorker(EnhancedBaseWorker):
     """Async worker for loading overview resource data"""
@@ -141,10 +311,19 @@ class OverviewResourceWorker(EnhancedBaseWorker):
         if not items:
             return 0, 0
 
+        from PyQt6.QtCore import QCoreApplication
+        import time
+        
         running = 0
         total = len(items)
-
-        for item in items:
+        
+        # Process in chunks for large datasets
+        chunk_size = 50
+        for idx, item in enumerate(items):
+            # Allow UI processing every chunk_size items
+            if idx > 0 and idx % chunk_size == 0:
+                QCoreApplication.processEvents()
+                time.sleep(0.001)  # 1ms pause to prevent UI freezing
             status = item.status if hasattr(item, 'status') and item.status else None
 
             if self.resource_type == "pods":
@@ -374,6 +553,10 @@ class OverviewPage(QWidget):
         self._is_loading = False  # Prevent duplicate loading
         self._loading_resources = set()  # Track which resources are being loaded
         
+        # Background worker for performance
+        self.data_worker = None
+        self._loading_in_progress = False
+        
         try:
             self.setup_ui()
             
@@ -382,9 +565,9 @@ class OverviewPage(QWidget):
                 # Set up auto-refresh with much longer interval to reduce load
                 self.setup_refresh_timer()
                 
-                # Initial data load - ensure it's called from main thread with optimized delay
+                # Initial data load - single call only
                 if self.thread() == QApplication.instance().thread():
-                    QTimer.singleShot(1000, self._safe_initial_load)  # Optimized delay for faster loading
+                    QTimer.singleShot(500, self._safe_initial_load)  # Single optimized call
                 else:
                     # Use metaObject to invoke on main thread
                     from PyQt6.QtCore import QMetaObject
@@ -416,15 +599,11 @@ class OverviewPage(QWidget):
             self.show_connection_error(f"Initial load failed: {str(e)}")
         
     def setup_refresh_timer(self):
-        """Set up the refresh timer for periodic updates."""
-        # Ensure timer is created on main thread
-        if self.thread() == QApplication.instance().thread():
-            self.refresh_timer = QTimer(self)  # Set parent to ensure proper cleanup
-            self.refresh_timer.timeout.connect(self.refresh_data)
-            # Refresh every 3 minutes for heavy loads (optimized for performance)
-            self.refresh_timer.start(180000)
-        else:
-            logging.warning("OverviewPage: Timer setup called from non-main thread")
+        """Set up the refresh timer for periodic updates - DISABLED for now"""
+        # Disable automatic refresh to prevent excessive API calls
+        # User can manually refresh using the refresh button
+        self.refresh_timer = None
+        logging.info("OverviewPage: Auto-refresh disabled - manual refresh only")
 
     def setup_ui(self):
         """Set up the main UI layout."""
@@ -530,6 +709,11 @@ class OverviewPage(QWidget):
 
     def force_load_data(self):
         """Force reload data when refresh button is clicked."""
+        # Check if already loading to prevent duplicate calls
+        if self._loading_in_progress:
+            logging.info("OverviewPage: Force loading data requested - already in progress, skipping")
+            return
+            
         logging.info("OverviewPage: Force loading data requested")
         
         # Stop any current loading to prevent conflicts
@@ -547,67 +731,161 @@ class OverviewPage(QWidget):
             self.show_connection_error("Failed to initialize Kubernetes client")
 
     def fetch_kubernetes_data(self):
-        """Fetch Kubernetes data with progressive async loading to prevent UI freezing."""
+        """Fetch Kubernetes data using background worker to prevent UI freezing."""
         try:
             logging.info("OverviewPage: fetch_kubernetes_data called")
             
-            # Simple check to prevent duplicate loading
-            if self._is_loading:
-                logging.info("OverviewPage: Already loading, skipping duplicate call")
+            if self._loading_in_progress:
+                logging.info("OverviewPage: Background loading already in progress, skipping")
                 return
-            
-            self._is_loading = True
-            self._loading_resources.clear()  # Clear any previous loading state
+                
+            self._loading_in_progress = True
             
             if not self.kube_client:
                 if not self.initialize_kube_client():
                     self.show_connection_error("Kubernetes client not initialized")
-                    self._is_loading = False
+                    self._loading_in_progress = False
                     return
 
             if not hasattr(self.kube_client, 'current_cluster') or not self.kube_client.current_cluster:
                 self.show_connection_error("No active cluster context")
-                self._is_loading = False
+                self._loading_in_progress = False
                 return
 
             if not hasattr(self.kube_client, 'v1') or not self.kube_client.v1:
                 self.show_connection_error("Kubernetes API client not available")
-                self._is_loading = False
+                self._loading_in_progress = False
                 return
 
-            logging.info(f"OverviewPage: Starting progressive loading for {len(self.metric_cards)} resource types")
-            
-            # Show loading indicators on all cards immediately
-            for card in self.metric_cards.values():
-                card.show_loading()
-            
-            # Load all resource types in parallel for maximum performance
-            resource_types = list(self.metric_cards.keys())
-            
-            # For heavy loads, process in smaller concurrent batches
-            if len(resource_types) > 4:
-                # Process high-priority resources first (pods, deployments)
-                priority_resources = ['pods', 'deployments']
-                secondary_resources = [r for r in resource_types if r not in priority_resources]
+            # Stop any existing worker
+            if self.data_worker and self.data_worker.isRunning():
+                self.data_worker.stop()
+                self.data_worker.wait(1000)  # Wait up to 1 second
                 
-                # Load priority resources immediately
-                for resource_type in priority_resources:
-                    if resource_type in resource_types:
-                        self.load_resource_async(resource_type)
+            # Create and configure new worker
+            self.data_worker = OverviewDataWorker(self)
+            self.data_worker.set_client(self.kube_client)
+            
+            # Connect signals
+            self.data_worker.data_loaded.connect(self._on_background_data_loaded)
+            self.data_worker.error_occurred.connect(self._on_background_error)
+            self.data_worker.progress_update.connect(self._on_progress_update)
+            self.data_worker.finished.connect(self._on_worker_finished)
+            
+            # Don't show loading indicators - keep cards clean
+            # Loading happens in background, no need to show spinners
+            
+            # Start background loading
+            self.data_worker.start()
+            logging.info("OverviewPage: Started background data loading")
+            
+        except Exception as e:
+            logging.error(f"OverviewPage: Error starting background data fetch: {e}")
+            self._loading_in_progress = False
+            self.show_connection_error(f"Failed to start data loading: {str(e)}")
+            
+    def _on_background_data_loaded(self, overview_data):
+        """Handle data loaded from background worker"""
+        try:
+            logging.info("OverviewPage: Received overview data from background worker")
+            
+            # Update workloads cards (main focus of Overview page)
+            if 'workloads' in overview_data:
+                self._update_workloads_cards(overview_data['workloads'])
                 
-                # Load secondary resources with minimal delay to prevent overwhelming
-                for i, resource_type in enumerate(secondary_resources):
-                    delay = i * 100  # 100ms stagger for secondary resources
-                    QTimer.singleShot(delay, lambda rt=resource_type: self.load_resource_async(rt))
-            else:
-                # Small number of resources - load all immediately
-                for resource_type in resource_types:
-                    self.load_resource_async(resource_type)
+            logging.info("OverviewPage: Successfully updated all overview cards")
+            
+        except Exception as e:
+            logging.error(f"OverviewPage: Error handling background data: {e}")
+            self.show_connection_error(f"Error updating overview: {str(e)}")
+            
+    def _on_background_error(self, error_message):
+        """Handle error from background worker"""
+        try:
+            logging.error(f"OverviewPage: Background worker error: {error_message}")
+            self.show_connection_error(error_message)
+            
+            # No loading indicators to hide
                     
         except Exception as e:
-            logging.error(f"Error in fetch_kubernetes_data: {e}")
-            self.show_connection_error(f"Error loading data: {str(e)}")
-            self._is_loading = False
+            logging.error(f"OverviewPage: Error handling background error: {e}")
+            
+    def _on_progress_update(self, percentage, status):
+        """Handle progress update from background worker"""
+        try:
+            logging.debug(f"OverviewPage: Progress {percentage}% - {status}")
+            # You could update a progress indicator here if you have one
+        except Exception as e:
+            logging.error(f"OverviewPage: Error handling progress update: {e}")
+            
+    def _on_worker_finished(self):
+        """Handle worker finished signal"""
+        try:
+            self._loading_in_progress = False
+            if self.data_worker:
+                self.data_worker.deleteLater()
+                self.data_worker = None
+        except Exception as e:
+            logging.error(f"OverviewPage: Error in worker finished handler: {e}")
+            
+    def _update_workloads_cards(self, workloads_data):
+        """Update workloads cards with data"""
+        try:
+            # Update pods card
+            if 'pods' in self.metric_cards:
+                pods_running = workloads_data.get('pods_running', 0)
+                pods_total = workloads_data.get('pods_total', 0)
+                self.metric_cards['pods'].update_data(pods_running, pods_total)
+                
+            # Update deployments card  
+            if 'deployments' in self.metric_cards:
+                deployments_count = workloads_data.get('deployments', 0)
+                self.metric_cards['deployments'].update_data(deployments_count, deployments_count)
+                
+            # Update daemon sets card
+            if 'daemonsets' in self.metric_cards:
+                daemonsets_count = workloads_data.get('daemonsets', 0)
+                self.metric_cards['daemonsets'].update_data(daemonsets_count, daemonsets_count)
+                
+            # Update stateful sets card
+            if 'statefulsets' in self.metric_cards:
+                statefulsets_count = workloads_data.get('statefulsets', 0)
+                self.metric_cards['statefulsets'].update_data(statefulsets_count, statefulsets_count)
+                
+            # Update replica sets card
+            if 'replicasets' in self.metric_cards:
+                replicasets_count = workloads_data.get('replicasets', 0)
+                self.metric_cards['replicasets'].update_data(replicasets_count, replicasets_count)
+                
+            # Update jobs card
+            if 'jobs' in self.metric_cards:
+                jobs_count = workloads_data.get('jobs', 0)
+                self.metric_cards['jobs'].update_data(jobs_count, jobs_count)
+                
+            # Update cron jobs card
+            if 'cronjobs' in self.metric_cards:
+                cronjobs_count = workloads_data.get('cronjobs', 0)
+                self.metric_cards['cronjobs'].update_data(cronjobs_count, cronjobs_count)
+                
+        except Exception as e:
+            logging.error(f"OverviewPage: Error updating workloads cards: {e}")
+            
+    def cleanup_on_destroy(self):
+        """Clean up resources when page is destroyed"""
+        try:
+            # Stop background worker
+            if self.data_worker and self.data_worker.isRunning():
+                self.data_worker.stop()
+                self.data_worker.wait(1000)
+                
+            # Stop refresh timer
+            if self.refresh_timer:
+                self.refresh_timer.stop()
+                
+            logging.info("OverviewPage: Cleanup completed")
+            
+        except Exception as e:
+            logging.error(f"OverviewPage: Error during cleanup: {e}")
 
     def load_resource_async(self, resource_type):
         """Load a specific resource type asynchronously"""
@@ -856,24 +1134,13 @@ class OverviewPage(QWidget):
             return False
 
     def showEvent(self, event):
-        """Handle show event - trigger immediate data load if needed"""
+        """Handle show event - no automatic loading (handled by initial load)"""
         super().showEvent(event)
         
-        # Only trigger load if not already loading and no data is visible
-        if (self._initialization_complete and not self._is_loading and
-            not any(card.running > 0 or card.total > 0 for card in self.metric_cards.values())):
-            logging.info("OverviewPage: No data visible on show, triggering immediate load")
-            QTimer.singleShot(100, self._force_load_all_data)
+        # No automatic loading on show - initial load handles everything
+        # This prevents duplicate loading calls
+        pass
     
-    def _force_load_all_data(self):
-        """Force load all data types directly"""
-        logging.info("OverviewPage: Force loading all data types")
-        
-        # Reset loading state first
-        self._is_loading = False
-        
-        # Load data directly for immediate response
-        self.fetch_kubernetes_data()
 
     def cleanup(self):
         """Cleanup when page is being destroyed."""

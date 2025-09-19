@@ -170,12 +170,17 @@ class MainWindow(QMainWindow):
             self.home_page.initialize_cluster_connector()
 
     def _periodic_cleanup(self):
-        """Enhanced periodic cleanup to prevent memory leaks"""
+        """Enhanced periodic cleanup to prevent memory leaks and performance degradation"""
         try:
-            # Force garbage collection
+            cleanup_start = time.time()
+            
+            # Force garbage collection with statistics
             collected = gc.collect()
             if collected > 0:
                 logging.debug(f"Periodic cleanup: {collected} objects collected")
+            
+            # Get memory usage statistics
+            total_objects = len(gc.get_objects())
             
             # Cleanup chart page caches if needed
             if hasattr(self, 'cluster_view') and hasattr(self.cluster_view, 'pages'):
@@ -186,15 +191,78 @@ class MainWindow(QMainWindow):
             # Cleanup age caches from base resource pages
             try:
                 from Base_Components.base_resource_page import BaseResourcePage
-                if len(BaseResourcePage._age_cache) > 1000:
+                if hasattr(BaseResourcePage, '_age_cache') and len(BaseResourcePage._age_cache) > 1000:
                     BaseResourcePage._clean_age_cache()
+                    logging.debug("Cleaned base resource page age cache")
             except Exception as cache_error:
                 logging.debug(f"Could not cleanup age cache: {cache_error}")
             
-            # Cache system removed - no optimization needed
+            # Cleanup debounced updater
+            try:
+                from Utils.debounced_updater import get_debounced_updater
+                updater = get_debounced_updater()
+                # Clear old throttle history to prevent memory accumulation
+                updater.clear_throttle_history()
+            except Exception as updater_error:
+                logging.debug(f"Could not cleanup debounced updater: {updater_error}")
+            
+            # Cleanup background workers that may be finished
+            self._cleanup_finished_workers()
+            
+            # Cleanup virtual scroll tables
+            self._cleanup_virtual_scroll_tables()
+            
+            # Monitor memory usage and log warnings if high
+            if total_objects > 50000:  # Threshold for warning
+                logging.warning(f"High object count detected: {total_objects} objects in memory")
+                
+            cleanup_time = (time.time() - cleanup_start) * 1000
+            if cleanup_time > 100:  # Log if cleanup takes too long
+                logging.warning(f"Periodic cleanup took {cleanup_time:.1f}ms")
+            else:
+                logging.debug(f"Periodic cleanup completed in {cleanup_time:.1f}ms, {total_objects} objects")
                     
         except Exception as e:
             logging.error(f"Error during periodic cleanup: {e}")
+            
+    def _cleanup_finished_workers(self):
+        """Clean up finished background workers"""
+        try:
+            # Cleanup workers in cluster view pages
+            if hasattr(self, 'cluster_view') and hasattr(self.cluster_view, 'pages'):
+                for page_name, page in self.cluster_view.pages.items():
+                    if hasattr(page, 'data_worker') and page.data_worker:
+                        if page.data_worker.isFinished():
+                            page.data_worker.deleteLater()
+                            page.data_worker = None
+                            logging.debug(f"Cleaned up finished worker for {page_name}")
+                            
+                    if hasattr(page, 'metrics_worker') and page.metrics_worker:
+                        if page.metrics_worker.isFinished():
+                            page.metrics_worker.deleteLater()
+                            page.metrics_worker = None
+                            logging.debug(f"Cleaned up finished metrics worker for {page_name}")
+                            
+        except Exception as e:
+            logging.debug(f"Error cleaning up finished workers: {e}")
+            
+    def _cleanup_virtual_scroll_tables(self):
+        """Clean up virtual scroll table caches"""
+        try:
+            from PyQt6.QtWidgets import QApplication
+            
+            # Find all virtual scroll tables and clean them up
+            for widget in QApplication.allWidgets():
+                if hasattr(widget, 'cleanup') and 'VirtualScroll' in widget.__class__.__name__:
+                    try:
+                        # Only cleanup if widget is not currently visible
+                        if not widget.isVisible():
+                            widget.cleanup()
+                    except Exception as widget_error:
+                        logging.debug(f"Error cleaning up virtual scroll widget: {widget_error}")
+                        
+        except Exception as e:
+            logging.debug(f"Error cleaning up virtual scroll tables: {e}")
 
     def _setup_cluster_state_manager(self):
         """Setup cluster state manager"""

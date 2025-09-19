@@ -190,9 +190,9 @@ class EnhancedClusterConnector(QObject):
         # Polling management
         self._polling_active = False
         self._polling_lock = threading.RLock()
-        self._metrics_timer = QTimer()
-        self._issues_timer = QTimer()
-        self._cleanup_timer = QTimer()
+        self._metrics_timer = QTimer(self)  # Fixed: Added self as parent
+        self._issues_timer = QTimer(self)   # Fixed: Added self as parent
+        self._cleanup_timer = QTimer(self)  # Fixed: Added self as parent
         
         # Shutdown management
         self._shutting_down = False

@@ -79,12 +79,15 @@ class VirtualScrollTable(QTableView):
         self.setShowGrid(True)
         self.setGridStyle(Qt.PenStyle.DotLine)
         
-        # Connect selection changes
-        self.selectionModel().selectionChanged.connect(self._on_selection_changed)
+        # Connect double-click - this works without model
         self.doubleClicked.connect(self._on_double_clicked)
         
         # Initialize with empty model
         self.set_resource_data([], self.headers)
+        
+        # Connect selection changes after model is set
+        if self.selectionModel():
+            self.selectionModel().selectionChanged.connect(self._on_selection_changed)
         
         logging.info(f"VirtualScrollTable initialized with {len(headers)} columns: {headers}")
     
@@ -159,6 +162,11 @@ class VirtualScrollTable(QTableView):
             
             # Connect model signals
             self._model.data_changed_custom.connect(self.data_changed.emit)
+            
+            # Connect selection changes now that model is set
+            if self.selectionModel() and not hasattr(self, '_selection_connected'):
+                self.selectionModel().selectionChanged.connect(self._on_selection_changed)
+                self._selection_connected = True
             
             # Apply responsive column sizing
             QTimer.singleShot(100, self._adjust_columns_to_screen)  # Delay to ensure proper widget size

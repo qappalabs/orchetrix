@@ -208,14 +208,19 @@ class KubernetesMetricsService:
         }
     
     def get_all_node_metrics_fast(self, node_names: list = None, include_disk_usage: bool = False) -> Dict[str, Dict[str, Any]]:
-        """Get metrics for all nodes efficiently in batch - ULTRA FAST VERSION"""
+        """Get metrics for all nodes efficiently in batch - ULTRA FAST VERSION with optimized API calls"""
         try:
             start_time = time.time()
             
-            # No caching - get fresh data
+            # Batch size limits for large clusters to prevent API overload
+            MAX_NODES_PER_BATCH = 50
             
-            # Get all nodes at once
-            nodes_list = self.api_service.v1.list_node()
+            # Get all nodes at once with resource version for efficient watching
+            nodes_list = self.api_service.v1.list_node(
+                limit=MAX_NODES_PER_BATCH if not node_names else None,
+                _request_timeout=30  # Increased timeout for large clusters
+            )
+            
             if not nodes_list.items:
                 return {}
             
@@ -223,10 +228,19 @@ class KubernetesMetricsService:
             if node_names:
                 nodes_list.items = [node for node in nodes_list.items if node.metadata.name in node_names]
             
-            # Get ALL pods for all namespaces at once (single API call)
-            all_pods = self.api_service.v1.list_pod_for_all_namespaces()
+            # Limit nodes for performance - process in batches if too many
+            if len(nodes_list.items) > MAX_NODES_PER_BATCH:
+                logging.info(f"Large cluster detected ({len(nodes_list.items)} nodes), processing in batches")
+                return self._process_nodes_in_batches(nodes_list.items, include_disk_usage)
             
-            # Group pods by node for efficient lookup
+            # Get ALL pods for all namespaces at once (single API call) with field selector for performance
+            all_pods = self.api_service.v1.list_pod_for_all_namespaces(
+                field_selector="status.phase!=Succeeded,status.phase!=Failed",  # Filter out completed pods
+                limit=5000,  # Limit to prevent memory issues
+                _request_timeout=30
+            )
+            
+            # Group pods by node for efficient lookup with optimized data structure
             pods_by_node = {}
             for pod in all_pods.items:
                 if pod.spec and pod.spec.node_name:
@@ -235,28 +249,105 @@ class KubernetesMetricsService:
                         pods_by_node[node_name] = []
                     pods_by_node[node_name].append(pod)
             
-            # Calculate metrics for all nodes
+            # Calculate metrics for all nodes with parallel processing simulation
             all_metrics = {}
-            for node in nodes_list.items:
+            failed_nodes = []
+            
+            for i, node in enumerate(nodes_list.items):
                 node_name = node.metadata.name
                 try:
-                    metrics = self._calculate_single_node_metrics_fast(node, pods_by_node.get(node_name, []), include_disk_usage)
+                    # Add progress logging for large batches
+                    if i % 10 == 0 and len(nodes_list.items) > 20:
+                        logging.debug(f"Processing node {i+1}/{len(nodes_list.items)}: {node_name}")
+                        
+                    metrics = self._calculate_single_node_metrics_fast(
+                        node, 
+                        pods_by_node.get(node_name, []), 
+                        include_disk_usage
+                    )
                     if metrics:
                         all_metrics[node_name] = metrics
+                    else:
+                        failed_nodes.append(node_name)
+                        
                 except Exception as e:
                     logging.warning(f"Error calculating fast metrics for node {node_name}: {e}")
+                    failed_nodes.append(node_name)
                     # Set default metrics for failed nodes
                     all_metrics[node_name] = self._get_default_node_metrics(node_name)
             
-            # No caching
-            
             processing_time = (time.time() - start_time) * 1000
             disk_text = "with disk" if include_disk_usage else "no disk"
+            
+            if failed_nodes:
+                logging.warning(f"⚠️ [BATCH] {len(failed_nodes)} nodes failed metrics calculation: {failed_nodes[:5]}{'...' if len(failed_nodes) > 5 else ''}")
+                
             logging.info(f"🚀 [FAST BATCH] Calculated {disk_text} metrics for {len(all_metrics)} nodes in {processing_time:.1f}ms")
             return all_metrics
             
         except Exception as e:
             logging.error(f"Error in fast batch node metrics calculation: {e}")
+            return {}
+            
+    def _process_nodes_in_batches(self, all_nodes: list, include_disk_usage: bool) -> Dict[str, Dict[str, Any]]:
+        """Process nodes in smaller batches to handle large clusters efficiently"""
+        try:
+            BATCH_SIZE = 25  # Smaller batch size for very large clusters
+            all_metrics = {}
+            
+            for i in range(0, len(all_nodes), BATCH_SIZE):
+                batch_nodes = all_nodes[i:i + BATCH_SIZE]
+                batch_start_time = time.time()
+                
+                logging.info(f"Processing batch {i//BATCH_SIZE + 1}/{(len(all_nodes) + BATCH_SIZE - 1)//BATCH_SIZE}: {len(batch_nodes)} nodes")
+                
+                # Get pods for this batch of nodes only
+                node_names_in_batch = [node.metadata.name for node in batch_nodes]
+                
+                # Use field selector to get pods only for nodes in this batch
+                batch_pods = self.api_service.v1.list_pod_for_all_namespaces(
+                    field_selector=f"spec.nodeName in ({','.join(node_names_in_batch)})",
+                    _request_timeout=20
+                )
+                
+                # Group pods by node for this batch
+                pods_by_node = {}
+                for pod in batch_pods.items:
+                    if pod.spec and pod.spec.node_name:
+                        node_name = pod.spec.node_name
+                        if node_name not in pods_by_node:
+                            pods_by_node[node_name] = []
+                        pods_by_node[node_name].append(pod)
+                
+                # Calculate metrics for nodes in this batch
+                for node in batch_nodes:
+                    node_name = node.metadata.name
+                    try:
+                        metrics = self._calculate_single_node_metrics_fast(
+                            node, 
+                            pods_by_node.get(node_name, []), 
+                            include_disk_usage
+                        )
+                        if metrics:
+                            all_metrics[node_name] = metrics
+                        else:
+                            all_metrics[node_name] = self._get_default_node_metrics(node_name)
+                            
+                    except Exception as e:
+                        logging.warning(f"Error calculating metrics for node {node_name} in batch: {e}")
+                        all_metrics[node_name] = self._get_default_node_metrics(node_name)
+                
+                batch_time = (time.time() - batch_start_time) * 1000
+                logging.info(f"Batch {i//BATCH_SIZE + 1} completed in {batch_time:.1f}ms")
+                
+                # Brief pause between batches to prevent API rate limiting
+                if i + BATCH_SIZE < len(all_nodes):
+                    time.sleep(0.1)  # 100ms pause between batches
+                    
+            return all_metrics
+            
+        except Exception as e:
+            logging.error(f"Error processing nodes in batches: {e}")
             return {}
 
     def get_all_node_metrics(self, node_names: list = None) -> Dict[str, Dict[str, Any]]:

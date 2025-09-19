@@ -17,13 +17,240 @@ import time
 from collections import deque
 
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QFrame, QTableWidgetItem, QMessageBox, QVBoxLayout, QWidget, QSizePolicy, QApplication
-from PyQt6.QtCore import Qt, QTimer, QRect
+from PyQt6.QtCore import Qt, QTimer, QRect, QThread, pyqtSignal
 from PyQt6.QtGui import QColor, QBrush, QPainter, QPen, QFont
 
 from Base_Components.base_resource_page import BaseResourcePage
 from UI.Styles import AppColors
 from UI.Icons import Icons, resource_path
-# Removed unused format_age import
+
+
+class NodesDataWorker(QThread):
+    """Background worker for loading nodes data to prevent UI freezing"""
+    
+    data_loaded = pyqtSignal(list)  # Emit loaded nodes data
+    error_occurred = pyqtSignal(str)  # Emit error message
+    progress_update = pyqtSignal(int, str)  # Emit progress percentage and status
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.kube_client = None
+        self._should_stop = False
+        
+    def set_client(self, kube_client):
+        """Set the Kubernetes client"""
+        self.kube_client = kube_client
+        
+    def stop(self):
+        """Stop the worker thread"""
+        self._should_stop = True
+        
+    def run(self):
+        """Run the background data loading"""
+        try:
+            if not self.kube_client:
+                self.error_occurred.emit("Kubernetes client not available")
+                return
+                
+            if self._should_stop:
+                return
+                
+            self.progress_update.emit(10, "Connecting to Kubernetes API...")
+            
+            # Check if client is connected
+            if not self.kube_client.is_connected():
+                self.error_occurred.emit("Not connected to Kubernetes cluster")
+                return
+                
+            if self._should_stop:
+                return
+                
+            self.progress_update.emit(30, "Loading nodes data...")
+            
+            # Load nodes data in background
+            nodes_data = self._load_nodes_data()
+            
+            if self._should_stop:
+                return
+                
+            self.progress_update.emit(100, "Data loaded successfully")
+            self.data_loaded.emit(nodes_data)
+            
+        except Exception as e:
+            logging.error(f"Error in NodesDataWorker: {e}")
+            self.error_occurred.emit(f"Failed to load nodes data: {str(e)}")
+            
+    def _load_nodes_data(self):
+        """Load nodes data with progress updates"""
+        try:
+            # Use the optimized batch loading from metrics service
+            if hasattr(self.kube_client, 'service') and hasattr(self.kube_client.service, 'metrics_service'):
+                # Get all node metrics in one batch call (much faster)
+                self.progress_update.emit(50, "Loading node metrics...")
+                node_metrics = self.kube_client.service.metrics_service.get_all_node_metrics_fast(include_disk_usage=False)
+                
+                if self._should_stop:
+                    return []
+                
+                self.progress_update.emit(70, "Processing node data...")
+                
+                # Get node details
+                nodes_list = self.kube_client.service.api_service.v1.list_node()
+                
+                if self._should_stop:
+                    return []
+                
+                self.progress_update.emit(85, "Formatting node information...")
+                
+                # Format data for display
+                nodes_data = []
+                for node in nodes_list.items:
+                    if self._should_stop:
+                        break
+                        
+                    node_name = node.metadata.name
+                    metrics = node_metrics.get(node_name, {})
+                    
+                    # Extract node information
+                    node_info = self._extract_node_info(node, metrics)
+                    nodes_data.append(node_info)
+                    
+                return nodes_data
+            else:
+                # Fallback to individual calls if metrics service not available
+                self.progress_update.emit(50, "Loading nodes (fallback method)...")
+                return self._load_nodes_fallback()
+                
+        except Exception as e:
+            logging.error(f"Error loading nodes data: {e}")
+            raise
+            
+    def _extract_node_info(self, node, metrics):
+        """Extract node information for display"""
+        try:
+            node_name = node.metadata.name
+            
+            # Get basic node info
+            status = "Ready" if self._is_node_ready(node) else "NotReady"
+            roles = self._get_node_roles(node)
+            age = self._calculate_age(node.metadata.creation_timestamp)
+            version = node.status.node_info.kubelet_version if node.status and node.status.node_info else "Unknown"
+            
+            # Get resource information from capacity
+            cpu_capacity = "0"
+            memory_capacity = "0"
+            
+            if node.status and node.status.capacity:
+                cpu_capacity = node.status.capacity.get('cpu', '0')
+                memory_capacity = node.status.capacity.get('memory', '0')
+                
+            # Get metrics if available
+            cpu_usage = metrics.get('cpu', {}).get('usage', 0) if metrics else 0
+            memory_usage = metrics.get('memory', {}).get('usage', 0) if metrics else 0
+            
+            return {
+                'name': node_name,
+                'status': status,
+                'roles': roles,
+                'age': age,
+                'version': version,
+                'cpu_capacity': cpu_capacity,
+                'memory_capacity': memory_capacity,
+                'cpu_usage': f"{cpu_usage:.1f}%",
+                'memory_usage': f"{memory_usage:.1f}%",
+                'raw_data': node  # Store raw data for detailed view
+            }
+            
+        except Exception as e:
+            logging.error(f"Error extracting node info for {node.metadata.name}: {e}")
+            return {
+                'name': node.metadata.name,
+                'status': 'Unknown',
+                'roles': 'Unknown',
+                'age': 'Unknown',
+                'version': 'Unknown',
+                'cpu_capacity': '0',
+                'memory_capacity': '0',
+                'cpu_usage': '0%',
+                'memory_usage': '0%',
+                'raw_data': node
+            }
+            
+    def _is_node_ready(self, node):
+        """Check if node is ready"""
+        if not node.status or not node.status.conditions:
+            return False
+            
+        for condition in node.status.conditions:
+            if condition.type == "Ready":
+                return condition.status == "True"
+        return False
+        
+    def _get_node_roles(self, node):
+        """Get node roles from labels"""
+        if not node.metadata or not node.metadata.labels:
+            return "worker"
+            
+        labels = node.metadata.labels
+        roles = []
+        
+        # Check for common role labels
+        if labels.get('node-role.kubernetes.io/master') == 'true' or 'node-role.kubernetes.io/master' in labels:
+            roles.append('master')
+        if labels.get('node-role.kubernetes.io/control-plane') == 'true' or 'node-role.kubernetes.io/control-plane' in labels:
+            roles.append('control-plane')
+        if labels.get('node-role.kubernetes.io/worker') == 'true' or 'node-role.kubernetes.io/worker' in labels:
+            roles.append('worker')
+            
+        return ', '.join(roles) if roles else 'worker'
+        
+    def _calculate_age(self, creation_timestamp):
+        """Calculate age from creation timestamp"""
+        try:
+            if hasattr(creation_timestamp, 'timestamp'):
+                age_seconds = time.time() - creation_timestamp.timestamp()
+            else:
+                age_seconds = (datetime.now(timezone.utc) - creation_timestamp).total_seconds()
+                
+            # Format age
+            days = int(age_seconds // 86400)
+            hours = int((age_seconds % 86400) // 3600)
+            minutes = int((age_seconds % 3600) // 60)
+            
+            if days > 0:
+                return f"{days}d{hours}h"
+            elif hours > 0:
+                return f"{hours}h{minutes}m"
+            else:
+                return f"{minutes}m"
+                
+        except Exception as e:
+            logging.error(f"Error calculating age: {e}")
+            return "Unknown"
+            
+    def _load_nodes_fallback(self):
+        """Fallback method for loading nodes"""
+        try:
+            nodes_list = self.kube_client.service.api_service.v1.list_node()
+            nodes_data = []
+            
+            for i, node in enumerate(nodes_list.items):
+                if self._should_stop:
+                    break
+                    
+                # Update progress
+                progress = 50 + (40 * i // len(nodes_list.items))
+                self.progress_update.emit(progress, f"Processing node {i+1}/{len(nodes_list.items)}")
+                
+                node_info = self._extract_node_info(node, {})
+                nodes_data.append(node_info)
+                
+            return nodes_data
+            
+        except Exception as e:
+            logging.error(f"Error in fallback node loading: {e}")
+            raise
+
 
 
 
@@ -202,8 +429,13 @@ class NodesPage(BaseResourcePage):
         self.disk_metrics_graph = None
         
         # Timer for real-time graph updates
-        self.metrics_update_timer = QTimer()
+        self.metrics_update_timer = QTimer(self)  # Fixed: Added self as parent
         self.metrics_update_timer.timeout.connect(self._update_node_metrics_graphs)
+        
+        # Background workers for performance
+        self.data_worker = None
+        self.metrics_worker = None
+        self._loading_in_progress = False
         
         self._setup_ui()
         self._setup_table_styling()
@@ -786,7 +1018,17 @@ class NodesPage(BaseResourcePage):
     def _format_node_age(self, node):
         """Format node age with detailed time units"""
         try:
-            # Try multiple timestamp fields
+            # First check if we already have a calculated age
+            if "age" in node and node["age"] != "Unknown":
+                return node["age"]
+            
+            # If we have raw_data (original node object), get timestamp from there
+            if "raw_data" in node and hasattr(node["raw_data"], 'metadata'):
+                raw_node = node["raw_data"]
+                if hasattr(raw_node.metadata, 'creation_timestamp'):
+                    return self._calculate_age(raw_node.metadata.creation_timestamp)
+            
+            # Fallback: Try multiple timestamp fields in node dict
             timestamp_fields = ["creation_timestamp", "creationTimestamp", "created", "created_at", "startup_time"]
             
             for field in timestamp_fields:
@@ -1615,21 +1857,153 @@ class NodesPage(BaseResourcePage):
     
     
     def refresh_data(self):
-        """Refresh nodes data from the cluster"""
+        """Refresh nodes data from the cluster using background worker"""
         try:
-            from Utils.unified_resource_loader import get_unified_resource_loader
-            loader = get_unified_resource_loader()
-            if loader:
-                loader.load_resources_async(
-                    resource_type=self.resource_type,
-                    namespace="all"
-                )
-                logging.info("NodesPage: Requested fresh data")
-            else:
-                logging.error("NodesPage: Could not get resource loader")
+            if self._loading_in_progress:
+                logging.info("NodesPage: Load already in progress, skipping refresh")
+                return
+                
+            self._loading_in_progress = True
+            
+            # Stop any existing worker
+            if self.data_worker and self.data_worker.isRunning():
+                self.data_worker.stop()
+                self.data_worker.wait(1000)  # Wait up to 1 second
+                
+            # Create and configure new worker
+            self.data_worker = NodesDataWorker(self)
+            
+            # Get kubernetes client
+            from Utils.kubernetes_client import get_kubernetes_client
+            kube_client = get_kubernetes_client()
+            if not kube_client:
+                logging.error("NodesPage: Kubernetes client not available")
+                self._loading_in_progress = False
+                return
+                
+            self.data_worker.set_client(kube_client)
+            
+            # Connect signals
+            self.data_worker.data_loaded.connect(self._on_background_data_loaded)
+            self.data_worker.error_occurred.connect(self._on_background_error)
+            self.data_worker.progress_update.connect(self._on_progress_update)
+            self.data_worker.finished.connect(self._on_worker_finished)
+            
+            # Show loading state
+            self._show_loading_state()
+            
+            # Start background loading
+            self.data_worker.start()
+            logging.info("NodesPage: Started background data loading")
                 
         except Exception as e:
-            logging.error(f"NodesPage: Error refreshing data: {e}")
+            logging.error(f"NodesPage: Error starting background refresh: {e}")
+            self._loading_in_progress = False
+            
+    def _on_background_data_loaded(self, nodes_data):
+        """Handle data loaded from background worker"""
+        try:
+            logging.info(f"NodesPage: Received {len(nodes_data)} nodes from background worker")
+            
+            # Store the resources for search functionality
+            self.resources = nodes_data
+            
+            # Populate table with loaded data
+            self.populate_table(nodes_data)
+            
+            # Hide loading state
+            self._hide_loading_state()
+            
+            logging.info(f"NodesPage: Successfully loaded {len(nodes_data)} nodes")
+            
+        except Exception as e:
+            logging.error(f"NodesPage: Error handling background data: {e}")
+            self._hide_loading_state()
+            
+    def _on_background_error(self, error_message):
+        """Handle error from background worker"""
+        try:
+            logging.error(f"NodesPage: Background worker error: {error_message}")
+            
+            # Show empty table
+            self.populate_table([])
+            
+            # Hide loading state
+            self._hide_loading_state()
+            
+            # Show error message to user
+            if hasattr(self, 'table'):
+                self.table.setRowCount(1)
+                error_item = QTableWidgetItem(f"Error loading nodes: {error_message}")
+                error_item.setForeground(QColor('#ff6b6b'))
+                self.table.setItem(0, 0, error_item)
+                self.table.setSpan(0, 0, 1, self.table.columnCount())
+                
+        except Exception as e:
+            logging.error(f"NodesPage: Error handling background error: {e}")
+            
+    def _on_progress_update(self, percentage, status):
+        """Handle progress update from background worker"""
+        try:
+            # You could update a progress bar here if you have one
+            logging.debug(f"NodesPage: Progress {percentage}% - {status}")
+        except Exception as e:
+            logging.error(f"NodesPage: Error handling progress update: {e}")
+            
+    def _on_worker_finished(self):
+        """Handle worker finished signal"""
+        try:
+            self._loading_in_progress = False
+            if self.data_worker:
+                self.data_worker.deleteLater()
+                self.data_worker = None
+        except Exception as e:
+            logging.error(f"NodesPage: Error in worker finished handler: {e}")
+            
+    def _show_loading_state(self):
+        """Show loading state in the UI"""
+        try:
+            if hasattr(self, 'table'):
+                self.table.setRowCount(1)
+                loading_item = QTableWidgetItem("Loading nodes data...")
+                loading_item.setForeground(QColor('#64b5f6'))
+                self.table.setItem(0, 0, loading_item)
+                self.table.setSpan(0, 0, 1, self.table.columnCount())
+        except Exception as e:
+            logging.error(f"NodesPage: Error showing loading state: {e}")
+            
+    def _hide_loading_state(self):
+        """Hide loading state from the UI"""
+        try:
+            # Loading state will be replaced by actual data or error message
+            pass
+        except Exception as e:
+            logging.error(f"NodesPage: Error hiding loading state: {e}")
+            
+    def force_load_data(self):
+        """Force reload data (called by refresh button)"""
+        self.refresh_data()
+        
+    def cleanup_on_destroy(self):
+        """Clean up resources when page is destroyed"""
+        try:
+            # Stop background workers
+            if self.data_worker and self.data_worker.isRunning():
+                self.data_worker.stop()
+                self.data_worker.wait(1000)
+                
+            if self.metrics_worker and self.metrics_worker.isRunning():
+                self.metrics_worker.stop()
+                self.metrics_worker.wait(1000)
+                
+            # Stop timers
+            if hasattr(self, 'metrics_update_timer'):
+                self.metrics_update_timer.stop()
+                
+            logging.info("NodesPage: Cleanup completed")
+            
+        except Exception as e:
+            logging.error(f"NodesPage: Error during cleanup: {e}")
     
     def get_resource_display_name(self):
         """Return display name for this resource type"""
@@ -1913,12 +2287,96 @@ class NodesPage(BaseResourcePage):
             # Show empty state with error message
             self.populate_table([])
     
+    def clear_for_cluster_change(self):
+        """Clear all data when cluster changes to prevent showing stale data"""
+        try:
+            # Set loading flag to prevent duplicate loading during cluster switch
+            self._loading_in_progress = True
+            
+            # Stop metrics timer to prevent cross-cluster API calls
+            if hasattr(self, 'metrics_update_timer') and self.metrics_update_timer.isActive():
+                self.metrics_update_timer.stop()
+                logging.info("NodesPage: Stopped metrics update timer for cluster change")
+            
+            # Clear selected node to prevent attempting to get metrics for wrong cluster
+            if hasattr(self, 'selected_node_name'):
+                prev_node = self.selected_node_name
+                self.selected_node_name = None
+                if prev_node:
+                    logging.info(f"NodesPage: Cleared selected node '{prev_node}' for cluster change")
+            
+            # Clear metrics graphs data
+            if hasattr(self, 'cpu_metrics_graph') and self.cpu_metrics_graph:
+                self.cpu_metrics_graph.clear_data()
+            if hasattr(self, 'memory_metrics_graph') and self.memory_metrics_graph:
+                self.memory_metrics_graph.clear_data()
+            if hasattr(self, 'disk_metrics_graph') and self.disk_metrics_graph:
+                self.disk_metrics_graph.clear_data()
+                
+            # Clear metrics cache to prevent showing stale metrics from previous cluster
+            if hasattr(self, 'metrics_cache'):
+                self.metrics_cache.clear()
+                logging.info("NodesPage: Cleared metrics cache for cluster change")
+            
+            # Stop and cleanup background workers
+            if hasattr(self, 'data_worker') and self.data_worker:
+                if self.data_worker.isRunning():
+                    self.data_worker.stop()
+                    self.data_worker.wait(1000)  # Wait up to 1 second for thread to finish
+                self.data_worker.deleteLater()
+                self.data_worker = None
+                logging.info("NodesPage: Stopped and cleaned up data worker for cluster change")
+                
+            if hasattr(self, 'metrics_worker') and self.metrics_worker:
+                if self.metrics_worker.isRunning():
+                    self.metrics_worker.stop()
+                    self.metrics_worker.wait(1000)  # Wait up to 1 second for thread to finish
+                self.metrics_worker.deleteLater()
+                self.metrics_worker = None
+                logging.info("NodesPage: Stopped and cleaned up metrics worker for cluster change")
+            
+            # Call parent clear method
+            super().clear_for_cluster_change()
+            
+            # Reset loading flag after cleanup is complete to allow fresh loading
+            self._loading_in_progress = False
+            
+            logging.info("NodesPage: Successfully cleared for cluster change")
+            
+        except Exception as e:
+            logging.error(f"NodesPage: Error clearing for cluster change: {e}")
+    
     def cleanup(self):
         """Clean up resources when page is destroyed"""
         try:
-            if hasattr(self, 'graph_update_timer') and self.metrics_update_timer:
+            # Stop metrics timer
+            if hasattr(self, 'metrics_update_timer') and self.metrics_update_timer:
                 self.metrics_update_timer.stop()
-                logging.debug("NodesPage: Stopped graph update timer")
+                logging.debug("NodesPage: Stopped metrics update timer")
+            
+            # Stop and cleanup background workers
+            if hasattr(self, 'data_worker') and self.data_worker:
+                if self.data_worker.isRunning():
+                    self.data_worker.stop()
+                    self.data_worker.wait(2000)  # Wait up to 2 seconds for thread to finish
+                self.data_worker.deleteLater()
+                self.data_worker = None
+                logging.debug("NodesPage: Cleaned up data worker")
+                
+            if hasattr(self, 'metrics_worker') and self.metrics_worker:
+                if self.metrics_worker.isRunning():
+                    self.metrics_worker.stop()
+                    self.metrics_worker.wait(2000)  # Wait up to 2 seconds for thread to finish
+                self.metrics_worker.deleteLater()
+                self.metrics_worker = None
+                logging.debug("NodesPage: Cleaned up metrics worker")
+            
+            # Clear metrics cache
+            if hasattr(self, 'metrics_cache'):
+                self.metrics_cache.clear()
+                
+            logging.info("NodesPage: Cleanup completed")
+            
         except Exception as e:
             logging.error(f"NodesPage: Error during cleanup: {e}")
     
