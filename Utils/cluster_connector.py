@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Tuple, Any, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from PyQt6.QtCore import QObject, pyqtSignal, QTimer
+from PyQt6.QtCore import QObject, pyqtSignal, QTimer, Qt
 
 from Utils.kubernetes_client import get_kubernetes_client
 from Utils.enhanced_worker import EnhancedBaseWorker
