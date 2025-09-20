@@ -3,9 +3,10 @@ Overview section for DetailPage component
 """
 
 from PyQt6.QtWidgets import (
-    QScrollArea, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
+    QScrollArea, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView
 )
 from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QColor
 from typing import Dict, Any, Optional
 import logging
 
@@ -1214,6 +1215,9 @@ class DetailPageOverviewSection(BaseDetailSection):
         runtime_info.setStyleSheet(EnhancedStyles.get_field_value_style())
         self.specific_layout.addWidget(runtime_info)
 
+        # Add pods section for this node
+        self._add_node_pods_section(data)
+
     def _add_namespace_specific_fields(self, data):
         """Add Namespace-specific fields"""
         status = data.get("status", {})
@@ -1455,3 +1459,87 @@ class DetailPageOverviewSection(BaseDetailSection):
             params_info.setStyleSheet(EnhancedStyles.get_field_value_style())
             params_info.setWordWrap(True)
             self.specific_layout.addWidget(params_info)
+
+    def _add_node_pods_section(self, data):
+        """Add simple pods info for this node"""
+        node_name = data.get("metadata", {}).get("name", "")
+        if not node_name:
+            return
+
+        # Create pods section header
+        pods_header = QLabel("PODS")
+        pods_header.setStyleSheet(EnhancedStyles.get_section_header_style())
+        self.specific_layout.addWidget(pods_header)
+
+        # Create loading label
+        self.pods_loading_label = QLabel("Loading pods...")
+        self.pods_loading_label.setStyleSheet(EnhancedStyles.get_field_value_style())
+        self.specific_layout.addWidget(self.pods_loading_label)
+
+        # Fetch pods for this node
+        self._fetch_node_pods(node_name)
+
+    def _fetch_node_pods(self, node_name):
+        """Fetch pods running on the specified node"""
+        try:
+            # Connect to kubernetes client signals for pods
+            self.kubernetes_client.pods_data_loaded.connect(self._handle_node_pods_loaded)
+            self.kubernetes_client.api_error.connect(self._handle_node_pods_error)
+
+            # Request pods for this node
+            self.kubernetes_client.get_pods_for_node_async(node_name)
+
+        except Exception as e:
+            self._handle_node_pods_error(f"Failed to fetch pods: {str(e)}")
+
+    def _handle_node_pods_loaded(self, pods_data):
+        """Handle when pods data is loaded"""
+        try:
+            # Disconnect signals
+            self.kubernetes_client.pods_data_loaded.disconnect(self._handle_node_pods_loaded)
+            self.kubernetes_client.api_error.disconnect(self._handle_node_pods_error)
+
+            self.pods_loading_label.hide()
+
+            if not pods_data:
+                pods_info = QLabel("No pods running on this node")
+                pods_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+                self.specific_layout.addWidget(pods_info)
+                return
+
+            # Create vertical list of pod names
+            for pod in pods_data:
+                name = pod.get("name", "Unknown")
+                status = pod.get("status", "Unknown")
+
+                if status.lower() == "running":
+                    pod_text = name
+                else:
+                    pod_text = f"{name} ({status})"
+
+                pod_label = QLabel(pod_text)
+                pod_label.setStyleSheet(EnhancedStyles.get_field_value_style())
+                self.specific_layout.addWidget(pod_label)
+
+        except Exception as e:
+            logging.error(f"Error handling node pods data: {str(e)}")
+            self._handle_node_pods_error(str(e))
+
+    def _handle_node_pods_error(self, error_message):
+        """Handle error when fetching pods for node"""
+        try:
+            # Disconnect signals
+            if hasattr(self.kubernetes_client, 'pods_data_loaded'):
+                self.kubernetes_client.pods_data_loaded.disconnect(self._handle_node_pods_loaded)
+            if hasattr(self.kubernetes_client, 'api_error'):
+                self.kubernetes_client.api_error.disconnect(self._handle_node_pods_error)
+        except:
+            pass
+
+        self.pods_loading_label.hide()
+
+        error_label = QLabel("Error loading pods")
+        error_label.setStyleSheet(EnhancedStyles.get_field_value_style() + f"""
+            color: {AppColors.TEXT_DANGER};
+        """)
+        self.specific_layout.addWidget(error_label)

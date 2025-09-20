@@ -49,6 +49,8 @@ class KubernetesClient(QObject):
     resource_detail_loaded = pyqtSignal(dict)
     resource_updated = pyqtSignal(dict)
     pod_logs_loaded = pyqtSignal(dict)
+    pods_data_loaded = pyqtSignal(list)
+    api_error = pyqtSignal(str)
     error_occurred = pyqtSignal(str)
 
     def __init__(self):
@@ -849,6 +851,65 @@ class KubernetesClient(QObject):
         """Get cache statistics - backward compatibility"""
         return self.service.get_cache_stats()
     
+    def get_pods_for_node_async(self, node_name: str):
+        """Get pods running on a specific node asynchronously"""
+        try:
+            from PyQt6.QtCore import QThread, QTimer
+
+            def fetch_pods():
+                try:
+                    # Get all pods and filter by node name
+                    all_pods = self._get_pods()
+                    node_pods = []
+
+                    for pod in all_pods:
+                        if hasattr(pod, 'spec') and hasattr(pod.spec, 'node_name'):
+                            if pod.spec.node_name == node_name:
+                                # Convert pod data to dictionary format
+                                pod_data = {
+                                    'name': pod.metadata.name,
+                                    'namespace': pod.metadata.namespace,
+                                    'status': pod.status.phase if hasattr(pod.status, 'phase') else 'Unknown',
+                                    'age': self._calculate_age(pod.metadata.creation_timestamp),
+                                    'node': pod.spec.node_name if hasattr(pod.spec, 'node_name') else ''
+                                }
+                                node_pods.append(pod_data)
+
+                    # Emit the data
+                    self.pods_data_loaded.emit(node_pods)
+
+                except Exception as e:
+                    logging.error(f"Error fetching pods for node {node_name}: {e}")
+                    self.api_error.emit(f"Failed to fetch pods for node: {str(e)}")
+
+            # Use QTimer to run async
+            QTimer.singleShot(0, fetch_pods)
+
+        except Exception as e:
+            logging.error(f"Error starting pod fetch for node {node_name}: {e}")
+            self.api_error.emit(f"Failed to start pod fetch: {str(e)}")
+
+    def _calculate_age(self, creation_timestamp):
+        """Calculate age from creation timestamp"""
+        try:
+            from datetime import datetime, timezone
+            now = datetime.now(timezone.utc)
+            created = creation_timestamp.replace(tzinfo=timezone.utc)
+            delta = now - created
+
+            days = delta.days
+            hours, remainder = divmod(delta.seconds, 3600)
+            minutes, _ = divmod(remainder, 60)
+
+            if days > 0:
+                return f"{days}d"
+            elif hours > 0:
+                return f"{hours}h"
+            else:
+                return f"{minutes}m"
+        except Exception:
+            return "Unknown"
+
     def cleanup(self):
         """Cleanup resources - backward compatibility"""
         self._shutting_down = True
