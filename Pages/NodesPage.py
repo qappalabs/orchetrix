@@ -283,6 +283,7 @@ class NodesPage(BaseResourcePage):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.resource_type = "nodes"
+        self.show_namespace_dropdown = False  # Hide namespace dropdown for Nodes page
         self.selected_row = -1
         self.has_loaded_data = False
         self.is_loading = False
@@ -306,15 +307,7 @@ class NodesPage(BaseResourcePage):
         
         layout = super().setup_ui("Nodes", headers, sortable_columns)
         
-        # Remove default checkbox header
-        header_widget = self._item_widgets.get("header_widget")
-        if header_widget:
-            header_widget.hide()
-        self.select_all_checkbox = None
-        
-        # Hide the checkbox column
-        if self.table:
-            self.table.hideColumn(0)
+        # Keep checkbox functionality enabled for Nodes page
             
         self.layout().setContentsMargins(16, 16, 16, 16)
         self.layout().setSpacing(16)
@@ -350,11 +343,11 @@ class NodesPage(BaseResourcePage):
         if not self.table:
             return
             
-        self.table.hideColumn(0)
+        # Show checkbox column (column 0)
         header = self.table.horizontalHeader()
         
         column_specs = [
-            (0, 40, "fixed"),        # Hidden checkbox
+            (0, 40, "fixed"),        # Checkbox
             (1, 140, "interactive"), # Name
             (2, 110, "interactive"), # CPU
             (3, 110, "interactive"), # Memory
@@ -430,9 +423,9 @@ class NodesPage(BaseResourcePage):
         
         node_name = resource.get("name", "unknown")
         
-        # Create checkbox container (hidden)
+        # Create checkbox container (visible)
         checkbox_container = self._create_checkbox_container(row, node_name)
-        checkbox_container.setStyleSheet("background-color: transparent;")
+        checkbox_container.setStyleSheet(AppStyles.CHECKBOX_STYLE)
         self.table.setCellWidget(row, 0, checkbox_container)
         
         # Get utilization data
@@ -690,12 +683,15 @@ class NodesPage(BaseResourcePage):
             self.is_loading = False
             self.show_no_data_message()
         
-    # Disable inherited methods that aren't needed for nodes
+    # Re-enable checkbox functionality for nodes
     def _add_delete_selected_button(self):
-        pass
+        # Use inherited implementation for delete selected button
+        super()._add_delete_selected_button()
         
     def _handle_checkbox_change(self, state, item_name):
-        pass
+        # Use inherited implementation for checkbox handling
+        super()._handle_checkbox_change(state, item_name)
         
     def _handle_select_all(self, state):
-        pass
+        # Use inherited implementation for select all functionality
+        super()._handle_select_all(state)
