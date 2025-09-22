@@ -62,22 +62,35 @@ class OverviewDataWorker(QThread):
             self.progress_update.emit(30, "Loading cluster metrics...")
 
             # Load overview data in background with timeout protection
-            import signal
             import time
-
-            def timeout_handler(signum, frame):
+            import threading
+            
+            # Use threading-based timeout instead of signal-based
+            overview_data = None
+            exception_holder = [None]
+            
+            def load_with_timeout():
+                try:
+                    nonlocal overview_data
+                    overview_data = self._load_overview_data()
+                except Exception as e:
+                    exception_holder[0] = e
+            
+            # Start loading in a separate thread with timeout
+            load_thread = threading.Thread(target=load_with_timeout)
+            load_thread.daemon = True
+            load_thread.start()
+            load_thread.join(timeout=60)  # 60 second timeout
+            
+            if load_thread.is_alive():
+                # Timeout occurred
                 raise TimeoutError("Data loading timeout")
-
-            # Set timeout for entire operation (60 seconds)
-            if hasattr(signal, 'SIGALRM'):  # Unix systems
-                signal.signal(signal.SIGALRM, timeout_handler)
-                signal.alarm(60)
-
-            try:
-                overview_data = self._load_overview_data()
-            finally:
-                if hasattr(signal, 'SIGALRM'):
-                    signal.alarm(0)  # Cancel the alarm
+            
+            if exception_holder[0]:
+                raise exception_holder[0]
+                
+            if overview_data is None:
+                raise Exception("No data loaded")
 
             if self._should_stop:
                 return
@@ -113,8 +126,6 @@ class OverviewDataWorker(QThread):
         """Load workloads summary data with optimizations for heavy loads"""
         import time
         try:
-            from PyQt6.QtCore import QCoreApplication
-
             workloads_data = {}
             start_time = time.time()
             timeout = 60  # Increased timeout for heavy clusters
@@ -132,7 +143,6 @@ class OverviewDataWorker(QThread):
                     return 0
 
                 self.progress_update.emit(progress_pct, progress_msg)
-                QCoreApplication.processEvents()
 
                 try:
                     resources = api_call()
@@ -202,7 +212,6 @@ class OverviewDataWorker(QThread):
 
             # Load pods last as they're usually the largest dataset
             self.progress_update.emit(80, "Loading pods...")
-            QCoreApplication.processEvents()
 
             try:
                 if check_timeout() or self._should_stop:
@@ -238,7 +247,6 @@ class OverviewDataWorker(QThread):
                             # Update progress
                             progress = 80 + (batch_count * 15 // max_batches)
                             self.progress_update.emit(progress, f"Loading pods... ({pods_total} found)")
-                            QCoreApplication.processEvents()
 
                             # Check for next page
                             continue_token = getattr(pods_batch.metadata, 'continue', None) if hasattr(pods_batch, 'metadata') else None
@@ -387,8 +395,12 @@ class MetricCard(QWidget):
             self.total = total if isinstance(total, int) else 0
             self.metric_label.setText(f"{running} / {total}")
         
+        # Update subtitle to show proper text instead of "Loading..."
+        self.subtitle_label.setText(f"Running / Total {self.title_label.text()}")
+        
         # Force a repaint to ensure the update is visible
         self.metric_label.update()
+        self.subtitle_label.update()
         
         # Use different styling for progressive vs final display
         border_color = self.colors['accent_color'] if "+" in str(total) else self.colors['border_color']

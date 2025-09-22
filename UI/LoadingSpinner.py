@@ -16,7 +16,7 @@ class CircularSpinner(QWidget):
     def __init__(self, size=32, color=None, parent=None):
         super().__init__(parent)
         self.size = size
-        self.color = QColor(color) if color else QColor(AppColors.ACCENT_BLUE)
+        self.color = QColor(color) if color else QColor(AppColors.ACCENT_ORANGE)
         self.angle = 0
         self.setFixedSize(size, size)
 
@@ -79,7 +79,7 @@ class PulsingDots(QWidget):
 
     def __init__(self, color=None, parent=None):
         super().__init__(parent)
-        self.color = QColor(color) if color else QColor(AppColors.ACCENT_BLUE)
+        self.color = QColor(color) if color else QColor(AppColors.ACCENT_ORANGE)
         self.setFixedSize(60, 20)
 
         self.phase = 0
@@ -217,13 +217,13 @@ class LoadingOverlay(QWidget):
         spinner_container.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         if spinner_type == "circular":
-            self.spinner = CircularSpinner(40, AppColors.ACCENT_BLUE)
+            self.spinner = CircularSpinner(40, AppColors.ACCENT_ORANGE)
         elif spinner_type == "dots":
-            self.spinner = PulsingDots(AppColors.ACCENT_BLUE)
+            self.spinner = PulsingDots(AppColors.ACCENT_ORANGE)
         elif spinner_type == "google":
             self.spinner = GoogleStyleSpinner(40)
         else:
-            self.spinner = CircularSpinner(40, AppColors.ACCENT_BLUE)
+            self.spinner = CircularSpinner(40, AppColors.ACCENT_ORANGE)
 
         spinner_container.addWidget(self.spinner)
         layout.addLayout(spinner_container)

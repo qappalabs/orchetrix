@@ -245,6 +245,8 @@ class NavIconButton(QToolButton):
         if self.coming_soon:
             if self.item_text == "Helm":
                 self.setToolTip("**Under Development**\nThis feature is currently being developed.")
+            elif self.item_text == "AI Assistant":
+                self.setToolTip("**Disabled**\nAI Assistant feature has been disabled.")
             else:
                 self.setToolTip("**Coming Soon**\nThis feature will be available in a future update.")
         else:
@@ -465,6 +467,8 @@ class NavIconButton(QToolButton):
                 # Show custom tooltip for coming soon/under development features
                 if self.item_text == "Helm":
                     message = "**Under Development**\nThis feature is currently being developed."
+                elif self.item_text == "AI Assistant":
+                    message = "**Disabled**\nAI Assistant feature has been disabled."
                 else:
                     message = "**Coming Soon**\nThis feature will be available in a future update."
 
@@ -683,7 +687,7 @@ class Sidebar(QWidget):
 
         ai_assis_btn = NavIconButton(
             "ai_assis", "AI Assistant", False, False,
-            self.parent_window, self.sidebar_expanded, coming_soon=False  # Enable AI Assistant
+            self.parent_window, self.sidebar_expanded, coming_soon=True  # Disable AI Assistant
         )
 
         self.nav_buttons.append(compare_btn)

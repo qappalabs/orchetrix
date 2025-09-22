@@ -338,8 +338,8 @@ class NodesPage(BaseResourcePage):
         self.no_data_widget.hide()
         self.layout().addWidget(self.no_data_widget)
 
-        # Set Google-style spinner for nodes page
-        self._spinner_type = "google"
+        # Use default blue spinner to match other pages
+        self._spinner_type = "circular"
 
     def configure_columns(self):
         """Configure column widths for full screen utilization"""
@@ -566,7 +566,7 @@ class NodesPage(BaseResourcePage):
         button = QToolButton()
 
         # Use custom SVG icon instead of text
-        icon = resource_path("icons/Moreaction_Button.svg")
+        icon = resource_path("Icons/Moreaction_Button.svg")
         button.setIcon(QIcon(icon))
         button.setIconSize(QSize(AppConstants.SIZES["ICON_SIZE"], AppConstants.SIZES["ICON_SIZE"]))
 

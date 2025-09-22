@@ -93,26 +93,6 @@ class PortForwardingPage(BaseResourcePage):
     def _add_management_buttons(self):
         """Add port forwarding management buttons"""
         
-        # Create Port Forward button
-        create_btn = QPushButton("Create Port Forward")
-        create_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: #ffffff;
-                border: none;
-                border-radius: 4px;
-                padding: 5px 10px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-            QPushButton:pressed {
-                background-color: #3d8b40;
-            }
-        """)
-        create_btn.clicked.connect(self.show_create_port_forward_dialog)
-        
         # Stop All button
         stop_all_btn = QPushButton("Stop All")
         stop_all_btn.setStyleSheet("""
@@ -140,8 +120,7 @@ class PortForwardingPage(BaseResourcePage):
                 for j in range(item.layout().count()):
                     widget = item.layout().itemAt(j).widget()
                     if isinstance(widget, QPushButton) and widget.text() == "Refresh":
-                        # Insert buttons before refresh
-                        item.layout().insertWidget(item.layout().count() - 1, create_btn)
+                        # Insert stop all button before refresh
                         item.layout().insertWidget(item.layout().count() - 1, stop_all_btn)
                         break
     
@@ -471,14 +450,6 @@ class PortForwardingPage(BaseResourcePage):
         if reply == QMessageBox.StandardButton.Yes:
             self._stop_port_forward(key)
 
-    def show_create_port_forward_dialog(self):
-        """Show dialog to create new port forward"""
-        # This could be enhanced to show a resource selector
-        QMessageBox.information(
-            self, "Create Port Forward",
-            "To create port forwards, navigate to the Pods or Services page "
-            "and use the 'Port Forward' action on specific resources."
-        )
 
     def stop_all_port_forwards(self):
         """Stop all active port forwards"""
