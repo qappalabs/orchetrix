@@ -22,6 +22,7 @@ from .virtual_scroll_table import VirtualScrollTable
 
 from Base_Components.base_components import BaseTablePage
 from UI.Styles import AppStyles, AppColors
+from UI.LoadingSpinner import LoadingOverlay, create_loading_overlay, create_compact_spinner
 from Utils.unified_resource_loader import get_unified_resource_loader, LoadResult
 from Utils.data_formatters import format_age, parse_memory_value, format_percentage, truncate_string
 from Utils.error_handler import get_error_handler, safe_execute, error_handler
@@ -103,8 +104,12 @@ class BaseResourcePage(BaseTablePage):
 
         self._message_widget_container = None
         self._table_stack = None
-        
-        
+
+        # Loading spinner overlay
+        self._loading_overlay = None
+        self._is_showing_loading = False
+        self._spinner_type = "circular"  # Default spinner type, can be overridden
+
         # Track if data has been loaded at least once
         self._initial_load_done = False
 
@@ -352,7 +357,43 @@ class BaseResourcePage(BaseTablePage):
             if not self.resources:
                 self.resources = []
             self.resources.extend(new_resources)
-    
+
+    # Loading Spinner Methods
+    def _create_loading_overlay(self):
+        """Create the loading overlay widget if it doesn't exist"""
+        if not self._loading_overlay:
+            self._loading_overlay = create_loading_overlay(self, "Loading data...", self._spinner_type)
+            # Position overlay to cover the entire page
+            self._loading_overlay.setGeometry(self.rect())
+
+    def _resize_loading_overlay(self):
+        """Resize the loading overlay to match the page size"""
+        if self._loading_overlay:
+            self._loading_overlay.setGeometry(self.rect())
+
+    def show_loading_indicator(self, message="Loading data..."):
+        """Show the loading spinner overlay with optional message"""
+        if not self._is_showing_loading:
+            self._create_loading_overlay()
+            self._resize_loading_overlay()
+            self._loading_overlay.show_loading(message)
+            self._is_showing_loading = True
+
+    def hide_loading_indicator(self):
+        """Hide the loading spinner overlay"""
+        if self._is_showing_loading and self._loading_overlay:
+            self._loading_overlay.hide_loading()
+            self._is_showing_loading = False
+
+    def update_loading_message(self, message):
+        """Update the loading message while spinner is showing"""
+        if self._is_showing_loading and self._loading_overlay:
+            self._loading_overlay.set_message(message)
+
+    def resizeEvent(self, event):
+        """Handle resize events to reposition loading overlay"""
+        super().resizeEvent(event)
+        self._resize_loading_overlay()
 
     def _create_title_and_count(self, layout, title_text):
         """Create title and count labels"""
@@ -1041,10 +1082,13 @@ class BaseResourcePage(BaseTablePage):
             self.is_loading_initial = False
             self.is_loading_more = False
             self._initial_load_done = True
-            
+
+            # Hide loading indicator
+            self.hide_loading_indicator()
+
             self.all_items_loaded_signal.emit()
             self.load_more_complete.emit()
-            
+
             # Log performance info
             logging.info(f"Loaded {self._loaded_item_count}/{self._total_item_count} {resource_type} in {result.load_time_ms:.1f}ms")
             
@@ -1059,15 +1103,18 @@ class BaseResourcePage(BaseTablePage):
         
         self.is_loading_initial = False
         self.is_loading_more = False
-        
+
+        # Hide loading indicator on error
+        self.hide_loading_indicator()
+
         # Use centralized error handling
         error_handler = get_error_handler()
         error_handler.handle_error(
-            Exception(error_message), 
-            f"loading {resource_type}", 
+            Exception(error_message),
+            f"loading {resource_type}",
             show_dialog=True
         )
-        
+
         self.load_more_complete.emit()
 
     def _on_resources_loaded(self, result):
@@ -1269,6 +1316,9 @@ class BaseResourcePage(BaseTablePage):
 
     def force_load_data(self):
         """Force reload of data"""
+        # Show loading indicator
+        self.show_loading_indicator("Refreshing data...")
+
         self._clear_resources()  # Use new method to clear resources properly
         self.current_continue_token = None
         self.all_data_loaded = False
@@ -1337,6 +1387,9 @@ class BaseResourcePage(BaseTablePage):
     def load_data(self):
         """Load data if not already loaded"""
         if not self.resources or self.reload_on_show:
+            # Show loading indicator for initial load
+            if not self.resources:  # Only show for truly initial loads
+                self.show_loading_indicator("Loading data...")
             self.force_load_data()
 
     def _handle_select_all(self, state):

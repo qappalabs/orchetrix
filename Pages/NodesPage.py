@@ -329,14 +329,17 @@ class NodesPage(BaseResourcePage):
         # Apply table style
         self.table.setStyleSheet(AppStyles.TABLE_STYLE)
         self.table.horizontalHeader().setStyleSheet(AppStyles.CUSTOM_HEADER_STYLE)
-        
+
         # Configure column widths
         self.configure_columns()
-        
+
         # Create no-data widget
         self.no_data_widget = NoDataWidget("No node data available. Please connect to a cluster.")
         self.no_data_widget.hide()
         self.layout().addWidget(self.no_data_widget)
+
+        # Set Google-style spinner for nodes page
+        self._spinner_type = "google"
 
     def configure_columns(self):
         """Configure column widths for full screen utilization"""
@@ -682,16 +685,3 @@ class NodesPage(BaseResourcePage):
         else:
             self.is_loading = False
             self.show_no_data_message()
-        
-    # Re-enable checkbox functionality for nodes
-    def _add_delete_selected_button(self):
-        # Use inherited implementation for delete selected button
-        super()._add_delete_selected_button()
-        
-    def _handle_checkbox_change(self, state, item_name):
-        # Use inherited implementation for checkbox handling
-        super()._handle_checkbox_change(state, item_name)
-        
-    def _handle_select_all(self, state):
-        # Use inherited implementation for select all functionality
-        super()._handle_select_all(state)
