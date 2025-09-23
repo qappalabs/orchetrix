@@ -38,7 +38,7 @@
 
 ##  Ready to Use
 
-- ✅ No external library installation required - fully self-contained
+- ✅ No Python installation required - fully self-contained
 - ✅ All Kubernetes libraries pre-bundled
 - ✅ Compatible with Kubernetes v1.20+ (tested up to v1.30)
 - ✅ Supports all major cloud providers (EKS, GKE, AKS)

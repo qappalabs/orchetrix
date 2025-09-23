@@ -108,7 +108,7 @@ orchetrix
 **Windows Installation Notes:**
 - No additional dependencies required - fully self-contained
 - Compatible with Windows 10+ (64-bit)
-- Includes embedded runtime and all libraries
+- Includes embedded Python runtime and all libraries
 - Can be run from any location without installation
 
 ### System Requirements
@@ -162,7 +162,9 @@ orchetrix
 
 ##  What's Included
 
+- ✅ Complete Python runtime (no system Python needed)
 - ✅ All Kubernetes client libraries pre-bundled
+- ✅ PyQt6 GUI framework included
 - ✅ Desktop integration files
 - ✅ Self-contained installation
 
@@ -185,5 +187,5 @@ orchetrix
 
 ##  Contributors
 
-    @josh-eversman @kunal2791 @arunqappalabs @rahul96saini @Rahulworkspace @Ayushman-UiUx 
+    @josh-eversman @kunal2791 @arunqappalabs @rahul96saini @Rahulworkspace 
 

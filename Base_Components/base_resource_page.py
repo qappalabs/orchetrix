@@ -2055,6 +2055,11 @@ class BaseResourcePage(BaseTablePage):
                 {"text": "View Logs", "icon": "Icons/logs.png", "dangerous": False},
                 {"text": "SSH", "icon": "Icons/terminal.png", "dangerous": False}
             ])
+            # Check if pod has ports for port forwarding
+            if row < len(self.resources) and self.resources:
+                pod_resource = self.resources[row]
+                if self._has_pod_ports(pod_resource):
+                    actions.append({"text": "Port Forward", "icon": "Icons/network.png", "dangerous": False})
         elif hasattr(self, 'resource_type') and self.resource_type == "services":
             # Check if service has ports for port forwarding
             if row < len(self.resources) and self.resources:
@@ -2109,6 +2114,28 @@ class BaseResourcePage(BaseTablePage):
             return False
         except Exception as e:
             logging.error(f"Unexpected error checking port forward availability: {e}")
+            return False
+
+    def _has_pod_ports(self, pod_resource):
+        """Check if pod has exposed ports for port forwarding"""
+        try:
+            if not pod_resource or not pod_resource.get("raw_data"):
+                return False
+            raw_data = pod_resource["raw_data"]
+            
+            # Check containers for exposed ports
+            containers = raw_data.get("spec", {}).get("containers", [])
+            for container in containers:
+                ports = container.get("ports", [])
+                if ports:  # If any container has ports, allow port forwarding
+                    return True
+            
+            return False
+        except (KeyError, TypeError, AttributeError) as e:
+            logging.debug(f"Could not check pod port forward availability: {e}")
+            return False
+        except Exception as e:
+            logging.error(f"Unexpected error checking pod port forward availability: {e}")
             return False
 
     def _create_action_container(self, row, action_button):
