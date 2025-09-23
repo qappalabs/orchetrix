@@ -4,18 +4,17 @@ Consolidates 3 duplicate resource loaders into one optimized system.
 Designed for speed, efficiency, and smooth user experience.
 """
 
-import asyncio
 import logging
 import time
 import threading
 # Use unified thread manager instead of separate ThreadPoolExecutor
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Any, Callable, Union, Set
-from functools import wraps
 from collections import defaultdict
 
-from PyQt6.QtCore import QObject, pyqtSignal, QTimer
+from PyQt6.QtCore import QObject, pyqtSignal, QTimer, Qt, QMetaObject
+from PyQt6.QtWidgets import QApplication
 
 from kubernetes.client.rest import ApiException
 from Utils.kubernetes_client import get_kubernetes_client
@@ -183,13 +182,32 @@ class SearchResourceLoadWorker(EnhancedBaseWorker):
         all_items = []
         
         try:
-            # Get namespaces first
+            kube_client = get_kubernetes_client()
+            api_client = self.loader._get_api_client(kube_client, self.config.resource_type)
+            
+            # Handle cluster-scoped resources differently
+            if self.config.resource_type in cluster_scoped_resources:
+                # For cluster-scoped resources (like nodes), use cluster-wide API method
+                cluster_method_name = self.loader._get_api_method(self.config.resource_type)
+                api_method = getattr(api_client, cluster_method_name)
+                
+                kwargs = {
+                    'timeout_seconds': 30,
+                    '_request_timeout': 35,
+                    'limit': 100
+                }
+                
+                response = api_method(**kwargs)
+                if hasattr(response, 'items'):
+                    all_items.extend(response.items)
+                    
+                logging.info(f"Search loaded {len(all_items)} cluster-scoped {self.config.resource_type}")
+                return all_items
+            
+            # For namespaced resources, search across namespaces
             namespaces_response = get_kubernetes_client().v1.list_namespace(limit=100)
             namespace_names = [ns.metadata.name for ns in namespaces_response.items]
             
-            # Search in all namespaces (not limited to 20 for search)
-            kube_client = get_kubernetes_client()
-            api_client = self.loader._get_api_client(kube_client, self.config.resource_type)
             namespaced_method_name = self.loader._get_namespaced_api_method(self.config.resource_type)
             api_method = getattr(api_client, namespaced_method_name)
             
@@ -199,14 +217,11 @@ class SearchResourceLoadWorker(EnhancedBaseWorker):
                     
                 try:
                     kwargs = {
-                        # 'namespace': namespace,
+                        'namespace': namespace,
                         'timeout_seconds': 30,
                         '_request_timeout': 35,
-                        'limit': 100  # Reasonable limit per namespace
+                        'limit': 100
                     }
-                    # Only add namespace if NOT cluster-scoped
-                    if self.config.resource_type not in cluster_scoped_resources:
-                        kwargs['namespace'] = namespace
 
                     response = api_method(**kwargs)
                     if hasattr(response, 'items'):
@@ -300,27 +315,8 @@ class SearchResourceLoadWorker(EnhancedBaseWorker):
             namespace = getattr(metadata, 'namespace', None)
             creation_timestamp = metadata.creation_timestamp
             
-            # Basic age calculation
-            age = "Unknown"
-            if creation_timestamp:
-                try:
-                    import datetime
-                    if hasattr(creation_timestamp, 'replace'):
-                        created_time = creation_timestamp.replace(tzinfo=datetime.timezone.utc)
-                    else:
-                        created_time = datetime.datetime.fromisoformat(str(creation_timestamp).replace('Z', '+00:00'))
-                    
-                    now = datetime.datetime.now(datetime.timezone.utc)
-                    diff = now - created_time
-                    
-                    if diff.days > 0:
-                        age = f"{diff.days}d"
-                    elif diff.seconds > 3600:
-                        age = f"{diff.seconds // 3600}h"
-                    else:
-                        age = f"{diff.seconds // 60}m"
-                except Exception:
-                    pass
+            # Calculate age using the unified method
+            age = self._format_age_fast(creation_timestamp)
             
             # Build basic resource data
             resource_data = {
@@ -431,6 +427,10 @@ class SearchResourceLoadWorker(EnhancedBaseWorker):
                     
                     # Add external IP information
                     processed_item['external_ip_text'] = ""  # Default empty, could be enhanced
+            
+            elif self.config.resource_type == 'nodes':
+                # Use the unified loader's node field processing for consistency
+                self.loader._add_node_fields(processed_item, item)
             
         except Exception as e:
             logging.debug(f"Error adding basic resource fields: {e}")
@@ -595,10 +595,48 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             # Skip some heavy fields that aren't displayed in UI
             logging.debug(f"Unified Resource Loader: Optimizing node API call for heavy data - using limit: {kwargs.get('limit', 'no limit')}")
         
-        # Execute API call with timeout
-        response = api_method(**kwargs)
+        # Execute API call with retry logic
+        response = self._execute_with_retry(api_method, **kwargs)
         
         return response.items if hasattr(response, 'items') else []
+    
+    def _execute_with_retry(self, api_method, max_retries=3, **kwargs):
+        """Execute API call with exponential backoff retry logic"""
+        import time
+        import random
+        
+        last_exception = None
+        
+        for attempt in range(max_retries):
+            try:
+                response = api_method(**kwargs)
+                if attempt > 0:
+                    logging.info(f"API call succeeded on attempt {attempt + 1}")
+                return response
+                
+            except Exception as e:
+                last_exception = e
+                error_str = str(e).lower()
+                
+                # Don't retry on certain errors
+                if any(err in error_str for err in ['unauthorized', 'forbidden', 'not found']):
+                    logging.debug(f"Non-retryable error, failing immediately: {e}")
+                    raise
+                
+                # Calculate exponential backoff with jitter
+                if attempt < max_retries - 1:
+                    delay = (2 ** attempt) + random.uniform(0, 1)
+                    logging.warning(f"API call failed (attempt {attempt + 1}/{max_retries}), retrying in {delay:.1f}s: {e}")
+                    time.sleep(delay)
+                    
+                    # Check if cancelled during delay
+                    if self.is_cancelled():
+                        raise Exception("Operation cancelled during retry")
+                else:
+                    logging.error(f"API call failed after {max_retries} attempts: {e}")
+        
+        # Re-raise the last exception if all retries failed
+        raise last_exception
     
     def _load_from_multiple_namespaces(self, api_client, base_kwargs) -> List[Any]:
         """Load resources from multiple namespaces efficiently for 'All Namespaces' option"""
@@ -1028,68 +1066,23 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             })
             return
         
-        # Get node status efficiently and format all conditions
-        node_status = 'Unknown'
-        conditions_list = []
+        # Process node conditions using helper method from the loader class
+        node_status, conditions_text = HighPerformanceResourceLoader._process_node_conditions(status.conditions if status else None)
         
-        if status and status.conditions:
-            for condition in status.conditions:
-                if condition.type == 'Ready':
-                    node_status = 'Ready' if condition.status == 'True' else 'NotReady'
-                
-                # Format condition for display: Type=Status
-                condition_display = f"{condition.type}={condition.status}"
-                
-                # Add reason if available for non-True conditions
-                if condition.status != 'True' and hasattr(condition, 'reason') and condition.reason:
-                    condition_display += f" ({condition.reason})"
-                
-                conditions_list.append(condition_display)
-        
-        # Join all conditions for the conditions column
-        conditions_text = ", ".join(conditions_list) if conditions_list else "Unknown"
-        
-        # Get node roles efficiently
-        roles = []
-        if node.metadata.labels:
-            for label_key in node.metadata.labels:
-                if 'node-role.kubernetes.io/' in label_key:
-                    role = label_key.replace('node-role.kubernetes.io/', '')
-                    if role:
-                        roles.append(role)
+        # Extract node roles using helper method from the loader class
+        roles = HighPerformanceResourceLoader._extract_node_roles(node.metadata.labels if node.metadata else None)
         
         # Get taints count
         taints_count = 0
         if node.spec and node.spec.taints:
             taints_count = len(node.spec.taints)
         
-        # Format memory capacity for display
+        # Format capacity information using helper method from the loader class
         memory_capacity = ''
-        if status and status.capacity and status.capacity.get('memory'):
-            memory_raw = status.capacity.get('memory', '')
-            if 'Ki' in memory_raw:
-                # Convert from Ki to GB
-                ki_value = int(memory_raw.replace('Ki', ''))
-                gb_value = ki_value / (1024 * 1024)
-                memory_capacity = f"{gb_value:.1f}GB"
-            else:
-                memory_capacity = memory_raw
-        
-        # Format disk capacity for display
         disk_capacity = ''
-        if status and status.capacity and status.capacity.get('ephemeral-storage'):
-            disk_raw = status.capacity.get('ephemeral-storage', '')
-            if 'Ki' in disk_raw:
-                # Convert from Ki to GB
-                ki_value = int(disk_raw.replace('Ki', ''))
-                gb_value = ki_value / (1024 * 1024)
-                disk_capacity = f"{gb_value:.1f}GB"
-            elif 'Gi' in disk_raw:
-                # Convert from Gi to GB
-                gi_value = int(disk_raw.replace('Gi', ''))
-                disk_capacity = f"{gi_value}GB"
-            else:
-                disk_capacity = disk_raw
+        if status and status.capacity:
+            memory_capacity = HighPerformanceResourceLoader._format_capacity(status.capacity.get('memory', ''))
+            disk_capacity = HighPerformanceResourceLoader._format_capacity(status.capacity.get('ephemeral-storage', ''))
         
         # Don't simulate disk usage - leave as None to be filled by real metrics
         estimated_disk_usage = None
@@ -1097,7 +1090,7 @@ class ResourceLoadWorker(EnhancedBaseWorker):
         processed_item.update({
             'status': node_status,
             'conditions': conditions_text,
-            'roles': roles if roles else ['<none>'],
+            'roles': roles,
             'version': status.node_info.kubelet_version if status and status.node_info else 'Unknown',
             'os': status.node_info.operating_system if status and status.node_info else 'Unknown',
             'kernel': status.node_info.kernel_version if status and status.node_info else 'Unknown',
@@ -1154,16 +1147,34 @@ class ResourceLoadWorker(EnhancedBaseWorker):
         })
     
     def _format_age_fast(self, creation_timestamp) -> str:
-        """Fast age calculation with caching"""
+        """Fast age calculation with comprehensive timestamp handling"""
         if not creation_timestamp:
             return 'Unknown'
         
         try:
+            # Handle different timestamp formats
             if hasattr(creation_timestamp, 'timestamp'):
+                # Kubernetes datetime object
                 created = datetime.fromtimestamp(creation_timestamp.timestamp(), tz=timezone.utc)
-            else:
+            elif isinstance(creation_timestamp, str):
+                # ISO string format
+                if creation_timestamp.endswith('Z'):
+                    created = datetime.fromisoformat(creation_timestamp.replace('Z', '+00:00'))
+                else:
+                    created = datetime.fromisoformat(creation_timestamp)
+                # Ensure timezone aware
+                if created.tzinfo is None:
+                    created = created.replace(tzinfo=timezone.utc)
+            elif isinstance(creation_timestamp, datetime):
+                # Already a datetime object
                 created = creation_timestamp
+                if created.tzinfo is None:
+                    created = created.replace(tzinfo=timezone.utc)
+            else:
+                # Try to convert to string and parse
+                created = datetime.fromisoformat(str(creation_timestamp).replace('Z', '+00:00'))
             
+            # Calculate age
             now = datetime.now(timezone.utc)
             age_delta = now - created
             
@@ -1171,14 +1182,24 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             hours = age_delta.seconds // 3600
             minutes = (age_delta.seconds % 3600) // 60
             
-            if days > 0:
+            # Format age
+            if days > 365:
+                years = days // 365
+                return f"{years}y"
+            elif days > 30:
+                months = days // 30
+                return f"{months}mo"
+            elif days > 0:
                 return f"{days}d"
             elif hours > 0:
                 return f"{hours}h"
-            else:
+            elif minutes > 0:
                 return f"{minutes}m"
+            else:
+                return "<1m"
                 
-        except Exception:
+        except Exception as e:
+            logging.warning(f"Error calculating age for timestamp {creation_timestamp}: {e}")
             return 'Unknown'
     
     def _get_pod_ready_status(self, status) -> str:
@@ -1551,6 +1572,11 @@ class HighPerformanceResourceLoader(QObject):
         # Configuration cache for performance
         self._config_cache: Dict[str, ResourceConfig] = {}
         
+        # Request deduplication to prevent duplicate API calls
+        self._pending_operations: Dict[str, str] = {}  # operation_key -> operation_id
+        self._operation_callbacks: Dict[str, List[Callable]] = defaultdict(list)
+        self._dedup_lock = threading.RLock()
+        
         # Performance monitoring
         self._load_stats = defaultdict(list)
         self._stats_lock = threading.RLock()
@@ -1558,7 +1584,55 @@ class HighPerformanceResourceLoader(QObject):
         # Initialize default configurations for all resource types
         self._initialize_default_configs()
         
+        # Setup memory monitoring timer
+        self._setup_memory_monitoring()
+        
         logging.info("High-Performance Resource Loader initialized")
+    
+    def _setup_memory_monitoring(self):
+        """Setup memory monitoring timer"""
+        if self.thread() != QApplication.instance().thread():
+            # Defer to main thread if called from worker thread
+            QMetaObject.invokeMethod(self, "_setup_memory_monitoring", Qt.ConnectionType.QueuedConnection)
+            return
+        
+        self._memory_timer = QTimer()
+        self._memory_timer.timeout.connect(self._check_memory_usage)
+        self._memory_timer.start(60000)  # Check every minute
+    
+    def _check_memory_usage(self):
+        """Check and log memory usage, cleanup if necessary"""
+        try:
+            import gc
+            import sys
+            
+            # Get object count
+            object_count = len(gc.get_objects())
+            
+            # Log warning if object count is high (increased threshold)
+            if object_count > 150000:
+                logging.warning(f"High object count detected: {object_count} objects in memory")
+                
+                # Force cleanup if very high (increased threshold)
+                if object_count > 200000:
+                    logging.info("Forcing memory cleanup due to high object count")
+                    self._force_memory_cleanup()
+                    # Clear caches more aggressively
+                    self._clear_old_cache_entries(force=True)
+            
+            # Log memory usage if psutil available
+            try:
+                import psutil
+                import os
+                process = psutil.Process(os.getpid())
+                memory_mb = process.memory_info().rss / 1024 / 1024
+                if memory_mb > 800:  # Log if over 800MB (increased threshold)
+                    logging.info(f"Memory usage: {memory_mb:.1f} MB, {object_count} objects")
+            except ImportError:
+                pass
+                
+        except Exception as e:
+            logging.debug(f"Error checking memory usage: {e}")
     
     def _initialize_default_configs(self):
         """Initialize optimized default configurations for all resource types"""
@@ -1794,10 +1868,20 @@ class HighPerformanceResourceLoader(QObject):
         custom_config: Optional[ResourceConfig] = None
     ) -> str:
         """
-        Load Kubernetes resources asynchronously with high performance.
+        Load Kubernetes resources asynchronously with high performance and deduplication.
         Returns operation ID for tracking.
         """
         logging.info(f"Unified Resource Loader: Starting async load for resource_type='{resource_type}', namespace='{namespace or 'all'}'") 
+        
+        # Generate operation key for deduplication
+        operation_key = f"{resource_type}_{namespace or 'all'}"
+        
+        # Check for duplicate request and deduplicate if necessary
+        with self._dedup_lock:
+            if operation_key in self._pending_operations:
+                existing_operation_id = self._pending_operations[operation_key]
+                logging.info(f"Unified Resource Loader: Duplicate request detected for {operation_key}, returning existing operation_id: {existing_operation_id}")
+                return existing_operation_id
         
         # Get or create configuration
         config = custom_config or self._get_config_for_resource(resource_type, namespace)
@@ -1806,6 +1890,10 @@ class HighPerformanceResourceLoader(QObject):
         # Generate operation ID
         operation_id = f"{resource_type}_{namespace or 'all'}_{int(time.time() * 1000)}"
         logging.debug(f"Unified Resource Loader: Generated operation_id: {operation_id}")
+        
+        # Register this operation to prevent duplicates
+        with self._dedup_lock:
+            self._pending_operations[operation_key] = operation_id
         
         # Cancel any existing load for this resource type
         self._cancel_existing_load(resource_type, namespace)
@@ -1906,8 +1994,9 @@ class HighPerformanceResourceLoader(QObject):
             logging.error(f"Unified Resource Loader: Error emitting load completion signal for {resource_type}: {e}")
             logging.debug(f"Unified Resource Loader: Load completion error details", exc_info=True)
         finally:
-            # Cleanup worker reference
+            # Cleanup worker reference and pending operation
             self._cleanup_worker(resource_type, namespace)
+            self._cleanup_pending_operation(resource_type, namespace)
     
     def _handle_load_completion_error(self, error_message: str, resource_type: str, namespace: Optional[str], operation_id: str):
         """Handle error in load completion"""
@@ -1921,14 +2010,22 @@ class HighPerformanceResourceLoader(QObject):
         except Exception as e:
             logging.error(f"Unified Resource Loader: Error emitting load error signal for {resource_type}: {e}")
         finally:
-            # Cleanup worker reference
+            # Cleanup worker reference and pending operation
             self._cleanup_worker(resource_type, namespace)
+            self._cleanup_pending_operation(resource_type, namespace)
     
     def _cleanup_worker(self, resource_type: str, namespace: Optional[str]):
         """Cleanup worker reference"""
         worker_key = f"{resource_type}_{namespace or 'all'}"
         with self._worker_lock:
             self._active_workers.pop(worker_key, None)
+    
+    def _cleanup_pending_operation(self, resource_type: str, namespace: Optional[str]):
+        """Cleanup pending operation to allow future requests"""
+        operation_key = f"{resource_type}_{namespace or 'all'}"
+        with self._dedup_lock:
+            self._pending_operations.pop(operation_key, None)
+            logging.debug(f"Cleaned up pending operation for {operation_key}")
     
     def _record_performance_stats(self, resource_type: str, load_time_ms: float, success: bool):
         """Record performance statistics for monitoring"""
@@ -2058,14 +2155,118 @@ class HighPerformanceResourceLoader(QObject):
         # Cancel all active loads
         self.cancel_all_loads()
         
-        # Cleanup is handled by thread manager
-        # No need to shutdown thread pool as it's managed globally
+        # Force garbage collection of large objects
+        self._force_memory_cleanup()
         
-        # Clear stats
+        # Clear all caches and references
+        with self._worker_lock:
+            self._active_workers.clear()
+        
+        with self._dedup_lock:
+            self._pending_operations.clear()
+            self._operation_callbacks.clear()
+        
         with self._stats_lock:
             self._load_stats.clear()
         
+        # Clear configuration cache
+        self._config_cache.clear()
+        
         logging.info("Resource Loader cleanup completed")
+    
+    def _force_memory_cleanup(self):
+        """Force cleanup of memory-intensive objects"""
+        import gc
+        
+        # Collect garbage multiple times to ensure deep cleanup
+        for _ in range(3):
+            collected = gc.collect()
+            if collected > 0:
+                logging.info(f"Memory cleanup: collected {collected} objects")
+        
+        # Log memory stats if available
+        try:
+            import psutil
+            import os
+            process = psutil.Process(os.getpid())
+            memory_mb = process.memory_info().rss / 1024 / 1024
+            logging.info(f"Memory usage after cleanup: {memory_mb:.1f} MB")
+        except ImportError:
+            pass
+    
+    def _clear_old_cache_entries(self, force=False):
+        """Clear old cache entries to free memory"""
+        try:
+            current_time = time.time()
+            max_age = 300 if not force else 60  # 5 minutes normal, 1 minute if forced
+            
+            with self._cache_lock:
+                keys_to_remove = []
+                for key, (data, timestamp) in self._resource_cache.items():
+                    if current_time - timestamp > max_age:
+                        keys_to_remove.append(key)
+                
+                for key in keys_to_remove:
+                    del self._resource_cache[key]
+                
+                if keys_to_remove:
+                    logging.info(f"Cleared {len(keys_to_remove)} old cache entries")
+                    
+        except Exception as e:
+            logging.debug(f"Error clearing old cache entries: {e}")
+    
+    @staticmethod
+    def _format_capacity(raw_value: str) -> str:
+        """Format Kubernetes capacity values to human-readable format"""
+        if not raw_value:
+            return ''
+        
+        if 'Ki' in raw_value:
+            # Convert from Ki to GB
+            ki_value = int(raw_value.replace('Ki', ''))
+            gb_value = ki_value / (1024 * 1024)
+            return f"{gb_value:.1f}GB"
+        elif 'Gi' in raw_value:
+            # Convert from Gi to GB
+            gi_value = int(raw_value.replace('Gi', ''))
+            return f"{gi_value}GB"
+        else:
+            return raw_value
+    
+    @staticmethod
+    def _process_node_conditions(conditions) -> tuple:
+        """Process node conditions and return (status, conditions_text)"""
+        node_status = 'Unknown'
+        conditions_list = []
+        
+        if conditions:
+            for condition in conditions:
+                if condition.type == 'Ready':
+                    node_status = 'Ready' if condition.status == 'True' else 'NotReady'
+                
+                # Format condition for display: Type=Status
+                condition_display = f"{condition.type}={condition.status}"
+                
+                # Add reason if available for non-True conditions
+                if condition.status != 'True' and hasattr(condition, 'reason') and condition.reason:
+                    condition_display += f" ({condition.reason})"
+                
+                conditions_list.append(condition_display)
+        
+        conditions_text = ", ".join(conditions_list) if conditions_list else "Unknown"
+        return node_status, conditions_text
+    
+    @staticmethod
+    def _extract_node_roles(labels) -> list:
+        """Extract node roles from Kubernetes labels"""
+        roles = []
+        if labels:
+            for label_key in labels:
+                if 'node-role.kubernetes.io/' in label_key:
+                    role = label_key.replace('node-role.kubernetes.io/', '')
+                    if role:
+                        roles.append(role)
+        return roles if roles else ['<none>']
     
     def __del__(self):
         """Destructor to ensure cleanup"""

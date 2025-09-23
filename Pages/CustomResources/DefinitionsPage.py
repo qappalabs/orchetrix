@@ -48,12 +48,12 @@ class DefinitionsPage(BaseResourcePage):
         # Column specifications with optimized default widths
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
-            (1, 140, "interactive"), # Resource
-            (2, 90, "interactive"),  # Group
-            (3, 180, "interactive"),  # Version
-            (3, 150, "interactive"),  # Scope  
-            (4, 80, "stretch"),  # Age
-            (5, 40, "fixed")        # Actions
+            (1, 180, "interactive"), # Resource
+            (2, 150, "interactive"),  # Group
+            (3, 120, "interactive"),  # Version
+            (4, 150, "interactive"),  # Scope  
+            (5, 80, "stretch"),  # Age
+            (6, 40, "fixed")        # Actions
         ]
         
         # Apply column configuration
@@ -147,11 +147,6 @@ class DefinitionsPage(BaseResourcePage):
         action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
         self.table.setCellWidget(row, len(columns) + 1, action_container)
     
-    # def handle_row_click(self, row, column):
-    #     """Handle row selection when a table cell is clicked"""
-    #     if column != self.table.columnCount() - 1:  # Skip action column
-    #         # Select the row
-    #         self.table.selectRow(row)
 
     def handle_row_click(self, row, column):
         if column != self.table.columnCount() - 1:  # Skip action column

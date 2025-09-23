@@ -137,11 +137,15 @@ class KubernetesAPIService:
             configuration.connection_pool_maxsize = 10  # Increase connection pool size
             
             # Timeout settings for better reliability with slow clusters
-            configuration.socket_timeout = 30  # 30 seconds socket timeout
-            configuration.request_timeout = 60  # 60 seconds request timeout
+            configuration.socket_timeout = 15  # 15 seconds socket timeout (reduced for faster failure detection)
+            configuration.request_timeout = 30  # 30 seconds request timeout (reduced for faster failure detection)
             
             # Retry settings for better reliability
-            configuration.retries = 3
+            configuration.retries = 5  # Increased retries for better reliability
+            
+            # Additional timeout configurations
+            if hasattr(configuration, 'connect_timeout'):
+                configuration.connect_timeout = 10  # 10 seconds connection timeout
             
             # Apply optimized configuration
             client.Configuration.set_default(configuration)

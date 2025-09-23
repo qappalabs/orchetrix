@@ -80,7 +80,7 @@ kubectl cluster-info
 - **Architecture**: amd64 (64-bit)
 - **Package Size**: 59M
 - **Package Type**: Universal .deb
-- **Built**: September 11, 2025
+- **Built**: September 23, 2025
 
 ## 🔗 Additional Resources
 - **Homepage**: https://orchetrix.io

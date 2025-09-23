@@ -212,8 +212,8 @@ class MainWindow(QMainWindow):
             # Cleanup virtual scroll tables
             self._cleanup_virtual_scroll_tables()
             
-            # Monitor memory usage and log warnings if high
-            if total_objects > 50000:  # Threshold for warning
+            # Monitor memory usage and log warnings if high (increased threshold)
+            if total_objects > 150000:  # Increased threshold for warning
                 logging.warning(f"High object count detected: {total_objects} objects in memory")
                 
             cleanup_time = (time.time() - cleanup_start) * 1000

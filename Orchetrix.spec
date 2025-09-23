@@ -3,255 +3,38 @@ import os
 import sys
 from pathlib import Path
 
-# Get absolute path to icon (fixed case for Icons directory)
+# Get absolute path to icon
 icon_path = os.path.abspath(os.path.join('Icons', 'logoIcon.ico'))
 if not os.path.exists(icon_path):
-    # Fallback to PNG icon
     icon_path = os.path.abspath(os.path.join('Icons', 'logoIcon.png'))
     if not os.path.exists(icon_path):
         icon_path = None
 
-def collect_icons():
-    """Collect all icon files from the icons directory"""
-    icon_files = []
-    icons_dir = Path('Icons')
-    
-    if icons_dir.exists():
-        # Get all icon file types
-        for ext in ['*.svg', '*.png', '*.ico', '*.jpg', '*.jpeg', '*.gif']:
-            for icon_file in icons_dir.glob(ext):
-                icon_files.append((str(icon_file), 'Icons'))
-        
-        print(f"Found {len(icon_files)} icon files to include")
-    else:
-        print("Icons directory not found!")
-    
-    return icon_files
-
-def collect_ui_files():
-    """Collect UI-related files"""
-    ui_files = []
-    
-    # Collect any additional UI files if they exist
-    ui_dirs = ['Images', 'logos', 'styles']
-    for ui_dir in ui_dirs:
-        ui_path = Path(ui_dir)
-        if ui_path.exists():
-            for file in ui_path.rglob('*'):
-                if file.is_file():
-                    ui_files.append((str(file), ui_dir))
-    
-    return ui_files
-
-# Get all resource files
-icon_data = collect_icons()
-ui_data = collect_ui_files()
-
 def collect_data_files():
-    """Collect all data files, filtering out non-existent directories"""
+    """Collect all necessary data files"""
     data_files = []
     
-    # Add collected icons and UI files
-    data_files.extend(icon_data)
-    data_files.extend(ui_data)
-    
-    # Ensure Icons are also copied to root level for fallback (Windows fix)
-    icons_fallback = []
-    for src, dest in icon_data:
-       if 'Icons' in src:
-            filename = os.path.basename(src)
-            icons_fallback.append((src, '.'))  
-     # Copy to root level as well
-    data_files.extend(icons_fallback)
-    
-
-    # Add directories that exist
-    directories_to_check = [
-        ('Icons', 'Icons'),
-        ('Images', 'Images'), 
-        ('logos', 'logos'),
-        ('UI', 'UI'),
-        ('Pages', 'Pages'),
-        ('utils', 'utils'),
-        ('Base_Components', 'Base_Components'),
-        ('Utils', 'Utils'),
-        ('Services', 'Services'),
-    ]
-    
-    for src_dir, dest_dir in directories_to_check:
-        if os.path.exists(src_dir) and os.path.isdir(src_dir):
-            data_files.append((src_dir, dest_dir))
-            print(f"Including directory: {src_dir} -> {dest_dir}")
-        else:
-            print(f"Skipping missing directory: {src_dir}")
+    # Add resource directories
+    resource_dirs = ['Icons', 'Images', 'UI', 'Pages', 'Utils', 'Services', 'Base_Components']
+    for dir_name in resource_dirs:
+        if os.path.exists(dir_name) and os.path.isdir(dir_name):
+            data_files.append((dir_name, dir_name))
     
     return data_files
 
-# Comprehensive hidden imports list
+# Comprehensive hidden imports
 hidden_imports = [
-    # PyQt6 modules
-    'PyQt6',
-    'PyQt6.QtCore',
-    'PyQt6.QtGui',
-    'PyQt6.QtWidgets',
-    'PyQt6.QtSvg',
-    'PyQt6.QtSvgWidgets',
-    'PyQt6.sip',
-    
-    # Standard library modules
-    'yaml',
-    'logging',
-    'datetime',
-    'json',
-    'subprocess',
-    'threading',
-    'socket',
-    'time',
-    'os',
-    'sys',
-    'traceback',
-    'gc',
-    'webbrowser',
-    'tempfile',
-    'shutil',
-    'random',
-    'string',
-    'math',
-    'queue',
-    'weakref',
-    'functools',
-    'typing',
-    'dataclasses',
-    'enum',
-    're',
-    'platform',
-    'select',
-    
-    # Third-party modules
-    'requests',
-    'requests.auth',
-    'requests.models',
-    'requests.sessions',
-    'requests.adapters',
-    'requests.exceptions',
-    'urllib3',
-    'urllib3.util',
-    'urllib3.util.retry',
-    'urllib3.exceptions',
-    'certifi',
-    'psutil',
-    
-    # Kubernetes client modules
-    'kubernetes',
-    'kubernetes.client',
-    'kubernetes.client.rest',
-    'kubernetes.client.api',
-    'kubernetes.client.models',
-    'kubernetes.client.api_client',
-    'kubernetes.client.configuration',
-    'kubernetes.config',
-    'kubernetes.config.config_exception',
-    'kubernetes.stream',
-    'kubernetes.watch',
-    
-    # Kubernetes API modules
-    'kubernetes.client.CoreV1Api',
-    'kubernetes.client.AppsV1Api',
-    'kubernetes.client.NetworkingV1Api',
-    'kubernetes.client.StorageV1Api',
-    'kubernetes.client.RbacAuthorizationV1Api',
-    'kubernetes.client.BatchV1Api',
-    'kubernetes.client.AutoscalingV1Api',
-    'kubernetes.client.CustomObjectsApi',
-    'kubernetes.client.VersionApi',
-    'kubernetes.client.ApiextensionsV1Api',
-    'kubernetes.client.AdmissionregistrationV1Api',
-    'kubernetes.client.CoordinationV1Api',
-    'kubernetes.client.PolicyV1Api',
-    'kubernetes.client.SchedulingV1Api',
-    'kubernetes.client.NodeV1Api',
-    'kubernetes.client.EventsV1Api',
-    
-    # Additional Kubernetes modules
-    'kubernetes.client.V1Pod',
-    'kubernetes.client.V1Service',
-    'kubernetes.client.V1Deployment',
-    'kubernetes.client.V1Node',
-    'kubernetes.client.V1Namespace',
-    'kubernetes.client.V1Event',
-    'kubernetes.client.V1DeleteOptions',
-    
-    # PyYAML
-    'yaml.loader',
-    'yaml.dumper',
-    'yaml.constructor',
-    'yaml.representer',
-    'yaml.resolver',
-    'yaml.scanner',
-    'yaml.parser',
-    'yaml.composer',
-    'yaml.emitter',
-    'yaml.serializer',
-    
-    # Additional networking modules
-    'socket',
-    'ssl',
-    'http',
-    'http.client',
-    'http.server',
-    
-    # Date/time modules
-    'datetime',
-    'time',
-    'calendar',
-    
-    # Logging modules
-    'logging.handlers',
-    'logging.config',
-    
-    # File handling
-    'pathlib',
-    'glob',
-    'fnmatch',
-    
-    # JSON handling
-    'json.encoder',
-    'json.decoder',
-    
-    # Base64 and encoding
-    'base64',
-    'encodings',
-    'encodings.utf_8',
-    'encodings.ascii',
-    
-    # Collections
-    'collections',
-    'collections.abc',
-    
-    # Crypto/security (for kubernetes)
-    'cryptography',
-    'cryptography.hazmat',
-    'cryptography.hazmat.primitives',
-    'cryptography.hazmat.backends',
-    'cryptography.x509',
-    
-    # Additional dependencies that might be dynamically imported
-    'pkg_resources',
-    'setuptools',
-    'six',
-    'google',
-    'google.auth',
-    'oauthlib',
-    'cachetools',
-    'pyasn1',
-    'rsa',
+    'PyQt6', 'PyQt6.QtCore', 'PyQt6.QtGui', 'PyQt6.QtWidgets', 'PyQt6.QtSvg',
+    'kubernetes', 'kubernetes.client', 'kubernetes.config', 'kubernetes.stream',
+    'yaml', 'requests', 'psutil', 'logging', 'json', 'datetime', 'threading',
+    'subprocess', 'tempfile', 'shutil', 'base64', 'ssl', 'socket'
 ]
 
 a = Analysis(
-    ['main.py'],  # Main entry point
-    pathex=['.'],  # Add current directory to path
+    ['main.py'],
+    pathex=['.'],
     binaries=[],
-    datas=collect_data_files(),  # Use the function that properly filters None values
+    datas=collect_data_files(),
     hiddenimports=hidden_imports,
     hookspath=[],
     hooksconfig={},
@@ -273,7 +56,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=False,  # Set to True for debugging if needed
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
