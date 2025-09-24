@@ -51,7 +51,7 @@ validate_environment() {
     fi
     
     # Check required tools
-    local required_tools=("python3" "rpm-build" "rpmbuild")
+    local required_tools=("python3" "rpmbuild")
     for tool in "${required_tools[@]}"; do
         if ! command -v $tool &> /dev/null; then
             print_error "Required tool '$tool' is not installed"
