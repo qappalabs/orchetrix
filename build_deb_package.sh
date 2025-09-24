@@ -9,7 +9,7 @@ set -e  # Exit on any error
 # Configuration
 APP_NAME="orchetrix"
 APP_DISPLAY_NAME="Orchetrix"
-APP_VERSION="1.0.0"
+APP_VERSION="0.0.2"
 APP_DESCRIPTION="Advanced Kubernetes Management Desktop Application"
 APP_MAINTAINER="Orchetrix Team <support@orchetrix.io>"
 APP_HOMEPAGE="https://orchetrix.io"
@@ -340,7 +340,7 @@ EOF
     
     # Create changelog
     cat > "$doc_dir/changelog.Debian.gz" << EOF | gzip -9 -c
-$APP_NAME ($APP_VERSION-1) unstable; urgency=low
+$APP_NAME ($APP_VERSION) unstable; urgency=low
 
   * Initial release
   * Universal Ubuntu compatibility
@@ -375,7 +375,7 @@ create_control_files() {
     # Create control file with comprehensive dependencies
     cat > "$control_dir/control" << EOF
 Package: $APP_NAME
-Version: $APP_VERSION-1
+Version: $APP_VERSION
 Section: $APP_CATEGORY
 Priority: optional
 Architecture: $ARCH
@@ -467,7 +467,7 @@ build_deb_package() {
     print_status "Building .deb package..."
     
     local pkg_dir="debian_package"
-    local deb_filename="${APP_NAME}_${APP_VERSION}-1_${ARCH}.deb"
+    local deb_filename="${APP_NAME}_${APP_VERSION}_${ARCH}.deb"
     
     # Build the package
     if ! fakeroot dpkg-deb --build "$pkg_dir" "$deb_filename"; then
@@ -506,7 +506,7 @@ build_deb_package() {
 
 # Test installation (optional)
 test_installation() {
-    local deb_filename="${APP_NAME}_${APP_VERSION}-1_${ARCH}.deb"
+    local deb_filename="${APP_NAME}_${APP_VERSION}_${ARCH}.deb"
     
     print_status "Testing package installation (dry-run)..."
     
@@ -521,7 +521,7 @@ test_installation() {
 
 # Create installation instructions
 create_installation_guide() {
-    local deb_filename="${APP_NAME}_${APP_VERSION}-1_${ARCH}.deb"
+    local deb_filename="${APP_NAME}_${APP_VERSION}_${ARCH}.deb"
     
     cat > "INSTALLATION_GUIDE.md" << EOF
 # Orchetrix Universal Installation Guide
@@ -602,7 +602,7 @@ kubectl cluster-info
 - ❌ Additional GUI frameworks
 
 ## 📋 Package Information
-- **Version**: $APP_VERSION-1
+- **Version**: $APP_VERSION
 - **Architecture**: $ARCH (64-bit)
 - **Package Size**: $(du -h $deb_filename 2>/dev/null | cut -f1 || echo "59M")
 - **Package Type**: Universal .deb
@@ -657,7 +657,7 @@ main() {
     
     echo ""
     print_status "To install the package:"
-    echo "  sudo dpkg -i ${APP_NAME}_${APP_VERSION}-1_${ARCH}.deb"
+    echo "  sudo dpkg -i ${APP_NAME}_${APP_VERSION}_${ARCH}.deb"
     echo "  sudo apt-get install -f  # If dependencies are missing"
     
     print_status "To uninstall:"

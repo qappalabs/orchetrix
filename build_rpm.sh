@@ -9,7 +9,7 @@ set -e  # Exit on any error
 # Configuration
 APP_NAME="orchetrix"
 APP_DISPLAY_NAME="Orchetrix"
-APP_VERSION="1.1.0"
+APP_VERSION="0.0.2"
 APP_DESCRIPTION="Advanced Kubernetes Management Desktop Application"
 APP_MAINTAINER="Orchetrix Team <support@orchetrix.io>"
 APP_HOMEPAGE="https://orchetrix.io"
@@ -251,7 +251,7 @@ create_desktop_file() {
     local source_dir="$1"
     cat > "$source_dir/$APP_NAME.desktop" << EOF
 [Desktop Entry]
-Version=1.0
+Version=0.0.2
 Type=Application
 Name=$APP_DISPLAY_NAME
 Comment=$APP_DESCRIPTION
@@ -434,7 +434,7 @@ fi
 /usr/share/pixmaps/%{name}.png
 
 %changelog
-* $(date +'%a %b %d %Y') $APP_MAINTAINER - $APP_VERSION-1
+* $(date +'%a %b %d %Y') $APP_MAINTAINER - $APP_VERSION
 - Initial RPM package for $APP_DISPLAY_NAME $APP_VERSION
 - Self-contained installation with embedded Python runtime
 - Desktop integration with applications menu
@@ -490,7 +490,7 @@ build_rpm_package() {
 
 # Test installation (optional)
 test_installation() {
-    local rpm_file="${APP_NAME}-${APP_VERSION}-1.${ARCH}.rpm"
+    local rpm_file="${APP_NAME}-${APP_VERSION}.${ARCH}.rpm"
     
     print_status "Testing package installation (dry-run)..."
     
@@ -504,7 +504,7 @@ test_installation() {
 
 # Create installation instructions
 create_installation_guide() {
-    local rpm_file="${APP_NAME}-${APP_VERSION}-1.${ARCH}.rpm"
+    local rpm_file="${APP_NAME}-${APP_VERSION}.${ARCH}.rpm"
     
     cat > "INSTALLATION_GUIDE_RPM.md" << EOF
 # Orchetrix Universal RPM Installation Guide
@@ -598,7 +598,7 @@ kubectl cluster-info
 - ❌ Additional GUI frameworks
 
 ## 📋 Package Information
-- **Version**: $APP_VERSION-1
+- **Version**: $APP_VERSION
 - **Architecture**: $ARCH (64-bit)
 - **Package Size**: $(du -h $rpm_file 2>/dev/null | cut -f1 || echo "65M")
 - **Package Type**: Universal RPM
@@ -654,9 +654,9 @@ main() {
     
     echo ""
     print_status "To install the package:"
-    echo "  sudo dnf install -y ${APP_NAME}-${APP_VERSION}-1.${ARCH}.rpm"
+    echo "  sudo dnf install -y ${APP_NAME}-${APP_VERSION}.${ARCH}.rpm"
     echo "  # or"
-    echo "  sudo zypper install -y ${APP_NAME}-${APP_VERSION}-1.${ARCH}.rpm"
+    echo "  sudo zypper install -y ${APP_NAME}-${APP_VERSION}.${ARCH}.rpm"
     
     print_status "To uninstall:"
     echo "  sudo dnf remove $APP_NAME"
