@@ -302,7 +302,6 @@ URL:            $APP_HOMEPAGE
 Source0:        %{name}-%{version}.tar.gz
 
 BuildArch:      $ARCH
-BuildRequires:  systemd-rpm-macros
 
 # Runtime dependencies
 Requires:       python3 >= 3.8
@@ -432,9 +431,7 @@ fi
 /opt/%{name}/
 /usr/bin/%{name}
 /usr/share/applications/%{name}.desktop
-%if 0%{?fedora} || 0%{?rhel} >= 8
-    /usr/share/pixmaps/%{name}.png
-%endif
+/usr/share/pixmaps/%{name}.png
 
 %changelog
 * $(date +'%a %b %d %Y') $APP_MAINTAINER - $APP_VERSION-1
@@ -625,7 +622,7 @@ cleanup_build_environment() {
         deactivate || true
     fi
     
-    # Remove build artifacts (keep the .rpm file)
+    # Remove all build artifacts and folders (keep only the .rpm file)
     rm -rf build/ dist/ *.egg-info/ rpmbuild/ venv_build/
     
     print_success "Build cleanup complete"
