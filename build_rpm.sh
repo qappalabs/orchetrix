@@ -314,15 +314,7 @@ Requires:       freetype
 Requires:       qt6-qtbase
 Requires:       qt6-qtsvg
 
-# Recommended packages
-Recommends:     kubectl
-Recommends:     docker
-Recommends:     curl
-Recommends:     wget
-
-# Suggested packages
-Suggests:       helm
-Suggests:       minikube
+# No additional package recommendations - self-contained application
 
 %description
 $APP_DISPLAY_NAME is a comprehensive Kubernetes management desktop application

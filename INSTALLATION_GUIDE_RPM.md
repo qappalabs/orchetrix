@@ -6,17 +6,17 @@
 
 ### RHEL/CentOS/Fedora
 ```bash
-sudo dnf install -y orchetrix-1.1.0-1.x86_64.rpm
+sudo dnf install -y orchetrix-0.0.2.x86_64.rpm
 ```
 
 ### openSUSE
 ```bash
-sudo zypper install -y orchetrix-1.1.0-1.x86_64.rpm
+sudo zypper install -y orchetrix-0.0.2.x86_64.rpm
 ```
 
 ### Manual Installation (if auto-install fails)
 ```bash
-sudo rpm -ivh orchetrix-1.1.0-1.x86_64.rpm
+sudo rpm -ivh orchetrix-0.0.2.x86_64.rpm
 ```
 
 ## 🚀 Launch Application
@@ -89,11 +89,11 @@ kubectl cluster-info
 - ❌ Additional GUI frameworks
 
 ## 📋 Package Information
-- **Version**: 1.1.0-1
+- **Version**: 0.0.2
 - **Architecture**: x86_64 (64-bit)
-- **Package Size**: 72M
+- **Package Size**: 
 - **Package Type**: Universal RPM
-- **Built**: September 24, 2025
+- **Built**: September 25, 2025
 
 ## 🔗 Additional Resources
 - **Homepage**: https://orchetrix.io
