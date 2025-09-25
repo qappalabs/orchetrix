@@ -1749,14 +1749,14 @@ class BaseResourcePage(BaseTablePage):
                 width: 14px;
                 height: 14px;
                 margin: 1px;
-                background-color: #2d2d2d;
-                border: 1px solid #555;
-                border-radius: 3px;
+                background-color: transparent;
+                border: none;
+                image: url(Icons/check_box_unchecked.svg);
             }
             QCheckBox::indicator:checked {
-                background-color: #0078d4;
-                border-color: #0078d4;
-                image: url(Icons/check.svg);
+                background-color: transparent;
+                border: none;
+                image: url(Icons/check_box_checked.svg);
             }
             QCheckBox::indicator:hover {
                 border-color: #0078d4;
@@ -2341,6 +2341,31 @@ class BaseResourcePage(BaseTablePage):
         checkbox.setProperty("row", row)
         checkbox.setProperty("resource_name", resource_name)
         checkbox.stateChanged.connect(self._on_row_checkbox_changed)
+        
+        # Apply styling to use proper icons
+        checkbox.setStyleSheet("""
+            QCheckBox {
+                margin: 0px;
+                padding: 0px;
+                background-color: transparent;
+            }
+            QCheckBox::indicator {
+                width: 14px;
+                height: 14px;
+                margin: 1px;
+                background-color: transparent;
+                border: none;
+                image: url(Icons/check_box_unchecked.svg);
+            }
+            QCheckBox::indicator:checked {
+                background-color: transparent;
+                border: none;
+                image: url(Icons/check_box_checked.svg);
+            }
+            QCheckBox::indicator:hover {
+                border-color: #0078d4;
+            }
+        """)
         
         layout.addWidget(checkbox)
         return container

@@ -157,7 +157,9 @@ class SecretsPage(BaseResourcePage):
         
         # Create and add action button
         action_button = self._create_action_button(row, resource["name"], resource["namespace"])
+        action_button.setStyleSheet(AppStyles.ACTION_BUTTON_STYLE)
         action_container = self._create_action_container(row, action_button)
+        action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
         self.table.setCellWidget(row, len(columns) + 1, action_container)
 
     def handle_row_click(self, row, column):

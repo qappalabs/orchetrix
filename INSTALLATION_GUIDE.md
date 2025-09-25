@@ -4,7 +4,7 @@
 
 ## ⚡ Quick Install (One Command)
 ```bash
-sudo dpkg -i orchetrix_1.0.0-1_amd64.deb
+sudo dpkg -i orchetrix_0.0.2_amd64.deb
 ```
 
 That's it! The application is now installed and ready to use.
@@ -76,11 +76,11 @@ kubectl cluster-info
 - ❌ Additional GUI frameworks
 
 ## 📋 Package Information
-- **Version**: 1.0.0-1
+- **Version**: 0.0.2
 - **Architecture**: amd64 (64-bit)
 - **Package Size**: 59M
 - **Package Type**: Universal .deb
-- **Built**: September 23, 2025
+- **Built**: September 25, 2025
 
 ## 🔗 Additional Resources
 - **Homepage**: https://orchetrix.io

@@ -2068,10 +2068,10 @@ class AppStyles:
             subcontrol-origin: content;
         }}
         QCheckBox::indicator:unchecked {{
-            image: url(icons/check_box_unchecked.svg);
+            image: url(Icons/check_box_unchecked.svg);
         }}
         QCheckBox::indicator:checked {{
-            image: url(icons/check_box_checked.svg);
+            image: url(Icons/check_box_checked.svg);
             background-color: transparent;
         }}
         QCheckBox::indicator:hover {{

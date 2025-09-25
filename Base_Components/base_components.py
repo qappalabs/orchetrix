@@ -391,6 +391,15 @@ class BaseTablePage(QWidget):
         checkbox.stateChanged.connect(partial(self._handle_checkbox_change, item_name=item_name))
         return checkbox
 
+    def _create_fallback_checkbox_icon(self, is_checked):
+        """Create a fallback checkbox icon if SVG files are not available"""
+        # For fallback, just return the standard checkbox style paths
+        # This should rarely be needed if the SVG files are properly bundled
+        if is_checked:
+            return "Icons/check_box_checked.svg"
+        else:
+            return "Icons/check_box_unchecked.svg"
+
     def _handle_checkbox_change(self, state, item_name):
         """Handle checkbox state changes"""
         if state == Qt.CheckState.Checked.value:
