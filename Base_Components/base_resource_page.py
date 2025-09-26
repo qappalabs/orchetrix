@@ -22,6 +22,7 @@ from .virtual_scroll_table import VirtualScrollTable
 
 from Base_Components.base_components import BaseTablePage
 from UI.Styles import AppStyles, AppColors
+from UI.Icons import resource_path
 from UI.LoadingSpinner import LoadingOverlay, create_loading_overlay, create_compact_spinner
 from Utils.unified_resource_loader import get_unified_resource_loader, LoadResult
 from Utils.data_formatters import format_age, parse_memory_value, format_percentage, truncate_string
@@ -30,6 +31,8 @@ from Utils.enhanced_worker import EnhancedBaseWorker
 from Utils.thread_manager import get_thread_manager
 from Utils.kubernetes_client import get_kubernetes_client
 from log_handler import method_logger, class_logger
+
+
 
 # Constants for performance tuning - optimized for large datasets - FIXED
 BATCH_SIZE = 100  # FIXED: Increased batch size for better large data performance
@@ -582,7 +585,7 @@ class BaseResourcePage(BaseTablePage):
         
         # Apply consistent styling with proper icon
         import os
-        from UI.Icons import resource_path
+
         down_arrow_icon = resource_path("Icons/down_btn.svg")
         
         combo_style = getattr(AppStyles, 'NAMESPACE_DROPDOWN',
@@ -1737,30 +1740,34 @@ class BaseResourcePage(BaseTablePage):
     def _create_select_all_checkbox(self):
         """Create select all checkbox for table header"""
         from PyQt6.QtWidgets import QCheckBox
-        
+
         select_all_checkbox = QCheckBox()
-        select_all_checkbox.setStyleSheet("""
-            QCheckBox {
+        # Generate dynamic checkbox style with proper resource path resolution
+        unchecked_path = resource_path("Icons/check_box_unchecked.svg")
+        checked_path = resource_path("Icons/check_box_checked.svg")
+        
+        select_all_checkbox.setStyleSheet(f"""
+            QCheckBox {{
                 margin: 0px;
                 padding: 0px;
                 background-color: transparent;
-            }
-            QCheckBox::indicator {
+            }}
+            QCheckBox::indicator {{
                 width: 14px;
                 height: 14px;
                 margin: 1px;
                 background-color: transparent;
                 border: none;
-                image: url(Icons/check_box_unchecked.svg);
-            }
-            QCheckBox::indicator:checked {
+                image: url({unchecked_path.replace(os.sep, '/')});
+            }}
+            QCheckBox::indicator:checked {{
                 background-color: transparent;
                 border: none;
-                image: url(Icons/check_box_checked.svg);
-            }
-            QCheckBox::indicator:hover {
+                image: url({checked_path.replace(os.sep, '/')});
+            }}
+            QCheckBox::indicator:hover {{
                 border-color: #0078d4;
-            }
+            }}
         """)
         select_all_checkbox.stateChanged.connect(self._on_select_all_changed)
         return select_all_checkbox
@@ -1978,7 +1985,6 @@ class BaseResourcePage(BaseTablePage):
         from PyQt6.QtGui import QIcon
         from PyQt6.QtCore import QSize
         from functools import partial
-        from UI.Icons import resource_path
         
         button = QToolButton()
 
@@ -2342,29 +2348,32 @@ class BaseResourcePage(BaseTablePage):
         checkbox.setProperty("resource_name", resource_name)
         checkbox.stateChanged.connect(self._on_row_checkbox_changed)
         
-        # Apply styling to use proper icons
-        checkbox.setStyleSheet("""
-            QCheckBox {
+        # Apply styling to use proper icons with dynamic resource path resolution
+        unchecked_path = resource_path("Icons/check_box_unchecked.svg")
+        checked_path = resource_path("Icons/check_box_checked.svg")
+        
+        checkbox.setStyleSheet(f"""
+            QCheckBox {{
                 margin: 0px;
                 padding: 0px;
                 background-color: transparent;
-            }
-            QCheckBox::indicator {
+            }}
+            QCheckBox::indicator {{
                 width: 14px;
                 height: 14px;
                 margin: 1px;
                 background-color: transparent;
                 border: none;
-                image: url(Icons/check_box_unchecked.svg);
-            }
-            QCheckBox::indicator:checked {
+                image: url({unchecked_path.replace(os.sep, '/')});
+            }}
+            QCheckBox::indicator:checked {{
                 background-color: transparent;
                 border: none;
-                image: url(Icons/check_box_checked.svg);
-            }
-            QCheckBox::indicator:hover {
+                image: url({checked_path.replace(os.sep, '/')});
+            }}
+            QCheckBox::indicator:hover {{
                 border-color: #0078d4;
-            }
+            }}
         """)
         
         layout.addWidget(checkbox)

@@ -2041,43 +2041,77 @@ class AppStyles:
         }}
         """
 
-    BASE_CHECKBOX_STYLE = f"""
-        QCheckBox {{
-            margin: 0px;
-            padding: 0px;
-            spacing: 0px;
-            background: transparent;
-            border: none;
-            outline: none;
-            width: 16px;
-            height: 16px;   
-            max-width: 16px;
-            max-height: 16px;
-            min-width: 16px;
-            min-height: 16px;
-        }}
-        QCheckBox::indicator {{
-            width: 16px;
-            height: 16px;
-            border: none;
-            background: transparent;
-            margin: 0px;
-            padding: 0px;
-            spacing: 0px;
-            subcontrol-position: center;
-            subcontrol-origin: content;
-        }}
-        QCheckBox::indicator:unchecked {{
-            image: url(Icons/check_box_unchecked.svg);
-        }}
-        QCheckBox::indicator:checked {{
-            image: url(Icons/check_box_checked.svg);
-            background-color: transparent;
-        }}
-        QCheckBox::indicator:hover {{
-            opacity: 0.8;
-        }}
-    """
+    @staticmethod
+    def get_base_checkbox_style():
+        """Generate checkbox style with properly resolved icon paths"""
+        try:
+            from UI.Icons import resource_path
+            unchecked_path = resource_path("Icons/check_box_unchecked.svg")
+            checked_path = resource_path("Icons/check_box_checked.svg")
+            
+            return f"""
+            QCheckBox {{
+                margin: 0px;
+                padding: 0px;
+                spacing: 0px;
+                background: transparent;
+                border: none;
+                outline: none;
+                width: 16px;
+                height: 16px;   
+                max-width: 16px;
+                max-height: 16px;
+                min-width: 16px;
+                min-height: 16px;
+            }}
+            QCheckBox::indicator {{
+                width: 16px;
+                height: 16px;
+                border: none;
+                background: transparent;
+                margin: 0px;
+                padding: 0px;
+                spacing: 0px;
+                subcontrol-position: center;
+                subcontrol-origin: content;
+            }}
+            QCheckBox::indicator:unchecked {{
+                image: url({unchecked_path.replace(os.sep, '/')});
+            }}
+            QCheckBox::indicator:checked {{
+                image: url({checked_path.replace(os.sep, '/')});
+                background-color: transparent;
+            }}
+            QCheckBox::indicator:hover {{
+                opacity: 0.8;
+            }}
+            """
+        except Exception as e:
+            # Fallback to basic style without icons if there are issues
+            return f"""
+            QCheckBox {{
+                margin: 0px;
+                padding: 0px;
+                spacing: 0px;
+                background: transparent;
+                border: none;
+                outline: none;
+            }}
+            QCheckBox::indicator {{
+                width: 16px;
+                height: 16px;
+                border: 1px solid {AppColors.TEXT_SECONDARY};
+                border-radius: 3px;
+                background: transparent;
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: {AppColors.ACCENT_BLUE};
+                border-color: {AppColors.ACCENT_BLUE};
+            }}
+            """
+    
+    # Keep backward compatibility
+    BASE_CHECKBOX_STYLE = get_base_checkbox_style()
 
     EMPTY_STATE_STYLE = f"""
         background-color: {AppColors.CARD_BG};
