@@ -45,13 +45,13 @@ An intelligent and intuitive Kubernetes cluster management IDE built for develop
 
 ## Screenshots
 
-![OX Desktop Layout](./images/Oxdesktoplayout.png)
-![Node View](./images/Nodeview.png)
-![Workload View](./images/Workloadview.png)
-![Detail Panel](./images/DetailPanel.png)
-![Overview](./images/Overview.png)
-![Terminal](./images/Terminal.png)
-![AppsChart](./images/appschart.png)
+![OX Desktop Layout](./Images/Oxdesktoplayout.png)
+![Node View](./Images/Nodeview.png)
+![Workload View](./Images/Workloadview.png)
+![Detail Panel](./Images/DetailPanel.png)
+![Overview](./Images/Overview.png)
+![Terminal](./Images/Terminal.png)
+![AppsChart](./Images/appschart.png)
 
 ---
 
