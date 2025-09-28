@@ -4,11 +4,12 @@
 ![Latest Release](https://img.shields.io/badge/release-v0.0.2%20Orchetrix-orange)
 
 An intelligent and intuitive Kubernetes cluster management IDE built for developers, SREs, and DevOps teams.
+
 This major release introduces significant performance optimizations and powerful application visualization capabilities to make Kubernetes operations faster and more intuitive.
 
 ---
 
-![OX](./Images/orchetrix_splash.png)
+![OX](./Images/Orchetrix_splash.png)
 
 ##  Table of content
 
