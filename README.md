@@ -170,7 +170,7 @@ Follow the instructions below to install and run **Orchetrix (OX)** on your oper
 
 ### Linux
 
-1. [Download Orchetrix for Ubuntu22](https://github.com/qappalabs/orchetrix/releases/download/v0.0.2-beta/orchetrix_0.0.2_amd64.deb)
+1. [Download Orchetrix for Linux](https://github.com/qappalabs/orchetrix/releases/download/v0.0.2-beta/orchetrix_0.0.2_amd64.deb)
 2. Unzip the file:
    ```bash
    unzip orchetrix-linux.zip
