@@ -9,7 +9,7 @@ This major release introduces significant performance optimizations and powerful
 
 ---
 
-![OX](./Images/Orchetrix_splash.png)
+![OX](./Images/softwareupdate.png)
 
 ##  Table of content
 
