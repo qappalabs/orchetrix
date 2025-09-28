@@ -136,7 +136,7 @@ Full usage guides, feature explanations, and setup tutorials for **Orchetrix (OX
 - **Contribute to OX:** Join the community and contribute.  
 - **Support:** Contact the Orchetrix team or reach the community.  
 
-👉 **[Explore OX Documentation](https://www.orchetrix.com/documentation)**
+**[Explore OX Documentation](https://www.orchetrix.com/documentation)**
 
 ---
 
@@ -146,7 +146,7 @@ Follow the instructions below to install and run **Orchetrix (OX)** on your oper
 
 ### Windows
 
-1. [Download Orchetrix for Windows](https://github.com/qappalabs/orchetrix/releases/download/v0.0.1-beta/Orchetrix_Windows.zip)
+1. [Download Orchetrix for Windows](https://github.com/qappalabs/orchetrix/releases/download/v0.0.2-beta/Orchetrix_0.0.2_Windows.zip )
 2. Unzip the file to any location.
 
    **Note:** The ZIP file is password protected. Use the password `Orchetrix` to extract it.
