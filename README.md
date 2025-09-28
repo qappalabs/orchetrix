@@ -146,10 +146,10 @@ Follow the instructions below to install and run **Orchetrix (OX)** on your oper
 
 ### Windows
 
-1. [Download Orchetrix for Windows](https://github.com/qappalabs/orchetrix/releases/download/v0.0.2-beta/Orchetrix_0.0.2_Windows.zip )
+1. [Download Orchetrix for Windows](https://github.com/qappalabs/orchetrix/releases/download/v0.0.2-beta/Orchetrix_0.0.2_Windows.zip)
 2. Unzip the file to any location.
 
-   **Note:** The ZIP file is password protected. Use the password `Orchetrix` to extract it.
+   **Note:** The ZIP file is password protected. Use the password `orchetrix` to extract it.
   
 3. Open the extracted folder.
 4. Double-click `orchetrix.exe` to launch the application.
@@ -160,7 +160,7 @@ Follow the instructions below to install and run **Orchetrix (OX)** on your oper
 
 ### macOS
 
-1. [Download Orchetrix for macOS](https://github.com/qappalabs/orchetrix/releases/download/v0.0.1-beta/Orchetrix_MacOS.zip)
+1. [Download Orchetrix for macOS](https://github.com/qappalabs/orchetrix/releases/download/v0.0.2-beta/Orchetrix_0.0.2_MacOS.zip)
 2. Unzip the file to your `Applications` or preferred directory.
 3. Open `orchetrix.app`.
 
@@ -170,9 +170,8 @@ Follow the instructions below to install and run **Orchetrix (OX)** on your oper
 
 ### Linux
 
-1. [Download Orchetrix for Ubuntu22](https://github.com/qappalabs/orchetrix/releases/download/v0.0.1-beta/Orchetrix_ubuntu22.zip)
-2. [Download Orchetrix for Ubuntu24](https://github.com/qappalabs/orchetrix/releases/download/v0.0.1-beta/Orchetrix_ubuntu24.zip)
-3. Unzip the file:
+1. [Download Orchetrix for Ubuntu22](https://github.com/qappalabs/orchetrix/releases/download/v0.0.2-beta/orchetrix_0.0.2_amd64.deb)
+2. Unzip the file:
    ```bash
    unzip orchetrix-linux.zip
    cd orchetrix-linux
@@ -223,7 +222,7 @@ Once you have installed and launched **Orchetrix (OX)**, follow these steps to s
 
 We are here to help. If you have any questions, suggestions, or run into issues:
 
-- Email us at: **management@qappalabs.com**
+- Email us at: **management@qappalabs.in**
 - Submit issues or feature requests via [GitHub Issues](https://github.com/qappalabs/orchetrix/issues)
 
 We also welcome feedback on features you would like to see in future releases.
