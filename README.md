@@ -171,8 +171,11 @@ Follow the instructions below to install and run **Orchetrix (OX)** on your oper
 ### Linux
 
 1. [Download Orchetrix for Linux](https://github.com/qappalabs/orchetrix/releases/download/v0.0.2-beta/orchetrix_0.0.2_amd64.deb)
+2. Open a terminal and navigate to the download folder.
+3. Run
    ```bash
    sudo dpkg -i orchetrix_0.0.2_amd64.deb
+4. Launch Orchetrix from your applications menu.
 
 ---   
    
