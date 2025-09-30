@@ -669,7 +669,7 @@ class Sidebar(QWidget):
         # Create utility buttons
         compare_btn = NavIconButton(
             "compare", "Compare", False, False,
-            self.parent_window, self.sidebar_expanded, coming_soon=True  # Add this parameter
+            self.parent_window, self.sidebar_expanded, coming_soon=False
         )
 
         # Terminal button - special handling

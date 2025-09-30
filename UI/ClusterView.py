@@ -72,6 +72,9 @@ from Pages.CustomResources.DefinitionsPage import DefinitionsPage
 # Apps page
 from Pages.AppsChartPage import AppsPage
 
+# Compare page
+from Pages.ComparePage import ComparePage
+
 # AI Assistant page
 # from Pages.AIAssistantPage import AIAssistantPage
 
@@ -136,6 +139,9 @@ PAGE_CONFIG = {
     
     # Apps page
     'AppsChart': AppsPage,
+    
+    # Compare page
+    'Compare': ComparePage,
     
     # AI Assistant page
     # 'AI Assistant': AIAssistantPage,
