@@ -61,7 +61,7 @@ This major release introduces significant performance optimizations and powerful
 - **Resource relationships** – Interactive diagrams showing connections between pods, services, and deployments  
 - **Live monitoring** – Real-time updates of application flow diagrams with 5-second refresh intervals  
 - **Deployment analysis** – Comprehensive analysis of deployment patterns and health status  
-- **Multiple layout options** – Horizontal and vertical layout modes for optimal visualization  
+- **Smart layout** – Horizontal layout for optimal visualization  
 - **Export capabilities** – Save diagrams as images for documentation and sharing  
 
 ---
