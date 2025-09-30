@@ -1,13 +1,15 @@
 ##
-# Orchetrix (OX)
+# Orchetrix (OX) 🚀 — Intelligent Kubernetes IDE
 
-An intelligent and intuitive Kubernetes cluster management IDE built for developers, SREs, and DevOps teams.
+**Orchetrix (OX)** is a powerful, intuitive, and intelligent Kubernetes cluster management IDE built for developers, SREs, and DevOps teams.  
+With Orchetrix, managing Kubernetes clusters becomes visual, centralized, and efficient — without relying solely on complex CLI commands like `kubectl`.
+
+**Keywords:** Orchetrix GitHub, Orchetrix Kubernetes IDE, Kubernetes cluster management, container orchestration, OX, Kubernetes GUI, DevOps tools
 
 ![OX](./images/orchetrix_splash.png)
 
-##  Table of content
-
-- [About](#about)
+##  Table of Contents
+- [About Orchetrix](#about-orchetrix)
 - [Features](#features)
 - [Screenshots](#screenshots)
 - [Tech Stack](#tech-stack)
@@ -20,38 +22,38 @@ An intelligent and intuitive Kubernetes cluster management IDE built for develop
 - [Feedback and Support](#feedback-and-support)
 - [License](#license)
 - [Acknowledgements](#acknowledgements)
+- 
+## About Orchetrix (OX)
 
-## About
+**Orchetrix (OX)** is an open-source Kubernetes Integrated Development Environment (IDE) designed to simplify container orchestration for developers and DevOps teams.  
+It provides a modern, graphical dashboard for managing clusters, namespaces, workloads, and nodes. With built-in live monitoring, in-place YAML editing, and terminal access, Orchetrix makes Kubernetes management easier, faster, and more intuitive.  
 
-**Orchetrix (OX)** is a powerful and intuitive graphical user interface (GUI) for managing Kubernetes clusters. Designed to simplify container orchestration, Orchetrix provides a centralized and visually rich dashboard to deploy, monitor, and troubleshoot your containerized applications. It serves as a user-friendly alternative to command-line tools like kubectl, offering a more accessible way to interact with your Kubernetes resources. With Orchetrix, you can effortlessly navigate through your namespaces, manage nodes and pods, and visualize the overall architecture of your applications, making Kubernetes management more efficient and approachable for everyone.
+**Official GitHub Repository:** [https://github.com/qappalabs/orchetrix](https://github.com/qappalabs/orchetrix)  
+**Documentation:** [https://www.orchetrix.com/documentation](https://www.orchetrix.com/documentation)
+
 
 ## Features
 
-- **Multi-cluster Management:** Seamlessly connect and manage multiple Kubernetes clusters from a single interface.
-
-- **Live Monitoring:** View real-time CPU, memory, and pod usage across clusters for quick insights into workload performance.
-
-- **Integrated Logs & Terminal:** Directly access pod logs and open terminals inside containers with just a click—no need to switch to the CLI.
-
-- **In-Place YAML Editing:** Edit resource YAMLs directly from the detail panel without opening separate editors or terminals.
-
-- **SSH into Pods:** Securely connect to pods using an SSH-like terminal interface for advanced troubleshooting and debugging.
-
-- **Dark-Themed UI:** Enjoy a clean, modern, and visually appealing dark UI designed for long DevOps sessions.
-
+- **Multi-cluster Management** — Connect and manage multiple Kubernetes clusters in one dashboard.
+- **Live Monitoring** — View real-time CPU, memory, and pod usage.
+- **Integrated Logs & Terminal** — Access logs and terminals without leaving the GUI.
+- **In-Place YAML Editing** — Edit Kubernetes resource YAML files directly.
+- **SSH into Pods** — Secure terminal access for debugging.
+- **Dark-Themed UI** — Modern design for prolonged usage.
+- 
 ## Screenshots
 
-![OX Desktop Layout](./images/Oxdesktoplayout.png)
+![OX Desktop Layout](./images/Oxdesktoplayout.png "Orchetrix OX Desktop Layout")
 
-![Node View](./images/Nodeview.png)
+![Node View](./images/Nodeview.png "Orchetrix Node View")
 
-![Workload View](./images/Workloadview.png)
+![Workload View](./images/Workloadview.png "Orchetrix Workload View")
 
-![Detail Panel](./images/DetailPanel.png)
+![Detail Panel](./images/DetailPanel.png "Orchetrix Detail Panel")
 
 ![Overview](./images/Overview.png)
 
-![Terminal](./images/Terminal.png)
+![Terminal](./images/Terminal.png "Orchetrix Terminal Access")
 
 
 ## Tech Stack
@@ -65,7 +67,7 @@ An intelligent and intuitive Kubernetes cluster management IDE built for develop
 
 ## Installation
 
-To install the **Orchetrix (OX)**, simply download the latest release from our official website:
+Download the latest Orchetrix (OX) release from our official website: 
 
 **[Download Orchetrix (OX)](https://www.orchetrix.com/downloads)**
 
@@ -209,3 +211,5 @@ We would like to thank the open-source community and the tools that power Orchet
 - [PyQt6](https://riverbankcomputing.com/software/pyqt/intro) – for enabling a native desktop interface
 - [Docker](https://www.docker.com/) – for simplifying containerization
 - All early contributors and beta testers who helped shape this project
+
+Tags: #Orchetrix #Kubernetes #DevOps #K8s #GitHub #OrchetrixGitHub #OX #KubernetesIDE
