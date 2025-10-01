@@ -166,7 +166,7 @@ Follow the instructions below to install and run **Orchetrix (OX)** on your oper
 > If you get a message like *“App can’t be opened because it is from an unidentified developer”*, go to `System Preferences > Security & Privacy > General`, and click **Open Anyway**.
 ---
 
-### Linux
+### Linux (.deb package)
 
 1. [Download Orchetrix for Linux](https://github.com/qappalabs/orchetrix/releases/download/v0.0.2-beta/orchetrix_0.0.2_amd64.deb)
 2. Open a terminal and navigate to the download folder.
@@ -176,6 +176,19 @@ Follow the instructions below to install and run **Orchetrix (OX)** on your oper
 4. Launch Orchetrix from your applications menu.
 
 ---   
+
+### Linux (.rpm package)
+1. [Download Orchetrix for Linux](https://github.com/qappalabs/orchetrix/releases/download/v0.0.2-beta/orchetrix-0.0.2-1.x86_64.rpm)
+2. Open a terminal and navigate to the download folder.
+3. Run
+   ```bash
+   sudo dnf install -y orchetrix-0.0.2-1.x86_64.rpm
+   Or
+   ```bash
+   sudo rpm -ivh orchetrix-0.0.2-1.x86_64.rpm
+4.Launch Orchetrix from your applications menu.
+
+---  
 
 ## Troubleshooting & Dependencies
 If you encounter any issues or module-related errors while installing or running **Orchetrix (OX)**, ensure all required dependencies are properly installed.
