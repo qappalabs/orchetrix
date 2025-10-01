@@ -183,8 +183,9 @@ Follow the instructions below to install and run **Orchetrix (OX)** on your oper
 3. Run
    ```bash
    sudo dnf install -y orchetrix-0.0.2-1.x86_64.rpm
+   
    Or
-   ```bash
+   
    sudo rpm -ivh orchetrix-0.0.2-1.x86_64.rpm
 4.Launch Orchetrix from your applications menu.
 
