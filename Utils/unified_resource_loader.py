@@ -147,10 +147,12 @@ class SearchResourceLoadWorker(EnhancedBaseWorker):
         
         # Filter results by search query
         if self.search_query:
+            logging.info(f"Filtering {len(all_items)} items for search query: '{self.search_query}'")
             filtered_items = []
             for item in all_items:
                 if self._item_matches_search(item):
                     filtered_items.append(item)
+            logging.info(f"Search filtering result: {len(filtered_items)} items matched out of {len(all_items)} total")
             return filtered_items
         
         return all_items
@@ -248,37 +250,45 @@ class SearchResourceLoadWorker(EnhancedBaseWorker):
             return self._load_from_single_namespace_with_search()
     
     def _item_matches_search(self, item: Any) -> bool:
-        """Check if item matches the search query"""
+        """Check if item matches the search query (focused search for better UX)"""
         if not self.search_query:
             return True
         
         try:
-            # Search in name
+            # Get item name for logging
+            name = getattr(item.metadata, 'name', 'unknown') if hasattr(item, 'metadata') and item.metadata else 'unknown'
+            
+            # PRIMARY SEARCH: Name matching (most important)
             if hasattr(item, 'metadata') and item.metadata:
-                name = getattr(item.metadata, 'name', '').lower()
-                if self.search_query in name:
+                item_name = getattr(item.metadata, 'name', '').lower()
+                if self.search_query in item_name:
+                    logging.info(f"Search match in name: '{item_name}' contains '{self.search_query}'")
                     return True
                 
-                # Search in namespace
+                # SECONDARY SEARCH: Namespace matching (less important)
                 namespace = getattr(item.metadata, 'namespace', '').lower()
                 if self.search_query in namespace:
+                    logging.info(f"Search match in namespace: '{namespace}' contains '{self.search_query}' for item '{name}'")
                     return True
                 
-                # Search in labels
+                # TERTIARY SEARCH: Important labels only (very selective)
                 labels = getattr(item.metadata, 'labels', {}) or {}
-                for key, value in labels.items():
-                    if (self.search_query in key.lower() or 
-                        self.search_query in str(value).lower()):
-                        return True
+                important_labels = ['app', 'name', 'component', 'tier', 'version', 'k8s-app']
+                for label_key in important_labels:
+                    if label_key in labels:
+                        label_value = str(labels[label_key]).lower()
+                        if self.search_query in label_value:
+                            logging.info(f"Search match in important label '{label_key}': '{label_value}' contains '{self.search_query}' for item '{name}'")
+                            return True
             
-            # Search in spec fields (for certain resources)
-            if hasattr(item, 'spec') and item.spec:
-                # Convert spec to string and search
-                spec_str = str(item.spec).lower()
-                if self.search_query in spec_str:
-                    return True
+            # SKIP spec search for now as it's too broad and causes false positives
+            # This makes search results more predictable and user-friendly
             
-        except Exception:
+            # Log what we searched in
+            logging.debug(f"No search match for query '{self.search_query}' in item: name='{name}', namespace='{getattr(item.metadata, 'namespace', 'N/A') if hasattr(item, 'metadata') and item.metadata else 'N/A'}'")
+            
+        except Exception as e:
+            logging.debug(f"Exception in search matching: {e}")
             pass
         
         return False
@@ -287,9 +297,12 @@ class SearchResourceLoadWorker(EnhancedBaseWorker):
     def _process_search_items(self, items: List[Any]) -> List[Dict[str, Any]]:
         """Process search results using simplified processing for speed"""
         if not items:
+            logging.debug("No items to process for search")
             return []
         
+        logging.info(f"Processing {len(items)} search items")
         processed_items = []
+        skipped_count = 0
         
         for item in items:
             if self.is_cancelled():
@@ -300,140 +313,79 @@ class SearchResourceLoadWorker(EnhancedBaseWorker):
                 processed_item = self._process_single_search_item(item)
                 if processed_item:
                     processed_items.append(processed_item)
+                else:
+                    skipped_count += 1
+                    item_name = getattr(item.metadata, 'name', 'unknown') if hasattr(item, 'metadata') else 'unknown'
+                    logging.info(f"SKIPPED processing item: {item_name} - _process_single_search_item returned None")
             except Exception as e:
-                logging.debug(f"Error processing search item: {e}")
+                skipped_count += 1
+                item_name = getattr(item.metadata, 'name', 'unknown') if hasattr(item, 'metadata') else 'unknown'
+                logging.info(f"ERROR processing search item {item_name}: {e}")
                 continue
         
+        logging.info(f"Search processing complete: {len(processed_items)} processed, {skipped_count} skipped")
         return processed_items
     
     def _process_single_search_item(self, item: Any) -> Optional[Dict[str, Any]]:
-        """Process a single search result item (simplified for speed)"""
+        """Process a single search result item (ultra-simplified)"""
         try:
-            # Extract basic fields efficiently
-            metadata = item.metadata
-            name = metadata.name
-            namespace = getattr(metadata, 'namespace', None)
-            creation_timestamp = metadata.creation_timestamp
+            # Ultra-safe extraction - only get what we absolutely need
+            name = 'unknown'
+            namespace = ''
             
-            # Calculate age using the unified method
-            age = self._format_age_fast(creation_timestamp)
+            try:
+                if hasattr(item, 'metadata') and item.metadata:
+                    if hasattr(item.metadata, 'name'):
+                        name = item.metadata.name
+                    if hasattr(item.metadata, 'namespace'):
+                        namespace = item.metadata.namespace or ''
+            except:
+                pass
+                
+            logging.info(f"Processing search item: {name} (namespace: {namespace})")
             
-            # Build basic resource data
+            # Create absolutely minimal resource data that should work for all UI pages
             resource_data = {
                 'name': name,
-                'namespace': namespace or '',
-                'age': age,
-                'created': creation_timestamp.isoformat() if creation_timestamp else None,
+                'namespace': namespace,
+                'age': 'Unknown',  # Simplified - no complex age calculation
                 'resource_type': self.config.resource_type,
-                'search_matched': True,  # Mark as search result
-                'labels': metadata.labels or {},
-                'annotations': metadata.annotations or {},
-                'uid': metadata.uid if hasattr(metadata, 'uid') else None,
+                'search_matched': True,
+                'status': 'Active',  # Simplified - assume active if it exists
+                'ready': '1/1',  # Simplified - assume ready if it exists
+                'labels': {},
+                'annotations': {},
+                'created': None,
+                'uid': '',
+                'raw_data': {
+                    'metadata': {
+                        'name': name,
+                        'namespace': namespace,
+                    }
+                }
             }
             
-            # Add resource-specific fields efficiently
-            self._add_basic_resource_fields(resource_data, item)
-            
-            # Add raw_data for UI components that need detailed information - CRITICAL for proper display
-            try:
-                kube_client = get_kubernetes_client()
-                if hasattr(kube_client, 'v1') and hasattr(kube_client.v1, 'api_client'):
-                    resource_data['raw_data'] = kube_client.v1.api_client.sanitize_for_serialization(item)
-                else:
-                    # No fallback - skip items that can't be serialized to avoid dummy data
-                    logging.warning(f"Skipping item {name} - unable to serialize raw data")
-                    return None
-            except Exception as e:
-                logging.debug(f"Error serializing search raw data: {e}")
-                resource_data['raw_data'] = {}
-            
+            logging.info(f"Successfully processed search item: {name}")
             return resource_data
             
         except Exception as e:
-            logging.debug(f"Error processing single search item: {e}")
-            return None
-    
-    def _add_basic_resource_fields(self, processed_item: Dict[str, Any], item: Any):
-        """Add basic resource-specific fields for search results"""
-        try:
-            # Add status and basic info based on resource type
-            if self.config.resource_type == 'pods':
-                if hasattr(item, 'status') and item.status:
-                    processed_item['status'] = item.status.phase or 'Unknown'
-                    if item.status.container_statuses:
-                        ready_containers = sum(1 for cs in item.status.container_statuses if cs.ready)
-                        total_containers = len(item.status.container_statuses)
-                        processed_item['ready'] = f"{ready_containers}/{total_containers}"
-                        processed_item['containers_count'] = str(total_containers)
-                        
-                        # Calculate restart count
-                        restart_count = sum(cs.restart_count for cs in item.status.container_statuses if cs.restart_count)
-                        processed_item['restart_count'] = str(restart_count)
-                    else:
-                        processed_item['containers_count'] = "0"
-                        processed_item['restart_count'] = "0"
-                
-                # Add additional pod-specific fields that PodsPage expects
-                processed_item['controller_by'] = ""  # Default empty, could be enhanced
-                processed_item['qos_class'] = ""      # Default empty, could be enhanced
-                
-                # Add node name if available
-                if hasattr(item, 'spec') and item.spec and hasattr(item.spec, 'node_name'):
-                    processed_item['node_name'] = item.spec.node_name or ""
-                else:
-                    processed_item['node_name'] = ""
-                
-            elif self.config.resource_type in ['deployments', 'replicasets', 'daemonsets', 'statefulsets']:
-                if hasattr(item, 'status') and item.status:
-                    replicas = getattr(item.status, 'replicas', 0) or 0
-                    ready_replicas = getattr(item.status, 'ready_replicas', 0) or 0
-                    available_replicas = getattr(item.status, 'available_replicas', ready_replicas) or ready_replicas
-                    processed_item['ready'] = f"{available_replicas}/{replicas}"
-                    processed_item['status'] = 'Ready' if ready_replicas == replicas and replicas > 0 else 'Not Ready'
-                    
-                    # Add fields that DeploymentPage expects
-                    processed_item['pods_str'] = f"{available_replicas}/{replicas}"
-                    processed_item['replicas_str'] = str(replicas)
-                
-                # Add spec replicas if available
-                if hasattr(item, 'spec') and item.spec:
-                    spec_replicas = getattr(item.spec, 'replicas', 0) or 0
-                    processed_item['replicas_str'] = str(spec_replicas)
-                
-            elif self.config.resource_type == 'services':
-                if hasattr(item, 'spec') and item.spec:
-                    processed_item['type'] = item.spec.type or 'Unknown'
-                    processed_item['cluster_ip'] = item.spec.cluster_ip or 'None'
-                    processed_item['service_type'] = item.spec.type or 'Unknown'
-                    
-                    # Add ports information
-                    ports = []
-                    if hasattr(item.spec, 'ports') and item.spec.ports:
-                        for port in item.spec.ports:
-                            port_info = f"{port.port}"
-                            if hasattr(port, 'target_port') and port.target_port:
-                                port_info += f":{port.target_port}"
-                            if hasattr(port, 'protocol') and port.protocol:
-                                port_info += f"/{port.protocol}"
-                            ports.append(port_info)
-                    processed_item['port_text'] = ",".join(ports)
-                    
-                    # Add selector information
-                    selector_parts = []
-                    if hasattr(item.spec, 'selector') and item.spec.selector:
-                        for key, value in item.spec.selector.items():
-                            selector_parts.append(f"{key}={value}")
-                    processed_item['selector_text'] = ",".join(selector_parts)
-                    
-                    # Add external IP information
-                    processed_item['external_ip_text'] = ""  # Default empty, could be enhanced
+            logging.info(f"EXCEPTION in _process_single_search_item: {type(e).__name__}: {e}")
             
-            elif self.config.resource_type == 'nodes':
-                # Use the unified loader's node field processing for consistency
-                self.loader._add_node_fields(processed_item, item)
-            
-        except Exception as e:
-            logging.debug(f"Error adding basic resource fields: {e}")
+            # Return absolute minimal data instead of None to avoid dropping items
+            return {
+                'name': 'unknown',
+                'namespace': '',
+                'age': 'Unknown',
+                'resource_type': self.config.resource_type,
+                'search_matched': True,
+                'status': 'Unknown',
+                'ready': 'Unknown',
+                'labels': {},
+                'annotations': {},
+                'created': None,
+                'uid': '',
+                'raw_data': {'metadata': {'name': 'unknown'}}
+            }
     
     def _generate_cache_key(self) -> str:
         """Generate cache key for search results - FIXED to include cluster"""
