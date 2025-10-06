@@ -1864,6 +1864,9 @@ class DetailPageOverviewSection(BaseDetailSection):
         self.pods_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.pods_table.setAlternatingRowColors(True)
         self.pods_table.verticalHeader().setVisible(False)
+        
+        # Connect single-click event to navigate to pod
+        self.pods_table.itemClicked.connect(self._on_pod_clicked)
 
         # Set column widths
         header = self.pods_table.horizontalHeader()
@@ -2037,3 +2040,182 @@ class DetailPageOverviewSection(BaseDetailSection):
         self.pods_table.setSpan(0, 0, 1, 5)
 
         logging.error(f"Node pods error: {error_message}")
+    
+    def _on_pod_clicked(self, item):
+        """Handle single-click on pod item to navigate to pods page"""
+        try:
+            if not item:
+                return
+            
+            # Get the row that was clicked
+            row = item.row()
+            
+            # Get pod name from the first column (Pod Name)
+            pod_name_item = self.pods_table.item(row, 0)
+            if not pod_name_item:
+                return
+                
+            pod_name = pod_name_item.text()
+            
+            # Get namespace from the second column (Namespace)
+            namespace_item = self.pods_table.item(row, 1)
+            namespace = namespace_item.text() if namespace_item else ""
+            
+            # Skip if this is an empty row or error message
+            if pod_name in ["No pods running on this node", "Error loading pods"] or "Error loading pods" in pod_name:
+                return
+            
+            logging.info(f"Navigating to pod '{pod_name}' in namespace '{namespace}'")
+            
+            # Navigate to the pods page and search for this specific pod
+            self._navigate_to_pods_page(pod_name, namespace)
+            
+        except Exception as e:
+            logging.error(f"Error handling pod click: {e}")
+    
+    def _navigate_to_pods_page(self, pod_name: str, namespace: str):
+        """Navigate to the pods page and search for the specific pod"""
+        try:
+            # Get the main cluster view (parent window)
+            detail_page = self.parent()
+            while detail_page and not hasattr(detail_page, 'parent_window'):
+                detail_page = detail_page.parent()
+            
+            if not detail_page or not hasattr(detail_page, 'parent_window'):
+                logging.error("Could not find detail page with parent_window")
+                return
+            
+            main_window = detail_page.parent_window
+            logging.info(f"Found main_window: {type(main_window).__name__}")
+            
+            # Get the actual cluster view from the main window
+            cluster_view = None
+            if hasattr(main_window, 'cluster_view'):
+                cluster_view = main_window.cluster_view
+                logging.info(f"Found cluster_view: {type(cluster_view).__name__}")
+                logging.info(f"Cluster view has handle_dropdown_selection: {hasattr(cluster_view, 'handle_dropdown_selection')}")
+            else:
+                logging.error("MainWindow does not have cluster_view attribute")
+                return
+            
+            # Close the detail page first
+            if hasattr(detail_page, 'close_detail'):
+                detail_page.close_detail()
+            elif hasattr(detail_page, 'hide'):
+                detail_page.hide()
+            
+            # Navigate to pods page - try multiple methods
+            navigation_success = False
+            
+            if hasattr(cluster_view, 'handle_dropdown_selection'):
+                try:
+                    cluster_view.handle_dropdown_selection("Pods")
+                    logging.info("Called handle_dropdown_selection for Pods page")
+                    navigation_success = True
+                except Exception as e:
+                    logging.error(f"Error calling handle_dropdown_selection: {e}")
+            
+            # Try alternative navigation method
+            if not navigation_success and hasattr(cluster_view, 'pages') and 'Pods' in cluster_view.pages:
+                try:
+                    pods_page = cluster_view.pages['Pods']
+                    if hasattr(cluster_view, 'stacked_widget'):
+                        cluster_view.stacked_widget.setCurrentWidget(pods_page)
+                        logging.info("Navigated to Pods page using direct stacked widget")
+                        navigation_success = True
+                        
+                        # Load data for the pods page
+                        if hasattr(cluster_view, '_load_page_data'):
+                            cluster_view._load_page_data(pods_page)
+                        elif hasattr(pods_page, 'force_load_data'):
+                            pods_page.force_load_data()
+                except Exception as e:
+                    logging.error(f"Error with direct navigation: {e}")
+            
+            if not navigation_success:
+                logging.error("All navigation methods failed")
+                return
+            
+            # Wait longer for the page to load, then set search filter
+            QTimer.singleShot(1000, lambda: self._set_pod_search_filter(cluster_view, pod_name, namespace))
+            
+        except Exception as e:
+            logging.error(f"Error navigating to pods page: {e}")
+    
+    def _set_pod_search_filter(self, cluster_view, pod_name: str, namespace: str):
+        """Set search filter on the pods page to show the specific pod"""
+        try:
+            # Check if we have stacked_widget
+            if not hasattr(cluster_view, 'stacked_widget'):
+                logging.error("ClusterView does not have stacked_widget")
+                return
+            
+            # Get the current page (should be pods page)
+            current_widget = cluster_view.stacked_widget.currentWidget()
+            
+            if not current_widget:
+                logging.error("No current widget found in cluster view")
+                return
+            
+            # Check if it's the pods page and has search functionality
+            widget_type = type(current_widget).__name__
+            logging.info(f"Current widget type: {widget_type}")
+            logging.info(f"Has search_bar attribute: {hasattr(current_widget, 'search_bar')}")
+            
+            # If we still get ClusterView instead of PodsPage, try a different approach
+            if widget_type == "ClusterView":
+                logging.warning("Still showing ClusterView instead of PodsPage, trying alternative navigation")
+                # Try to force navigate to pods page directly
+                if hasattr(cluster_view, 'pages') and 'Pods' in cluster_view.pages:
+                    pods_page = cluster_view.pages['Pods']
+                    cluster_view.stacked_widget.setCurrentWidget(pods_page)
+                    logging.info("Switched to pods page directly")
+                    # Try again with the pods page
+                    QTimer.singleShot(500, lambda: self._apply_search_to_pods_page(pods_page, pod_name, namespace))
+                else:
+                    logging.error("Could not find Pods page in cluster view pages")
+                return
+            
+            # We have the right page, now try to apply search
+            self._apply_search_to_pods_page(current_widget, pod_name, namespace)
+                
+        except Exception as e:
+            logging.error(f"Error setting pod search filter: {e}")
+    
+    def _apply_search_to_pods_page(self, pods_page, pod_name: str, namespace: str):
+        """Apply search to the pods page widget"""
+        try:
+            logging.info(f"Applying search to pods page: {type(pods_page).__name__}")
+            
+            if hasattr(pods_page, 'search_bar'):
+                logging.info(f"search_bar found: {pods_page.search_bar}")
+                
+                if pods_page.search_bar:
+                    # Set the search text to find the specific pod
+                    search_text = pod_name
+                    pods_page.search_bar.setText(search_text)
+                    
+                    # If the pods page has namespace filtering, try to set that too
+                    if hasattr(pods_page, 'namespace_combo') and pods_page.namespace_combo:
+                        # Try to find and select the namespace
+                        combo = pods_page.namespace_combo
+                        for i in range(combo.count()):
+                            if combo.itemText(i) == namespace:
+                                combo.setCurrentIndex(i)
+                                break
+                    
+                    logging.info(f"Set pods page search filter to '{search_text}' in namespace '{namespace}'")
+                    return
+            
+            # Try alternative methods to trigger search
+            if hasattr(pods_page, '_perform_global_search'):
+                logging.info(f"Using alternative search method for pod '{pod_name}'")
+                pods_page._perform_global_search(pod_name.lower())
+            elif hasattr(pods_page, 'force_load_data'):
+                logging.info(f"Triggering data reload for pods page")
+                pods_page.force_load_data()
+            else:
+                logging.warning("Pods page does not have search functionality")
+                
+        except Exception as e:
+            logging.error(f"Error applying search to pods page: {e}")
