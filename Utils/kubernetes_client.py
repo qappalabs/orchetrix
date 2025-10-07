@@ -52,6 +52,10 @@ class KubernetesClient(QObject):
     pods_data_loaded = pyqtSignal(list)
     api_error = pyqtSignal(str)
     error_occurred = pyqtSignal(str)
+    
+    # Deployment rollback signals
+    deployment_history_loaded = pyqtSignal(list)
+    deployment_rollback_completed = pyqtSignal(dict)
 
     def __init__(self):
         super().__init__()
@@ -258,6 +262,104 @@ class KubernetesClient(QObject):
         """Load clusters asynchronously - backward compatibility"""
         self.service.load_clusters_async()
     
+    # Deployment rollback functionality
+    def get_deployment_rollout_history_async(self, deployment_name: str, namespace: str = "default"):
+        """Get deployment rollout history asynchronously using QThread"""
+        logging.info(f"Getting rollout history for deployment {deployment_name} in namespace {namespace}")
+        
+        from Utils.enhanced_worker import EnhancedBaseWorker
+        
+        class RolloutHistoryWorker(EnhancedBaseWorker):
+            def __init__(self, client_instance, deployment_name, namespace):
+                super().__init__(f"rollout_history_{deployment_name}")
+                self.client_instance = client_instance
+                self.deployment_name = deployment_name
+                self.namespace = namespace
+            
+            def execute(self):
+                return self.client_instance._get_deployment_rollout_history_sync(
+                    self.deployment_name, self.namespace
+                )
+        
+        worker = RolloutHistoryWorker(self, deployment_name, namespace)
+        
+        # Connect signals with proper error handling
+        def handle_success(result):
+            try:
+                self.deployment_history_loaded.emit(result)
+            except Exception as e:
+                logging.error(f"Error emitting history result: {str(e)}")
+                self.api_error.emit(f"Failed to emit rollout history: {str(e)}")
+        
+        def handle_error(error):
+            try:
+                self.api_error.emit(f"Failed to get rollout history: {str(error)}")
+            except Exception as e:
+                logging.error(f"Error emitting history error: {str(e)}")
+        
+        worker.signals.finished.connect(handle_success)
+        worker.signals.error.connect(handle_error)
+        
+        # Submit to thread manager
+        thread_manager = get_thread_manager()
+        thread_manager.submit_worker(f"rollout_history_{deployment_name}", worker)
+    
+    def rollback_deployment_async(self, deployment_name: str, revision: int, namespace: str = "default"):
+        """Rollback deployment to specific revision asynchronously using QThread"""
+        logging.info(f"Rolling back deployment {deployment_name} to revision {revision} in namespace {namespace}")
+        
+        from Utils.enhanced_worker import EnhancedBaseWorker
+        
+        class RollbackWorker(EnhancedBaseWorker):
+            def __init__(self, client_instance, deployment_name, revision, namespace):
+                super().__init__(f"rollback_{deployment_name}")
+                self.client_instance = client_instance
+                self.deployment_name = deployment_name
+                self.revision = revision
+                self.namespace = namespace
+            
+            def execute(self):
+                return self.client_instance._rollback_deployment_sync(
+                    self.deployment_name, self.revision, self.namespace
+                )
+        
+        worker = RollbackWorker(self, deployment_name, revision, namespace)
+        
+        # Connect signals with proper error handling
+        def handle_success(result):
+            try:
+                self.deployment_rollback_completed.emit(result)
+            except Exception as e:
+                logging.error(f"Error emitting rollback result: {str(e)}")
+                error_result = {
+                    "success": False,
+                    "message": f"Signal emission failed: {str(e)}",
+                    "deployment": deployment_name,
+                    "revision": revision,
+                    "namespace": namespace
+                }
+                self.deployment_rollback_completed.emit(error_result)
+        
+        def handle_error(error):
+            try:
+                error_result = {
+                    "success": False,
+                    "message": str(error),
+                    "deployment": deployment_name,
+                    "revision": revision,
+                    "namespace": namespace
+                }
+                self.deployment_rollback_completed.emit(error_result)
+            except Exception as e:
+                logging.error(f"Error emitting rollback error: {str(e)}")
+        
+        worker.signals.finished.connect(handle_success)
+        worker.signals.error.connect(handle_error)
+        
+        # Submit to thread manager
+        thread_manager = get_thread_manager()
+        thread_manager.submit_worker(f"rollback_{deployment_name}", worker)
+    
     def get_cluster_metrics_async(self):
         """Get cluster metrics asynchronously - backward compatibility"""
         # Trigger async metrics polling
@@ -375,6 +477,87 @@ class KubernetesClient(QObject):
                     namespace=namespace,
                     body=resource_body
                 )
+            elif resource_type.lower() in ["job", "jobs"]:
+                result = self.batch_v1.patch_namespaced_job(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=resource_body
+                )
+            elif resource_type.lower() in ["cronjob", "cronjobs"]:
+                result = self.batch_v1.patch_namespaced_cron_job(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=resource_body
+                )
+            elif resource_type.lower() in ["persistentvolumeclaim", "persistentvolumeclaims", "pvc"]:
+                result = self.v1.patch_namespaced_persistent_volume_claim(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=resource_body
+                )
+            elif resource_type.lower() in ["persistentvolume", "persistentvolumes", "pv"]:
+                result = self.v1.patch_persistent_volume(
+                    name=resource_name,
+                    body=resource_body
+                )
+            elif resource_type.lower() in ["endpoints"]:
+                result = self.v1.patch_namespaced_endpoints(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=resource_body
+                )
+            elif resource_type.lower() in ["limitrange", "limitranges"]:
+                result = self.v1.patch_namespaced_limit_range(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=resource_body
+                )
+            elif resource_type.lower() in ["resourcequota", "resourcequotas"]:
+                result = self.v1.patch_namespaced_resource_quota(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=resource_body
+                )
+            elif resource_type.lower() in ["replicationcontroller", "replicationcontrollers", "rc"]:
+                result = self.v1.patch_namespaced_replication_controller(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=resource_body
+                )
+            elif resource_type.lower() in ["role", "roles"]:
+                result = self.rbac_v1.patch_namespaced_role(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=resource_body
+                )
+            elif resource_type.lower() in ["rolebinding", "rolebindings"]:
+                result = self.rbac_v1.patch_namespaced_role_binding(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=resource_body
+                )
+            elif resource_type.lower() in ["clusterrole", "clusterroles"]:
+                result = self.rbac_v1.patch_cluster_role(
+                    name=resource_name,
+                    body=resource_body
+                )
+            elif resource_type.lower() in ["clusterrolebinding", "clusterrolebindings"]:
+                result = self.rbac_v1.patch_cluster_role_binding(
+                    name=resource_name,
+                    body=resource_body
+                )
+            elif resource_type.lower() in ["horizontalpodautoscaler", "horizontalpodautoscalers", "hpa"]:
+                result = self.autoscaling_v2.patch_namespaced_horizontal_pod_autoscaler(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=resource_body
+                )
+            elif resource_type.lower() in ["poddisruptionbudget", "poddisruptionbudgets", "pdb"]:
+                result = self.policy_v1.patch_namespaced_pod_disruption_budget(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=resource_body
+                )
             else:
                 return {
                     "success": False,
@@ -411,10 +594,28 @@ class KubernetesClient(QObject):
                 import json
                 body = json.loads(error.body)
                 if 'message' in body:
-                    return body['message']
+                    message = body['message']
+                    
+                    # Make common errors more user-friendly
+                    if "forbidden" in message.lower():
+                        return f"Permission denied: {message}\n\nTip: Check if you have the necessary RBAC permissions to edit this resource."
+                    elif "invalid" in message.lower() and "immutable" in message.lower():
+                        return f"Field cannot be changed: {message}\n\nTip: Some fields cannot be modified after resource creation."
+                    elif "conflict" in message.lower():
+                        return f"Resource conflict: {message}\n\nTip: Another process may have modified this resource. Try refreshing and editing again."
+                    elif "not found" in message.lower():
+                        return f"Resource not found: {message}\n\nTip: The resource may have been deleted by another process."
+                    else:
+                        return message
             
-            # Handle standard exceptions
-            return str(error)
+            # Handle standard exceptions with better context
+            error_str = str(error)
+            if "connection" in error_str.lower():
+                return f"Connection error: {error_str}\n\nTip: Check your cluster connection and try again."
+            elif "timeout" in error_str.lower():
+                return f"Request timeout: {error_str}\n\nTip: The cluster may be slow to respond. Try again in a moment."
+            else:
+                return error_str
             
         except Exception:
             # Fallback to string representation
@@ -436,11 +637,12 @@ class KubernetesClient(QObject):
             if 'metadata' not in resource_data:
                 return False, "Missing required field: metadata"
             
+            # Validate metadata has name
             metadata = resource_data.get('metadata', {})
             if not isinstance(metadata, dict):
                 return False, "metadata field must be a dictionary"
-            
-            if 'name' not in metadata:
+                
+            if not metadata.get('name'):
                 return False, "Missing required field: metadata.name"
             
             # Check for invalid field values
@@ -448,129 +650,28 @@ class KubernetesClient(QObject):
             if not isinstance(name, str) or not name.strip():
                 return False, "metadata.name must be a non-empty string"
             
-            # Validate Kubernetes DNS-1123 name format
-            if not self._is_valid_kubernetes_name(name):
-                return False, f"metadata.name '{name}' is not a valid Kubernetes name (must be lowercase alphanumeric with hyphens)"
-            
-            # Resource-specific validation
-            kind = resource_data.get('kind', '').lower()
-            spec = resource_data.get('spec', {})
-            
-            if kind in ['deployment', 'pod', 'daemonset', 'statefulset', 'replicaset']:
-                # Validate container ports for duplicate names
-                validation_result = self._validate_container_ports(spec)
-                if not validation_result[0]:
-                    return validation_result
+            # For Pod validation, be more lenient with container validation
+            if resource_data.get('kind') == 'Pod':
+                spec = resource_data.get('spec', {})
+                containers = spec.get('containers', [])
                 
-                # Validate container names for duplicates
-                validation_result = self._validate_container_names(spec)
-                if not validation_result[0]:
-                    return validation_result
+                if containers:
+                    container_names = [c.get('name', '') for c in containers]
+                    # Only check for empty names, allow duplicate names (some use cases need this)
+                    if any(not name for name in container_names):
+                        return False, "All containers must have names"
+                
+                # Check for basic container structure
+                for container in containers:
+                    if not isinstance(container, dict):
+                        return False, "Each container must be a dictionary"
+                    if not container.get('image'):
+                        return False, "All containers must have an image specified"
             
-            return True, "Schema validation passed"
+            return True, "Valid Kubernetes resource"
             
         except Exception as e:
             return False, f"Schema validation error: {str(e)}"
-    
-    def _is_valid_kubernetes_name(self, name: str) -> bool:
-        """Validate Kubernetes DNS-1123 name format"""
-        if len(name) > 253:
-            return False
-        if not name.replace('-', '').replace('.', '').isalnum():
-            return False
-        if name.startswith('-') or name.endswith('-'):
-            return False
-        return name.islower()
-    
-    def _validate_container_ports(self, spec: dict) -> tuple[bool, str]:
-        """Validate container ports for duplicates"""
-        try:
-            containers = []
-            
-            # Get containers from different locations based on resource type
-            if 'template' in spec and 'spec' in spec['template']:
-                # Deployment, StatefulSet, DaemonSet
-                template_spec = spec['template']['spec']
-                containers = template_spec.get('containers', [])
-                containers.extend(template_spec.get('initContainers', []))
-            elif 'containers' in spec:
-                # Pod
-                containers = spec.get('containers', [])
-                containers.extend(spec.get('initContainers', []))
-            
-            for container in containers:
-                if not isinstance(container, dict):
-                    continue
-                    
-                ports = container.get('ports', [])
-                if not isinstance(ports, list):
-                    continue
-                    
-                # Check for duplicate port names within this container
-                port_names = []
-                port_numbers = []
-                
-                for port in ports:
-                    if not isinstance(port, dict):
-                        continue
-                        
-                    # Check for duplicate port names
-                    if 'name' in port:
-                        port_name = port['name']
-                        if port_name in port_names:
-                            return False, f"Duplicate port name '{port_name}' in container '{container.get('name', 'unknown')}'"
-                        port_names.append(port_name)
-                    
-                    # Check for duplicate port numbers with same protocol
-                    if 'containerPort' in port:
-                        port_number = port['containerPort']
-                        protocol = port.get('protocol', 'TCP')
-                        port_key = f"{port_number}/{protocol}"
-                        if port_key in port_numbers:
-                            return False, f"Duplicate port {port_number}/{protocol} in container '{container.get('name', 'unknown')}'"
-                        port_numbers.append(port_key)
-            
-            return True, "Container ports validation passed"
-            
-        except Exception as e:
-            return False, f"Container ports validation error: {str(e)}"
-    
-    def _validate_container_names(self, spec: dict) -> tuple[bool, str]:
-        """Validate container names for duplicates"""
-        try:
-            all_container_names = []
-            
-            # Get containers from different locations
-            if 'template' in spec and 'spec' in spec['template']:
-                template_spec = spec['template']['spec']
-                containers = template_spec.get('containers', [])
-                init_containers = template_spec.get('initContainers', [])
-            elif 'containers' in spec:
-                containers = spec.get('containers', [])
-                init_containers = spec.get('initContainers', [])
-            else:
-                return True, "No containers to validate"
-            
-            # Check regular containers
-            for container in containers:
-                if isinstance(container, dict) and 'name' in container:
-                    name = container['name']
-                    if name in all_container_names:
-                        return False, f"Duplicate container name '{name}'"
-                    all_container_names.append(name)
-            
-            # Check init containers
-            for container in init_containers:
-                if isinstance(container, dict) and 'name' in container:
-                    name = container['name']
-                    if name in all_container_names:
-                        return False, f"Duplicate container name '{name}' (conflicts with regular or init container)"
-                    all_container_names.append(name)
-            
-            return True, "Container names validation passed"
-            
-        except Exception as e:
-            return False, f"Container names validation error: {str(e)}"
 
     def get_resource_detail_async(self, resource_type: str, resource_name: str, namespace: str = None):
         """Get resource detail asynchronously - backward compatibility"""
@@ -852,42 +953,63 @@ class KubernetesClient(QObject):
         return self.service.get_cache_stats()
     
     def get_pods_for_node_async(self, node_name: str):
-        """Get pods running on a specific node asynchronously"""
-        try:
-            from PyQt6.QtCore import QThread, QTimer
-
-            def fetch_pods():
+        """Get all pods running on a specific node asynchronously"""
+        logging.info(f"Getting pods for node {node_name}")
+        
+        from Utils.enhanced_worker import EnhancedBaseWorker
+        
+        class NodePodsWorker(EnhancedBaseWorker):
+            def __init__(self, client_instance, node_name):
+                super().__init__(f"node_pods_{node_name}")
+                self.client_instance = client_instance
+                self.node_name = node_name
+            
+            def execute(self):
                 try:
-                    # Get all pods and filter by node name
-                    all_pods = self._get_pods()
+                    # Get all pods for the specific node using field selector
+                    all_pods = self.client_instance.v1.list_pod_for_all_namespaces(
+                        field_selector=f"spec.nodeName={self.node_name}"
+                    )
+                    
                     node_pods = []
-
-                    for pod in all_pods:
-                        if hasattr(pod, 'spec') and hasattr(pod.spec, 'node_name'):
-                            if pod.spec.node_name == node_name:
-                                # Convert pod data to dictionary format
-                                pod_data = {
-                                    'name': pod.metadata.name,
-                                    'namespace': pod.metadata.namespace,
-                                    'status': pod.status.phase if hasattr(pod.status, 'phase') else 'Unknown',
-                                    'age': self._calculate_age(pod.metadata.creation_timestamp),
-                                    'node': pod.spec.node_name if hasattr(pod.spec, 'node_name') else ''
-                                }
-                                node_pods.append(pod_data)
-
-                    # Emit the data
-                    self.pods_data_loaded.emit(node_pods)
-
+                    for pod in all_pods.items:
+                        pod_data = {
+                            'name': pod.metadata.name,
+                            'namespace': pod.metadata.namespace,
+                            'status': pod.status.phase if pod.status and pod.status.phase else 'Unknown',
+                            'cpu_usage': "N/A",
+                            'memory_usage': "N/A"
+                        }
+                        node_pods.append(pod_data)
+                    
+                    return node_pods
+                    
                 except Exception as e:
-                    logging.error(f"Error fetching pods for node {node_name}: {e}")
-                    self.api_error.emit(f"Failed to fetch pods for node: {str(e)}")
-
-            # Use QTimer to run async
-            QTimer.singleShot(0, fetch_pods)
-
-        except Exception as e:
-            logging.error(f"Error starting pod fetch for node {node_name}: {e}")
-            self.api_error.emit(f"Failed to start pod fetch: {str(e)}")
+                    logging.error(f"Failed to get pods for node {self.node_name}: {str(e)}")
+                    raise Exception(f"Failed to get pods for node {self.node_name}: {str(e)}")
+        
+        worker = NodePodsWorker(self, node_name)
+        
+        # Connect signals with proper error handling
+        def handle_success(result):
+            try:
+                self.pods_data_loaded.emit(result)
+            except Exception as e:
+                logging.error(f"Error emitting node pods result: {str(e)}")
+                self.api_error.emit(f"Failed to emit node pods: {str(e)}")
+        
+        def handle_error(error):
+            try:
+                self.api_error.emit(f"Failed to get pods for node: {str(error)}")
+            except Exception as e:
+                logging.error(f"Error emitting node pods error: {str(e)}")
+        
+        worker.signals.finished.connect(handle_success)
+        worker.signals.error.connect(handle_error)
+        
+        # Submit to thread manager
+        thread_manager = get_thread_manager()
+        thread_manager.submit_worker(f"node_pods_{node_name}", worker)
 
     def _calculate_age(self, creation_timestamp):
         """Calculate age from creation timestamp"""
@@ -909,6 +1031,244 @@ class KubernetesClient(QObject):
                 return f"{minutes}m"
         except Exception:
             return "Unknown"
+
+    def _get_deployment_rollout_history_sync(self, deployment_name: str, namespace: str = "default"):
+        """Get deployment rollout history synchronously with optimized async patterns"""
+        try:
+            logging.debug(f"Fetching deployment {deployment_name} from namespace {namespace}")
+            
+            # Get deployment with timeout protection
+            deployment = self.apps_v1.read_namespaced_deployment(
+                name=deployment_name, 
+                namespace=namespace,
+                _request_timeout=10.0  # 10 second timeout
+            )
+            
+            # Build more robust label selector
+            deployment_labels = deployment.metadata.labels or {}
+            app_label = deployment_labels.get('app', deployment_name)
+            
+            # Try multiple label selectors for better compatibility
+            selectors = [
+                f"app={app_label}",
+                f"app.kubernetes.io/name={deployment_name}",
+                f"app.kubernetes.io/instance={deployment_name}"
+            ]
+            
+            all_replica_sets = []
+            for selector in selectors:
+                try:
+                    logging.debug(f"Trying label selector: {selector}")
+                    replica_sets = self.apps_v1.list_namespaced_replica_set(
+                        namespace=namespace,
+                        label_selector=selector,
+                        _request_timeout=10.0  # 10 second timeout
+                    )
+                    all_replica_sets.extend(replica_sets.items)
+                except Exception as e:
+                    logging.debug(f"Label selector {selector} failed: {str(e)}")
+                    continue
+            
+            # Remove duplicates by name
+            unique_rs = {rs.metadata.name: rs for rs in all_replica_sets}
+            
+            history = []
+            for rs_name, rs in unique_rs.items():
+                # Verify ownership more thoroughly
+                owner_refs = rs.metadata.owner_references or []
+                is_owned_by_deployment = any(
+                    ref.kind == "Deployment" and ref.name == deployment_name 
+                    for ref in owner_refs
+                )
+                
+                if is_owned_by_deployment:
+                    # Get revision and other metadata
+                    annotations = rs.metadata.annotations or {}
+                    revision_str = annotations.get("deployment.kubernetes.io/revision", "1")
+                    
+                    try:
+                        revision = int(revision_str)
+                    except (ValueError, TypeError):
+                        revision = 1
+                    
+                    # Get creation timestamp with safe handling
+                    creation_time = rs.metadata.creation_timestamp
+                    
+                    # Determine if this is the current revision
+                    current_replicas = rs.spec.replicas or 0
+                    ready_replicas = (rs.status.ready_replicas or 0) if rs.status else 0
+                    
+                    history_item = {
+                        "revision": revision,
+                        "name": rs.metadata.name,
+                        "creation_time": creation_time.isoformat() if creation_time else "",
+                        "replicas": current_replicas,
+                        "ready_replicas": ready_replicas,
+                        "current": current_replicas > 0 and ready_replicas > 0,
+                        "change_cause": annotations.get("kubernetes.io/change-cause", "No change cause recorded"),
+                        "template_hash": annotations.get("pod-template-hash", ""),
+                        "status": "Active" if current_replicas > 0 else "Inactive"
+                    }
+                    history.append(history_item)
+            
+            # Sort by revision number (descending)
+            history.sort(key=lambda x: x["revision"], reverse=True)
+            
+            # Mark the most recent active revision as current
+            if history:
+                active_revisions = [h for h in history if h["current"]]
+                if active_revisions:
+                    # Reset all current flags
+                    for h in history:
+                        h["current"] = False
+                    # Mark the highest revision that's active
+                    active_revisions[0]["current"] = True
+            
+            logging.info(f"Successfully found {len(history)} revisions for deployment {deployment_name}")
+            return history
+            
+        except Exception as e:
+            error_msg = f"Failed to get rollout history for deployment {deployment_name}: {str(e)}"
+            logging.error(error_msg)
+            raise Exception(error_msg)
+    
+    def _rollback_deployment_sync(self, deployment_name: str, revision: int, namespace: str = "default"):
+        """Rollback deployment to specific revision synchronously with enhanced async compatibility"""
+        try:
+            logging.info(f"Starting rollback of deployment {deployment_name} to revision {revision}")
+            
+            # Step 1: Get current deployment with timeout
+            deployment = self.apps_v1.read_namespaced_deployment(
+                name=deployment_name, 
+                namespace=namespace,
+                _request_timeout=10.0
+            )
+            
+            original_template_hash = deployment.spec.template.metadata.labels.get("pod-template-hash", "")
+            logging.debug(f"Current deployment template hash: {original_template_hash}")
+            
+            # Step 2: Find target ReplicaSet more robustly
+            deployment_labels = deployment.metadata.labels or {}
+            app_label = deployment_labels.get('app', deployment_name)
+            
+            # Try multiple label selectors
+            selectors = [
+                f"app={app_label}",
+                f"app.kubernetes.io/name={deployment_name}",
+                f"app.kubernetes.io/instance={deployment_name}"
+            ]
+            
+            target_rs = None
+            for selector in selectors:
+                try:
+                    replica_sets = self.apps_v1.list_namespaced_replica_set(
+                        namespace=namespace,
+                        label_selector=selector,
+                        _request_timeout=10.0
+                    )
+                    
+                    for rs in replica_sets.items:
+                        # Verify ownership
+                        owner_refs = rs.metadata.owner_references or []
+                        is_owned = any(
+                            ref.kind == "Deployment" and ref.name == deployment_name 
+                            for ref in owner_refs
+                        )
+                        
+                        if is_owned:
+                            annotations = rs.metadata.annotations or {}
+                            rs_revision_str = annotations.get("deployment.kubernetes.io/revision", "1")
+                            try:
+                                rs_revision = int(rs_revision_str)
+                                if rs_revision == revision:
+                                    target_rs = rs
+                                    break
+                            except (ValueError, TypeError):
+                                continue
+                    
+                    if target_rs:
+                        break
+                        
+                except Exception as e:
+                    logging.debug(f"Selector {selector} failed during rollback: {str(e)}")
+                    continue
+            
+            if not target_rs:
+                raise Exception(f"Revision {revision} not found for deployment {deployment_name}. Available revisions might be limited.")
+            
+            target_template_hash = target_rs.spec.template.metadata.labels.get("pod-template-hash", "")
+            logging.info(f"Found target ReplicaSet {target_rs.metadata.name} with template hash: {target_template_hash}")
+            
+            # Step 3: Prepare rollback patch
+            # Clone the deployment spec to avoid mutations
+            import copy
+            rollback_deployment = copy.deepcopy(deployment)
+            
+            # Update the deployment template with target ReplicaSet template
+            rollback_deployment.spec.template = target_rs.spec.template
+            
+            # Update annotations
+            if not rollback_deployment.metadata.annotations:
+                rollback_deployment.metadata.annotations = {}
+            
+            # Add rollback metadata
+            from datetime import datetime
+            timestamp = datetime.now().isoformat()
+            rollback_deployment.metadata.annotations.update({
+                "kubernetes.io/change-cause": f"Rolled back to revision {revision} at {timestamp}",
+                "deployment.kubernetes.io/rollback-revision": str(revision),
+                "orchetrix.io/rollback-timestamp": timestamp
+            })
+            
+            # Step 4: Perform the rollback with retry logic
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    logging.debug(f"Rollback attempt {attempt + 1}/{max_retries}")
+                    
+                    result = self.apps_v1.patch_namespaced_deployment(
+                        name=deployment_name,
+                        namespace=namespace,
+                        body=rollback_deployment,
+                        _request_timeout=15.0
+                    )
+                    
+                    logging.info(f"Rollback patch applied successfully on attempt {attempt + 1}")
+                    break
+                    
+                except Exception as e:
+                    if attempt == max_retries - 1:
+                        raise e
+                    logging.warning(f"Rollback attempt {attempt + 1} failed: {str(e)}, retrying...")
+                    import time
+                    time.sleep(1)  # Brief delay before retry
+            
+            # Step 5: Verify rollback success
+            success_msg = f"Successfully rolled back deployment {deployment_name} to revision {revision}"
+            
+            return {
+                "success": True,
+                "message": success_msg,
+                "deployment": deployment_name,
+                "revision": revision,
+                "namespace": namespace,
+                "original_template_hash": original_template_hash,
+                "target_template_hash": target_template_hash,
+                "target_replicaset": target_rs.metadata.name,
+                "timestamp": timestamp
+            }
+            
+        except Exception as e:
+            error_msg = f"Failed to rollback deployment {deployment_name} to revision {revision}: {str(e)}"
+            logging.error(error_msg)
+            return {
+                "success": False,
+                "message": error_msg,
+                "deployment": deployment_name,
+                "revision": revision,
+                "namespace": namespace,
+                "error_type": type(e).__name__
+            }
 
     def cleanup(self):
         """Cleanup resources - backward compatibility"""

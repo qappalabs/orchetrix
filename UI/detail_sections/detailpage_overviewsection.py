@@ -299,23 +299,49 @@ class DetailPageOverviewSection(BaseDetailSection):
 
         resource_type_lower = self.resource_type.lower()
 
-        # Pod status
+        # Pod status with enhanced container state checking
         if resource_type_lower in ["pod", "pods"]:
             phase = status.get("phase", "Unknown")
             status_value = phase
+            
+            # Check container statuses for more detailed information
+            container_statuses = status.get("containerStatuses", [])
+            if container_statuses:
+                for cs in container_statuses:
+                    if cs.get("state"):
+                        state = cs["state"]
+                        if "waiting" in state:
+                            waiting = state["waiting"]
+                            reason = waiting.get("reason", "")
+                            if reason in ("CrashLoopBackOff", "ImagePullBackOff", "ErrImagePull"):
+                                status_value = reason
+                                break
+                        elif "terminated" in state:
+                            terminated = state["terminated"]
+                            exit_code = terminated.get("exitCode", 0)
+                            reason = terminated.get("reason", "")
+                            if exit_code != 0:
+                                status_value = f"Error ({reason})"
+                                break
+                            elif reason == "Completed":
+                                status_value = f"Completed ({exit_code})"
+                                break
 
-            if phase == "Running":
+            if status_value in ["Running"]:
                 status_text = "Pod is running"
                 status_type = "success"
-            elif phase == "Pending":
+            elif status_value in ["Pending"]:
                 status_text = "Pod is pending"
                 status_type = "warning"
-            elif phase == "Failed":
+            elif status_value in ["Failed"] or "Error" in status_value:
                 status_text = "Pod has failed"
                 status_type = "error"
-            elif phase == "Succeeded":
+            elif status_value in ["Succeeded"] or "Completed" in status_value:
                 status_text = "Pod completed successfully"
                 status_type = "success"
+            elif status_value in ["CrashLoopBackOff", "ImagePullBackOff", "ErrImagePull"]:
+                status_text = f"Pod error: {status_value}"
+                status_type = "error"
 
         # NetworkPolicy status
         elif resource_type_lower in ["networkpolicy", "networkpolicies", "netpol"]:
@@ -941,6 +967,353 @@ class DetailPageOverviewSection(BaseDetailSection):
         ready_info.setStyleSheet(EnhancedStyles.get_field_value_style())
         self.specific_layout.addWidget(ready_info)
 
+        # Add rollback section
+        self._add_deployment_rollback_section(data)
+
+    def _add_deployment_rollback_section(self, data):
+        """Add deployment rollback section with history and rollback buttons"""
+        metadata = data.get("metadata", {})
+        deployment_name = metadata.get("name", "")
+        namespace = metadata.get("namespace", "default")
+        
+        if not deployment_name:
+            return
+        
+        # Create rollback section header
+        rollback_header = QLabel("ROLLBACK HISTORY")
+        rollback_header.setStyleSheet(EnhancedStyles.get_section_header_style())
+        self.specific_layout.addWidget(rollback_header)
+        
+        # Create loading label for history
+        self.history_loading_label = QLabel("Loading rollback history...")
+        self.history_loading_label.setStyleSheet(EnhancedStyles.get_field_value_style())
+        self.specific_layout.addWidget(self.history_loading_label)
+        
+        # Create container for history table
+        self.history_container = QWidget()
+        history_layout = QVBoxLayout(self.history_container)
+        history_layout.setContentsMargins(0, 0, 0, 0)
+        history_layout.setSpacing(8)
+        
+        # Create table for rollback history
+        self.history_table = QTableWidget()
+        self.history_table.setColumnCount(4)
+        self.history_table.setHorizontalHeaderLabels(["Revision", "Age", "Change Cause", "Action"])
+        
+        # Style the table
+        self.history_table.setStyleSheet(f"""
+            QTableWidget {{
+                background-color: {AppColors.BG_SIDEBAR};
+                color: {AppColors.TEXT_LIGHT};
+                border: 1px solid {AppColors.BORDER_COLOR};
+                border-radius: 6px;
+                gridline-color: {AppColors.BORDER_COLOR};
+                selection-background-color: {AppColors.SELECTED_BG};
+            }}
+            QTableWidget::item {{
+                padding: 8px;
+                border-bottom: 1px solid {AppColors.BORDER_COLOR};
+            }}
+            QTableWidget::item:selected {{
+                background-color: {AppColors.SELECTED_BG};
+            }}
+            QHeaderView::section {{
+                background-color: {AppColors.BG_MEDIUM};
+                color: {AppColors.TEXT_LIGHT};
+                padding: 8px;
+                border: 1px solid {AppColors.BORDER_COLOR};
+                font-weight: bold;
+            }}
+        """)
+        
+        # Configure table properties
+        self.history_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.history_table.setAlternatingRowColors(True)
+        self.history_table.verticalHeader().setVisible(False)
+        
+        # Set column widths
+        header = self.history_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)  # Revision
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)  # Age
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)  # Change Cause
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)  # Action
+        
+        self.history_table.setColumnWidth(0, 80)   # Revision
+        self.history_table.setColumnWidth(1, 80)   # Age
+        self.history_table.setColumnWidth(3, 100)  # Action
+        
+        # Set maximum height for table (show max 5 rows)
+        self.history_table.setMaximumHeight(200)
+        
+        history_layout.addWidget(self.history_table)
+        self.history_container.hide()  # Hide initially
+        self.specific_layout.addWidget(self.history_container)
+        
+        # Store deployment info for rollback operations
+        self.current_deployment_name = deployment_name
+        self.current_deployment_namespace = namespace
+        
+        # Connect to kubernetes client signals with safe handling
+        try:
+            # Disconnect any existing connections first
+            try:
+                self.kubernetes_client.deployment_history_loaded.disconnect()
+            except TypeError:
+                pass  # No connections to disconnect
+            
+            try:
+                self.kubernetes_client.deployment_rollback_completed.disconnect()
+            except TypeError:
+                pass  # No connections to disconnect
+            
+            # Connect new handlers
+            self.kubernetes_client.deployment_history_loaded.connect(self._handle_deployment_history_loaded)
+            self.kubernetes_client.deployment_rollback_completed.connect(self._handle_deployment_rollback_completed)
+            
+        except Exception as e:
+            logging.error(f"Error connecting rollback signals: {str(e)}")
+        
+        # Fetch rollback history
+        self.kubernetes_client.get_deployment_rollout_history_async(deployment_name, namespace)
+
+    def _handle_deployment_history_loaded(self, history_data):
+        """Handle when deployment history is loaded"""
+        try:
+            # Safely disconnect the signal to avoid multiple calls
+            try:
+                self.kubernetes_client.deployment_history_loaded.disconnect(self._handle_deployment_history_loaded)
+            except (TypeError, RuntimeError):
+                pass  # Signal already disconnected or object deleted
+            
+            # Hide loading label and show container
+            self.history_loading_label.hide()
+            self.history_container.show()
+            
+            if not history_data:
+                no_history_label = QLabel("No rollback history available")
+                no_history_label.setStyleSheet(EnhancedStyles.get_secondary_text_style())
+                self.specific_layout.addWidget(no_history_label)
+                return
+            
+            # Populate the table
+            self.history_table.setRowCount(len(history_data))
+            
+            for row, revision_data in enumerate(history_data):
+                revision = revision_data.get("revision", 1)
+                creation_time = revision_data.get("creation_time", "")
+                change_cause = revision_data.get("change_cause", "No change cause recorded")
+                current = revision_data.get("current", False)
+                
+                # Calculate age from creation time
+                age = self._calculate_age_from_timestamp(creation_time)
+                
+                # Add revision cell
+                revision_text = f"{revision}"
+                if current:
+                    revision_text += " (current)"
+                revision_item = QTableWidgetItem(revision_text)
+                revision_item.setFlags(revision_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                if current:
+                    revision_item.setForeground(QColor(AppColors.STATUS_ACTIVE))
+                self.history_table.setItem(row, 0, revision_item)
+                
+                # Add age cell
+                age_item = QTableWidgetItem(age)
+                age_item.setFlags(age_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self.history_table.setItem(row, 1, age_item)
+                
+                # Add change cause cell
+                cause_item = QTableWidgetItem(change_cause)
+                cause_item.setFlags(cause_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                cause_item.setToolTip(change_cause)  # Show full text on hover
+                self.history_table.setItem(row, 2, cause_item)
+                
+                # Add rollback button cell
+                if not current:  # Don't show rollback button for current revision
+                    rollback_btn = QPushButton("Rollback")
+                    rollback_btn.setStyleSheet(f"""
+                        QPushButton {{
+                            background-color: {AppColors.ACCENT_BLUE};
+                            color: white;
+                            border: none;
+                            border-radius: 4px;
+                            padding: 4px 8px;
+                            font-size: 12px;
+                            font-weight: bold;
+                        }}
+                        QPushButton:hover {{
+                            background-color: {AppColors.HOVER_BG};
+                        }}
+                        QPushButton:pressed {{
+                            background-color: {AppColors.HOVER_BG_DARKER};
+                        }}
+                    """)
+                    rollback_btn.clicked.connect(lambda checked, rev=revision: self._rollback_to_revision(rev))
+                    self.history_table.setCellWidget(row, 3, rollback_btn)
+                else:
+                    # Show "Current" label for current revision
+                    current_label = QLabel("Current")
+                    current_label.setStyleSheet(f"color: {AppColors.STATUS_ACTIVE}; font-weight: bold;")
+                    current_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                    self.history_table.setCellWidget(row, 3, current_label)
+            
+            logging.info(f"Populated rollback history table with {len(history_data)} revisions")
+            
+        except Exception as e:
+            logging.error(f"Error handling deployment history: {str(e)}")
+            error_label = QLabel("Error loading rollback history")
+            error_label.setStyleSheet(f"color: {AppColors.TEXT_DANGER};")
+            self.specific_layout.addWidget(error_label)
+
+    def _calculate_age_from_timestamp(self, timestamp_str):
+        """Calculate age from ISO timestamp string"""
+        if not timestamp_str:
+            return "Unknown"
+        
+        try:
+            from datetime import datetime
+            from dateutil import parser
+            
+            creation_time = parser.parse(timestamp_str)
+            now = datetime.now(creation_time.tzinfo)
+            delta = now - creation_time
+            
+            days = delta.days
+            seconds = delta.seconds
+            hours = seconds // 3600
+            minutes = (seconds % 3600) // 60
+            
+            if days > 0:
+                return f"{days}d"
+            elif hours > 0:
+                return f"{hours}h"
+            else:
+                return f"{minutes}m"
+                
+        except Exception:
+            return "Unknown"
+
+    def _rollback_to_revision(self, revision):
+        """Initiate rollback to specific revision"""
+        from PyQt6.QtWidgets import QMessageBox
+        
+        # Show confirmation dialog
+        msg_box = QMessageBox()
+        msg_box.setWindowTitle("Confirm Rollback")
+        msg_box.setText(f"Are you sure you want to rollback deployment '{self.current_deployment_name}' to revision {revision}?")
+        msg_box.setInformativeText("This action will update the deployment and trigger a new rollout.")
+        msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        msg_box.setDefaultButton(QMessageBox.StandardButton.No)
+        msg_box.setIcon(QMessageBox.Icon.Question)
+        
+        # Apply dark theme styling
+        msg_box.setStyleSheet(f"""
+            QMessageBox {{
+                background-color: {AppColors.BG_SIDEBAR};
+                color: {AppColors.TEXT_LIGHT};
+            }}
+            QMessageBox QPushButton {{
+                background-color: {AppColors.BG_MEDIUM};
+                color: {AppColors.TEXT_LIGHT};
+                border: 1px solid {AppColors.BORDER_COLOR};
+                padding: 8px 16px;
+                border-radius: 4px;
+                min-width: 80px;
+            }}
+            QMessageBox QPushButton:hover {{
+                background-color: {AppColors.ACCENT_BLUE};
+            }}
+        """)
+        
+        result = msg_box.exec()
+        
+        if result == QMessageBox.StandardButton.Yes:
+            logging.info(f"User confirmed rollback of {self.current_deployment_name} to revision {revision}")
+            
+            # Show progress indicator
+            for i in range(self.history_table.rowCount()):
+                widget = self.history_table.cellWidget(i, 3)
+                if isinstance(widget, QPushButton):
+                    widget.setText("Rolling back...")
+                    widget.setEnabled(False)
+            
+            # Trigger rollback
+            self.kubernetes_client.rollback_deployment_async(
+                self.current_deployment_name, 
+                revision, 
+                self.current_deployment_namespace
+            )
+
+    def _handle_deployment_rollback_completed(self, result):
+        """Handle when deployment rollback is completed"""
+        try:
+            # Safely disconnect the signal
+            try:
+                self.kubernetes_client.deployment_rollback_completed.disconnect(self._handle_deployment_rollback_completed)
+            except (TypeError, RuntimeError):
+                pass  # Signal already disconnected or object deleted
+            
+            # Re-enable buttons
+            for i in range(self.history_table.rowCount()):
+                widget = self.history_table.cellWidget(i, 3)
+                if isinstance(widget, QPushButton):
+                    widget.setText("Rollback")
+                    widget.setEnabled(True)
+            
+            # Show result message
+            from PyQt6.QtWidgets import QMessageBox
+            
+            msg_box = QMessageBox()
+            msg_box.setWindowTitle("Rollback Result")
+            
+            if result.get("success", False):
+                msg_box.setText("Rollback completed successfully!")
+                msg_box.setInformativeText(result.get("message", ""))
+                msg_box.setIcon(QMessageBox.Icon.Information)
+                
+                # Refresh the deployment details after successful rollback
+                QTimer.singleShot(2000, lambda: self._refresh_deployment_details())
+                
+            else:
+                msg_box.setText("Rollback failed!")
+                msg_box.setInformativeText(result.get("message", "Unknown error"))
+                msg_box.setIcon(QMessageBox.Icon.Critical)
+            
+            # Apply dark theme styling
+            msg_box.setStyleSheet(f"""
+                QMessageBox {{
+                    background-color: {AppColors.BG_SIDEBAR};
+                    color: {AppColors.TEXT_LIGHT};
+                }}
+                QMessageBox QPushButton {{
+                    background-color: {AppColors.BG_MEDIUM};
+                    color: {AppColors.TEXT_LIGHT};
+                    border: 1px solid {AppColors.BORDER_COLOR};
+                    padding: 8px 16px;
+                    border-radius: 4px;
+                    min-width: 80px;
+                }}
+                QMessageBox QPushButton:hover {{
+                    background-color: {AppColors.ACCENT_BLUE};
+                }}
+            """)
+            
+            msg_box.exec()
+            
+            logging.info(f"Rollback completed with result: {result}")
+            
+        except Exception as e:
+            logging.error(f"Error handling rollback completion: {str(e)}")
+
+    def _refresh_deployment_details(self):
+        """Refresh deployment details after rollback"""
+        try:
+            # Trigger a refresh of the current resource
+            if hasattr(self, 'resource_name') and hasattr(self, 'resource_namespace'):
+                self.load_data(self.resource_type, self.resource_name, self.resource_namespace)
+        except Exception as e:
+            logging.error(f"Error refreshing deployment details: {str(e)}")
+
     def _add_configmap_specific_fields(self, data):
         """Add ConfigMap-specific fields"""
         spec = data.get("spec", {})
@@ -1461,13 +1834,13 @@ class DetailPageOverviewSection(BaseDetailSection):
             self.specific_layout.addWidget(params_info)
 
     def _add_node_pods_section(self, data):
-        """Add simple pods info for this node"""
+        """Add pods table for this node"""
         node_name = data.get("metadata", {}).get("name", "")
         if not node_name:
             return
 
         # Create pods section header
-        pods_header = QLabel("PODS")
+        pods_header = QLabel("PODS RUNNING ON THIS NODE")
         pods_header.setStyleSheet(EnhancedStyles.get_section_header_style())
         self.specific_layout.addWidget(pods_header)
 
@@ -1475,6 +1848,75 @@ class DetailPageOverviewSection(BaseDetailSection):
         self.pods_loading_label = QLabel("Loading pods...")
         self.pods_loading_label.setStyleSheet(EnhancedStyles.get_field_value_style())
         self.specific_layout.addWidget(self.pods_loading_label)
+
+        # Create container for pods table
+        self.pods_container = QWidget()
+        pods_layout = QVBoxLayout(self.pods_container)
+        pods_layout.setContentsMargins(0, 0, 0, 0)
+        pods_layout.setSpacing(8)
+
+        # Create table for pods
+        self.pods_table = QTableWidget()
+        self.pods_table.setColumnCount(5)
+        self.pods_table.setHorizontalHeaderLabels(["Pod Name", "Namespace", "Status", "CPU", "Memory"])
+
+        # Style the table
+        self.pods_table.setStyleSheet(f"""
+            QTableWidget {{
+                background-color: {AppColors.BG_SIDEBAR};
+                color: {AppColors.TEXT_LIGHT};
+                border: 1px solid {AppColors.BORDER_COLOR};
+                border-radius: 6px;
+                gridline-color: {AppColors.BORDER_COLOR};
+                selection-background-color: {AppColors.SELECTED_BG};
+            }}
+            QTableWidget::item {{
+                padding: 8px;
+                border-bottom: 1px solid {AppColors.BORDER_COLOR};
+            }}
+            QTableWidget::item:selected {{
+                background-color: {AppColors.SELECTED_BG};
+            }}
+            QHeaderView::section {{
+                background-color: {AppColors.BG_MEDIUM};
+                color: {AppColors.TEXT_LIGHT};
+                padding: 8px;
+                border: 1px solid {AppColors.BORDER_COLOR};
+                font-weight: bold;
+            }}
+        """)
+
+        # Configure table properties
+        self.pods_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.pods_table.setAlternatingRowColors(True)
+        self.pods_table.verticalHeader().setVisible(False)
+        
+        # Connect single-click event to navigate to pod
+        self.pods_table.itemClicked.connect(self._on_pod_clicked)
+
+        # Set column widths
+        header = self.pods_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)    # Pod Name
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)    # Namespace
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)    # Status
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)    # CPU
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)  # Memory
+
+        self.pods_table.setColumnWidth(0, 250)  # Pod Name - made larger
+        self.pods_table.setColumnWidth(1, 120)  # Namespace
+        self.pods_table.setColumnWidth(2, 100)  # Status
+        self.pods_table.setColumnWidth(3, 80)   # CPU
+        # Memory column will stretch to fill remaining space
+
+        # Set maximum height for table (show max 8 rows)
+        self.pods_table.setMaximumHeight(250)
+
+        pods_layout.addWidget(self.pods_table)
+        self.pods_container.hide()  # Hide initially
+        self.specific_layout.addWidget(self.pods_container)
+
+        # Store node name for pod operations
+        self.current_node_name = node_name
 
         # Fetch pods for this node
         self._fetch_node_pods(node_name)
@@ -1495,31 +1937,98 @@ class DetailPageOverviewSection(BaseDetailSection):
     def _handle_node_pods_loaded(self, pods_data):
         """Handle when pods data is loaded"""
         try:
-            # Disconnect signals
-            self.kubernetes_client.pods_data_loaded.disconnect(self._handle_node_pods_loaded)
-            self.kubernetes_client.api_error.disconnect(self._handle_node_pods_error)
+            # Safely disconnect signals
+            try:
+                self.kubernetes_client.pods_data_loaded.disconnect(self._handle_node_pods_loaded)
+            except (TypeError, RuntimeError):
+                pass
+            
+            try:
+                self.kubernetes_client.api_error.disconnect(self._handle_node_pods_error)
+            except (TypeError, RuntimeError):
+                pass
 
+            # Hide loading label and show table container
             self.pods_loading_label.hide()
+            self.pods_container.show()
 
             if not pods_data:
-                pods_info = QLabel("No pods running on this node")
-                pods_info.setStyleSheet(EnhancedStyles.get_field_value_style())
-                self.specific_layout.addWidget(pods_info)
+                # Show empty state in table
+                self.pods_table.setRowCount(1)
+                empty_item = QTableWidgetItem("No pods running on this node")
+                empty_item.setFlags(empty_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                empty_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.pods_table.setItem(0, 0, empty_item)
+                
+                # Span across all columns
+                self.pods_table.setSpan(0, 0, 1, 5)
                 return
 
-            # Create vertical list of pod names
-            for pod in pods_data:
-                name = pod.get("name", "Unknown")
+            # Populate the table
+            self.pods_table.setRowCount(len(pods_data))
+
+            for row, pod in enumerate(pods_data):
+                pod_name = pod.get("name", "Unknown")
+                namespace = pod.get("namespace", "Unknown") 
                 status = pod.get("status", "Unknown")
-
-                if status.lower() == "running":
-                    pod_text = name
+                
+                # Get resource usage if available
+                cpu_usage = pod.get("cpu_usage", "N/A")
+                memory_usage = pod.get("memory_usage", "N/A")
+                
+                # Format resource usage
+                if cpu_usage != "N/A" and isinstance(cpu_usage, (int, float)):
+                    cpu_display = f"{cpu_usage:.0f}m"
                 else:
-                    pod_text = f"{name} ({status})"
+                    cpu_display = str(cpu_usage)
+                    
+                if memory_usage != "N/A" and isinstance(memory_usage, (int, float)):
+                    if memory_usage > 1024:
+                        memory_display = f"{memory_usage/1024:.1f}Gi"
+                    else:
+                        memory_display = f"{memory_usage:.0f}Mi"
+                else:
+                    memory_display = str(memory_usage)
 
-                pod_label = QLabel(pod_text)
-                pod_label.setStyleSheet(EnhancedStyles.get_field_value_style())
-                self.specific_layout.addWidget(pod_label)
+                # Add pod name cell
+                name_item = QTableWidgetItem(pod_name)
+                name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self.pods_table.setItem(row, 0, name_item)
+
+                # Add namespace cell
+                namespace_item = QTableWidgetItem(namespace)
+                namespace_item.setFlags(namespace_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self.pods_table.setItem(row, 1, namespace_item)
+
+                # Add status cell with color coding
+                status_item = QTableWidgetItem(status)
+                status_item.setFlags(status_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                
+                # Color code status
+                if status.lower() == "running":
+                    status_item.setForeground(QColor(AppColors.STATUS_ACTIVE))
+                elif status.lower() in ["pending", "containercreating"]:
+                    status_item.setForeground(QColor(AppColors.STATUS_WARNING))
+                elif status.lower() in ["failed", "crashloopbackoff", "error"]:
+                    status_item.setForeground(QColor(AppColors.TEXT_DANGER))
+                else:
+                    status_item.setForeground(QColor(AppColors.TEXT_SECONDARY))
+                    
+                self.pods_table.setItem(row, 2, status_item)
+
+                # Add CPU cell
+                cpu_item = QTableWidgetItem(cpu_display)
+                cpu_item.setFlags(cpu_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                cpu_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                self.pods_table.setItem(row, 3, cpu_item)
+
+                # Add Memory cell
+                memory_item = QTableWidgetItem(memory_display)
+                memory_item.setFlags(memory_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                memory_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                self.pods_table.setItem(row, 4, memory_item)
+
+            logging.info(f"Populated pods table with {len(pods_data)} pods for node")
 
         except Exception as e:
             logging.error(f"Error handling node pods data: {str(e)}")
@@ -1528,18 +2037,211 @@ class DetailPageOverviewSection(BaseDetailSection):
     def _handle_node_pods_error(self, error_message):
         """Handle error when fetching pods for node"""
         try:
-            # Disconnect signals
-            if hasattr(self.kubernetes_client, 'pods_data_loaded'):
+            # Safely disconnect signals
+            try:
                 self.kubernetes_client.pods_data_loaded.disconnect(self._handle_node_pods_loaded)
-            if hasattr(self.kubernetes_client, 'api_error'):
+            except (TypeError, RuntimeError):
+                pass
+            
+            try:
                 self.kubernetes_client.api_error.disconnect(self._handle_node_pods_error)
+            except (TypeError, RuntimeError):
+                pass
         except:
             pass
 
+        # Hide loading label and show error in table
         self.pods_loading_label.hide()
+        self.pods_container.show()
+        
+        # Show error in table
+        self.pods_table.setRowCount(1)
+        error_item = QTableWidgetItem(f"Error loading pods: {error_message}")
+        error_item.setFlags(error_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        error_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        error_item.setForeground(QColor(AppColors.TEXT_DANGER))
+        self.pods_table.setItem(0, 0, error_item)
+        
+        # Span across all columns
+        self.pods_table.setSpan(0, 0, 1, 5)
 
-        error_label = QLabel("Error loading pods")
-        error_label.setStyleSheet(EnhancedStyles.get_field_value_style() + f"""
-            color: {AppColors.TEXT_DANGER};
-        """)
-        self.specific_layout.addWidget(error_label)
+        logging.error(f"Node pods error: {error_message}")
+    
+    def _on_pod_clicked(self, item):
+        """Handle single-click on pod item to navigate to pods page"""
+        try:
+            if not item:
+                return
+            
+            # Get the row that was clicked
+            row = item.row()
+            
+            # Get pod name from the first column (Pod Name)
+            pod_name_item = self.pods_table.item(row, 0)
+            if not pod_name_item:
+                return
+                
+            pod_name = pod_name_item.text()
+            
+            # Get namespace from the second column (Namespace)
+            namespace_item = self.pods_table.item(row, 1)
+            namespace = namespace_item.text() if namespace_item else ""
+            
+            # Skip if this is an empty row or error message
+            if pod_name in ["No pods running on this node", "Error loading pods"] or "Error loading pods" in pod_name:
+                return
+            
+            logging.info(f"Navigating to pod '{pod_name}' in namespace '{namespace}'")
+            
+            # Navigate to the pods page and search for this specific pod
+            self._navigate_to_pods_page(pod_name, namespace)
+            
+        except Exception as e:
+            logging.error(f"Error handling pod click: {e}")
+    
+    def _navigate_to_pods_page(self, pod_name: str, namespace: str):
+        """Navigate to the pods page and search for the specific pod"""
+        try:
+            # Get the main cluster view (parent window)
+            detail_page = self.parent()
+            while detail_page and not hasattr(detail_page, 'parent_window'):
+                detail_page = detail_page.parent()
+            
+            if not detail_page or not hasattr(detail_page, 'parent_window'):
+                logging.error("Could not find detail page with parent_window")
+                return
+            
+            main_window = detail_page.parent_window
+            logging.info(f"Found main_window: {type(main_window).__name__}")
+            
+            # Get the actual cluster view from the main window
+            cluster_view = None
+            if hasattr(main_window, 'cluster_view'):
+                cluster_view = main_window.cluster_view
+                logging.info(f"Found cluster_view: {type(cluster_view).__name__}")
+                logging.info(f"Cluster view has handle_dropdown_selection: {hasattr(cluster_view, 'handle_dropdown_selection')}")
+            else:
+                logging.error("MainWindow does not have cluster_view attribute")
+                return
+            
+            # Close the detail page first
+            if hasattr(detail_page, 'close_detail'):
+                detail_page.close_detail()
+            elif hasattr(detail_page, 'hide'):
+                detail_page.hide()
+            
+            # Navigate to pods page - try multiple methods
+            navigation_success = False
+            
+            if hasattr(cluster_view, 'handle_dropdown_selection'):
+                try:
+                    cluster_view.handle_dropdown_selection("Pods")
+                    logging.info("Called handle_dropdown_selection for Pods page")
+                    navigation_success = True
+                except Exception as e:
+                    logging.error(f"Error calling handle_dropdown_selection: {e}")
+            
+            # Try alternative navigation method
+            if not navigation_success and hasattr(cluster_view, 'pages') and 'Pods' in cluster_view.pages:
+                try:
+                    pods_page = cluster_view.pages['Pods']
+                    if hasattr(cluster_view, 'stacked_widget'):
+                        cluster_view.stacked_widget.setCurrentWidget(pods_page)
+                        logging.info("Navigated to Pods page using direct stacked widget")
+                        navigation_success = True
+                        
+                        # Load data for the pods page
+                        if hasattr(cluster_view, '_load_page_data'):
+                            cluster_view._load_page_data(pods_page)
+                        elif hasattr(pods_page, 'force_load_data'):
+                            pods_page.force_load_data()
+                except Exception as e:
+                    logging.error(f"Error with direct navigation: {e}")
+            
+            if not navigation_success:
+                logging.error("All navigation methods failed")
+                return
+            
+            # Wait longer for the page to load, then set search filter
+            QTimer.singleShot(1000, lambda: self._set_pod_search_filter(cluster_view, pod_name, namespace))
+            
+        except Exception as e:
+            logging.error(f"Error navigating to pods page: {e}")
+    
+    def _set_pod_search_filter(self, cluster_view, pod_name: str, namespace: str):
+        """Set search filter on the pods page to show the specific pod"""
+        try:
+            # Check if we have stacked_widget
+            if not hasattr(cluster_view, 'stacked_widget'):
+                logging.error("ClusterView does not have stacked_widget")
+                return
+            
+            # Get the current page (should be pods page)
+            current_widget = cluster_view.stacked_widget.currentWidget()
+            
+            if not current_widget:
+                logging.error("No current widget found in cluster view")
+                return
+            
+            # Check if it's the pods page and has search functionality
+            widget_type = type(current_widget).__name__
+            logging.info(f"Current widget type: {widget_type}")
+            logging.info(f"Has search_bar attribute: {hasattr(current_widget, 'search_bar')}")
+            
+            # If we still get ClusterView instead of PodsPage, try a different approach
+            if widget_type == "ClusterView":
+                logging.warning("Still showing ClusterView instead of PodsPage, trying alternative navigation")
+                # Try to force navigate to pods page directly
+                if hasattr(cluster_view, 'pages') and 'Pods' in cluster_view.pages:
+                    pods_page = cluster_view.pages['Pods']
+                    cluster_view.stacked_widget.setCurrentWidget(pods_page)
+                    logging.info("Switched to pods page directly")
+                    # Try again with the pods page
+                    QTimer.singleShot(500, lambda: self._apply_search_to_pods_page(pods_page, pod_name, namespace))
+                else:
+                    logging.error("Could not find Pods page in cluster view pages")
+                return
+            
+            # We have the right page, now try to apply search
+            self._apply_search_to_pods_page(current_widget, pod_name, namespace)
+                
+        except Exception as e:
+            logging.error(f"Error setting pod search filter: {e}")
+    
+    def _apply_search_to_pods_page(self, pods_page, pod_name: str, namespace: str):
+        """Apply search to the pods page widget"""
+        try:
+            logging.info(f"Applying search to pods page: {type(pods_page).__name__}")
+            
+            if hasattr(pods_page, 'search_bar'):
+                logging.info(f"search_bar found: {pods_page.search_bar}")
+                
+                if pods_page.search_bar:
+                    # Set the search text to find the specific pod
+                    search_text = pod_name
+                    pods_page.search_bar.setText(search_text)
+                    
+                    # If the pods page has namespace filtering, try to set that too
+                    if hasattr(pods_page, 'namespace_combo') and pods_page.namespace_combo:
+                        # Try to find and select the namespace
+                        combo = pods_page.namespace_combo
+                        for i in range(combo.count()):
+                            if combo.itemText(i) == namespace:
+                                combo.setCurrentIndex(i)
+                                break
+                    
+                    logging.info(f"Set pods page search filter to '{search_text}' in namespace '{namespace}'")
+                    return
+            
+            # Try alternative methods to trigger search
+            if hasattr(pods_page, '_perform_global_search'):
+                logging.info(f"Using alternative search method for pod '{pod_name}'")
+                pods_page._perform_global_search(pod_name.lower())
+            elif hasattr(pods_page, 'force_load_data'):
+                logging.info(f"Triggering data reload for pods page")
+                pods_page.force_load_data()
+            else:
+                logging.warning("Pods page does not have search functionality")
+                
+        except Exception as e:
+            logging.error(f"Error applying search to pods page: {e}")

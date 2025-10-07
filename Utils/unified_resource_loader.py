@@ -147,10 +147,12 @@ class SearchResourceLoadWorker(EnhancedBaseWorker):
         
         # Filter results by search query
         if self.search_query:
+            logging.info(f"Filtering {len(all_items)} items for search query: '{self.search_query}'")
             filtered_items = []
             for item in all_items:
                 if self._item_matches_search(item):
                     filtered_items.append(item)
+            logging.info(f"Search filtering result: {len(filtered_items)} items matched out of {len(all_items)} total")
             return filtered_items
         
         return all_items
@@ -248,37 +250,45 @@ class SearchResourceLoadWorker(EnhancedBaseWorker):
             return self._load_from_single_namespace_with_search()
     
     def _item_matches_search(self, item: Any) -> bool:
-        """Check if item matches the search query"""
+        """Check if item matches the search query (focused search for better UX)"""
         if not self.search_query:
             return True
         
         try:
-            # Search in name
+            # Get item name for logging
+            name = getattr(item.metadata, 'name', 'unknown') if hasattr(item, 'metadata') and item.metadata else 'unknown'
+            
+            # PRIMARY SEARCH: Name matching (most important)
             if hasattr(item, 'metadata') and item.metadata:
-                name = getattr(item.metadata, 'name', '').lower()
-                if self.search_query in name:
+                item_name = getattr(item.metadata, 'name', '').lower()
+                if self.search_query in item_name:
+                    logging.info(f"Search match in name: '{item_name}' contains '{self.search_query}'")
                     return True
                 
-                # Search in namespace
+                # SECONDARY SEARCH: Namespace matching (less important)
                 namespace = getattr(item.metadata, 'namespace', '').lower()
                 if self.search_query in namespace:
+                    logging.info(f"Search match in namespace: '{namespace}' contains '{self.search_query}' for item '{name}'")
                     return True
                 
-                # Search in labels
+                # TERTIARY SEARCH: Important labels only (very selective)
                 labels = getattr(item.metadata, 'labels', {}) or {}
-                for key, value in labels.items():
-                    if (self.search_query in key.lower() or 
-                        self.search_query in str(value).lower()):
-                        return True
+                important_labels = ['app', 'name', 'component', 'tier', 'version', 'k8s-app']
+                for label_key in important_labels:
+                    if label_key in labels:
+                        label_value = str(labels[label_key]).lower()
+                        if self.search_query in label_value:
+                            logging.info(f"Search match in important label '{label_key}': '{label_value}' contains '{self.search_query}' for item '{name}'")
+                            return True
             
-            # Search in spec fields (for certain resources)
-            if hasattr(item, 'spec') and item.spec:
-                # Convert spec to string and search
-                spec_str = str(item.spec).lower()
-                if self.search_query in spec_str:
-                    return True
+            # SKIP spec search for now as it's too broad and causes false positives
+            # This makes search results more predictable and user-friendly
             
-        except Exception:
+            # Log what we searched in
+            logging.debug(f"No search match for query '{self.search_query}' in item: name='{name}', namespace='{getattr(item.metadata, 'namespace', 'N/A') if hasattr(item, 'metadata') and item.metadata else 'N/A'}'")
+            
+        except Exception as e:
+            logging.debug(f"Exception in search matching: {e}")
             pass
         
         return False
@@ -287,9 +297,12 @@ class SearchResourceLoadWorker(EnhancedBaseWorker):
     def _process_search_items(self, items: List[Any]) -> List[Dict[str, Any]]:
         """Process search results using simplified processing for speed"""
         if not items:
+            logging.debug("No items to process for search")
             return []
         
+        logging.info(f"Processing {len(items)} search items")
         processed_items = []
+        skipped_count = 0
         
         for item in items:
             if self.is_cancelled():
@@ -300,49 +313,60 @@ class SearchResourceLoadWorker(EnhancedBaseWorker):
                 processed_item = self._process_single_search_item(item)
                 if processed_item:
                     processed_items.append(processed_item)
+                else:
+                    skipped_count += 1
+                    item_name = getattr(item.metadata, 'name', 'unknown') if hasattr(item, 'metadata') else 'unknown'
+                    logging.info(f"SKIPPED processing item: {item_name} - _process_single_search_item returned None")
             except Exception as e:
-                logging.debug(f"Error processing search item: {e}")
+                skipped_count += 1
+                item_name = getattr(item.metadata, 'name', 'unknown') if hasattr(item, 'metadata') else 'unknown'
+                logging.info(f"ERROR processing search item {item_name}: {e}")
                 continue
         
+        logging.info(f"Search processing complete: {len(processed_items)} processed, {skipped_count} skipped")
         return processed_items
     
     def _process_single_search_item(self, item: Any) -> Optional[Dict[str, Any]]:
-        """Process a single search result item (simplified for speed)"""
+        """Process a single search result item with comprehensive data"""
         try:
             # Extract basic fields efficiently
             metadata = item.metadata
+            if not metadata:
+                return None
+                
             name = metadata.name
+            if not name:
+                return None
+                
             namespace = getattr(metadata, 'namespace', None)
             creation_timestamp = metadata.creation_timestamp
             
-            # Calculate age using the unified method
+            # Calculate age efficiently
             age = self._format_age_fast(creation_timestamp)
             
-            # Build basic resource data
+            # Build resource data using the same structure as regular loader
             resource_data = {
                 'name': name,
-                'namespace': namespace or '',
+                'namespace': namespace,
                 'age': age,
-                'created': creation_timestamp.isoformat() if creation_timestamp else None,
-                'resource_type': self.config.resource_type,
-                'search_matched': True,  # Mark as search result
+                'created': creation_timestamp,
                 'labels': metadata.labels or {},
                 'annotations': metadata.annotations or {},
-                'uid': metadata.uid if hasattr(metadata, 'uid') else None,
+                'resource_type': self.config.resource_type,
+                'uid': metadata.uid,
+                'search_matched': True,  # Mark as search result
             }
             
-            # Add resource-specific fields efficiently
-            self._add_basic_resource_fields(resource_data, item)
+            # Add resource-specific fields
+            self._add_resource_specific_fields(resource_data, item)
             
-            # Add raw_data for UI components that need detailed information - CRITICAL for proper display
+            # Add raw_data for UI components that need detailed information
             try:
                 kube_client = get_kubernetes_client()
                 if hasattr(kube_client, 'v1') and hasattr(kube_client.v1, 'api_client'):
                     resource_data['raw_data'] = kube_client.v1.api_client.sanitize_for_serialization(item)
                 else:
-                    # No fallback - skip items that can't be serialized to avoid dummy data
-                    logging.warning(f"Skipping item {name} - unable to serialize raw data")
-                    return None
+                    resource_data['raw_data'] = {}
             except Exception as e:
                 logging.debug(f"Error serializing search raw data: {e}")
                 resource_data['raw_data'] = {}
@@ -353,87 +377,259 @@ class SearchResourceLoadWorker(EnhancedBaseWorker):
             logging.debug(f"Error processing single search item: {e}")
             return None
     
-    def _add_basic_resource_fields(self, processed_item: Dict[str, Any], item: Any):
-        """Add basic resource-specific fields for search results"""
+    def _format_age_fast(self, creation_timestamp) -> str:
+        """Format age quickly for search results"""
+        if not creation_timestamp:
+            return "Unknown"
+        
         try:
-            # Add status and basic info based on resource type
-            if self.config.resource_type == 'pods':
-                if hasattr(item, 'status') and item.status:
-                    processed_item['status'] = item.status.phase or 'Unknown'
-                    if item.status.container_statuses:
-                        ready_containers = sum(1 for cs in item.status.container_statuses if cs.ready)
-                        total_containers = len(item.status.container_statuses)
-                        processed_item['ready'] = f"{ready_containers}/{total_containers}"
-                        processed_item['containers_count'] = str(total_containers)
-                        
-                        # Calculate restart count
-                        restart_count = sum(cs.restart_count for cs in item.status.container_statuses if cs.restart_count)
-                        processed_item['restart_count'] = str(restart_count)
-                    else:
-                        processed_item['containers_count'] = "0"
-                        processed_item['restart_count'] = "0"
-                
-                # Add additional pod-specific fields that PodsPage expects
-                processed_item['controller_by'] = ""  # Default empty, could be enhanced
-                processed_item['qos_class'] = ""      # Default empty, could be enhanced
-                
-                # Add node name if available
-                if hasattr(item, 'spec') and item.spec and hasattr(item.spec, 'node_name'):
-                    processed_item['node_name'] = item.spec.node_name or ""
-                else:
-                    processed_item['node_name'] = ""
-                
-            elif self.config.resource_type in ['deployments', 'replicasets', 'daemonsets', 'statefulsets']:
-                if hasattr(item, 'status') and item.status:
-                    replicas = getattr(item.status, 'replicas', 0) or 0
-                    ready_replicas = getattr(item.status, 'ready_replicas', 0) or 0
-                    available_replicas = getattr(item.status, 'available_replicas', ready_replicas) or ready_replicas
-                    processed_item['ready'] = f"{available_replicas}/{replicas}"
-                    processed_item['status'] = 'Ready' if ready_replicas == replicas and replicas > 0 else 'Not Ready'
-                    
-                    # Add fields that DeploymentPage expects
-                    processed_item['pods_str'] = f"{available_replicas}/{replicas}"
-                    processed_item['replicas_str'] = str(replicas)
-                
-                # Add spec replicas if available
-                if hasattr(item, 'spec') and item.spec:
-                    spec_replicas = getattr(item.spec, 'replicas', 0) or 0
-                    processed_item['replicas_str'] = str(spec_replicas)
-                
-            elif self.config.resource_type == 'services':
-                if hasattr(item, 'spec') and item.spec:
-                    processed_item['type'] = item.spec.type or 'Unknown'
-                    processed_item['cluster_ip'] = item.spec.cluster_ip or 'None'
-                    processed_item['service_type'] = item.spec.type or 'Unknown'
-                    
-                    # Add ports information
-                    ports = []
-                    if hasattr(item.spec, 'ports') and item.spec.ports:
-                        for port in item.spec.ports:
-                            port_info = f"{port.port}"
-                            if hasattr(port, 'target_port') and port.target_port:
-                                port_info += f":{port.target_port}"
-                            if hasattr(port, 'protocol') and port.protocol:
-                                port_info += f"/{port.protocol}"
-                            ports.append(port_info)
-                    processed_item['port_text'] = ",".join(ports)
-                    
-                    # Add selector information
-                    selector_parts = []
-                    if hasattr(item.spec, 'selector') and item.spec.selector:
-                        for key, value in item.spec.selector.items():
-                            selector_parts.append(f"{key}={value}")
-                    processed_item['selector_text'] = ",".join(selector_parts)
-                    
-                    # Add external IP information
-                    processed_item['external_ip_text'] = ""  # Default empty, could be enhanced
+            import datetime
+            if hasattr(creation_timestamp, 'replace'):
+                created_time = creation_timestamp.replace(tzinfo=datetime.timezone.utc)
+            else:
+                created_time = datetime.datetime.fromisoformat(str(creation_timestamp).replace('Z', '+00:00'))
             
-            elif self.config.resource_type == 'nodes':
-                # Use the unified loader's node field processing for consistency
-                self.loader._add_node_fields(processed_item, item)
+            now = datetime.datetime.now(datetime.timezone.utc)
+            diff = now - created_time
             
+            if diff.days > 0:
+                return f"{diff.days}d"
+            elif diff.seconds > 3600:
+                return f"{diff.seconds // 3600}h"
+            else:
+                return f"{diff.seconds // 60}m"
+        except Exception:
+            return "Unknown"
+    
+    def _add_resource_specific_fields(self, processed_item: Dict[str, Any], item: Any):
+        """Add resource-specific fields for search results"""
+        resource_type = self.config.resource_type
+        
+        try:
+            if resource_type == 'pods':
+                self._add_pod_fields(processed_item, item)
+            elif resource_type == 'services':
+                self._add_service_fields(processed_item, item)
+            elif resource_type in ['deployments', 'replicasets', 'statefulsets', 'daemonsets']:
+                self._add_workload_fields(processed_item, item)
+            elif resource_type == 'nodes':
+                self._add_node_fields(processed_item, item)
+            elif resource_type == 'configmaps':
+                self._add_configmap_fields(processed_item, item)
+            elif resource_type == 'secrets':
+                self._add_secret_fields(processed_item, item)
+            # Add default status for other resource types
+            else:
+                processed_item['status'] = 'Active'
         except Exception as e:
-            logging.debug(f"Error adding basic resource fields: {e}")
+            logging.debug(f"Error adding resource-specific fields: {e}")
+            processed_item['status'] = 'Unknown'
+    
+    def _add_pod_fields(self, processed_item: Dict[str, Any], pod: Any):
+        """Add pod-specific fields"""
+        status = pod.status if hasattr(pod, 'status') else None
+        spec = pod.spec if hasattr(pod, 'spec') else None
+        
+        # Pod status with enhanced details
+        pod_status = 'Unknown'
+        if status:
+            pod_status = status.phase or 'Unknown'
+            
+            # Check for more specific container states
+            if hasattr(status, 'container_statuses') and status.container_statuses:
+                for cs in status.container_statuses:
+                    if hasattr(cs, 'state') and cs.state:
+                        if hasattr(cs.state, 'waiting') and cs.state.waiting:
+                            reason = cs.state.waiting.reason
+                            if reason in ("CrashLoopBackOff", "ImagePullBackOff", "ErrImagePull"):
+                                pod_status = reason
+                                break
+                        elif hasattr(cs.state, 'terminated') and cs.state.terminated:
+                            # For terminated containers, show more specific status
+                            exit_code = cs.state.terminated.exit_code
+                            reason = cs.state.terminated.reason
+                            if exit_code != 0:
+                                pod_status = f"Error ({reason})"
+                                break
+                            elif reason == "Completed":
+                                pod_status = f"Completed ({exit_code})"
+                                break
+        
+        # Container counts and restart count
+        containers_count = 0
+        restart_count = 0
+        ready_containers = 0
+        
+        if spec and hasattr(spec, 'containers') and spec.containers:
+            containers_count = len(spec.containers)
+        
+        if status and hasattr(status, 'container_statuses') and status.container_statuses:
+            ready_containers = sum(1 for cs in status.container_statuses if hasattr(cs, 'ready') and cs.ready)
+            restart_count = sum(getattr(cs, 'restart_count', 0) for cs in status.container_statuses)
+        
+        processed_item.update({
+            'status': pod_status,
+            'ready': f"{ready_containers}/{containers_count}",
+            'restarts': str(restart_count),
+            'containers': containers_count,
+            'node_name': getattr(spec, 'node_name', '') if spec else '',
+        })
+    
+    def _add_service_fields(self, processed_item: Dict[str, Any], service: Any):
+        """Add service-specific fields"""
+        spec = service.spec if hasattr(service, 'spec') else None
+        
+        if spec:
+            processed_item.update({
+                'type': getattr(spec, 'type', 'Unknown'),
+                'cluster_ip': getattr(spec, 'cluster_ip', 'None'),
+                'service_type': getattr(spec, 'type', 'Unknown'),
+                'status': 'Active'
+            })
+            
+            # Add ports
+            ports = []
+            if hasattr(spec, 'ports') and spec.ports:
+                for port in spec.ports:
+                    port_info = str(getattr(port, 'port', ''))
+                    if hasattr(port, 'target_port') and port.target_port:
+                        port_info += f":{port.target_port}"
+                    if hasattr(port, 'protocol') and port.protocol:
+                        port_info += f"/{port.protocol}"
+                    ports.append(port_info)
+            processed_item['port_text'] = ",".join(ports)
+        else:
+            processed_item['status'] = 'Unknown'
+    
+    def _add_workload_fields(self, processed_item: Dict[str, Any], workload: Any):
+        """Add workload-specific fields (deployments, replicasets, etc.)"""
+        status = workload.status if hasattr(workload, 'status') else None
+        spec = workload.spec if hasattr(workload, 'spec') else None
+        
+        if status:
+            replicas = getattr(status, 'replicas', 0) or 0
+            ready_replicas = getattr(status, 'ready_replicas', 0) or 0
+            available_replicas = getattr(status, 'available_replicas', ready_replicas) or ready_replicas
+            
+            processed_item.update({
+                'ready': f"{available_replicas}/{replicas}",
+                'status': 'Ready' if ready_replicas == replicas and replicas > 0 else 'Not Ready',
+                'replicas_str': str(replicas)
+            })
+        else:
+            processed_item['status'] = 'Unknown'
+            
+        # Add spec replicas if available
+        if spec and hasattr(spec, 'replicas'):
+            processed_item['replicas_str'] = str(getattr(spec, 'replicas', 0))
+    
+    def _add_node_fields(self, processed_item: Dict[str, Any], node: Any):
+        """Add node-specific fields"""
+        status = node.status if hasattr(node, 'status') else None
+        
+        # Node status
+        node_status = 'Unknown'
+        conditions_list = []
+        if status and hasattr(status, 'conditions') and status.conditions:
+            for condition in status.conditions:
+                if getattr(condition, 'type', '') == 'Ready':
+                    node_status = 'Ready' if getattr(condition, 'status', '') == 'True' else 'NotReady'
+                
+                # Format condition for display
+                condition_display = f"{condition.type}={condition.status}"
+                if condition.status != 'True' and hasattr(condition, 'reason') and condition.reason:
+                    condition_display += f" ({condition.reason})"
+                conditions_list.append(condition_display)
+        
+        # Get node roles
+        roles = []
+        if hasattr(node, 'metadata') and node.metadata and hasattr(node.metadata, 'labels') and node.metadata.labels:
+            for label_key in node.metadata.labels:
+                if 'node-role.kubernetes.io/' in label_key:
+                    role = label_key.replace('node-role.kubernetes.io/', '')
+                    if role:
+                        roles.append(role)
+        
+        roles_text = ",".join(roles) if roles else "<none>"
+        
+        # Get Kubernetes version
+        version = 'Unknown'
+        if status and hasattr(status, 'node_info') and status.node_info:
+            version = getattr(status.node_info, 'kubelet_version', 'Unknown')
+        
+        # Get capacity information for CPU, Memory, Disk
+        cpu_capacity = ''
+        memory_capacity = ''
+        disk_capacity = ''
+        if status and hasattr(status, 'capacity') and status.capacity:
+            cpu_capacity = status.capacity.get('cpu', '')
+            memory_raw = status.capacity.get('memory', '')
+            disk_raw = status.capacity.get('ephemeral-storage', '')
+            
+            # Format memory capacity for display
+            if memory_raw:
+                try:
+                    if memory_raw.endswith('Ki'):
+                        memory_mb = int(memory_raw[:-2]) / 1024
+                        memory_capacity = f"{memory_mb:.1f}GB"
+                    else:
+                        memory_capacity = memory_raw
+                except:
+                    memory_capacity = memory_raw
+            
+            # Format disk capacity for display
+            if disk_raw:
+                try:
+                    if disk_raw.endswith('Ki'):
+                        disk_gb = int(disk_raw[:-2]) / 1024 / 1024
+                        disk_capacity = f"{disk_gb:.1f}GB"
+                    else:
+                        disk_capacity = disk_raw
+                except:
+                    disk_capacity = disk_raw
+        
+        # Get taints count
+        taints_count = 0
+        if hasattr(node, 'spec') and node.spec and hasattr(node.spec, 'taints') and node.spec.taints:
+            taints_count = len(node.spec.taints)
+        
+        processed_item.update({
+            'status': node_status,
+            'roles': roles_text,
+            'version': version,
+            'conditions': ", ".join(conditions_list) if conditions_list else "Unknown",
+            'cpu_capacity': cpu_capacity,
+            'memory_capacity': memory_capacity,
+            'disk_capacity': disk_capacity,
+            'cpu_usage': 0.0,  # Default values for metrics (real metrics would require separate API calls)
+            'memory_usage': 0.0,
+            'disk_usage': 0.0,
+            'taints': str(taints_count),
+            'os': getattr(getattr(status, 'node_info', None), 'operating_system', 'Unknown') if status else 'Unknown',
+            'kernel': getattr(getattr(status, 'node_info', None), 'kernel_version', 'Unknown') if status else 'Unknown'
+        })
+    
+    def _add_configmap_fields(self, processed_item: Dict[str, Any], configmap: Any):
+        """Add configmap-specific fields"""
+        data = configmap.data if hasattr(configmap, 'data') else None
+        data_count = len(data) if data else 0
+        
+        processed_item.update({
+            'status': 'Active',
+            'data_count': str(data_count)
+        })
+    
+    def _add_secret_fields(self, processed_item: Dict[str, Any], secret: Any):
+        """Add secret-specific fields"""
+        data = secret.data if hasattr(secret, 'data') else None
+        data_count = len(data) if data else 0
+        secret_type = getattr(secret, 'type', 'Opaque') if hasattr(secret, 'type') else 'Opaque'
+        
+        processed_item.update({
+            'status': 'Active',
+            'type': secret_type,
+            'data_count': str(data_count)
+        })
     
     def _generate_cache_key(self) -> str:
         """Generate cache key for search results - FIXED to include cluster"""
@@ -778,7 +974,9 @@ class ResourceLoadWorker(EnhancedBaseWorker):
     def _get_field_selector(self) -> str:
         """Get optimized field selector for common resources"""
         if self.config.resource_type == 'pods':
-            return 'status.phase!=Succeeded,status.phase!=Failed'
+            # Show all pods including Succeeded and Failed for better visibility
+            # Only filter out pods that are truly not useful
+            return ''  # No filtering - show all pods regardless of status
         elif self.config.resource_type == 'nodes':
             return 'spec.unschedulable!=true'
         return ''

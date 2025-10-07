@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (QHeaderView, QPushButton, QLabel, QVBoxLayout,
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QColor
 
-from Base_Components.base_components import SortableTableWidgetItem
+from Base_Components.base_components import SortableTableWidgetItem, StatusLabel
 from Base_Components.base_resource_page import BaseResourcePage
 from UI.Styles import AppColors, AppStyles
 from kubernetes import client
@@ -17,29 +17,6 @@ from Utils.port_forward_manager import get_port_forward_manager, PortForwardConf
 from Utils.port_forward_dialog import PortForwardDialog, ActivePortForwardsDialog
 from UI.Icons import resource_path
 
-class StatusLabel(QWidget):
-    """Widget that displays a status with consistent styling and background handling."""
-    clicked = pyqtSignal()
-    
-    def __init__(self, status_text, color=None, parent=None):
-        super().__init__(parent)
-        
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        self.label = QLabel(status_text)
-        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        if color:
-            self.label.setStyleSheet(f"color: {QColor(color).name()}; background-color: transparent;")
-        
-        layout.addWidget(self.label)
-        self.setStyleSheet("background-color: transparent;")
-    
-    def mousePressEvent(self, event):
-        self.clicked.emit()
-        super().mousePressEvent(event)
 
 class ServicesPage(BaseResourcePage):
     """

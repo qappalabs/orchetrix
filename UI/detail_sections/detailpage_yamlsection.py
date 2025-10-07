@@ -853,35 +853,40 @@ class DetailPageYAMLSection(BaseDetailSection):
                 if kind in api_version_mapping:
                     converted_data['apiVersion'] = api_version_mapping[kind]
 
-            # For Pods specifically, clean up the spec to only include editable fields
+            # For Pods specifically, be less restrictive to allow more editing capabilities
             if converted_data.get('kind') == 'Pod' and 'spec' in converted_data:
                 spec = converted_data['spec']
 
-                # Keep only the fields that are allowed to be changed in Pods
-                editable_pod_spec = {}
+                # Remove fields that are typically immutable after creation
+                immutable_fields = [
+                    'nodeName',  # Assigned by scheduler
+                    'phase',  # Status field
+                    'podIP',  # Runtime assigned
+                    'podIPs',  # Runtime assigned
+                    'hostIP',  # Runtime assigned
+                    'startTime',  # Runtime assigned
+                    'qosClass',  # Computed field
+                ]
+                
+                for field in immutable_fields:
+                    if field in spec:
+                        del spec[field]
 
-                # Always keep containers (for image updates)
-                if 'containers' in spec:
-                    editable_pod_spec['containers'] = spec['containers']
-
-                # Keep initContainers if present
-                if 'initContainers' in spec:
-                    editable_pod_spec['initContainers'] = spec['initContainers']
-
-                # Keep activeDeadlineSeconds if present
-                if 'activeDeadlineSeconds' in spec:
-                    editable_pod_spec['activeDeadlineSeconds'] = spec['activeDeadlineSeconds']
-
-                # Keep terminationGracePeriodSeconds if present
-                if 'terminationGracePeriodSeconds' in spec:
-                    editable_pod_spec['terminationGracePeriodSeconds'] = spec['terminationGracePeriodSeconds']
-
-                # Keep tolerations if present (only additions allowed)
-                if 'tolerations' in spec:
-                    editable_pod_spec['tolerations'] = spec['tolerations']
-
-                # Replace the spec with only editable fields
-                converted_data['spec'] = editable_pod_spec
+                # Keep most fields that can be edited, including:
+                # - containers (image updates, resource limits, etc.)
+                # - initContainers 
+                # - volumes and volumeMounts
+                # - serviceAccount
+                # - securityContext
+                # - tolerations
+                # - nodeSelector
+                # - affinity
+                # - restartPolicy
+                # - terminationGracePeriodSeconds
+                # - activeDeadlineSeconds
+                # - dnsPolicy
+                # - dnsConfig
+                # - imagePullSecrets
 
         return converted_data
 
@@ -959,11 +964,19 @@ class DetailPageYAMLSection(BaseDetailSection):
                     self.handle_error("Invalid YAML: Empty or null document")
                     return
 
-                # Step 2: Validate Kubernetes schema
+                # Step 2: Validate Kubernetes schema (with better error messages)
                 if hasattr(self.kubernetes_client, 'validate_kubernetes_schema'):
                     schema_valid, schema_error = self.kubernetes_client.validate_kubernetes_schema(yaml_data)
                     if not schema_valid:
-                        self.handle_error(f"Schema validation failed: {schema_error}")
+                        # Provide more helpful error messages
+                        if "container name" in schema_error.lower():
+                            error_msg = f"Container Configuration Error: {schema_error}\n\nTip: Ensure all containers have unique names and required fields (name, image)."
+                        elif "missing required field" in schema_error.lower():
+                            error_msg = f"Required Field Missing: {schema_error}\n\nTip: Kubernetes resources require 'apiVersion', 'kind', and 'metadata' fields."
+                        else:
+                            error_msg = f"Validation Error: {schema_error}"
+                        
+                        self.handle_error(error_msg)
                         return
                 else:
                     logging.warning("Schema validation not available, proceeding without validation")

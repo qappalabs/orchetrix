@@ -34,6 +34,37 @@ class SortableTableWidgetItem(QTableWidgetItem):
             return self.value < other.value
         return super().__lt__(other)
 
+class StatusLabel(QWidget):
+    """Widget that displays a status with consistent styling and background handling."""
+    clicked = pyqtSignal()
+    
+    def __init__(self, status_text, color=None, parent=None):
+        super().__init__(parent)
+        
+        # Create layout
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # Create label
+        self.label = QLabel(status_text)
+        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # Set color if provided, otherwise use default color
+        if color:
+            self.label.setStyleSheet(f"color: {QColor(color).name()}; background-color: transparent;")
+        
+        # Add label to layout
+        layout.addWidget(self.label)
+        
+        # Make sure this widget has a transparent background
+        self.setStyleSheet("background-color: transparent;")
+    
+    def mousePressEvent(self, event):
+        """Emit clicked signal when widget is clicked"""
+        self.clicked.emit()
+        super().mousePressEvent(event)
+
 class CustomHeader(QHeaderView):
     """
     Custom table header that enables sorting only for specific columns

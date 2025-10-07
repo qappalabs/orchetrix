@@ -2111,7 +2111,7 @@ class AppStyles:
             """
     
     # Keep backward compatibility
-    BASE_CHECKBOX_STYLE = get_base_checkbox_style()
+    BASE_CHECKBOX_STYLE = ""  # Will be set after class definition
 
     EMPTY_STATE_STYLE = f"""
         background-color: {AppColors.CARD_BG};
@@ -2298,3 +2298,6 @@ def get_component_styles(component_name):
 def get_dropdown_style_with_icon():
     """Generate dropdown style with properly resolved icon path"""
     return AppStyles.get_dropdown_style_with_icon()
+
+# Set the BASE_CHECKBOX_STYLE after class definition
+AppStyles.BASE_CHECKBOX_STYLE = AppStyles.get_base_checkbox_style()

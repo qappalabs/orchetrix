@@ -1278,12 +1278,27 @@ class BaseResourcePage(BaseTablePage):
         # Clear and setup the message container
         self._clear_message_container()
         
-        # Create centered empty message with app theme styling
-        empty_title = QLabel("No resources found")
+        # Check if we're in search mode to show appropriate message
+        is_searching = getattr(self, '_is_searching', False)
+        current_search_query = getattr(self, '_current_search_query', None)
+        search_bar_text = self.search_bar.text().strip() if hasattr(self, 'search_bar') else ""
+        
+        # Use either the stored search query or current search bar text
+        active_search_query = current_search_query or search_bar_text
+        
+        if is_searching and active_search_query:
+            # Show search-specific empty message
+            empty_title = QLabel(f"No results found for '{active_search_query}'")
+            empty_subtitle = QLabel("Try a different search term or clear the search to see all resources")
+        else:
+            # Show general empty message
+            empty_title = QLabel("No resources found")
+            empty_subtitle = QLabel("Connect to a cluster or check your filters")
+        
+        # Apply styling to both title and subtitle
         empty_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         empty_title.setStyleSheet("color: #ffffff; font-size: 20px; font-weight: bold; background-color: transparent; margin: 8px;")
         
-        empty_subtitle = QLabel("Connect to a cluster or check your filters")
         empty_subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)  
         empty_subtitle.setStyleSheet("color: #9ca3af; font-size: 14px; background-color: transparent; margin: 4px;")
         
