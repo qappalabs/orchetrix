@@ -3,7 +3,6 @@ import os
 import traceback
 import logging
 import time
-import webbrowser
 import requests
 import json
 import gc

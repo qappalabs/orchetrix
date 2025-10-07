@@ -12,7 +12,7 @@ from PyQt6.QtCore import Qt, QTimer, QRect, QRectF, pyqtSignal, QSize
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QLinearGradient, QPainterPath, QBrush, QCursor
 
 from UI.Styles import AppStyles, AppColors, AppConstants
-from Base_Components.base_components import SortableTableWidgetItem
+from Base_Components.base_components import SortableTableWidgetItem, StatusLabel
 from Base_Components.base_resource_page import BaseResourcePage
 from Utils.cluster_connector import get_cluster_connector
 from UI.Icons import resource_path
@@ -39,32 +39,6 @@ class CustomHeaderStyle(QProxyStyle):
                 return
         super().drawControl(element, option, painter, widget)
 
-#------------------------------------------------------------------
-# StatusLabel - Same implementation as in PodsPage
-#------------------------------------------------------------------
-class StatusLabel(QWidget):
-    """Widget that displays a status with consistent styling and background handling."""
-    clicked = pyqtSignal()
-    
-    def __init__(self, status_text, color=None, parent=None):
-        super().__init__(parent)
-        
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        self.label = QLabel(status_text)
-        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        if color:
-            self.label.setStyleSheet(f"color: {QColor(color).name()}; background-color: transparent;")
-        
-        layout.addWidget(self.label)
-        self.setStyleSheet("background-color: transparent;")
-    
-    def mousePressEvent(self, event):
-        self.clicked.emit()
-        super().mousePressEvent(event)
 
 #------------------------------------------------------------------
 # Optimized GraphWidget
