@@ -430,7 +430,7 @@ class SearchResourceLoadWorker(EnhancedBaseWorker):
         status = pod.status if hasattr(pod, 'status') else None
         spec = pod.spec if hasattr(pod, 'spec') else None
         
-        # Pod status
+        # Pod status with enhanced details
         pod_status = 'Unknown'
         if status:
             pod_status = status.phase or 'Unknown'
@@ -445,8 +445,14 @@ class SearchResourceLoadWorker(EnhancedBaseWorker):
                                 pod_status = reason
                                 break
                         elif hasattr(cs.state, 'terminated') and cs.state.terminated:
-                            if cs.state.terminated.exit_code != 0:
-                                pod_status = "Error"
+                            # For terminated containers, show more specific status
+                            exit_code = cs.state.terminated.exit_code
+                            reason = cs.state.terminated.reason
+                            if exit_code != 0:
+                                pod_status = f"Error ({reason})"
+                                break
+                            elif reason == "Completed":
+                                pod_status = f"Completed ({exit_code})"
                                 break
         
         # Container counts and restart count
@@ -968,7 +974,9 @@ class ResourceLoadWorker(EnhancedBaseWorker):
     def _get_field_selector(self) -> str:
         """Get optimized field selector for common resources"""
         if self.config.resource_type == 'pods':
-            return 'status.phase!=Succeeded,status.phase!=Failed'
+            # Show all pods including Succeeded and Failed for better visibility
+            # Only filter out pods that are truly not useful
+            return ''  # No filtering - show all pods regardless of status
         elif self.config.resource_type == 'nodes':
             return 'spec.unschedulable!=true'
         return ''

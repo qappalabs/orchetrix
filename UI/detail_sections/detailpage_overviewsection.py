@@ -299,23 +299,49 @@ class DetailPageOverviewSection(BaseDetailSection):
 
         resource_type_lower = self.resource_type.lower()
 
-        # Pod status
+        # Pod status with enhanced container state checking
         if resource_type_lower in ["pod", "pods"]:
             phase = status.get("phase", "Unknown")
             status_value = phase
+            
+            # Check container statuses for more detailed information
+            container_statuses = status.get("containerStatuses", [])
+            if container_statuses:
+                for cs in container_statuses:
+                    if cs.get("state"):
+                        state = cs["state"]
+                        if "waiting" in state:
+                            waiting = state["waiting"]
+                            reason = waiting.get("reason", "")
+                            if reason in ("CrashLoopBackOff", "ImagePullBackOff", "ErrImagePull"):
+                                status_value = reason
+                                break
+                        elif "terminated" in state:
+                            terminated = state["terminated"]
+                            exit_code = terminated.get("exitCode", 0)
+                            reason = terminated.get("reason", "")
+                            if exit_code != 0:
+                                status_value = f"Error ({reason})"
+                                break
+                            elif reason == "Completed":
+                                status_value = f"Completed ({exit_code})"
+                                break
 
-            if phase == "Running":
+            if status_value in ["Running"]:
                 status_text = "Pod is running"
                 status_type = "success"
-            elif phase == "Pending":
+            elif status_value in ["Pending"]:
                 status_text = "Pod is pending"
                 status_type = "warning"
-            elif phase == "Failed":
+            elif status_value in ["Failed"] or "Error" in status_value:
                 status_text = "Pod has failed"
                 status_type = "error"
-            elif phase == "Succeeded":
+            elif status_value in ["Succeeded"] or "Completed" in status_value:
                 status_text = "Pod completed successfully"
                 status_type = "success"
+            elif status_value in ["CrashLoopBackOff", "ImagePullBackOff", "ErrImagePull"]:
+                status_text = f"Pod error: {status_value}"
+                status_type = "error"
 
         # NetworkPolicy status
         elif resource_type_lower in ["networkpolicy", "networkpolicies", "netpol"]:

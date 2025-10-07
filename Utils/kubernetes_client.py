@@ -477,6 +477,87 @@ class KubernetesClient(QObject):
                     namespace=namespace,
                     body=resource_body
                 )
+            elif resource_type.lower() in ["job", "jobs"]:
+                result = self.batch_v1.patch_namespaced_job(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=resource_body
+                )
+            elif resource_type.lower() in ["cronjob", "cronjobs"]:
+                result = self.batch_v1.patch_namespaced_cron_job(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=resource_body
+                )
+            elif resource_type.lower() in ["persistentvolumeclaim", "persistentvolumeclaims", "pvc"]:
+                result = self.v1.patch_namespaced_persistent_volume_claim(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=resource_body
+                )
+            elif resource_type.lower() in ["persistentvolume", "persistentvolumes", "pv"]:
+                result = self.v1.patch_persistent_volume(
+                    name=resource_name,
+                    body=resource_body
+                )
+            elif resource_type.lower() in ["endpoints"]:
+                result = self.v1.patch_namespaced_endpoints(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=resource_body
+                )
+            elif resource_type.lower() in ["limitrange", "limitranges"]:
+                result = self.v1.patch_namespaced_limit_range(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=resource_body
+                )
+            elif resource_type.lower() in ["resourcequota", "resourcequotas"]:
+                result = self.v1.patch_namespaced_resource_quota(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=resource_body
+                )
+            elif resource_type.lower() in ["replicationcontroller", "replicationcontrollers", "rc"]:
+                result = self.v1.patch_namespaced_replication_controller(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=resource_body
+                )
+            elif resource_type.lower() in ["role", "roles"]:
+                result = self.rbac_v1.patch_namespaced_role(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=resource_body
+                )
+            elif resource_type.lower() in ["rolebinding", "rolebindings"]:
+                result = self.rbac_v1.patch_namespaced_role_binding(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=resource_body
+                )
+            elif resource_type.lower() in ["clusterrole", "clusterroles"]:
+                result = self.rbac_v1.patch_cluster_role(
+                    name=resource_name,
+                    body=resource_body
+                )
+            elif resource_type.lower() in ["clusterrolebinding", "clusterrolebindings"]:
+                result = self.rbac_v1.patch_cluster_role_binding(
+                    name=resource_name,
+                    body=resource_body
+                )
+            elif resource_type.lower() in ["horizontalpodautoscaler", "horizontalpodautoscalers", "hpa"]:
+                result = self.autoscaling_v2.patch_namespaced_horizontal_pod_autoscaler(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=resource_body
+                )
+            elif resource_type.lower() in ["poddisruptionbudget", "poddisruptionbudgets", "pdb"]:
+                result = self.policy_v1.patch_namespaced_pod_disruption_budget(
+                    name=resource_name,
+                    namespace=namespace,
+                    body=resource_body
+                )
             else:
                 return {
                     "success": False,
@@ -513,10 +594,28 @@ class KubernetesClient(QObject):
                 import json
                 body = json.loads(error.body)
                 if 'message' in body:
-                    return body['message']
+                    message = body['message']
+                    
+                    # Make common errors more user-friendly
+                    if "forbidden" in message.lower():
+                        return f"Permission denied: {message}\n\nTip: Check if you have the necessary RBAC permissions to edit this resource."
+                    elif "invalid" in message.lower() and "immutable" in message.lower():
+                        return f"Field cannot be changed: {message}\n\nTip: Some fields cannot be modified after resource creation."
+                    elif "conflict" in message.lower():
+                        return f"Resource conflict: {message}\n\nTip: Another process may have modified this resource. Try refreshing and editing again."
+                    elif "not found" in message.lower():
+                        return f"Resource not found: {message}\n\nTip: The resource may have been deleted by another process."
+                    else:
+                        return message
             
-            # Handle standard exceptions
-            return str(error)
+            # Handle standard exceptions with better context
+            error_str = str(error)
+            if "connection" in error_str.lower():
+                return f"Connection error: {error_str}\n\nTip: Check your cluster connection and try again."
+            elif "timeout" in error_str.lower():
+                return f"Request timeout: {error_str}\n\nTip: The cluster may be slow to respond. Try again in a moment."
+            else:
+                return error_str
             
         except Exception:
             # Fallback to string representation
@@ -538,11 +637,12 @@ class KubernetesClient(QObject):
             if 'metadata' not in resource_data:
                 return False, "Missing required field: metadata"
             
+            # Validate metadata has name
             metadata = resource_data.get('metadata', {})
             if not isinstance(metadata, dict):
                 return False, "metadata field must be a dictionary"
-            
-            if 'name' not in metadata:
+                
+            if not metadata.get('name'):
                 return False, "Missing required field: metadata.name"
             
             # Check for invalid field values
@@ -550,129 +650,28 @@ class KubernetesClient(QObject):
             if not isinstance(name, str) or not name.strip():
                 return False, "metadata.name must be a non-empty string"
             
-            # Validate Kubernetes DNS-1123 name format
-            if not self._is_valid_kubernetes_name(name):
-                return False, f"metadata.name '{name}' is not a valid Kubernetes name (must be lowercase alphanumeric with hyphens)"
-            
-            # Resource-specific validation
-            kind = resource_data.get('kind', '').lower()
-            spec = resource_data.get('spec', {})
-            
-            if kind in ['deployment', 'pod', 'daemonset', 'statefulset', 'replicaset']:
-                # Validate container ports for duplicate names
-                validation_result = self._validate_container_ports(spec)
-                if not validation_result[0]:
-                    return validation_result
+            # For Pod validation, be more lenient with container validation
+            if resource_data.get('kind') == 'Pod':
+                spec = resource_data.get('spec', {})
+                containers = spec.get('containers', [])
                 
-                # Validate container names for duplicates
-                validation_result = self._validate_container_names(spec)
-                if not validation_result[0]:
-                    return validation_result
+                if containers:
+                    container_names = [c.get('name', '') for c in containers]
+                    # Only check for empty names, allow duplicate names (some use cases need this)
+                    if any(not name for name in container_names):
+                        return False, "All containers must have names"
+                
+                # Check for basic container structure
+                for container in containers:
+                    if not isinstance(container, dict):
+                        return False, "Each container must be a dictionary"
+                    if not container.get('image'):
+                        return False, "All containers must have an image specified"
             
-            return True, "Schema validation passed"
+            return True, "Valid Kubernetes resource"
             
         except Exception as e:
             return False, f"Schema validation error: {str(e)}"
-    
-    def _is_valid_kubernetes_name(self, name: str) -> bool:
-        """Validate Kubernetes DNS-1123 name format"""
-        if len(name) > 253:
-            return False
-        if not name.replace('-', '').replace('.', '').isalnum():
-            return False
-        if name.startswith('-') or name.endswith('-'):
-            return False
-        return name.islower()
-    
-    def _validate_container_ports(self, spec: dict) -> tuple[bool, str]:
-        """Validate container ports for duplicates"""
-        try:
-            containers = []
-            
-            # Get containers from different locations based on resource type
-            if 'template' in spec and 'spec' in spec['template']:
-                # Deployment, StatefulSet, DaemonSet
-                template_spec = spec['template']['spec']
-                containers = template_spec.get('containers', [])
-                containers.extend(template_spec.get('initContainers', []))
-            elif 'containers' in spec:
-                # Pod
-                containers = spec.get('containers', [])
-                containers.extend(spec.get('initContainers', []))
-            
-            for container in containers:
-                if not isinstance(container, dict):
-                    continue
-                    
-                ports = container.get('ports', [])
-                if not isinstance(ports, list):
-                    continue
-                    
-                # Check for duplicate port names within this container
-                port_names = []
-                port_numbers = []
-                
-                for port in ports:
-                    if not isinstance(port, dict):
-                        continue
-                        
-                    # Check for duplicate port names
-                    if 'name' in port:
-                        port_name = port['name']
-                        if port_name in port_names:
-                            return False, f"Duplicate port name '{port_name}' in container '{container.get('name', 'unknown')}'"
-                        port_names.append(port_name)
-                    
-                    # Check for duplicate port numbers with same protocol
-                    if 'containerPort' in port:
-                        port_number = port['containerPort']
-                        protocol = port.get('protocol', 'TCP')
-                        port_key = f"{port_number}/{protocol}"
-                        if port_key in port_numbers:
-                            return False, f"Duplicate port {port_number}/{protocol} in container '{container.get('name', 'unknown')}'"
-                        port_numbers.append(port_key)
-            
-            return True, "Container ports validation passed"
-            
-        except Exception as e:
-            return False, f"Container ports validation error: {str(e)}"
-    
-    def _validate_container_names(self, spec: dict) -> tuple[bool, str]:
-        """Validate container names for duplicates"""
-        try:
-            all_container_names = []
-            
-            # Get containers from different locations
-            if 'template' in spec and 'spec' in spec['template']:
-                template_spec = spec['template']['spec']
-                containers = template_spec.get('containers', [])
-                init_containers = template_spec.get('initContainers', [])
-            elif 'containers' in spec:
-                containers = spec.get('containers', [])
-                init_containers = spec.get('initContainers', [])
-            else:
-                return True, "No containers to validate"
-            
-            # Check regular containers
-            for container in containers:
-                if isinstance(container, dict) and 'name' in container:
-                    name = container['name']
-                    if name in all_container_names:
-                        return False, f"Duplicate container name '{name}'"
-                    all_container_names.append(name)
-            
-            # Check init containers
-            for container in init_containers:
-                if isinstance(container, dict) and 'name' in container:
-                    name = container['name']
-                    if name in all_container_names:
-                        return False, f"Duplicate container name '{name}' (conflicts with regular or init container)"
-                    all_container_names.append(name)
-            
-            return True, "Container names validation passed"
-            
-        except Exception as e:
-            return False, f"Container names validation error: {str(e)}"
 
     def get_resource_detail_async(self, resource_type: str, resource_name: str, namespace: str = None):
         """Get resource detail asynchronously - backward compatibility"""
