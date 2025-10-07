@@ -66,6 +66,14 @@ class ComparePage(QWidget):
 
         # Simple loader state
         self._namespaces_loaded = False
+        
+        # Edit state management
+        self._left_edit_mode = False
+        self._right_edit_mode = False
+        self._left_original_yaml = None
+        self._right_original_yaml = None
+        self._left_resource_info = None  # (namespace, resource_type, name)
+        self._right_resource_info = None
 
         self._build_ui()
 
@@ -267,57 +275,172 @@ class ComparePage(QWidget):
         compare_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.compare_area.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
-        # Header row with resource labels
+        # Header row with resource labels and edit buttons
         header_row = QHBoxLayout()
+        
+        # Left side: label + edit buttons
+        left_container = QHBoxLayout()
         self.left_label = QLabel("")
+        self.left_edit_btn = QPushButton("Edit")
+        self.left_deploy_btn = QPushButton("Deploy")
+        self.left_cancel_btn = QPushButton("Cancel")
+        
+        # Style buttons like DetailPageYAMLSection
+        self.left_edit_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2d2d2d;
+                color: #ffffff;
+                border: 1px solid #3d3d3d;
+                border-radius: 4px;
+                padding: 5px 15px;
+            }
+            QPushButton:hover {
+                background-color: #3d3d3d;
+            }
+        """)
+        self.left_deploy_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: #ffffff;
+                border: none;
+                border-radius: 4px;
+                padding: 5px 15px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
+        self.left_cancel_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f44336;
+                color: #ffffff;
+                border: none;
+                border-radius: 4px;
+                padding: 5px 15px;
+            }
+            QPushButton:hover {
+                background-color: #d32f2f;
+            }
+        """)
+        
+        # Initially hide deploy/cancel buttons
+        self.left_deploy_btn.hide()
+        self.left_cancel_btn.hide()
+        
+        left_container.addWidget(self.left_label)
+        left_container.addWidget(self.left_edit_btn)
+        left_container.addWidget(self.left_deploy_btn)
+        left_container.addWidget(self.left_cancel_btn)
+        left_container.addStretch()
+        
+        # Right side: label + edit buttons
+        right_container = QHBoxLayout()
         self.right_label = QLabel("")
-        header_row.addWidget(self.left_label)
+        self.right_edit_btn = QPushButton("Edit")
+        self.right_deploy_btn = QPushButton("Deploy")
+        self.right_cancel_btn = QPushButton("Cancel")
+        
+        # Style buttons like DetailPageYAMLSection
+        self.right_edit_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2d2d2d;
+                color: #ffffff;
+                border: 1px solid #3d3d3d;
+                border-radius: 4px;
+                padding: 5px 15px;
+            }
+            QPushButton:hover {
+                background-color: #3d3d3d;
+            }
+        """)
+        self.right_deploy_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: #ffffff;
+                border: none;
+                border-radius: 4px;
+                padding: 5px 15px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
+        self.right_cancel_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f44336;
+                color: #ffffff;
+                border: none;
+                border-radius: 4px;
+                padding: 5px 15px;
+            }
+            QPushButton:hover {
+                background-color: #d32f2f;
+            }
+        """)
+        
+        # Initially hide deploy/cancel buttons
+        self.right_deploy_btn.hide()
+        self.right_cancel_btn.hide()
+        
+        right_container.addStretch()
+        right_container.addWidget(self.right_label)
+        right_container.addWidget(self.right_edit_btn)
+        right_container.addWidget(self.right_deploy_btn)
+        right_container.addWidget(self.right_cancel_btn)
+        
+        header_row.addLayout(left_container)
         header_row.addStretch()
-        header_row.addWidget(self.right_label)
+        header_row.addLayout(right_container)
         header_row.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         compare_layout.addLayout(header_row)
         
-        # Search widgets row (will be populated by _setup_search_widgets)
-        self.search_row = QHBoxLayout()
-        compare_layout.addLayout(self.search_row)
-
-        # YAML comparison editors inside a splitter with synced scrolling
+        # YAML comparison editors inside a splitter with individual search widgets
         splitter = QSplitter(Qt.Orientation.Horizontal)
+        
+        # Create left editor container with search widget
+        left_container = QWidget()
+        left_layout = QVBoxLayout(left_container)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(0)
+        
         self.left_box = YamlEditorWithLineNumbers()
         self.left_box.setFont(QFont(self.font_family, self.font_size))
+        self.left_box.setReadOnly(True)
+        self.left_box.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.left_box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.left_box.setMinimumHeight(200)
+        self.left_box.setStyleSheet(AppStyles.DETAIL_PAGE_YAML_TEXT_STYLE)
+        
+        left_layout.addWidget(self.left_box)
+        
+        # Create right editor container with search widget
+        right_container = QWidget()
+        right_layout = QVBoxLayout(right_container)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(0)
+        
         self.right_box = YamlEditorWithLineNumbers()
         self.right_box.setFont(QFont(self.font_family, self.font_size))
-        self.left_box.setReadOnly(True)
         self.right_box.setReadOnly(True)
-        
-        # Set focus policy to ensure editors can receive focus
-        self.left_box.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.right_box.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.right_box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.right_box.setMinimumHeight(200)
+        self.right_box.setStyleSheet(AppStyles.DETAIL_PAGE_YAML_TEXT_STYLE)
+        
+        right_layout.addWidget(self.right_box)
         
         # Add search functionality with keyboard shortcuts first
         self._setup_search_shortcuts()
         
         # Create search widgets for both editors
-        self._setup_search_widgets()
-
-        # Set size policies to expand and fill available space
-        self.left_box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.right_box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-
-        # Set modest minimum height to avoid double-scrollbar issues
-        self.left_box.setMinimumHeight(200)
-        self.right_box.setMinimumHeight(200)
+        self._setup_search_widgets(left_layout, right_layout)
 
         # Create highlighters for granular comparison
         self.left_highlighter = YAMLCompareHighlighter(self.left_box.document())
         self.right_highlighter = YAMLCompareHighlighter(self.right_box.document())
 
-        # Apply styling to make the text areas look better
-        self.left_box.setStyleSheet(AppStyles.DETAIL_PAGE_YAML_TEXT_STYLE)
-        self.right_box.setStyleSheet(AppStyles.DETAIL_PAGE_YAML_TEXT_STYLE)
-
-        splitter.addWidget(self.left_box)
-        splitter.addWidget(self.right_box)
+        splitter.addWidget(left_container)
+        splitter.addWidget(right_container)
         splitter.setChildrenCollapsible(False)
         splitter.setSizes([1, 1])
         compare_layout.addWidget(splitter, 1)
@@ -333,6 +456,14 @@ class ComparePage(QWidget):
         self.resource2_combo.currentIndexChanged.connect(self._update_compare_button_state)
         self.compare_btn.clicked.connect(self._on_compare_clicked)
         
+        # Connect edit button signals
+        self.left_edit_btn.clicked.connect(self._toggle_left_edit_mode)
+        self.left_deploy_btn.clicked.connect(self._deploy_left_changes)
+        self.left_cancel_btn.clicked.connect(self._cancel_left_edit)
+        self.right_edit_btn.clicked.connect(self._toggle_right_edit_mode)
+        self.right_deploy_btn.clicked.connect(self._deploy_right_changes)
+        self.right_cancel_btn.clicked.connect(self._cancel_right_edit)
+        
         # Add click handlers to set focus on editors
         def create_focus_handler(editor):
             original_mouse_press = editor.mousePressEvent
@@ -344,14 +475,14 @@ class ComparePage(QWidget):
         self.left_box.mousePressEvent = create_focus_handler(self.left_box)
         self.right_box.mousePressEvent = create_focus_handler(self.right_box)
 
-    def _setup_search_widgets(self):
-        """Create search widgets for both editors"""
+    def _setup_search_widgets(self, left_layout, right_layout):
+        """Create search widgets for both editors positioned above each editor"""
         from UI.detail_sections.detailpage_yamlsection import SearchWidget
         
         # Create and configure search widgets
-        for side, editor, close_handler in [
-            ('left', self.left_box, self._on_left_search_closed),
-            ('right', self.right_box, self._on_right_search_closed)
+        for side, editor, layout, close_handler in [
+            ('left', self.left_box, left_layout, self._on_left_search_closed),
+            ('right', self.right_box, right_layout, self._on_right_search_closed)
         ]:
             search_widget = SearchWidget(self.compare_area, editor=editor)
             search_widget.search_next.connect(editor.search_next)
@@ -362,8 +493,8 @@ class ComparePage(QWidget):
             # Store widget reference
             setattr(self, f'{side}_search_widget', search_widget)
             
-            # Add to layout and override editor's search widget
-            self.search_row.addWidget(search_widget)
+            # Insert search widget at position 0 (above editor) following DetailPageYAMLSection pattern
+            layout.insertWidget(0, search_widget)
             editor.search_widget = search_widget
             
             # Disable built-in search shortcuts to avoid conflicts
@@ -382,10 +513,14 @@ class ComparePage(QWidget):
         self.right_box.setFocus()
 
     def _setup_search_shortcuts(self):
-        """Setup Ctrl+F shortcuts for both YAML editors"""
-        # Create shortcuts for the entire ComparePage
+        """Setup Ctrl+F and Ctrl+Shift+F shortcuts for both YAML editors"""
+        # Ctrl+F: Open/refocus search on focused editor
         self.search_shortcut = QShortcut(QKeySequence.StandardKey.Find, self)
         self.search_shortcut.activated.connect(self._on_search_requested)
+        
+        # Ctrl+Shift+F: Switch to other editor's search
+        self.switch_search_shortcut = QShortcut(QKeySequence("Ctrl+Shift+F"), self)
+        self.switch_search_shortcut.activated.connect(self._on_switch_search_requested)
         
         # Also create shortcuts directly on the editors as fallback
         self.left_search_shortcut = QShortcut(QKeySequence.StandardKey.Find, self.left_box)
@@ -395,34 +530,71 @@ class ComparePage(QWidget):
         self.right_search_shortcut.activated.connect(self._show_right_search)
         
     def _on_search_requested(self):
-        """Handle Ctrl+F - determine which editor has focus and show its search"""
-        # Check which editor has focus
+        """Handle Ctrl+F - open/refocus search on focused editor (traditional behavior)"""
         focused_widget = self.focusWidget()
         
-        if focused_widget == self.left_box or (focused_widget and self.left_box.isAncestorOf(focused_widget)):
-            # Left editor has focus
+        # Check which search is already visible
+        left_visible = hasattr(self, 'left_search_widget') and self.left_search_widget.isVisible()
+        right_visible = hasattr(self, 'right_search_widget') and self.right_search_widget.isVisible()
+        
+        # Check if search input has focus (search widget is ancestor of focused widget)
+        left_search_focused = left_visible and self.left_search_widget.isAncestorOf(focused_widget)
+        right_search_focused = right_visible and self.right_search_widget.isAncestorOf(focused_widget)
+        
+        # Traditional behavior: refocus if search input already focused
+        if left_search_focused:
+            # Left search input has focus - just refocus it
+            self.left_search_widget.focus_search()
+        elif right_search_focused:
+            # Right search input has focus - just refocus it  
+            self.right_search_widget.focus_search()
+        elif focused_widget == self.left_box or (focused_widget and self.left_box.isAncestorOf(focused_widget)):
+            # Left editor has focus - show left search
             self._show_left_search()
         elif focused_widget == self.right_box or (focused_widget and self.right_box.isAncestorOf(focused_widget)):
-            # Right editor has focus  
+            # Right editor has focus - show right search
             self._show_right_search()
         else:
-            # No specific editor focused, default to left
+            # Default to left editor
             self.left_box.setFocus()
             self._show_left_search()
     
+    def _on_switch_search_requested(self):
+        """Handle Ctrl+Shift+F - switch to other editor's search"""
+        left_visible = hasattr(self, 'left_search_widget') and self.left_search_widget.isVisible()
+        right_visible = hasattr(self, 'right_search_widget') and self.right_search_widget.isVisible()
+        
+        if left_visible:
+            # Left search is open, switch to right
+            self._show_right_search()
+        elif right_visible:
+            # Right search is open, switch to left
+            self._show_left_search()
+        else:
+            # No search open, determine by focus and switch to other
+            focused_widget = self.focusWidget()
+            if focused_widget == self.left_box or (focused_widget and self.left_box.isAncestorOf(focused_widget)):
+                self._show_right_search()
+            else:
+                self._show_left_search()
+    
     def _show_left_search(self):
         """Show search widget for left editor"""
-        if hasattr(self, 'right_search_widget'):
-            self.right_search_widget.hide()  # Hide right search if visible
         if hasattr(self, 'left_search_widget'):
+            # Hide right search if visible
+            if hasattr(self, 'right_search_widget') and self.right_search_widget.isVisible():
+                self.right_search_widget.hide()
+            
             self.left_search_widget.show()
             self.left_search_widget.focus_search()
     
     def _show_right_search(self):
         """Show search widget for right editor"""
-        if hasattr(self, 'left_search_widget'):
-            self.left_search_widget.hide()  # Hide left search if visible
         if hasattr(self, 'right_search_widget'):
+            # Hide left search if visible
+            if hasattr(self, 'left_search_widget') and self.left_search_widget.isVisible():
+                self.left_search_widget.hide()
+            
             self.right_search_widget.show()
             self.right_search_widget.focus_search()
 
@@ -472,6 +644,15 @@ class ComparePage(QWidget):
             self._fill_namespace_combo(["default", "kube-system", "kube-public"])
 
     def _fill_namespace_combo(self, namespaces):
+        # Store current selection to restore it
+        current_namespace = self.namespace_combo.currentText() if self.namespace_combo.count() > 0 else None
+        
+        # Temporarily disconnect signal to prevent unwanted triggers
+        try:
+            self.namespace_combo.currentTextChanged.disconnect(self._on_namespace_changed)
+        except:
+            pass
+        
         self.namespace_combo.clear()
         if not namespaces:
             self.namespace_combo.addItem("No namespaces found")
@@ -481,6 +662,21 @@ class ComparePage(QWidget):
             self.namespace_combo.addItem("Select namespace")
             for ns in namespaces:
                 self.namespace_combo.addItem(ns)
+            
+            # Restore previous selection if it exists in the new list
+            if current_namespace and current_namespace not in ["Loading namespaces…", "Select namespace"]:
+                restore_index = self.namespace_combo.findText(current_namespace)
+                if restore_index >= 0:
+                    self.namespace_combo.setCurrentIndex(restore_index)
+                else:
+                    # If previous selection not found, default to "Select namespace"
+                    self.namespace_combo.setCurrentIndex(0)
+            else:
+                # No previous selection, default to "Select namespace"
+                self.namespace_combo.setCurrentIndex(0)
+        
+        # Reconnect the signal
+        self.namespace_combo.currentTextChanged.connect(self._on_namespace_changed)
 
 
     # ---------- namespace/type -> resources ----------
@@ -489,6 +685,9 @@ class ComparePage(QWidget):
         if not ns or ns.startswith(("Select", "Loading", "No ", "Unable", "kubernetes package")):
             self._clear_resource_combos()
             return
+
+        # Store current resource type selection to restore it
+        current_resource_type = self.resource_type_combo.currentText() if self.resource_type_combo.count() > 0 else None
 
         self.resource_type_combo.blockSignals(True)
         self.resource_type_combo.clear()
@@ -518,7 +717,16 @@ class ComparePage(QWidget):
             for k in sorted(available):
                 self.resource_type_combo.addItem(k)
             self.resource_type_combo.setEnabled(True)
-            self.resource_type_combo.setCurrentIndex(0)
+            
+            # Restore previous resource type selection if it exists in the new list
+            if current_resource_type and current_resource_type not in ["Scanning…", "Select resource type", "No resource types found"]:
+                restore_index = self.resource_type_combo.findText(current_resource_type)
+                if restore_index >= 0:
+                    self.resource_type_combo.setCurrentIndex(restore_index)
+                else:
+                    self.resource_type_combo.setCurrentIndex(0)
+            else:
+                self.resource_type_combo.setCurrentIndex(0)
         self.resource_type_combo.blockSignals(False)
 
     def _clear_resource_combos(self):
@@ -543,6 +751,10 @@ class ComparePage(QWidget):
         self._populate_resource_combos(names)
 
     def _populate_resource_combos(self, names):
+        # Store current selections to restore them
+        current_resource1 = self.resource1_combo.currentText() if self.resource1_combo.count() > 0 else None
+        current_resource2 = self.resource2_combo.currentText() if self.resource2_combo.count() > 0 else None
+        
         self.resource1_combo.clear()
         self.resource2_combo.clear()
         if not names:
@@ -559,6 +771,18 @@ class ComparePage(QWidget):
             self.resource2_combo.setEnabled(True)
             self.resource2_combo.addItem("Select resource 2")
             self.resource2_combo.addItems(sorted(names))
+            
+            # Restore previous selections if they exist in the new list
+            if current_resource1 and current_resource1 not in ["Select resource 1", "No resources found"]:
+                restore_index1 = self.resource1_combo.findText(current_resource1)
+                if restore_index1 >= 0:
+                    self.resource1_combo.setCurrentIndex(restore_index1)
+            
+            if current_resource2 and current_resource2 not in ["Select resource 2", "No resources found"]:
+                restore_index2 = self.resource2_combo.findText(current_resource2)
+                if restore_index2 >= 0:
+                    self.resource2_combo.setCurrentIndex(restore_index2)
+        
         self._update_compare_button_state()
 
     def _update_compare_button_state(self):
@@ -866,6 +1090,10 @@ class ComparePage(QWidget):
 
         self.left_label.setText(f"{rt} / {a} @ {ns}")
         self.right_label.setText(f"{rt} / {b} @ {ns}")
+        
+        # Store resource info for editing
+        self._left_resource_info = (ns, rt, a)
+        self._right_resource_info = (ns, rt, b)
 
         self._apply_comparison_highlighting(left_yaml, right_yaml)
 
@@ -971,3 +1199,347 @@ class ComparePage(QWidget):
                 
         except Exception as e:
             LOG.error(f"Error clearing ComparePage for cluster change: {e}")
+    
+    # ---------- edit functionality ----------
+    def _toggle_left_edit_mode(self):
+        """Toggle left editor edit mode"""
+        if self._left_edit_mode:
+            # Exit edit mode
+            self.left_box.setReadOnly(True)
+            self.left_box.setStyleSheet(AppStyles.DETAIL_PAGE_YAML_TEXT_STYLE)
+            self.left_edit_btn.show()
+            self.left_deploy_btn.hide()
+            self.left_cancel_btn.hide()
+            self._left_edit_mode = False
+        else:
+            # Enter edit mode
+            self.left_box.setReadOnly(False)
+            self.left_box.setStyleSheet(f"""
+                QTextEdit {{
+                    background-color: #1E1E1E;
+                    color: #D4D4D4;
+                    border: 1px solid #0078d7;
+                    selection-background-color: #264F78;
+                    selection-color: #D4D4D4;
+                    padding: 20px;
+                }}
+            """)
+            self._left_original_yaml = self.left_box.toPlainText()
+            self.left_edit_btn.hide()
+            self.left_deploy_btn.show()
+            self.left_cancel_btn.show()
+            self._left_edit_mode = True
+    
+    def _toggle_right_edit_mode(self):
+        """Toggle right editor edit mode"""
+        if self._right_edit_mode:
+            # Exit edit mode
+            self.right_box.setReadOnly(True)
+            self.right_box.setStyleSheet(AppStyles.DETAIL_PAGE_YAML_TEXT_STYLE)
+            self.right_edit_btn.show()
+            self.right_deploy_btn.hide()
+            self.right_cancel_btn.hide()
+            self._right_edit_mode = False
+        else:
+            # Enter edit mode
+            self.right_box.setReadOnly(False)
+            self.right_box.setStyleSheet(f"""
+                QTextEdit {{
+                    background-color: #1E1E1E;
+                    color: #D4D4D4;
+                    border: 1px solid #0078d7;
+                    selection-background-color: #264F78;
+                    selection-color: #D4D4D4;
+                    padding: 20px;
+                }}
+            """)
+            self._right_original_yaml = self.right_box.toPlainText()
+            self.right_edit_btn.hide()
+            self.right_deploy_btn.show()
+            self.right_cancel_btn.show()
+            self._right_edit_mode = True
+    
+    def _cancel_left_edit(self):
+        """Cancel left editor changes"""
+        if self._left_original_yaml:
+            self.left_box.setPlainText(self._left_original_yaml)
+        self._toggle_left_edit_mode()
+    
+    def _cancel_right_edit(self):
+        """Cancel right editor changes"""
+        if self._right_original_yaml:
+            self.right_box.setPlainText(self._right_original_yaml)
+        self._toggle_right_edit_mode()
+    
+    def _deploy_left_changes(self):
+        """Deploy left editor changes"""
+        if not self._left_resource_info:
+            return
+        
+        yaml_text = self.left_box.toPlainText()
+        if yaml_text == self._left_original_yaml:
+            self._toggle_left_edit_mode()
+            return
+        
+        try:
+            yaml_data = yaml.safe_load(yaml_text)
+            if not yaml_data:
+                LOG.error("Invalid YAML: Empty or null document")
+                return
+            
+            # Clean YAML data like DetailPageYAMLSection does
+            cleaned_yaml_data = self._convert_to_kubernetes_yaml(yaml_data)
+            
+            self.left_deploy_btn.setEnabled(False)
+            self.left_deploy_btn.setText("Deploying...")
+            
+            namespace, resource_type, name = self._left_resource_info
+            self._update_resource(namespace, resource_type, name, cleaned_yaml_data, 'left')
+            
+        except yaml.YAMLError as e:
+            LOG.error(f"Invalid YAML syntax: {str(e)}")
+            self.left_deploy_btn.setEnabled(True)
+            self.left_deploy_btn.setText("Deploy")
+    
+    def _deploy_right_changes(self):
+        """Deploy right editor changes"""
+        if not self._right_resource_info:
+            return
+        
+        yaml_text = self.right_box.toPlainText()
+        if yaml_text == self._right_original_yaml:
+            self._toggle_right_edit_mode()
+            return
+        
+        try:
+            yaml_data = yaml.safe_load(yaml_text)
+            if not yaml_data:
+                LOG.error("Invalid YAML: Empty or null document")
+                return
+            
+            # Clean YAML data like DetailPageYAMLSection does
+            cleaned_yaml_data = self._convert_to_kubernetes_yaml(yaml_data)
+            
+            self.right_deploy_btn.setEnabled(False)
+            self.right_deploy_btn.setText("Deploying...")
+            
+            namespace, resource_type, name = self._right_resource_info
+            self._update_resource(namespace, resource_type, name, cleaned_yaml_data, 'right')
+            
+        except yaml.YAMLError as e:
+            LOG.error(f"Invalid YAML syntax: {str(e)}")
+            self.right_deploy_btn.setEnabled(True)
+            self.right_deploy_btn.setText("Deploy")
+    
+    def _update_resource(self, namespace: str, resource_type: str, name: str, yaml_data: dict, side: str):
+        """Update Kubernetes resource"""
+        try:
+            from Utils.kubernetes_client import get_kubernetes_client
+            kube = get_kubernetes_client()
+            
+            # Connect to update result signal if not already connected
+            if not hasattr(self, '_update_signals_connected'):
+                kube.resource_updated.connect(self._handle_update_result)
+                self._update_signals_connected = True
+            
+            # Store which side is being updated
+            self._updating_side = side
+            
+            # Call async update
+            kube.update_resource_async(
+                self._map_kind_to_resource_type(resource_type.lower()),
+                name,
+                namespace,
+                yaml_data
+            )
+            
+        except Exception as e:
+            LOG.error(f"Error updating resource: {str(e)}")
+            self._reset_deploy_button(side)
+    
+    def _handle_update_result(self, result):
+        """Handle deployment result - copied from DetailPageYAMLSection"""
+        try:
+            side = getattr(self, '_updating_side', None)
+            if not side:
+                return
+            
+            # Reset button state first
+            self._reset_deploy_button(side)
+            
+            # Handle result - exact same logic as DetailPageYAMLSection
+            if not result or not isinstance(result, dict):
+                LOG.error(f"Deployment failed: Invalid update result received")
+                return
+            
+            if result.get('success', False):
+                # Success - exact same logic as DetailPageYAMLSection
+                message = result.get('message', 'Resource updated successfully')
+                LOG.info(f"Successfully deployed {side} resource changes: {message}")
+                
+                # Exit edit mode
+                if side == 'left':
+                    self._toggle_left_edit_mode()
+                    # Refresh left YAML after delay
+                    if self._left_resource_info:
+                        from PyQt6.QtCore import QTimer
+                        QTimer.singleShot(1000, lambda: self._refresh_yaml_content('left'))
+                else:
+                    self._toggle_right_edit_mode()
+                    # Refresh right YAML after delay
+                    if self._right_resource_info:
+                        from PyQt6.QtCore import QTimer
+                        QTimer.singleShot(1000, lambda: self._refresh_yaml_content('right'))
+                
+            else:
+                # Error - exact same logic as DetailPageYAMLSection
+                error_message = result.get('message', 'Unknown error occurred')
+                LOG.error(f"Deployment failed: {error_message}")
+                
+        except Exception as e:
+            LOG.error(f"Critical error in _handle_update_result: {str(e)}")
+            self._reset_deploy_button(getattr(self, '_updating_side', None))
+    
+    def _refresh_yaml_content(self, side: str):
+        """Refresh YAML content after successful deployment"""
+        try:
+            if side == 'left' and self._left_resource_info:
+                ns, rt, name = self._left_resource_info
+                updated_yaml = self._get_resource_yaml(ns, rt, name)
+                self.left_box.setPlainText(updated_yaml)
+            elif side == 'right' and self._right_resource_info:
+                ns, rt, name = self._right_resource_info
+                updated_yaml = self._get_resource_yaml(ns, rt, name)
+                self.right_box.setPlainText(updated_yaml)
+            
+            # Reapply comparison highlighting
+            left_yaml = self.left_box.toPlainText()
+            right_yaml = self.right_box.toPlainText()
+            self._apply_comparison_highlighting(left_yaml, right_yaml)
+            
+        except Exception as e:
+            LOG.error(f"Error refreshing {side} YAML content: {str(e)}")
+    
+    def _convert_to_kubernetes_yaml(self, data):
+        """Convert Python client dict format to Kubernetes YAML format - Pod-safe version"""
+        def snake_to_camel(snake_str):
+            """Convert snake_case to camelCase"""
+            if '_' not in snake_str:
+                return snake_str
+            components = snake_str.split('_')
+            return components[0] + ''.join(word.capitalize() for word in components[1:])
+
+        def convert_dict(obj):
+            """Recursively convert dict keys from snake_case to camelCase"""
+            if isinstance(obj, dict):
+                new_dict = {}
+                for key, value in obj.items():
+                    new_key = snake_to_camel(key)
+                    if value is not None:
+                        new_dict[new_key] = convert_dict(value)
+                return new_dict
+            elif isinstance(obj, list):
+                return [convert_dict(item) for item in obj if item is not None]
+            else:
+                return obj
+
+        converted_data = convert_dict(data)
+
+        if isinstance(converted_data, dict):
+            # Remove read-only sections first
+            converted_data.pop('status', None)
+            converted_data.pop('events', None)
+            
+            # Clean Pod specs (both direct Pods and Pod templates in Deployments)
+            def clean_pod_spec(pod_spec):
+                """Clean Pod spec to only include allowed fields"""
+                editable_pod_spec = {}
+                
+                # STRICT: Only keep containers with name and image (no ports, env, volumes, etc.)
+                if 'containers' in pod_spec and pod_spec['containers']:
+                    clean_containers = []
+                    for container in pod_spec['containers']:
+                        if isinstance(container, dict) and container.get('name') and container.get('image'):
+                            clean_container = {
+                                'name': container['name'],
+                                'image': container['image']
+                            }
+                            clean_containers.append(clean_container)
+                    if clean_containers:
+                        editable_pod_spec['containers'] = clean_containers
+
+                # STRICT: Only keep initContainers with name and image
+                if 'initContainers' in pod_spec and pod_spec['initContainers']:
+                    clean_init_containers = []
+                    for container in pod_spec['initContainers']:
+                        if isinstance(container, dict) and container.get('name') and container.get('image'):
+                            clean_container = {
+                                'name': container['name'],
+                                'image': container['image']
+                            }
+                            clean_init_containers.append(clean_container)
+                    if clean_init_containers:
+                        editable_pod_spec['initContainers'] = clean_init_containers
+
+                # Keep other allowed Pod fields (these are the ONLY other fields allowed)
+                if 'activeDeadlineSeconds' in pod_spec:
+                    editable_pod_spec['activeDeadlineSeconds'] = pod_spec['activeDeadlineSeconds']
+                if 'terminationGracePeriodSeconds' in pod_spec:
+                    editable_pod_spec['terminationGracePeriodSeconds'] = pod_spec['terminationGracePeriodSeconds']
+                if 'tolerations' in pod_spec:
+                    editable_pod_spec['tolerations'] = pod_spec['tolerations']
+                    
+                return editable_pod_spec
+            
+            # For Pods, use STRICT field filtering to prevent validation errors
+            if converted_data.get('kind') == 'Pod':
+                # Keep only essential metadata for Pods
+                if 'metadata' in converted_data:
+                    metadata = converted_data['metadata']
+                    clean_metadata = {
+                        'name': metadata.get('name'),
+                        'namespace': metadata.get('namespace')
+                    }
+                    if 'labels' in metadata and metadata['labels']:
+                        clean_metadata['labels'] = metadata['labels']
+                    if 'annotations' in metadata and metadata['annotations']:
+                        clean_metadata['annotations'] = metadata['annotations']
+                    converted_data['metadata'] = clean_metadata
+                
+                # Clean Pod spec
+                if 'spec' in converted_data:
+                    converted_data['spec'] = clean_pod_spec(converted_data['spec'])
+            
+            # For Deployments, StatefulSets, DaemonSets - DON'T clean Pod templates aggressively
+            elif converted_data.get('kind') in ['Deployment', 'StatefulSet', 'DaemonSet']:
+                # Normal metadata cleaning for non-Pod resources
+                metadata_fields_to_remove = [
+                    'managedFields', 'resourceVersion', 'uid', 'selfLink',
+                    'creationTimestamp', 'generation', 'ownerReferences'
+                ]
+                if 'metadata' in converted_data:
+                    for field in metadata_fields_to_remove:
+                        if field in converted_data['metadata']:
+                            del converted_data['metadata'][field]
+            else:
+                # For non-Pod resources, use normal cleaning
+                metadata_fields_to_remove = [
+                    'managedFields', 'resourceVersion', 'uid', 'selfLink',
+                    'creationTimestamp', 'generation', 'ownerReferences'
+                ]
+
+                if 'metadata' in converted_data:
+                    for field in metadata_fields_to_remove:
+                        if field in converted_data['metadata']:
+                            del converted_data['metadata'][field]
+
+        return converted_data
+    
+    def _reset_deploy_button(self, side: str):
+        """Reset deploy button after error"""
+        if side == 'left':
+            self.left_deploy_btn.setEnabled(True)
+            self.left_deploy_btn.setText("Deploy")
+        elif side == 'right':
+            self.right_deploy_btn.setEnabled(True)
+            self.right_deploy_btn.setText("Deploy")
