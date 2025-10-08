@@ -21,7 +21,7 @@ from UI.Styles import AppStyles, AppColors
 from UI.Icons import resource_path
 
 class YamlHighlighter(QSyntaxHighlighter):
-    """Syntax highlighter for YAML content with improved color scheme"""
+    """Syntax highlighter for YAML content with improved color scheme and error detection"""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.highlighting_rules = []
@@ -68,16 +68,86 @@ class YamlHighlighter(QSyntaxHighlighter):
         self.highlighting_rules.append((r'"[^"]*"', string_format))
         self.highlighting_rules.append((r"'[^']*'", string_format))
 
+        # Format for syntax errors
+        self.error_format = QTextCharFormat()
+        self.error_format.setUnderlineColor(QColor("#FF0000"))
+        self.error_format.setUnderlineStyle(QTextCharFormat.UnderlineStyle.WaveUnderline)
+        self.error_format.setForeground(QColor("#FF4444"))
+
         self.rules = [(re.compile(pattern), fmt) for pattern, fmt in self.highlighting_rules]
 
     def highlightBlock(self, text):
         """Apply highlighting to the given block of text"""
+        # Apply standard syntax highlighting
         for regex, format in self.rules:
             matches = regex.finditer(text)
             for match in matches:
                 start = match.start()
                 length = match.end() - start
                 self.setFormat(start, length, format)
+
+        # Check for syntax errors in this line
+        self._highlight_yaml_errors(text)
+
+    def _highlight_yaml_errors(self, text):
+        """Highlight YAML syntax errors in real-time"""
+        # Skip empty lines, comments, and list items
+        stripped = text.strip()
+        if not stripped or stripped.startswith('#') or stripped.startswith('-'):
+            return
+
+        # Check for the specific "backeend:django" type error (missing space after colon)
+        colon_match = re.search(r'^\s*(\w+):([\w-]+)', text)
+        if colon_match:
+            # Found key:value without space after colon
+            key = colon_match.group(1)
+            value = colon_match.group(2)
+            colon_pos = text.find(':')
+            
+            # Highlight the problematic part (from colon to end of value)
+            error_start = colon_pos
+            error_end = colon_pos + 1 + len(value)
+            self.setFormat(error_start, error_end - error_start, self.error_format)
+            return
+
+        # Check for other common YAML syntax errors
+        error_patterns = [
+            # Key without colon at end of line
+            (r'^\s*\w+\s*$', "Key without colon"),
+            # Multiple colons in key
+            (r'^\s*[^:]*:[^:]*:[^:]*:', "Multiple colons in key"),
+            # Colon without key
+            (r'^\s*:\s*', "Value without key"),
+            # Invalid indentation (tabs mixed with spaces - basic check)
+            (r'^\t+ +|\s+ \t+', "Mixed tabs and spaces"),
+        ]
+
+        for pattern, error_type in error_patterns:
+            if re.search(pattern, text):
+                # Don't highlight if this looks like a valid YAML structure
+                if pattern == r'^\s*\w+\s*$':
+                    # Check if next line is properly indented child
+                    current_block = self.currentBlock()
+                    next_block = current_block.next()
+                    if next_block.isValid():
+                        next_text = next_block.text().strip()
+                        if next_text and (next_text.startswith('- ') or ':' in next_text):
+                            continue  # This is likely valid YAML
+                
+                self.setFormat(0, len(text), self.error_format)
+                break
+
+        # Additional check for malformed key-value pairs
+        if ':' in text and not re.search(r'^\s*[\w-]+\s*:\s+', text):
+            colon_pos = text.find(':')
+            if colon_pos > 0:  # Not at start of line
+                # Check if there's proper spacing
+                before_colon = text[:colon_pos].strip()
+                after_colon = text[colon_pos+1:]
+                
+                if before_colon and after_colon.strip():  # Both key and value present
+                    if not after_colon.startswith(' '):  # No space after colon
+                        self.setFormat(colon_pos, len(after_colon.split()[0]) + 1, self.error_format)
 
 class SearchWidget(QFrame):
     """Search widget for YAML editor"""
@@ -263,6 +333,11 @@ class YamlEditorWithLineNumbers(QTextEdit):
         self.current_search_format.setBackground(QColor("#F39C12"))
         self.current_search_format.setForeground(QColor("#FFFFFF"))
 
+        # YAML validation
+        self.validation_timer = QTimer()
+        self.validation_timer.timeout.connect(self.validate_yaml_content)
+        self.validation_timer.setSingleShot(True)
+
         # Preferences settings with defaults
         self.show_line_numbers = True
         self.tab_size = 2
@@ -272,6 +347,7 @@ class YamlEditorWithLineNumbers(QTextEdit):
         self.document().blockCountChanged.connect(self.update_line_number_area_width)
         self.verticalScrollBar().valueChanged.connect(self.update_line_number_area)
         self.textChanged.connect(lambda: self.update_line_number_area(0))
+        self.textChanged.connect(self.on_text_changed)
         self.update_line_number_area_width(0)
         self.update_line_number_visibility()
 
@@ -282,6 +358,32 @@ class YamlEditorWithLineNumbers(QTextEdit):
         """Setup Ctrl+F shortcut for search"""
         search_shortcut = QShortcut(QKeySequence.StandardKey.Find, self)
         search_shortcut.activated.connect(self.show_search)
+
+    def on_text_changed(self):
+        """Handle text changes for real-time validation"""
+        # Restart validation timer on text change
+        if not self.isReadOnly():
+            self.validation_timer.stop()
+            self.validation_timer.start(500)  # Validate after 500ms of no changes
+
+    def validate_yaml_content(self):
+        """Validate entire YAML content and show errors"""
+        if self.isReadOnly():
+            return
+
+        yaml_text = self.toPlainText()
+        if not yaml_text.strip():
+            return
+
+        try:
+            yaml.safe_load(yaml_text)
+            # YAML is valid, no need to do anything special
+        except yaml.YAMLError as e:
+            # YAML has errors, trigger re-highlighting
+            highlighter = self.document().find("highlighter")
+            if hasattr(self, 'yaml_highlighter'):
+                # Force rehighlight to show errors
+                self.yaml_highlighter.rehighlight()
 
     def show_search(self):
         """Show search widget"""
@@ -669,6 +771,7 @@ class DetailPageYAMLSection(BaseDetailSection):
 
         # Apply syntax highlighting
         self.yaml_highlighter = YamlHighlighter(self.yaml_editor.document())
+        self.yaml_editor.yaml_highlighter = self.yaml_highlighter
 
         # Basic stylesheet
         base_yaml_style = f"""
@@ -1026,7 +1129,7 @@ class DetailPageYAMLSection(BaseDetailSection):
             logging.error(f"Error resetting save button: {str(e)}")
 
     def handle_resource_update_result(self, result):
-        """Handle the result of resource update operation"""
+        """Handle the result of resource update operation with enhanced feedback"""
         try:
             # Reset UI state safely
             if hasattr(self, 'hide_loading'):
@@ -1042,15 +1145,30 @@ class DetailPageYAMLSection(BaseDetailSection):
                 except Exception as e:
                     logging.error(f"Error resetting save button: {str(e)}")
 
-            # Handle result
+            # Handle result with detailed logging for debugging
             if not result or not isinstance(result, dict):
-                self.handle_error("Invalid update result received")
+                error_msg = f"Invalid update result received: {result}"
+                logging.error(error_msg)
+                self.handle_error("Invalid response from Kubernetes API. Check logs for details.")
                 return
 
             if result.get('success', False):
                 # Success
                 message = result.get('message', 'Resource updated successfully')
-                logging.info(f"YAML update successful: {message}")
+                logging.info(f"YAML update successful for {self.resource_type}/{self.resource_name}: {message}")
+                
+                # Show success message to user
+                from PyQt6.QtWidgets import QMessageBox
+                try:
+                    success_box = QMessageBox()
+                    success_box.setIcon(QMessageBox.Icon.Information)
+                    success_box.setWindowTitle("Deployment Successful")
+                    success_box.setText(f"Successfully deployed {self.resource_type}/{self.resource_name}")
+                    success_box.setDetailedText(f"Details: {message}")
+                    success_box.setStandardButtons(QMessageBox.StandardButton.Ok)
+                    success_box.exec()
+                except Exception as e:
+                    logging.error(f"Error showing success message: {str(e)}")
 
                 try:
                     # Exit edit mode
@@ -1078,9 +1196,28 @@ class DetailPageYAMLSection(BaseDetailSection):
                     logging.error(f"Error emitting refresh signal: {str(e)}")
 
             else:
-                # Error
+                # Error - provide detailed feedback
                 error_message = result.get('message', 'Unknown error occurred')
-                self.handle_error(f"Deployment failed: {error_message}")
+                resource_info = f"{self.resource_type}/{self.resource_name}"
+                
+                # Log detailed error information
+                logging.error(f"YAML deployment failed for {resource_info}: {error_message}")
+                
+                # Show detailed error dialog to user
+                from PyQt6.QtWidgets import QMessageBox
+                try:
+                    error_box = QMessageBox()
+                    error_box.setIcon(QMessageBox.Icon.Critical)
+                    error_box.setWindowTitle("Deployment Failed")
+                    error_box.setText(f"Failed to deploy {resource_info}")
+                    error_box.setInformativeText("The YAML deployment encountered an error. See details below for more information.")
+                    error_box.setDetailedText(f"Error Details:\n{error_message}\n\nResource: {resource_info}\nNamespace: {getattr(self, 'resource_namespace', 'default')}")
+                    error_box.setStandardButtons(QMessageBox.StandardButton.Ok)
+                    error_box.exec()
+                except Exception as e:
+                    logging.error(f"Error showing error dialog: {str(e)}")
+                    # Fallback to standard error handling
+                    self.handle_error(f"Deployment failed: {error_message}")
 
         except Exception as e:
             logging.error(f"Critical error in handle_resource_update_result: {str(e)}")

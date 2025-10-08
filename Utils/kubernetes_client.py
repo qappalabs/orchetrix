@@ -394,8 +394,28 @@ class KubernetesClient(QObject):
     def _update_resource_sync(self, resource_type: str, resource_name: str, namespace: str, resource_data: dict):
         """Synchronous resource update - used by worker"""
         try:
-            # Convert dict to proper Kubernetes object
+            logging.info(f"Starting resource update for {resource_type}/{resource_name} in namespace {namespace}")
+            
+            # For YAML updates, we need to ensure we're doing a proper patch operation
+            # that handles both additions and removals correctly
             resource_body = resource_data
+            
+            # Log the resource data for debugging (but limit size)
+            data_summary = str(resource_data)[:500] + "..." if len(str(resource_data)) > 500 else str(resource_data)
+            logging.debug(f"Resource update data: {data_summary}")
+            
+            # Validate the resource has required fields
+            if not isinstance(resource_data, dict):
+                raise ValueError("Resource data must be a dictionary")
+            
+            if not resource_data.get('apiVersion'):
+                raise ValueError("Resource data missing required 'apiVersion' field")
+                
+            if not resource_data.get('kind'):
+                raise ValueError("Resource data missing required 'kind' field")
+            
+            if not resource_data.get('metadata', {}).get('name'):
+                raise ValueError("Resource data missing required 'metadata.name' field")
             
             # Map resource type to appropriate API call
             result = None
@@ -1033,98 +1053,89 @@ class KubernetesClient(QObject):
             return "Unknown"
 
     def _get_deployment_rollout_history_sync(self, deployment_name: str, namespace: str = "default"):
-        """Get deployment rollout history synchronously with optimized async patterns"""
+        """Get deployment rollout history synchronously with improved ReplicaSet detection"""
         try:
-            logging.debug(f"Fetching deployment {deployment_name} from namespace {namespace}")
+            logging.info(f"Getting rollout history for deployment {deployment_name} in namespace {namespace}")
             
             # Get deployment with timeout protection
             deployment = self.apps_v1.read_namespaced_deployment(
                 name=deployment_name, 
                 namespace=namespace,
-                _request_timeout=10.0  # 10 second timeout
+                _request_timeout=10.0
             )
             
-            # Build more robust label selector
-            deployment_labels = deployment.metadata.labels or {}
-            app_label = deployment_labels.get('app', deployment_name)
+            # Get all ReplicaSets in the namespace first
+            all_replica_sets = self.apps_v1.list_namespaced_replica_set(
+                namespace=namespace,
+                _request_timeout=10.0
+            )
             
-            # Try multiple label selectors for better compatibility
-            selectors = [
-                f"app={app_label}",
-                f"app.kubernetes.io/name={deployment_name}",
-                f"app.kubernetes.io/instance={deployment_name}"
-            ]
+            # Filter ReplicaSets owned by this deployment
+            deployment_replica_sets = []
+            for rs in all_replica_sets.items:
+                owner_refs = rs.metadata.owner_references or []
+                for owner in owner_refs:
+                    if (owner.kind == "Deployment" and 
+                        owner.name == deployment_name and
+                        owner.uid == deployment.metadata.uid):
+                        deployment_replica_sets.append(rs)
+                        break
             
-            all_replica_sets = []
-            for selector in selectors:
-                try:
-                    logging.debug(f"Trying label selector: {selector}")
-                    replica_sets = self.apps_v1.list_namespaced_replica_set(
-                        namespace=namespace,
-                        label_selector=selector,
-                        _request_timeout=10.0  # 10 second timeout
-                    )
-                    all_replica_sets.extend(replica_sets.items)
-                except Exception as e:
-                    logging.debug(f"Label selector {selector} failed: {str(e)}")
-                    continue
-            
-            # Remove duplicates by name
-            unique_rs = {rs.metadata.name: rs for rs in all_replica_sets}
+            logging.info(f"Found {len(deployment_replica_sets)} ReplicaSets for deployment {deployment_name}")
             
             history = []
-            for rs_name, rs in unique_rs.items():
-                # Verify ownership more thoroughly
-                owner_refs = rs.metadata.owner_references or []
-                is_owned_by_deployment = any(
-                    ref.kind == "Deployment" and ref.name == deployment_name 
-                    for ref in owner_refs
-                )
+            current_deployment_revision = int(deployment.metadata.annotations.get("deployment.kubernetes.io/revision", "1"))
+            
+            for rs in deployment_replica_sets:
+                annotations = rs.metadata.annotations or {}
+                revision_str = annotations.get("deployment.kubernetes.io/revision", "1")
                 
-                if is_owned_by_deployment:
-                    # Get revision and other metadata
-                    annotations = rs.metadata.annotations or {}
-                    revision_str = annotations.get("deployment.kubernetes.io/revision", "1")
-                    
-                    try:
-                        revision = int(revision_str)
-                    except (ValueError, TypeError):
-                        revision = 1
-                    
-                    # Get creation timestamp with safe handling
-                    creation_time = rs.metadata.creation_timestamp
-                    
-                    # Determine if this is the current revision
-                    current_replicas = rs.spec.replicas or 0
-                    ready_replicas = (rs.status.ready_replicas or 0) if rs.status else 0
-                    
-                    history_item = {
-                        "revision": revision,
-                        "name": rs.metadata.name,
-                        "creation_time": creation_time.isoformat() if creation_time else "",
-                        "replicas": current_replicas,
-                        "ready_replicas": ready_replicas,
-                        "current": current_replicas > 0 and ready_replicas > 0,
-                        "change_cause": annotations.get("kubernetes.io/change-cause", "No change cause recorded"),
-                        "template_hash": annotations.get("pod-template-hash", ""),
-                        "status": "Active" if current_replicas > 0 else "Inactive"
-                    }
-                    history.append(history_item)
+                try:
+                    revision = int(revision_str)
+                except (ValueError, TypeError):
+                    revision = 1
+                
+                # Get creation timestamp
+                creation_time = rs.metadata.creation_timestamp
+                
+                # Check if this is the current revision
+                is_current = revision == current_deployment_revision
+                
+                # Get replicas info
+                desired_replicas = rs.spec.replicas or 0
+                ready_replicas = (rs.status.ready_replicas or 0) if rs.status else 0
+                available_replicas = (rs.status.available_replicas or 0) if rs.status else 0
+                
+                # Extract change cause
+                change_cause = annotations.get("kubernetes.io/change-cause", "No change cause recorded")
+                
+                # Get image information from the pod template
+                containers = rs.spec.template.spec.containers or []
+                images = [container.image for container in containers] if containers else []
+                
+                history_item = {
+                    "revision": revision,
+                    "name": rs.metadata.name,
+                    "creation_time": creation_time.isoformat() if creation_time else "",
+                    "replicas": desired_replicas,
+                    "ready_replicas": ready_replicas,
+                    "available_replicas": available_replicas,
+                    "current": is_current,
+                    "change_cause": change_cause,
+                    "images": images,
+                    "template_hash": annotations.get("pod-template-hash", ""),
+                    "status": "Current" if is_current else ("Available" if available_replicas > 0 else "Inactive")
+                }
+                history.append(history_item)
+                logging.debug(f"Added revision {revision}: {history_item}")
             
             # Sort by revision number (descending)
             history.sort(key=lambda x: x["revision"], reverse=True)
             
-            # Mark the most recent active revision as current
-            if history:
-                active_revisions = [h for h in history if h["current"]]
-                if active_revisions:
-                    # Reset all current flags
-                    for h in history:
-                        h["current"] = False
-                    # Mark the highest revision that's active
-                    active_revisions[0]["current"] = True
+            logging.info(f"Successfully processed {len(history)} revisions for deployment {deployment_name}")
+            for item in history:
+                logging.debug(f"Revision {item['revision']}: Current={item['current']}, Status={item['status']}")
             
-            logging.info(f"Successfully found {len(history)} revisions for deployment {deployment_name}")
             return history
             
         except Exception as e:
