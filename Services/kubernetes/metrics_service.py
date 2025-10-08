@@ -488,7 +488,7 @@ class KubernetesMetricsService:
             return self._get_default_node_metrics(node.metadata.name)
     
     def _calculate_single_node_metrics_fast(self, node, node_pods: list, include_disk_usage: bool = False) -> Optional[Dict[str, Any]]:
-        """Calculate metrics for a single node using pre-fetched pods - FAST VERSION (optional disk)"""
+        """Calculate metrics for a single node using pre-fetched pods - FAST VERSION with real metrics when available"""
         try:
             node_name = node.metadata.name
             
@@ -510,40 +510,51 @@ class KubernetesMetricsService:
                 memory_allocatable = self._parse_memory_value(node.status.allocatable.get('memory', '0Ki'))
                 storage_allocatable = self._parse_storage_value(node.status.allocatable.get('ephemeral-storage', '0Ki'))
             
-            # Calculate resource usage from pre-fetched pods
-            cpu_requests = 0
-            memory_requests = 0
-            storage_requests = 0
-            running_pods = 0
+            # Try to get real usage from metrics server first for more accurate data
+            real_usage = self._get_real_node_usage_from_metrics_server(node_name)
             
-            for pod in node_pods:
-                if pod.status and pod.status.phase == "Running":
-                    running_pods += 1
-                    
-                    if pod.spec and pod.spec.containers:
-                        for container in pod.spec.containers:
-                            if container.resources and container.resources.requests:
-                                cpu_requests += self._parse_cpu_value(container.resources.requests.get('cpu', '0'))
-                                memory_requests += self._parse_memory_value(container.resources.requests.get('memory', '0'))
-                                storage_requests += self._parse_storage_value(container.resources.requests.get('ephemeral-storage', '0'))
-            
-            # Calculate usage percentages
-            cpu_usage_percent = (cpu_requests / cpu_capacity * 100) if cpu_capacity > 0 else 0
-            memory_usage_percent = (memory_requests / memory_capacity * 100) if memory_capacity > 0 else 0
-            pods_usage_percent = (running_pods / pods_capacity * 100) if pods_capacity > 0 else 0
-            
-            # Handle disk usage based on parameter
-            if include_disk_usage:
-                # Get real disk usage (slower)
-                real_disk_usage = self._get_node_disk_usage(node_name, storage_capacity)
-                if real_disk_usage is not None:
-                    disk_usage_percent = real_disk_usage
-                else:
-                    # Fallback to storage requests calculation
-                    disk_usage_percent = (storage_requests / storage_capacity * 100) if storage_capacity > 0 else 0
+            if real_usage:
+                # Use real metrics if available
+                cpu_usage_percent = (real_usage.get('cpu_usage', 0) / cpu_capacity * 100) if cpu_capacity > 0 else 0
+                memory_usage_percent = (real_usage.get('memory_usage', 0) / memory_capacity * 100) if memory_capacity > 0 else 0
+                disk_usage_percent = real_usage.get('disk_usage_percent', 0) if include_disk_usage else None
+                
+                # Still count running pods from pre-fetched data
+                running_pods = sum(1 for pod in node_pods if pod.status and pod.status.phase == "Running")
+                
             else:
-                # Skip disk calculation for speed - use placeholder
-                disk_usage_percent = None  # Will show loading indicator
+                # Fallback to resource requests calculation
+                cpu_requests = 0
+                memory_requests = 0
+                storage_requests = 0
+                running_pods = 0
+                
+                for pod in node_pods:
+                    if pod.status and pod.status.phase == "Running":
+                        running_pods += 1
+                        
+                        if pod.spec and pod.spec.containers:
+                            for container in pod.spec.containers:
+                                if container.resources and container.resources.requests:
+                                    cpu_requests += self._parse_cpu_value(container.resources.requests.get('cpu', '0'))
+                                    memory_requests += self._parse_memory_value(container.resources.requests.get('memory', '0'))
+                                    storage_requests += self._parse_storage_value(container.resources.requests.get('ephemeral-storage', '0'))
+                
+                # Calculate usage percentages based on requests
+                cpu_usage_percent = (cpu_requests / cpu_capacity * 100) if cpu_capacity > 0 else 0
+                memory_usage_percent = (memory_requests / memory_capacity * 100) if memory_capacity > 0 else 0
+                
+                # Get disk usage if requested
+                if include_disk_usage:
+                    disk_usage_percent = self._get_node_disk_usage(node_name, storage_capacity)
+                    if disk_usage_percent is None:
+                        # Fallback to storage requests calculation
+                        disk_usage_percent = (storage_requests / storage_capacity * 100) if storage_capacity > 0 else 0
+                else:
+                    disk_usage_percent = None
+            
+            # Calculate pods usage percentage (same for both real and request-based metrics)
+            pods_usage_percent = (running_pods / pods_capacity * 100) if pods_capacity > 0 else 0
             
             # Ensure percentages are reasonable
             cpu_usage_percent = min(cpu_usage_percent, 100)
@@ -551,6 +562,12 @@ class KubernetesMetricsService:
             pods_usage_percent = min(pods_usage_percent, 100)
             if disk_usage_percent is not None:
                 disk_usage_percent = min(disk_usage_percent, 100)
+            
+            # For real metrics case, we might not have calculated requests
+            if real_usage:
+                cpu_requests = 0  # Not calculated for real metrics
+                memory_requests = 0  # Not calculated for real metrics  
+                storage_requests = 0  # Not calculated for real metrics
             
             return {
                 "name": node_name,
@@ -594,7 +611,7 @@ class KubernetesMetricsService:
         }
 
     def get_node_metrics(self, node_name: str) -> Optional[Dict[str, Any]]:
-        """Get metrics for a specific node including disk usage"""
+        """Get metrics for a specific node including real usage from metrics server"""
         try:
             node = self.api_service.v1.read_node(name=node_name)
             
@@ -618,38 +635,62 @@ class KubernetesMetricsService:
                 memory_allocatable = self._parse_memory_value(node.status.allocatable.get('memory', '0Ki'))
                 storage_allocatable = self._parse_storage_value(node.status.allocatable.get('ephemeral-storage', '0Ki'))
             
-            # Get pods running on this node
-            pods_list = self.api_service.v1.list_pod_for_all_namespaces(
-                field_selector=f"spec.nodeName={node_name}"
-            )
-            
+            # Initialize variables for both real and fallback metrics
             cpu_requests = 0
             memory_requests = 0
             storage_requests = 0
             running_pods = 0
             
-            for pod in pods_list.items:
-                if pod.status and pod.status.phase == "Running":
-                    running_pods += 1
-                    
-                    if pod.spec and pod.spec.containers:
-                        for container in pod.spec.containers:
-                            if container.resources and container.resources.requests:
-                                cpu_requests += self._parse_cpu_value(container.resources.requests.get('cpu', '0'))
-                                memory_requests += self._parse_memory_value(container.resources.requests.get('memory', '0'))
-                                storage_requests += self._parse_storage_value(container.resources.requests.get('ephemeral-storage', '0'))
+            # Try to get real usage from metrics server first
+            real_usage = self._get_real_node_usage_from_metrics_server(node_name)
             
-            # Try to get real disk usage from the metrics server API
-            disk_usage_percent = self._get_node_disk_usage(node_name, storage_capacity)
-            
-            if disk_usage_percent is not None:
-                logging.info(f"Got real disk usage for {node_name}: {disk_usage_percent:.1f}%")
+            if real_usage:
+                # Use real metrics if available
+                cpu_usage_percent = (real_usage.get('cpu_usage', 0) / cpu_capacity * 100) if cpu_capacity > 0 else 0
+                memory_usage_percent = (real_usage.get('memory_usage', 0) / memory_capacity * 100) if memory_capacity > 0 else 0
+                disk_usage_percent = real_usage.get('disk_usage_percent', 0)
+                
+                # For real metrics, we still need to count running pods
+                pods_list = self.api_service.v1.list_pod_for_all_namespaces(
+                    field_selector=f"spec.nodeName={node_name}"
+                )
+                running_pods = sum(1 for pod in pods_list.items if pod.status and pod.status.phase == "Running")
+                
+                # For real metrics, we don't have request values, so keep them as 0
+                logging.debug(f"Using real metrics for {node_name}: CPU {cpu_usage_percent:.1f}%, Memory {memory_usage_percent:.1f}%")
             else:
-                logging.debug(f"No real disk usage available for {node_name}, will use fallback")
+                # Fallback to resource requests calculation
+                logging.debug(f"No metrics server data for {node_name}, using resource requests as fallback")
+                
+                # Get pods running on this node
+                pods_list = self.api_service.v1.list_pod_for_all_namespaces(
+                    field_selector=f"spec.nodeName={node_name}"
+                )
+                
+                cpu_requests = 0
+                memory_requests = 0
+                storage_requests = 0
+                running_pods = 0
+                
+                for pod in pods_list.items:
+                    if pod.status and pod.status.phase == "Running":
+                        running_pods += 1
+                        
+                        if pod.spec and pod.spec.containers:
+                            for container in pod.spec.containers:
+                                if container.resources and container.resources.requests:
+                                    cpu_requests += self._parse_cpu_value(container.resources.requests.get('cpu', '0'))
+                                    memory_requests += self._parse_memory_value(container.resources.requests.get('memory', '0'))
+                                    storage_requests += self._parse_storage_value(container.resources.requests.get('ephemeral-storage', '0'))
+                
+                # Calculate usage percentages based on requests (not ideal but better than random)
+                cpu_usage_percent = (cpu_requests / cpu_capacity * 100) if cpu_capacity > 0 else 0
+                memory_usage_percent = (memory_requests / memory_capacity * 100) if memory_capacity > 0 else 0
+                
+                # Try to get real disk usage from the metrics server API
+                disk_usage_percent = self._get_node_disk_usage(node_name, storage_capacity)
             
-            # Calculate usage percentages
-            cpu_usage_percent = (cpu_requests / cpu_capacity * 100) if cpu_capacity > 0 else 0
-            memory_usage_percent = (memory_requests / memory_capacity * 100) if memory_capacity > 0 else 0
+            # Calculate pods usage percentage (same for both real and request-based metrics)
             pods_usage_percent = (running_pods / pods_capacity * 100) if pods_capacity > 0 else 0
             
             # If we couldn't get real disk usage, ensure we have a meaningful value
@@ -813,6 +854,160 @@ class KubernetesMetricsService:
         except Exception as e:
             logging.debug(f"Error getting disk usage for {node_name}: {e}")
             return None
+
+    def _get_real_node_usage_from_metrics_server(self, node_name: str) -> Optional[Dict[str, Any]]:
+        """Get real CPU and memory usage from Kubernetes metrics server API"""
+        try:
+            if not hasattr(self.api_service, 'custom_objects_api'):
+                logging.warning("No custom objects API available for metrics server")
+                return None
+            
+            # Try to get node metrics from metrics.k8s.io/v1beta1
+            try:
+                metrics = self.api_service.custom_objects_api.get_cluster_custom_object(
+                    group="metrics.k8s.io",
+                    version="v1beta1", 
+                    plural="nodes",
+                    name=node_name
+                )
+                
+                if not metrics or 'usage' not in metrics:
+                    logging.debug(f"No usage data in metrics response for {node_name}")
+                    return None
+                
+                usage_data = metrics['usage']
+                
+                # Parse CPU usage
+                cpu_usage = 0
+                if 'cpu' in usage_data:
+                    cpu_raw = usage_data['cpu']
+                    cpu_usage = self._parse_cpu_value(cpu_raw)
+                
+                # Parse memory usage  
+                memory_usage = 0
+                if 'memory' in usage_data:
+                    memory_raw = usage_data['memory']
+                    memory_usage = self._parse_memory_value(memory_raw)
+                
+                # Parse disk usage
+                disk_usage_bytes = 0
+                disk_usage_percent = 0
+                
+                # Try different field names for disk usage
+                for field in ['ephemeral-storage', 'storage', 'filesystem']:
+                    if field in usage_data:
+                        disk_raw = usage_data[field]
+                        disk_usage_bytes = self._parse_storage_value(disk_raw)
+                        break
+                
+                # If we got actual disk usage in bytes, convert to percentage
+                if disk_usage_bytes > 0:
+                    try:
+                        # Get node capacity to calculate percentage
+                        node = self.api_service.v1.read_node(name=node_name)
+                        if node.status and node.status.capacity:
+                            storage_capacity = self._parse_storage_value(
+                                node.status.capacity.get('ephemeral-storage', '0Ki')
+                            )
+                            if storage_capacity > 0:
+                                disk_usage_percent = (disk_usage_bytes / storage_capacity) * 100
+                    except Exception as e:
+                        logging.debug(f"Error calculating disk percentage for {node_name}: {e}")
+                
+                logging.debug(f"Retrieved real metrics from metrics-server for {node_name}: "
+                           f"CPU={cpu_usage:.2f} cores, Memory={memory_usage/(1024**2):.0f}MB, "
+                           f"Disk={disk_usage_percent:.1f}%")
+                
+                return {
+                    'cpu_usage': cpu_usage,
+                    'memory_usage': memory_usage,
+                    'disk_usage_bytes': disk_usage_bytes,
+                    'disk_usage_percent': min(disk_usage_percent, 100.0)
+                }
+                
+            except Exception as e:
+                logging.debug(f"Could not get metrics from metrics-server for {node_name}: {e}")
+                return None
+                
+        except Exception as e:
+            logging.debug(f"Error accessing metrics server for {node_name}: {e}")
+            return None
+
+    def is_metrics_server_available(self) -> bool:
+        """Check if Kubernetes metrics server is available"""
+        try:
+            if not hasattr(self.api_service, 'custom_objects_api'):
+                return False
+            
+            # Try to list nodes from metrics.k8s.io API
+            self.api_service.custom_objects_api.list_cluster_custom_object(
+                group="metrics.k8s.io",
+                version="v1beta1",
+                plural="nodes"
+            )
+            logging.info("Metrics server is available and responding")
+            return True
+            
+        except Exception as e:
+            logging.warning(f"Metrics server not available: {e}")
+            return False
+
+    def _parse_cpu_value(self, cpu_str: str) -> float:
+        """Parse CPU value from Kubernetes format to cores (float)"""
+        if not cpu_str:
+            return 0.0
+        
+        try:
+            cpu_str = str(cpu_str).strip()
+            
+            # Handle different CPU formats
+            if cpu_str.endswith('n'):  # nanocores
+                return float(cpu_str[:-1]) / 1e9
+            elif cpu_str.endswith('u'):  # microcores  
+                return float(cpu_str[:-1]) / 1e6
+            elif cpu_str.endswith('m'):  # millicores
+                return float(cpu_str[:-1]) / 1000
+            else:
+                # Plain number (cores)
+                return float(cpu_str)
+        except (ValueError, TypeError):
+            logging.warning(f"Could not parse CPU value: {cpu_str}")
+            return 0.0
+
+    def _parse_memory_value(self, memory_str: str) -> float:
+        """Parse memory value from Kubernetes format to bytes (float)"""
+        if not memory_str:
+            return 0.0
+        
+        try:
+            memory_str = str(memory_str).strip()
+            
+            # Handle different memory formats
+            if memory_str.endswith('Ki'):
+                return float(memory_str[:-2]) * 1024
+            elif memory_str.endswith('Mi'):
+                return float(memory_str[:-2]) * 1024 * 1024
+            elif memory_str.endswith('Gi'):
+                return float(memory_str[:-2]) * 1024 * 1024 * 1024
+            elif memory_str.endswith('Ti'):
+                return float(memory_str[:-2]) * 1024 * 1024 * 1024 * 1024
+            elif memory_str.endswith('k'):
+                return float(memory_str[:-1]) * 1000
+            elif memory_str.endswith('M'):
+                return float(memory_str[:-1]) * 1000 * 1000
+            elif memory_str.endswith('G'):
+                return float(memory_str[:-1]) * 1000 * 1000 * 1000
+            else:
+                # Plain number (bytes)
+                return float(memory_str)
+        except (ValueError, TypeError):
+            logging.warning(f"Could not parse memory value: {memory_str}")
+            return 0.0
+
+    def _parse_storage_value(self, storage_str: str) -> float:
+        """Parse storage value from Kubernetes format to bytes (float)"""
+        # Same logic as memory parsing
+        return self._parse_memory_value(storage_str)
 
     def cleanup(self):
         """Cleanup metrics service resources"""
