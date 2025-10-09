@@ -805,6 +805,14 @@ class MainWindow(QMainWindow):
     def cleanup_ui_components(self):
         """Clean up UI components safely"""
         try:
+            # Clean up HomePage and save pinned items
+            if hasattr(self, 'home_page') and hasattr(self.home_page, 'cleanup'):
+                try:
+                    self.home_page.cleanup()
+                    logging.debug("HomePage cleanup completed")
+                except Exception as e:
+                    logging.error(f"Error during HomePage cleanup: {e}")
+                    
             if (hasattr(self, 'cluster_view') and
                     hasattr(self.cluster_view, 'terminal_panel')):
                 if self.cluster_view.terminal_panel.is_visible:
