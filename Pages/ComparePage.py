@@ -1,18 +1,23 @@
 # orchetrix/Pages/ComparePage.py
 import logging
 import yaml
+import json
+import os
+import sys
+import tempfile
+from datetime import datetime
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
-    QSizePolicy, QPushButton, QSplitter, QListView
+    QSizePolicy, QPushButton, QSplitter, QListView, QLineEdit, QMenu, QWidgetAction
 )
-from PyQt6.QtGui import QFont, QSyntaxHighlighter, QTextCharFormat, QColor, QKeySequence, QShortcut
-from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QFont, QSyntaxHighlighter, QTextCharFormat, QColor, QKeySequence, QShortcut, QAction
+from PyQt6.QtCore import Qt, QEvent, QRect, QPoint
 
 from Utils.unified_resource_loader import get_unified_resource_loader
 from Utils.cluster_connector import get_cluster_connector
 
-from UI.detail_sections.detailpage_yamlsection import YamlEditorWithLineNumbers
+from UI.detail_sections.detailpage_yamlsection import YamlEditorWithLineNumbers, DetailPageYAMLSection
 
 from UI.Styles import AppStyles
 
@@ -66,6 +71,7 @@ class ComparePage(QWidget):
 
         # Simple loader state
         self._namespaces_loaded = False
+        self.namespace_filter = "default"  # Initialize namespace filter for state persistence
         
         # Edit state management
         self._left_edit_mode = False
@@ -75,14 +81,18 @@ class ComparePage(QWidget):
         self._left_resource_info = None  # (namespace, resource_type, name)
         self._right_resource_info = None
 
+        # Initialize cluster connector
+        self.cluster_connector = get_cluster_connector()
+
         self._build_ui()
+
+        # Connect to app shutdown signal for reliable cleanup
+        from PyQt6.QtWidgets import QApplication
+        QApplication.instance().aboutToQuit.connect(self._clear_all_local_saves)
 
         self._populate_namespaces()
 
-        # cluster connector hooks
-        cluster_connector = get_cluster_connector()
-        cluster_connector.connection_complete.connect(self._on_cluster_switch_completed)
-        cluster_connector.connection_started.connect(self._on_cluster_switch_started)
+        # Remove redundant cluster signal handlers to prevent conflicts with ClusterView clearing
 
     def _request_namespaces(self):
         """Request namespaces using unified loader."""
@@ -190,41 +200,11 @@ class ComparePage(QWidget):
         self.main_layout.addWidget(top_bar)
 
         # Create resource combos (will be placed in always-visible row)
-        self.resource1_combo = QComboBox()
+        self.resource1_combo = self._create_searchable_combo("Select resource 1", "resource1")
         self.resource1_combo.setObjectName("resource1_combo")
-        self.resource1_combo.setEditable(False)
-        self.resource1_combo.setSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Fixed)
-        self.resource1_combo.setFixedHeight(32)
-        self.resource1_combo.setMinimumWidth(120)
-        self.resource1_combo.addItem("Select resource 1")
-        self.resource1_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self.resource1_combo.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.resource1_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-        self.resource1_combo.setMinimumContentsLength(1)
-        self.resource1_combo.setStyleSheet(AppStyles.get_dropdown_style_with_icon())
-        view = QListView()
-        self.resource1_combo.setView(view)
-        self.resource1_combo.setMaxVisibleItems(10)
-        view.setUniformItemSizes(True)
-        view.setVerticalScrollMode(QListView.ScrollMode.ScrollPerPixel)
 
-        self.resource2_combo = QComboBox()
+        self.resource2_combo = self._create_searchable_combo("Select resource 2", "resource2")
         self.resource2_combo.setObjectName("resource2_combo")
-        self.resource2_combo.setEditable(False)
-        self.resource2_combo.setSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Fixed)
-        self.resource2_combo.setFixedHeight(32)
-        self.resource2_combo.setMinimumWidth(120)
-        self.resource2_combo.addItem("Select resource 2")
-        self.resource2_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self.resource2_combo.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.resource2_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-        self.resource2_combo.setMinimumContentsLength(1)
-        self.resource2_combo.setStyleSheet(AppStyles.get_dropdown_style_with_icon())
-        view = QListView()
-        self.resource2_combo.setView(view)
-        self.resource2_combo.setMaxVisibleItems(10)
-        view.setUniformItemSizes(True)
-        view.setVerticalScrollMode(QListView.ScrollMode.ScrollPerPixel)
 
         # Resource selector row - always visible (moved out of compare_area)
         resource_select_row = QWidget()
@@ -282,6 +262,7 @@ class ComparePage(QWidget):
         left_container = QHBoxLayout()
         self.left_label = QLabel("")
         self.left_edit_btn = QPushButton("Edit")
+        self.left_save_btn = QPushButton("Save")
         self.left_deploy_btn = QPushButton("Deploy")
         self.left_cancel_btn = QPushButton("Cancel")
         
@@ -296,6 +277,22 @@ class ComparePage(QWidget):
             }
             QPushButton:hover {
                 background-color: #3d3d3d;
+            }
+        """)
+        # Save button uses refresh button style (SECONDARY_BUTTON_STYLE)
+        self.left_save_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2d2d2d;
+                color: #ffffff;
+                border: 1px solid #3d3d3d;
+                border-radius: 4px;
+                padding: 5px 10px;
+            }
+            QPushButton:hover {
+                background-color: #3d3d3d;
+            }
+            QPushButton:pressed {
+                background-color: #1e1e1e;
             }
         """)
         self.left_deploy_btn.setStyleSheet("""
@@ -323,12 +320,14 @@ class ComparePage(QWidget):
             }
         """)
         
-        # Initially hide deploy/cancel buttons
+        # Initially hide save/deploy/cancel buttons
+        self.left_save_btn.hide()
         self.left_deploy_btn.hide()
         self.left_cancel_btn.hide()
         
         left_container.addWidget(self.left_label)
         left_container.addWidget(self.left_edit_btn)
+        left_container.addWidget(self.left_save_btn)
         left_container.addWidget(self.left_deploy_btn)
         left_container.addWidget(self.left_cancel_btn)
         left_container.addStretch()
@@ -337,6 +336,7 @@ class ComparePage(QWidget):
         right_container = QHBoxLayout()
         self.right_label = QLabel("")
         self.right_edit_btn = QPushButton("Edit")
+        self.right_save_btn = QPushButton("Save")
         self.right_deploy_btn = QPushButton("Deploy")
         self.right_cancel_btn = QPushButton("Cancel")
         
@@ -351,6 +351,22 @@ class ComparePage(QWidget):
             }
             QPushButton:hover {
                 background-color: #3d3d3d;
+            }
+        """)
+        # Save button uses refresh button style (SECONDARY_BUTTON_STYLE)
+        self.right_save_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2d2d2d;
+                color: #ffffff;
+                border: 1px solid #3d3d3d;
+                border-radius: 4px;
+                padding: 5px 10px;
+            }
+            QPushButton:hover {
+                background-color: #3d3d3d;
+            }
+            QPushButton:pressed {
+                background-color: #1e1e1e;
             }
         """)
         self.right_deploy_btn.setStyleSheet("""
@@ -378,13 +394,15 @@ class ComparePage(QWidget):
             }
         """)
         
-        # Initially hide deploy/cancel buttons
+        # Initially hide save/deploy/cancel buttons
+        self.right_save_btn.hide()
         self.right_deploy_btn.hide()
         self.right_cancel_btn.hide()
         
         right_container.addStretch()
         right_container.addWidget(self.right_label)
         right_container.addWidget(self.right_edit_btn)
+        right_container.addWidget(self.right_save_btn)
         right_container.addWidget(self.right_deploy_btn)
         right_container.addWidget(self.right_cancel_btn)
         
@@ -434,6 +452,9 @@ class ComparePage(QWidget):
         
         # Create search widgets for both editors
         self._setup_search_widgets(left_layout, right_layout)
+        
+        # Create error widgets for both editors
+        self._setup_error_widgets(left_layout, right_layout)
 
         # Create highlighters for granular comparison
         self.left_highlighter = YAMLCompareHighlighter(self.left_box.document())
@@ -450,17 +471,19 @@ class ComparePage(QWidget):
         self.main_layout.addWidget(self.compare_area, 1)
 
         # connects
-        self.namespace_combo.currentIndexChanged.connect(self._on_namespace_changed)
+        self.namespace_combo.currentTextChanged.connect(self._on_namespace_changed)
         self.resource_type_combo.currentIndexChanged.connect(self._on_namespace_or_type_changed)
-        self.resource1_combo.currentIndexChanged.connect(self._update_compare_button_state)
-        self.resource2_combo.currentIndexChanged.connect(self._update_compare_button_state)
+        self.resource1_combo.currentIndexChanged.connect(self._on_resource_selection_changed)
+        self.resource2_combo.currentIndexChanged.connect(self._on_resource_selection_changed)
         self.compare_btn.clicked.connect(self._on_compare_clicked)
         
         # Connect edit button signals
         self.left_edit_btn.clicked.connect(self._toggle_left_edit_mode)
+        self.left_save_btn.clicked.connect(self._save_left_changes)
         self.left_deploy_btn.clicked.connect(self._deploy_left_changes)
         self.left_cancel_btn.clicked.connect(self._cancel_left_edit)
         self.right_edit_btn.clicked.connect(self._toggle_right_edit_mode)
+        self.right_save_btn.clicked.connect(self._save_right_changes)
         self.right_deploy_btn.clicked.connect(self._deploy_right_changes)
         self.right_cancel_btn.clicked.connect(self._cancel_right_edit)
         
@@ -501,6 +524,31 @@ class ComparePage(QWidget):
             for child in editor.findChildren(QShortcut):
                 if child.key() == QKeySequence.StandardKey.Find:
                     child.setEnabled(False)
+    
+    def _setup_error_widgets(self, left_layout, right_layout):
+        """Create error widgets for both editors positioned above each editor"""
+        from PyQt6.QtWidgets import QLabel
+        
+        # Create and configure error widgets
+        for side, layout in [('left', left_layout), ('right', right_layout)]:
+            error_widget = QLabel()
+            error_widget.setStyleSheet(f"""
+                QLabel {{
+                    color: #ff4444;
+                    background-color: rgba(255, 68, 68, 0.1);
+                    padding: 10px;
+                    border-radius: 4px;
+                    border: 1px solid rgba(255, 68, 68, 0.3);
+                }}
+            """)
+            error_widget.setWordWrap(True)
+            error_widget.hide()
+            
+            # Store widget reference
+            setattr(self, f'{side}_error_widget', error_widget)
+            
+            # Insert error widget at position 0 (above search and editor)
+            layout.insertWidget(0, error_widget)
     
     def _on_left_search_closed(self):
         """Handle left search widget closed"""
@@ -636,12 +684,16 @@ class ComparePage(QWidget):
             self._on_namespace_error_unified('namespaces', result_obj.error_message or "Failed to load namespaces")
         
         self._namespaces_loaded = True
+        LOG.info(f"ComparePage: Loaded namespaces, current filter: {getattr(self, 'namespace_filter', 'not set')}")
     
     def _on_namespace_error_unified(self, resource_type: str, error_message: str):
         """Handle namespace loading errors from unified loader"""
         if resource_type == 'namespaces':
             LOG.error(f"Failed to load namespaces via unified loader: {error_message}")
             self._fill_namespace_combo(["default", "kube-system", "kube-public"])
+            # Ensure namespace filter is set even on error
+            if not hasattr(self, 'namespace_filter'):
+                self.namespace_filter = "default"
 
     def _fill_namespace_combo(self, namespaces):
         # Store current selection to restore it
@@ -659,32 +711,58 @@ class ComparePage(QWidget):
             self.namespace_combo.setEnabled(False)
         else:
             self.namespace_combo.setEnabled(True)
-            self.namespace_combo.addItem("Select namespace")
+            # Add "All Namespaces" first (like other pages)
+            self.namespace_combo.addItem("All Namespaces")
             for ns in namespaces:
                 self.namespace_combo.addItem(ns)
             
-            # Restore previous selection if it exists in the new list
-            if current_namespace and current_namespace not in ["Loading namespaces…", "Select namespace"]:
+            # Enhanced state persistence logic - default to "default" namespace (like other pages)
+            if current_namespace and current_namespace not in ["Loading namespaces…", "No namespaces found"]:
                 restore_index = self.namespace_combo.findText(current_namespace)
                 if restore_index >= 0:
                     self.namespace_combo.setCurrentIndex(restore_index)
+                    self.namespace_filter = current_namespace
                 else:
-                    # If previous selection not found, default to "Select namespace"
-                    self.namespace_combo.setCurrentIndex(0)
+                    # If previous selection not found, try default namespace
+                    default_index = self.namespace_combo.findText("default")
+                    if default_index >= 0:
+                        self.namespace_combo.setCurrentIndex(default_index)
+                        self.namespace_filter = "default"
+                    else:
+                        self.namespace_combo.setCurrentIndex(0)
+                        self.namespace_filter = "All Namespaces"
             else:
-                # No previous selection, default to "Select namespace"
-                self.namespace_combo.setCurrentIndex(0)
+                # No previous selection, try default namespace first (like other pages)
+                default_index = self.namespace_combo.findText("default")
+                if default_index >= 0:
+                    self.namespace_combo.setCurrentIndex(default_index)
+                    self.namespace_filter = "default"
+                else:
+                    self.namespace_combo.setCurrentIndex(0)
+                    self.namespace_filter = "All Namespaces"
         
         # Reconnect the signal
         self.namespace_combo.currentTextChanged.connect(self._on_namespace_changed)
 
 
     # ---------- namespace/type -> resources ----------
-    def _on_namespace_changed(self, _=None):
-        ns = self.namespace_combo.currentText().strip()
-        if not ns or ns.startswith(("Select", "Loading", "No ", "Unable", "kubernetes package")):
+    def _on_namespace_changed(self, namespace=None):
+        # Handle both direct calls and signal calls
+        if namespace is None:
+            namespace = self.namespace_combo.currentText().strip()
+        
+        # Skip if loading placeholder or invalid namespace
+        if not namespace or namespace.startswith(("Loading", "No ", "Unable", "kubernetes package")):
             self._clear_resource_combos()
             return
+
+        # Enhanced state persistence - only proceed if namespace actually changed
+        old_namespace = getattr(self, 'namespace_filter', 'default')
+        if old_namespace == namespace:
+            return  # No change, skip reload
+            
+        # Update internal filter
+        self.namespace_filter = namespace
 
         # Store current resource type selection to restore it
         current_resource_type = self.resource_type_combo.currentText() if self.resource_type_combo.count() > 0 else None
@@ -703,7 +781,7 @@ class ComparePage(QWidget):
         available = []
         for kind in self.KNOWN_KINDS:
             try:
-                if self._list_resources_for_namespace(ns, kind):
+                if self._list_resources_for_namespace(namespace, kind):
                     available.append(kind)
             except Exception:
                 continue
@@ -718,7 +796,7 @@ class ComparePage(QWidget):
                 self.resource_type_combo.addItem(k)
             self.resource_type_combo.setEnabled(True)
             
-            # Restore previous resource type selection if it exists in the new list
+            # Enhanced state persistence for resource type
             if current_resource_type and current_resource_type not in ["Scanning…", "Select resource type", "No resource types found"]:
                 restore_index = self.resource_type_combo.findText(current_resource_type)
                 if restore_index >= 0:
@@ -728,6 +806,10 @@ class ComparePage(QWidget):
             else:
                 self.resource_type_combo.setCurrentIndex(0)
         self.resource_type_combo.blockSignals(False)
+        
+        # Force resource population after namespace change to ensure resource dropdowns are updated
+        # This handles the case where resource type stays the same but namespace changes
+        self._on_namespace_or_type_changed()
 
     def _clear_resource_combos(self):
         self.resource_type_combo.clear()
@@ -743,7 +825,7 @@ class ComparePage(QWidget):
     def _on_namespace_or_type_changed(self, _=None):
         ns = self.namespace_combo.currentText().strip()
         rt = self.resource_type_combo.currentText().strip()
-        if not ns or ns.startswith(("Select", "Loading", "No ", "Unable", "kubernetes package")):
+        if not ns or ns.startswith(("Loading", "No ", "Unable", "kubernetes package")):
             return
         if not rt or rt.startswith(("Select", "Loading", "No ", "Unable", "kubernetes package")):
             return
@@ -751,9 +833,13 @@ class ComparePage(QWidget):
         self._populate_resource_combos(names)
 
     def _populate_resource_combos(self, names):
-        # Store current selections to restore them
+        # Enhanced state persistence - store current selections to restore them
         current_resource1 = self.resource1_combo.currentText() if self.resource1_combo.count() > 0 else None
         current_resource2 = self.resource2_combo.currentText() if self.resource2_combo.count() > 0 else None
+        
+        # Block signals to prevent unwanted triggers during population
+        self.resource1_combo.blockSignals(True)
+        self.resource2_combo.blockSignals(True)
         
         self.resource1_combo.clear()
         self.resource2_combo.clear()
@@ -762,6 +848,9 @@ class ComparePage(QWidget):
             self.resource2_combo.addItem("No resources found")
             self.resource1_combo.setEnabled(False)
             self.resource2_combo.setEnabled(False)
+            # Clear original items for search
+            self.resource1_combo._original_items = []
+            self.resource2_combo._original_items = []
         else:
             # Keep specific labels for each dropdown
             self.resource1_combo.setEnabled(True)
@@ -772,19 +861,40 @@ class ComparePage(QWidget):
             self.resource2_combo.addItem("Select resource 2")
             self.resource2_combo.addItems(sorted(names))
             
-            # Restore previous selections if they exist in the new list
+            # Store original items for search functionality
+            self.resource1_combo._original_items = ["Select resource 1"] + sorted(names)
+            self.resource2_combo._original_items = ["Select resource 2"] + sorted(names)
+            
+            # Enhanced state persistence - restore previous selections if they exist in the new list
             if current_resource1 and current_resource1 not in ["Select resource 1", "No resources found"]:
                 restore_index1 = self.resource1_combo.findText(current_resource1)
                 if restore_index1 >= 0:
                     self.resource1_combo.setCurrentIndex(restore_index1)
+                else:
+                    self.resource1_combo.setCurrentIndex(0)  # Fallback to default
+            else:
+                self.resource1_combo.setCurrentIndex(0)
             
             if current_resource2 and current_resource2 not in ["Select resource 2", "No resources found"]:
                 restore_index2 = self.resource2_combo.findText(current_resource2)
                 if restore_index2 >= 0:
                     self.resource2_combo.setCurrentIndex(restore_index2)
+                else:
+                    self.resource2_combo.setCurrentIndex(0)  # Fallback to default
+            else:
+                self.resource2_combo.setCurrentIndex(0)
+        
+        # Re-enable signals
+        self.resource1_combo.blockSignals(False)
+        self.resource2_combo.blockSignals(False)
         
         self._update_compare_button_state()
 
+    def _on_resource_selection_changed(self):
+        """Handle resource selection changes - update compare button and auto-recompare"""
+        self._update_compare_button_state()
+        self._try_auto_recompare()
+    
     def _update_compare_button_state(self):
         """Enable Compare button only when two valid resources are selected"""
         r1 = self.resource1_combo.currentText().strip()
@@ -794,52 +904,37 @@ class ComparePage(QWidget):
         valid_r2 = bool(r2 and not r2.startswith(("Select", "No ", "Error")))
         
         self.compare_btn.setEnabled(valid_r1 and valid_r2)
+    
+    def _try_auto_recompare(self):
+        """Auto-recompare if conditions are met (same logic as Compare button)"""
+        # Block auto-recompare if either editor is in edit mode
+        if self._left_edit_mode or self._right_edit_mode:
+            return
+        
+        # Use same validation logic as Compare button
+        ns = self.namespace_combo.currentText().strip()
+        rt = self.resource_type_combo.currentText().strip()
+        a = self.resource1_combo.currentText().strip()
+        b = self.resource2_combo.currentText().strip()
+
+        if not ns or ns.startswith(("Loading", "No ", "Unable", "kubernetes package")):
+            return
+        if not rt or rt.startswith(("Select", "Loading", "No ", "Unable", "kubernetes package")):
+            return
+        if not a or a.startswith(("No ", "Select")) or not b or b.startswith(("No ", "Select")):
+            return
+        
+        # Only auto-recompare if compare area is already visible (user has compared before)
+        if self.compare_area.isVisible():
+            self._on_compare_clicked()
 
     # ---------- comparison functions ----------
 
     def _clean_resource_data(self, data):
-        """Clean resource data exactly like DetailPageYAMLSection does"""
+        """Clean resource data for display"""
         if not isinstance(data, dict):
             return data
-
-        def snake_to_camel(snake_str):
-            if '_' not in snake_str:
-                return snake_str
-            components = snake_str.split('_')
-            return components[0] + ''.join(word.capitalize() for word in components[1:])
-
-        def convert_dict(obj):
-            if isinstance(obj, dict):
-                new_dict = {}
-                for key, value in obj.items():
-                    new_key = snake_to_camel(key)
-                    if value is not None:
-                        new_dict[new_key] = convert_dict(value)
-                return new_dict
-            elif isinstance(obj, list):
-                return [convert_dict(item) for item in obj if item is not None]
-            else:
-                return obj
-
-        converted_data = convert_dict(data)
-
-        if isinstance(converted_data, dict):
-            # Remove read-only metadata fields
-            metadata_fields_to_remove = [
-                'managedFields', 'resourceVersion', 'uid', 'selfLink',
-                'creationTimestamp', 'generation', 'ownerReferences'
-            ]
-
-            if 'metadata' in converted_data:
-                for field in metadata_fields_to_remove:
-                    if field in converted_data['metadata']:
-                        del converted_data['metadata'][field]
-
-            # Remove read-only sections
-            converted_data.pop('status', None)
-            converted_data.pop('events', None)
-
-        return converted_data
+        return data
 
     def parse_yaml_string(self, yaml_string):
         """Convert YAML string to dictionary for comparison"""
@@ -1024,10 +1119,10 @@ class ComparePage(QWidget):
                 from kubernetes.client import ApiClient
                 data = ApiClient().sanitize_for_serialization(obj)
 
-            # Clean and convert to YAML
-            cleaned_data = self._clean_resource_data(data)
+            # Convert to YAML using the same method as DetailPageYAMLSection
+            kubernetes_yaml = self._convert_to_kubernetes_yaml(data)
             return yaml.dump(
-                cleaned_data,
+                kubernetes_yaml,
                 default_flow_style=False,
                 sort_keys=False,
                 indent=2,
@@ -1078,22 +1173,36 @@ class ComparePage(QWidget):
         a = self.resource1_combo.currentText().strip()
         b = self.resource2_combo.currentText().strip()
 
-        if not ns or ns.startswith(("Select", "Loading", "No ", "Unable", "kubernetes package")):
+        if not ns or ns.startswith(("Loading", "No ", "Unable", "kubernetes package")):
             return
         if not rt or rt.startswith(("Select", "Loading", "No ", "Unable", "kubernetes package")):
             return
         if not a or a.startswith(("No ", "Select")) or not b or b.startswith(("No ", "Select")):
             return
 
-        left_yaml = self._get_resource_yaml(ns, rt, a)
-        right_yaml = self._get_resource_yaml(ns, rt, b)
+        # Parse resource names and namespaces for All Namespaces mode
+        if ns == "All Namespaces":
+            # Extract resource name and namespace from "name (namespace)" format
+            a_name, a_ns = self._parse_resource_name(a)
+            b_name, b_ns = self._parse_resource_name(b)
+        else:
+            # Use selected namespace for both resources
+            a_name, a_ns = a, ns
+            b_name, b_ns = b, ns
 
-        self.left_label.setText(f"{rt} / {a} @ {ns}")
-        self.right_label.setText(f"{rt} / {b} @ {ns}")
+        # Get current cluster name for saved YAML lookup
+        cluster = self._get_current_cluster_name()
+        
+        # Try to load saved YAML first, fallback to cluster
+        left_yaml = self._load_saved_yaml(cluster, a_ns, rt, a_name) or self._get_resource_yaml(a_ns, rt, a_name)
+        right_yaml = self._load_saved_yaml(cluster, b_ns, rt, b_name) or self._get_resource_yaml(b_ns, rt, b_name)
+
+        self.left_label.setText(f"{rt} / {a_name} @ {a_ns}")
+        self.right_label.setText(f"{rt} / {b_name} @ {b_ns}")
         
         # Store resource info for editing
-        self._left_resource_info = (ns, rt, a)
-        self._right_resource_info = (ns, rt, b)
+        self._left_resource_info = (a_ns, rt, a_name)
+        self._right_resource_info = (b_ns, rt, b_name)
 
         self._apply_comparison_highlighting(left_yaml, right_yaml)
 
@@ -1116,34 +1225,68 @@ class ComparePage(QWidget):
 
             if "node" in rt:
                 items = v1.list_node().items
-            elif "pod" in rt:
-                items = v1.list_namespaced_pod(namespace).items
-            elif "service" in rt or rt == "svc":
-                items = v1.list_namespaced_service(namespace).items
-            elif "configmap" in rt or ("config" in rt and "map" in rt):
-                items = v1.list_namespaced_config_map(namespace).items
-            elif "secret" in rt:
-                items = v1.list_namespaced_secret(namespace).items
-            elif "persistentvolumeclaim" in rt or "pvc" in rt:
-                items = v1.list_namespaced_persistent_volume_claim(namespace).items
-            elif "deploy" in rt:
-                items = apps_v1.list_namespaced_deployment(namespace).items
-            elif "stateful" in rt:
-                items = apps_v1.list_namespaced_stateful_set(namespace).items
-            elif "daemon" in rt:
-                items = apps_v1.list_namespaced_daemon_set(namespace).items
-            elif "replica" in rt:
-                items = apps_v1.list_namespaced_replica_set(namespace).items
-            elif "job" in rt and "cron" not in rt:
-                items = batch_v1.list_namespaced_job(namespace).items
-            elif "cron" in rt:
-                items = batch_v1.list_namespaced_cron_job(namespace).items
-            elif "ingress" in rt:
-                items = net_v1.list_namespaced_ingress(namespace).items
+            elif namespace == "All Namespaces":
+                # Handle All Namespaces - get resources from all namespaces
+                if "pod" in rt:
+                    items = v1.list_pod_for_all_namespaces().items
+                elif "service" in rt or rt == "svc":
+                    items = v1.list_service_for_all_namespaces().items
+                elif "configmap" in rt or ("config" in rt and "map" in rt):
+                    items = v1.list_config_map_for_all_namespaces().items
+                elif "secret" in rt:
+                    items = v1.list_secret_for_all_namespaces().items
+                elif "persistentvolumeclaim" in rt or "pvc" in rt:
+                    items = v1.list_persistent_volume_claim_for_all_namespaces().items
+                elif "deploy" in rt:
+                    items = apps_v1.list_deployment_for_all_namespaces().items
+                elif "stateful" in rt:
+                    items = apps_v1.list_stateful_set_for_all_namespaces().items
+                elif "daemon" in rt:
+                    items = apps_v1.list_daemon_set_for_all_namespaces().items
+                elif "replica" in rt:
+                    items = apps_v1.list_replica_set_for_all_namespaces().items
+                elif "job" in rt and "cron" not in rt:
+                    items = batch_v1.list_job_for_all_namespaces().items
+                elif "cron" in rt:
+                    items = batch_v1.list_cron_job_for_all_namespaces().items
+                elif "ingress" in rt:
+                    items = net_v1.list_ingress_for_all_namespaces().items
+                else:
+                    return []
             else:
-                return []
+                # Handle specific namespace
+                if "pod" in rt:
+                    items = v1.list_namespaced_pod(namespace).items
+                elif "service" in rt or rt == "svc":
+                    items = v1.list_namespaced_service(namespace).items
+                elif "configmap" in rt or ("config" in rt and "map" in rt):
+                    items = v1.list_namespaced_config_map(namespace).items
+                elif "secret" in rt:
+                    items = v1.list_namespaced_secret(namespace).items
+                elif "persistentvolumeclaim" in rt or "pvc" in rt:
+                    items = v1.list_namespaced_persistent_volume_claim(namespace).items
+                elif "deploy" in rt:
+                    items = apps_v1.list_namespaced_deployment(namespace).items
+                elif "stateful" in rt:
+                    items = apps_v1.list_namespaced_stateful_set(namespace).items
+                elif "daemon" in rt:
+                    items = apps_v1.list_namespaced_daemon_set(namespace).items
+                elif "replica" in rt:
+                    items = apps_v1.list_namespaced_replica_set(namespace).items
+                elif "job" in rt and "cron" not in rt:
+                    items = batch_v1.list_namespaced_job(namespace).items
+                elif "cron" in rt:
+                    items = batch_v1.list_namespaced_cron_job(namespace).items
+                elif "ingress" in rt:
+                    items = net_v1.list_namespaced_ingress(namespace).items
+                else:
+                    return []
 
-            return [item.metadata.name for item in items if item and item.metadata and item.metadata.name]
+            # Return resource names with namespace info for All Namespaces mode
+            if namespace == "All Namespaces":
+                return [f"{item.metadata.name} ({item.metadata.namespace})" for item in items if item and item.metadata and item.metadata.name]
+            else:
+                return [item.metadata.name for item in items if item and item.metadata and item.metadata.name]
         except Exception:
             return []
 
@@ -1158,18 +1301,21 @@ class ComparePage(QWidget):
         # Only populate namespaces if not already loaded to preserve selections
         elif not self._namespaces_loaded:
             self._populate_namespaces()
+        # Ensure namespace filter is initialized
+        if not hasattr(self, 'namespace_filter'):
+            self.namespace_filter = "default"
 
-    # ---------- cluster switch handlers ----------
-    def _on_cluster_switch_started(self, cluster_name: str):
-        self.namespace_combo.clear()
-        self.namespace_combo.addItem("Loading namespaces…")
-        self._clear_resource_combos()
-        self.compare_area.hide()
-        self._namespaces_loaded = False
-
-    def _on_cluster_switch_completed(self, cluster_name: str, success: bool, message: str):
-        if success:
-            self._request_namespaces()
+    # Cluster switch handling now done via clear_for_cluster_change() method (called by ClusterView)
+    
+    def _parse_resource_name(self, resource_display_name):
+        """Parse resource name from 'name (namespace)' format"""
+        if ' (' in resource_display_name and resource_display_name.endswith(')'):
+            name = resource_display_name.split(' (')[0]
+            namespace = resource_display_name.split(' (')[1][:-1]  # Remove closing parenthesis
+            return name, namespace
+        else:
+            # Fallback for resources without namespace info
+            return resource_display_name, "default"
     
     def clear_for_cluster_change(self):
         """Clear data when cluster changes to prevent showing stale data"""
@@ -1189,13 +1335,13 @@ class ComparePage(QWidget):
             if hasattr(self, 'compare_area'):
                 self.compare_area.hide()
             
-            # Reset namespace loading flag
+            # Reset namespace loading flag and filter for new cluster
             self._namespaces_loaded = False
+            self.namespace_filter = "default"  # Reset to default for new cluster
             
-            # Trigger namespace reload for visible pages
-            if self.isVisible():
-                from PyQt6.QtCore import QTimer
-                QTimer.singleShot(100, self._populate_namespaces)
+            # Trigger namespace reload after clearing
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(100, self._populate_namespaces)
                 
         except Exception as e:
             LOG.error(f"Error clearing ComparePage for cluster change: {e}")
@@ -1204,15 +1350,20 @@ class ComparePage(QWidget):
     def _toggle_left_edit_mode(self):
         """Toggle left editor edit mode"""
         if self._left_edit_mode:
-            # Exit edit mode
+            # Exit edit mode - clear any errors
+            self._clear_error('left')
             self.left_box.setReadOnly(True)
             self.left_box.setStyleSheet(AppStyles.DETAIL_PAGE_YAML_TEXT_STYLE)
             self.left_edit_btn.show()
+            self.left_save_btn.hide()
             self.left_deploy_btn.hide()
             self.left_cancel_btn.hide()
             self._left_edit_mode = False
+            # Re-enable resource dropdowns when exiting edit mode
+            self._update_resource_dropdowns_state()
         else:
-            # Enter edit mode
+            # Enter edit mode - clear any errors
+            self._clear_error('left')
             self.left_box.setReadOnly(False)
             self.left_box.setStyleSheet(f"""
                 QTextEdit {{
@@ -1223,25 +1374,34 @@ class ComparePage(QWidget):
                     selection-color: #D4D4D4;
                     padding: 20px;
                 }}
+                {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
             """)
             self._left_original_yaml = self.left_box.toPlainText()
             self.left_edit_btn.hide()
+            self.left_save_btn.show()
             self.left_deploy_btn.show()
             self.left_cancel_btn.show()
             self._left_edit_mode = True
+            # Disable resource dropdowns when entering edit mode
+            self._update_resource_dropdowns_state()
     
     def _toggle_right_edit_mode(self):
         """Toggle right editor edit mode"""
         if self._right_edit_mode:
-            # Exit edit mode
+            # Exit edit mode - clear any errors
+            self._clear_error('right')
             self.right_box.setReadOnly(True)
             self.right_box.setStyleSheet(AppStyles.DETAIL_PAGE_YAML_TEXT_STYLE)
             self.right_edit_btn.show()
+            self.right_save_btn.hide()
             self.right_deploy_btn.hide()
             self.right_cancel_btn.hide()
             self._right_edit_mode = False
+            # Re-enable resource dropdowns when exiting edit mode
+            self._update_resource_dropdowns_state()
         else:
-            # Enter edit mode
+            # Enter edit mode - clear any errors
+            self._clear_error('right')
             self.right_box.setReadOnly(False)
             self.right_box.setStyleSheet(f"""
                 QTextEdit {{
@@ -1252,12 +1412,16 @@ class ComparePage(QWidget):
                     selection-color: #D4D4D4;
                     padding: 20px;
                 }}
+                {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
             """)
             self._right_original_yaml = self.right_box.toPlainText()
             self.right_edit_btn.hide()
+            self.right_save_btn.show()
             self.right_deploy_btn.show()
             self.right_cancel_btn.show()
             self._right_edit_mode = True
+            # Disable resource dropdowns when entering edit mode
+            self._update_resource_dropdowns_state()
     
     def _cancel_left_edit(self):
         """Cancel left editor changes"""
@@ -1297,7 +1461,9 @@ class ComparePage(QWidget):
             self._update_resource(namespace, resource_type, name, cleaned_yaml_data, 'left')
             
         except yaml.YAMLError as e:
-            LOG.error(f"Invalid YAML syntax: {str(e)}")
+            error_msg = f"Invalid YAML syntax: {str(e)}"
+            self._show_error('left', error_msg)
+            LOG.error(error_msg)
             self.left_deploy_btn.setEnabled(True)
             self.left_deploy_btn.setText("Deploy")
     
@@ -1327,7 +1493,9 @@ class ComparePage(QWidget):
             self._update_resource(namespace, resource_type, name, cleaned_yaml_data, 'right')
             
         except yaml.YAMLError as e:
-            LOG.error(f"Invalid YAML syntax: {str(e)}")
+            error_msg = f"Invalid YAML syntax: {str(e)}"
+            self._show_error('right', error_msg)
+            LOG.error(error_msg)
             self.right_deploy_btn.setEnabled(True)
             self.right_deploy_btn.setText("Deploy")
     
@@ -1354,7 +1522,9 @@ class ComparePage(QWidget):
             )
             
         except Exception as e:
-            LOG.error(f"Error updating resource: {str(e)}")
+            error_msg = f"Error updating resource: {str(e)}"
+            self._show_error(side, error_msg)
+            LOG.error(error_msg)
             self._reset_deploy_button(side)
     
     def _handle_update_result(self, result):
@@ -1373,27 +1543,25 @@ class ComparePage(QWidget):
                 return
             
             if result.get('success', False):
-                # Success - exact same logic as DetailPageYAMLSection
+                # Success - clear any existing errors and refresh
+                self._clear_error(side)
                 message = result.get('message', 'Resource updated successfully')
                 LOG.info(f"Successfully deployed {side} resource changes: {message}")
                 
-                # Exit edit mode
+                # Exit edit mode and refresh content
                 if side == 'left':
                     self._toggle_left_edit_mode()
-                    # Refresh left YAML after delay
                     if self._left_resource_info:
-                        from PyQt6.QtCore import QTimer
-                        QTimer.singleShot(1000, lambda: self._refresh_yaml_content('left'))
+                        self._refresh_yaml_content('left')
                 else:
                     self._toggle_right_edit_mode()
-                    # Refresh right YAML after delay
                     if self._right_resource_info:
-                        from PyQt6.QtCore import QTimer
-                        QTimer.singleShot(1000, lambda: self._refresh_yaml_content('right'))
+                        self._refresh_yaml_content('right')
                 
             else:
-                # Error - exact same logic as DetailPageYAMLSection
+                # Error - show error above the failing editor
                 error_message = result.get('message', 'Unknown error occurred')
+                self._show_error(side, f"Deployment failed: {error_message}")
                 LOG.error(f"Deployment failed: {error_message}")
                 
         except Exception as e:
@@ -1421,120 +1589,95 @@ class ComparePage(QWidget):
             LOG.error(f"Error refreshing {side} YAML content: {str(e)}")
     
     def _convert_to_kubernetes_yaml(self, data):
-        """Convert Python client dict format to Kubernetes YAML format - Pod-safe version"""
-        def snake_to_camel(snake_str):
-            """Convert snake_case to camelCase"""
-            if '_' not in snake_str:
-                return snake_str
-            components = snake_str.split('_')
-            return components[0] + ''.join(word.capitalize() for word in components[1:])
-
-        def convert_dict(obj):
-            """Recursively convert dict keys from snake_case to camelCase"""
-            if isinstance(obj, dict):
-                new_dict = {}
-                for key, value in obj.items():
-                    new_key = snake_to_camel(key)
-                    if value is not None:
-                        new_dict[new_key] = convert_dict(value)
-                return new_dict
-            elif isinstance(obj, list):
-                return [convert_dict(item) for item in obj if item is not None]
-            else:
-                return obj
-
-        converted_data = convert_dict(data)
-
-        if isinstance(converted_data, dict):
-            # Remove read-only sections first
-            converted_data.pop('status', None)
-            converted_data.pop('events', None)
-            
-            # Clean Pod specs (both direct Pods and Pod templates in Deployments)
-            def clean_pod_spec(pod_spec):
-                """Clean Pod spec to only include allowed fields"""
-                editable_pod_spec = {}
-                
-                # STRICT: Only keep containers with name and image (no ports, env, volumes, etc.)
-                if 'containers' in pod_spec and pod_spec['containers']:
-                    clean_containers = []
-                    for container in pod_spec['containers']:
-                        if isinstance(container, dict) and container.get('name') and container.get('image'):
-                            clean_container = {
-                                'name': container['name'],
-                                'image': container['image']
-                            }
-                            clean_containers.append(clean_container)
-                    if clean_containers:
-                        editable_pod_spec['containers'] = clean_containers
-
-                # STRICT: Only keep initContainers with name and image
-                if 'initContainers' in pod_spec and pod_spec['initContainers']:
-                    clean_init_containers = []
-                    for container in pod_spec['initContainers']:
-                        if isinstance(container, dict) and container.get('name') and container.get('image'):
-                            clean_container = {
-                                'name': container['name'],
-                                'image': container['image']
-                            }
-                            clean_init_containers.append(clean_container)
-                    if clean_init_containers:
-                        editable_pod_spec['initContainers'] = clean_init_containers
-
-                # Keep other allowed Pod fields (these are the ONLY other fields allowed)
-                if 'activeDeadlineSeconds' in pod_spec:
-                    editable_pod_spec['activeDeadlineSeconds'] = pod_spec['activeDeadlineSeconds']
-                if 'terminationGracePeriodSeconds' in pod_spec:
-                    editable_pod_spec['terminationGracePeriodSeconds'] = pod_spec['terminationGracePeriodSeconds']
-                if 'tolerations' in pod_spec:
-                    editable_pod_spec['tolerations'] = pod_spec['tolerations']
-                    
-                return editable_pod_spec
-            
-            # For Pods, use STRICT field filtering to prevent validation errors
-            if converted_data.get('kind') == 'Pod':
-                # Keep only essential metadata for Pods
-                if 'metadata' in converted_data:
-                    metadata = converted_data['metadata']
-                    clean_metadata = {
-                        'name': metadata.get('name'),
-                        'namespace': metadata.get('namespace')
-                    }
-                    if 'labels' in metadata and metadata['labels']:
-                        clean_metadata['labels'] = metadata['labels']
-                    if 'annotations' in metadata and metadata['annotations']:
-                        clean_metadata['annotations'] = metadata['annotations']
-                    converted_data['metadata'] = clean_metadata
-                
-                # Clean Pod spec
-                if 'spec' in converted_data:
-                    converted_data['spec'] = clean_pod_spec(converted_data['spec'])
-            
-            # For Deployments, StatefulSets, DaemonSets - DON'T clean Pod templates aggressively
-            elif converted_data.get('kind') in ['Deployment', 'StatefulSet', 'DaemonSet']:
-                # Normal metadata cleaning for non-Pod resources
-                metadata_fields_to_remove = [
-                    'managedFields', 'resourceVersion', 'uid', 'selfLink',
-                    'creationTimestamp', 'generation', 'ownerReferences'
-                ]
-                if 'metadata' in converted_data:
-                    for field in metadata_fields_to_remove:
-                        if field in converted_data['metadata']:
-                            del converted_data['metadata'][field]
-            else:
-                # For non-Pod resources, use normal cleaning
-                metadata_fields_to_remove = [
-                    'managedFields', 'resourceVersion', 'uid', 'selfLink',
-                    'creationTimestamp', 'generation', 'ownerReferences'
-                ]
-
-                if 'metadata' in converted_data:
-                    for field in metadata_fields_to_remove:
-                        if field in converted_data['metadata']:
-                            del converted_data['metadata'][field]
-
-        return converted_data
+        """Convert Python client dict format to Kubernetes YAML format"""
+        return DetailPageYAMLSection._convert_to_kubernetes_yaml(self, data)
     
+    def _show_error(self, side: str, error_message: str):
+        """Show error message above the specified editor"""
+        if side == 'left' and hasattr(self, 'left_error_widget'):
+            self.left_error_widget.setText(error_message)
+            self.left_error_widget.show()
+        elif side == 'right' and hasattr(self, 'right_error_widget'):
+            self.right_error_widget.setText(error_message)
+            self.right_error_widget.show()
+    
+    def _clear_error(self, side: str):
+        """Clear error message for the specified editor"""
+        if side == 'left' and hasattr(self, 'left_error_widget'):
+            self.left_error_widget.hide()
+        elif side == 'right' and hasattr(self, 'right_error_widget'):
+            self.right_error_widget.hide()
+    
+    def _save_left_changes(self):
+        """Save left editor changes without deploying"""
+        if not self._left_resource_info:
+            return
+        
+        yaml_text = self.left_box.toPlainText()
+        if yaml_text == self._left_original_yaml:
+            # No changes to save
+            return
+        
+        try:
+            # Validate YAML syntax
+            yaml_data = yaml.safe_load(yaml_text)
+            if not yaml_data:
+                LOG.error("Invalid YAML: Empty or null document")
+                return
+            
+            # Save locally to disk
+            self._save_yaml_locally('left', yaml_text)
+            
+            # Update the original YAML to current content (save changes)
+            self._left_original_yaml = yaml_text
+            self._clear_error('left')
+            LOG.info("Left editor changes saved successfully")
+            
+            # Update comparison highlighting with current editor content
+            left_yaml = self.left_box.toPlainText()
+            right_yaml = self.right_box.toPlainText()
+            self._apply_comparison_highlighting(left_yaml, right_yaml)
+            
+        except yaml.YAMLError as e:
+            error_msg = f"Invalid YAML syntax: {str(e)}"
+            self._show_error('left', error_msg)
+            LOG.error(error_msg)
+    
+    def _save_right_changes(self):
+        """Save right editor changes without deploying"""
+        if not self._right_resource_info:
+            return
+        
+        yaml_text = self.right_box.toPlainText()
+        if yaml_text == self._right_original_yaml:
+            # No changes to save
+            return
+        
+        try:
+            # Validate YAML syntax
+            yaml_data = yaml.safe_load(yaml_text)
+            if not yaml_data:
+                LOG.error("Invalid YAML: Empty or null document")
+                return
+            
+            # Save locally to disk
+            self._save_yaml_locally('right', yaml_text)
+            
+            # Update the original YAML to current content (save changes)
+            self._right_original_yaml = yaml_text
+            self._clear_error('right')
+            LOG.info("Right editor changes saved successfully")
+            
+            # Update comparison highlighting with current editor content
+            left_yaml = self.left_box.toPlainText()
+            right_yaml = self.right_box.toPlainText()
+            self._apply_comparison_highlighting(left_yaml, right_yaml)
+
+        except yaml.YAMLError as e:
+            error_msg = f"Invalid YAML syntax: {str(e)}"
+            self._show_error('right', error_msg)
+            LOG.error(error_msg)
+
     def _reset_deploy_button(self, side: str):
         """Reset deploy button after error"""
         if side == 'left':
@@ -1543,3 +1686,281 @@ class ComparePage(QWidget):
         elif side == 'right':
             self.right_deploy_btn.setEnabled(True)
             self.right_deploy_btn.setText("Deploy")
+    
+    def _update_resource_dropdowns_state(self):
+        """Enable/disable resource dropdowns based on edit mode state"""
+        # Disable dropdowns if either editor is in edit mode
+        enable_dropdowns = not (self._left_edit_mode or self._right_edit_mode)
+        
+        self.resource1_combo.setEnabled(enable_dropdowns)
+        self.resource2_combo.setEnabled(enable_dropdowns)
+    
+    def _create_searchable_combo(self, placeholder_text: str, combo_id: str):
+        """Create a searchable combo box using QMenu approach"""
+        combo = QComboBox()
+        combo.setEditable(False)
+        combo.setSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Fixed)
+        combo.setFixedHeight(32)
+        combo.setMinimumWidth(120)
+        combo.addItem(placeholder_text)
+        combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        combo.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        combo.setMinimumContentsLength(1)
+        combo.setStyleSheet(AppStyles.get_dropdown_style_with_icon())
+        
+        view = QListView()
+        combo.setView(view)
+        combo.setMaxVisibleItems(10)
+        view.setUniformItemSizes(True)
+        view.setVerticalScrollMode(QListView.ScrollMode.ScrollPerPixel)
+        
+        # Store search state for this combo
+        setattr(combo, '_search_menu', None)
+        setattr(combo, '_search_input', None)
+        setattr(combo, '_search_action', None)
+        setattr(combo, '_original_items', [])
+        setattr(combo, '_combo_id', combo_id)
+        
+        # Override showPopup to show QMenu instead
+        combo.showPopup = lambda: self._show_search_menu(combo)
+        
+        return combo
+    
+    def _show_search_menu(self, combo):
+        """Show QMenu with search functionality instead of popup"""
+        # Store original items on first use
+        if not combo._original_items:
+            combo._original_items = [combo.itemText(i) for i in range(combo.count())]
+        
+        # Create or update the search menu
+        if not combo._search_menu:
+            combo._search_menu = QMenu(self)
+            combo._search_menu.setStyleSheet(f"""
+                QMenu {{
+                    background-color: #2d2d2d;
+                    color: #ffffff;
+                    border: 1px solid #3d3d3d;
+                    border-radius: 4px;
+                    padding: 5px;
+                }}
+                QMenu::item {{
+                    padding: 5px 20px;
+                    border-radius: 3px;
+                }}
+                QMenu::item:selected {{
+                    background-color: #0078d7;
+                }}
+            """)
+        
+        # Create search input if not exists
+        if not combo._search_input:
+            combo._search_input = QLineEdit(self)
+            combo._search_input.setPlaceholderText("Search resources...")
+            combo._search_input.setFixedWidth(combo.width() - 10)
+            combo._search_input.setStyleSheet(f"""
+                QLineEdit {{
+                    background-color: #2d2d2d;
+                    color: #ffffff;
+                    border: 1px solid #3d3d3d;
+                    border-radius: 3px;
+                    padding: 5px;
+                    font-size: 12px;
+                }}
+                QLineEdit:focus {{
+                    border: 1px solid #0078d7;
+                }}
+            """)
+            combo._search_input.textChanged.connect(lambda text: self._filter_menu_items(combo, text))
+            combo._search_action = QWidgetAction(self)
+            combo._search_action.setDefaultWidget(combo._search_input)
+        
+        # Update menu with current items
+        self._update_search_menu(combo)
+        
+        # Show menu below combo
+        button_pos = combo.mapToGlobal(QPoint(0, combo.height()))
+        combo._search_menu.move(button_pos)
+        combo._search_menu.show()
+        
+        # Focus search input
+        combo._search_input.setFocus()
+        combo._search_input.clear()
+    
+    def _update_search_menu(self, combo):
+        """Update the search menu with current items"""
+        combo._search_menu.clear()
+        combo._search_menu.addAction(combo._search_action)
+        
+        # Add items as actions
+        if combo._original_items:
+            for item in combo._original_items:
+                if not item.startswith("Select resource"):
+                    action = QAction(item, combo._search_menu)
+                    action.triggered.connect(lambda checked, i=item: self._handle_menu_selection(combo, i))
+                    combo._search_menu.addAction(action)
+        else:
+            action = QAction("No resources found", combo._search_menu)
+            action.setEnabled(False)
+            combo._search_menu.addAction(action)
+    
+    def _filter_menu_items(self, combo, search_text):
+        """Filter menu items based on search text"""
+        if not combo._original_items:
+            return
+        
+        combo._search_menu.clear()
+        combo._search_menu.addAction(combo._search_action)
+        
+        search_lower = search_text.lower()
+        filtered_items = [item for item in combo._original_items 
+                         if not item.startswith("Select resource") and search_lower in item.lower()]
+        
+        if filtered_items:
+            for item in filtered_items:
+                action = QAction(item, combo._search_menu)
+                action.triggered.connect(lambda checked, i=item: self._handle_menu_selection(combo, i))
+                combo._search_menu.addAction(action)
+        else:
+            action = QAction("No matching resources", combo._search_menu)
+            action.setEnabled(False)
+            combo._search_menu.addAction(action)
+        
+        # Keep focus on search input
+        combo._search_input.setFocus()
+    
+    def _handle_menu_selection(self, combo, item):
+        """Handle selection from search menu"""
+        # Find the item in the combo and select it
+        index = combo.findText(item)
+        if index >= 0:
+            combo.setCurrentIndex(index)
+        combo._search_menu.hide()
+    
+    # ---------- Local Save Functionality ----------
+    
+    def _get_current_cluster_name(self):
+        """Get current cluster name with simplified fallback"""
+        try:
+            cluster_name = getattr(self.cluster_connector, 'current_cluster', None) or 'unknown-cluster'
+            return cluster_name
+        except Exception as e:
+            LOG.error(f"Error getting cluster name: {e}")
+            return 'unknown-cluster'
+    
+    def _get_save_directory(self):
+        """Get or create save directory with fallback"""
+        try:
+            # Try application directory first
+            if getattr(sys, 'frozen', False):
+                # Running as executable
+                app_dir = os.path.dirname(sys.executable)
+            else:
+                # Running as script
+                app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            
+            save_dir = os.path.join(app_dir, 'saved_yamls')
+            
+            # Test write permissions
+            os.makedirs(save_dir, exist_ok=True)
+            test_file = os.path.join(save_dir, '.test')
+            with open(test_file, 'w') as f:
+                f.write('test')
+            os.remove(test_file)
+            
+            return save_dir
+            
+        except (OSError, PermissionError):
+            # Fallback to temp directory
+            temp_dir = tempfile.gettempdir()
+            save_dir = os.path.join(temp_dir, 'orchetrix_saved_yamls')
+            os.makedirs(save_dir, exist_ok=True)
+            return save_dir
+    
+    def _get_save_file_path(self, cluster, namespace, resource_type, resource_name):
+        """Generate file path for saved YAML"""
+        save_dir = self._get_save_directory()
+        # Clean filename components
+        clean_cluster = ''.join(c for c in cluster if c.isalnum() or c in '-_')
+        clean_namespace = ''.join(c for c in namespace if c.isalnum() or c in '-_')
+        clean_type = ''.join(c for c in resource_type if c.isalnum() or c in '-_')
+        clean_name = ''.join(c for c in resource_name if c.isalnum() or c in '-_')
+        
+        filename = f"{clean_cluster}_{clean_namespace}_{clean_type}_{clean_name}.json"
+        return os.path.join(save_dir, filename)
+    
+    def _save_yaml_locally(self, side, yaml_content):
+        """Save YAML to local file"""
+        try:
+            if side == 'left' and self._left_resource_info:
+                namespace, resource_type, resource_name = self._left_resource_info
+            elif side == 'right' and self._right_resource_info:
+                namespace, resource_type, resource_name = self._right_resource_info
+            else:
+                return
+            
+            cluster = self._get_current_cluster_name()
+            file_path = self._get_save_file_path(cluster, namespace, resource_type, resource_name)
+            
+            # Create save data
+            save_data = {
+                "cluster": cluster,
+                "namespace": namespace,
+                "resource_type": resource_type,
+                "resource_name": resource_name,
+                "yaml_content": yaml_content,
+                "original_yaml": getattr(self, f'_{side}_original_yaml', yaml_content),
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            # Write to file
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(save_data, f, indent=2, ensure_ascii=False)
+            
+            LOG.info(f"Saved {side} YAML locally: {file_path}")
+            
+        except Exception as e:
+            LOG.error(f"Error saving {side} YAML locally: {e}")
+    
+    def _load_saved_yaml(self, cluster, namespace, resource_type, resource_name):
+        """Load saved YAML if exists"""
+        try:
+            file_path = self._get_save_file_path(cluster, namespace, resource_type, resource_name)
+            
+            if not os.path.exists(file_path):
+                return None
+            
+            with open(file_path, 'r', encoding='utf-8') as f:
+                save_data = json.load(f)
+            
+            # Verify the saved data matches current resource
+            if (save_data.get('cluster') == cluster and
+                save_data.get('namespace') == namespace and
+                save_data.get('resource_type') == resource_type and
+                save_data.get('resource_name') == resource_name):
+                
+                return save_data.get('yaml_content')
+            
+            return None
+            
+        except Exception as e:
+            LOG.debug(f"Error loading saved YAML: {e}")
+            return None
+    
+    def _clear_all_local_saves(self):
+        """Clear all saved files on app shutdown"""
+        try:
+            save_dir = self._get_save_directory()
+            if os.path.exists(save_dir):
+                for filename in os.listdir(save_dir):
+                    if filename.endswith('.json'):
+                        file_path = os.path.join(save_dir, filename)
+                        try:
+                            os.remove(file_path)
+                        except Exception as e:
+                            LOG.debug(f"Error removing saved file {filename}: {e}")
+                
+                LOG.info("Cleared all local save files")
+                
+        except Exception as e:
+            LOG.error(f"Error clearing local saves: {e}")
