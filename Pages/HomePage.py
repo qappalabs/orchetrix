@@ -8,6 +8,7 @@ from PyQt6.QtGui import QColor, QPainter, QIcon, QMouseEvent, QFont, QPixmap # A
 from UI.Styles import AppColors, AppStyles, AppConstants
 from Utils.kubernetes_client import get_kubernetes_client
 from Utils.cluster_connector import get_cluster_connector
+from Utils.pin_storage import get_pin_storage_manager
 import logging
 from collections import defaultdict
 from log_handler import method_logger, class_logger
@@ -192,7 +193,12 @@ class OrchestrixGUI(QMainWindow):
         self.tree_widget = None
         self.browser_label = None
         self.items_label = None
-        self.pinned_items = set()
+        
+        # Initialize pin storage manager
+        self.pin_storage = get_pin_storage_manager()
+        # Load saved pinned items
+        self.pinned_items = self.pin_storage.load_pinned_items()
+        logging.info(f"Loaded {len(self.pinned_items)} pinned items: {list(self.pinned_items)}")
 
         self.connecting_clusters = set()
         self.waiting_for_cluster_load = None
@@ -217,6 +223,9 @@ class OrchestrixGUI(QMainWindow):
         self.init_data_model()
         self.setup_ui()
         self.update_content_view("Browse All")
+        
+        # Emit initial pinned items to title bar
+        QTimer.singleShot(50, lambda: self.update_pinned_items_signal.emit(list(self.pinned_items)))
         QTimer.singleShot(100, self.load_kubernetes_clusters)
         
         # Set up periodic cluster status refresh (every 5 minutes for Docker Desktop)
@@ -497,6 +506,8 @@ class OrchestrixGUI(QMainWindow):
         # Update filtered views
         self.update_filtered_views()
         self.update_content_view(self.current_view)
+        
+        # Emit pinned items signal to update title bar
         self.update_pinned_items_signal.emit(list(self.pinned_items))
 
     def _on_cluster_state_changed(self, cluster_name, state):
@@ -1304,11 +1315,21 @@ class OrchestrixGUI(QMainWindow):
             # print(f"Debug: Item {name} not found with cluster_data for pinning.")
             return
 
-
-        if name in self.pinned_items:
+        # Toggle pin state
+        was_pinned = name in self.pinned_items
+        if was_pinned:
             self.pinned_items.remove(name)
+            logging.info(f"Unpinned item: {name}")
         else:
             self.pinned_items.add(name)
+            logging.info(f"Pinned item: {name}")
+
+        # Save to persistent storage
+        try:
+            self.pin_storage.save_pinned_items(self.pinned_items)
+            logging.info(f"Saved pinned items to storage. Total pins: {len(self.pinned_items)}")
+        except Exception as e:
+            logging.error(f"Failed to save pinned items: {e}")
 
         self.update_pinned_items_signal.emit(list(self.pinned_items))
         # No need to call update_content_view here, as only the icon of the pin button changes.
@@ -1328,10 +1349,19 @@ class OrchestrixGUI(QMainWindow):
                             child_widget.setIcon(QIcon(current_pin_icon_path))
                             break # Found and updated the pin button
 
-        def cleanup(self):
-            """Cleanup resources"""
-            ICON_CACHE.clear()
-            COLORED_ICON_CACHE.clear()
-            if self._update_timer.isActive():
-                self._update_timer.stop()
+    def cleanup(self):
+        """Cleanup resources and save pin data"""
+        try:
+            # Save pinned items before cleanup
+            if hasattr(self, 'pin_storage') and hasattr(self, 'pinned_items'):
+                self.pin_storage.save_pinned_items(self.pinned_items)
+                logging.info("Saved pinned items during cleanup")
+        except Exception as e:
+            logging.error(f"Failed to save pinned items during cleanup: {e}")
+            
+        ICON_CACHE.clear()
+        COLORED_ICON_CACHE.clear()
+        if hasattr(self, '_update_timer') and self._update_timer.isActive():
+            self._update_timer.stop()
+        if hasattr(self, '_pending_updates'):
             self._pending_updates.clear()

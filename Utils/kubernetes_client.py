@@ -162,6 +162,11 @@ class KubernetesClient(QObject):
         return self.service.api_service.custom_objects_api
     
     @property
+    def metrics_service(self):
+        """Access to KubernetesMetricsService - backward compatibility"""
+        return self.service.metrics_service
+    
+    @property
     def version_api(self):
         """Access to VersionApi - backward compatibility"""
         return self.service.api_service.version_api

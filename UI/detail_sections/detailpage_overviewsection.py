@@ -1165,9 +1165,6 @@ class DetailPageOverviewSection(BaseDetailSection):
                 # Add action cell (rollback button or current label)
                 logging.debug(f"Setting action widget for row {row}, current={current}, revision={revision}")
                 
-                # First, try a simple test widget to see if the column works at all
-                test_item = QTableWidgetItem("TEST")
-                self.history_table.setItem(row, 4, test_item)
                 
                 if not current:  # Don't show rollback button for current revision
                     rollback_btn = QPushButton("Rollback")

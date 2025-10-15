@@ -1307,15 +1307,25 @@ class ResourceLoadWorker(EnhancedBaseWorker):
                 'pods_capacity': status.capacity.get('pods', ''),
             })
         
-        # Set default metrics values (no real metrics loading to avoid blocking)
-        processed_item.update({
-            'cpu_usage': 0.0,
-            'memory_usage': 0.0,
-            'disk_usage': 0.0
-        })
+        # Use preloaded metrics if available, otherwise set defaults
+        cpu_usage = 0.0
+        memory_usage = 0.0
+        disk_usage = 0.0
         
-        # Skip metrics loading for now to avoid 3+ minute delay
-        # Metrics will be loaded separately in background
+        if preloaded_metrics:
+            cpu_usage = preloaded_metrics.get("cpu", {}).get("usage", 0.0)
+            memory_usage = preloaded_metrics.get("memory", {}).get("usage", 0.0)
+            disk_usage_val = preloaded_metrics.get("disk", {}).get("usage")
+            disk_usage = disk_usage_val if disk_usage_val is not None else 0.0
+            
+            logging.debug(f"Using preloaded metrics for {processed_item.get('name', 'unknown')}: "
+                        f"CPU {cpu_usage:.1f}%, Memory {memory_usage:.1f}%, Disk {disk_usage:.1f}%")
+        
+        processed_item.update({
+            'cpu_usage': cpu_usage,
+            'memory_usage': memory_usage,
+            'disk_usage': disk_usage
+        })
     
     def _add_service_fields(self, processed_item: Dict[str, Any], service: Any):
         """Add service-specific fields efficiently"""

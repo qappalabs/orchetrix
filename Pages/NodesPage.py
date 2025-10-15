@@ -92,7 +92,7 @@ class GraphWidget(QFrame):
         self.timer.start(int(self._update_interval * 1000))
 
     def generate_utilization_data(self, nodes_data):
-        """Generate utilization data for nodes"""
+        """Generate utilization data for nodes from real metrics"""
         if not nodes_data or self._is_updating:
             return
             
@@ -104,32 +104,53 @@ class GraphWidget(QFrame):
         self._last_update_time = current_time
         
         try:
-            # Keep existing data and update gradually
-            old_data = self.utilization_data.copy()
+            # Get real metrics from the metrics service
+            from Utils.kubernetes_client import get_kubernetes_client
+            kube_client = get_kubernetes_client()
             
+            if hasattr(kube_client, 'metrics_service'):
+                # Get all node metrics in batch for efficiency
+                all_node_metrics = kube_client.metrics_service.get_all_node_metrics_fast(
+                    node_names=[node.get("name") for node in nodes_data],
+                    include_disk_usage=(self.title == "Disk Usage")
+                )
+                
+                for node in nodes_data:
+                    node_name = node.get("name", "unknown")
+                    
+                    # Try to get real metrics for this node
+                    node_metrics = all_node_metrics.get(node_name)
+                    
+                    if node_metrics:
+                        if self.title == "CPU Usage":
+                            utilization = node_metrics.get("cpu", {}).get("usage", 0)
+                        elif self.title == "Memory Usage":
+                            utilization = node_metrics.get("memory", {}).get("usage", 0)
+                        else:  # Disk Usage
+                            disk_usage = node_metrics.get("disk", {}).get("usage")
+                            utilization = disk_usage if disk_usage is not None else 0
+                        
+                        # Ensure utilization is within reasonable bounds
+                        utilization = max(0, min(100, utilization))
+                        self.utilization_data[node_name] = utilization
+                        
+                        logging.debug(f"Real {self.title} for {node_name}: {utilization:.1f}%")
+                    else:
+                        # If we can't get real metrics, show 0 instead of random data
+                        self.utilization_data[node_name] = 0
+                        logging.debug(f"No real metrics available for {node_name}, showing 0%")
+            else:
+                # No metrics service available, show 0 for all nodes
+                for node in nodes_data:
+                    node_name = node.get("name", "unknown")
+                    self.utilization_data[node_name] = 0
+                    
+        except Exception as e:
+            logging.error(f"Error getting real node metrics for graphs: {e}")
+            # On error, show 0 instead of random data
             for node in nodes_data:
                 node_name = node.get("name", "unknown")
-                
-                if self.title == "CPU Usage":
-                    if "cpu_usage" in node:
-                        utilization = float(node.get("cpu_usage", 0))
-                    else:
-                        prev_value = old_data.get(node_name, random.uniform(15, 50))
-                        utilization = max(5, min(80, prev_value + random.uniform(-3, 3)))
-                elif self.title == "Memory Usage":
-                    if "memory_usage" in node:
-                        utilization = float(node.get("memory_usage", 0))
-                    else:
-                        prev_value = old_data.get(node_name, random.uniform(25, 60))
-                        utilization = max(10, min(85, prev_value + random.uniform(-3, 3)))
-                else:  # Disk Usage
-                    if "disk_usage" in node:
-                        utilization = float(node.get("disk_usage", 0))
-                    else:
-                        prev_value = old_data.get(node_name, random.uniform(30, 70))
-                        utilization = max(15, min(90, prev_value + random.uniform(-2, 2)))
-                
-                self.utilization_data[node_name] = utilization
+                self.utilization_data[node_name] = 0
         finally:
             self._is_updating = False
 
@@ -150,18 +171,17 @@ class GraphWidget(QFrame):
             self.value_label.setText(f"{self.current_value}{self.unit}")
 
     def update_data(self):
-        """Update the chart data"""
+        """Update the chart data with real metrics"""
         if not self.selected_node or self.node_name not in self.utilization_data:
             return
             
+        # Get the latest real utilization data (no random variation)
         current_utilization = self.utilization_data[self.node_name]
-        variation = random.uniform(-1, 1)
-        new_value = max(0, min(100, current_utilization + variation))
-            
-        self.utilization_data[self.node_name] = new_value
-        self.data.append(new_value)
+        
+        # Update the data series for the graph
+        self.data.append(current_utilization)
         self.data.pop(0)
-        self.current_value = round(new_value, 1)
+        self.current_value = round(current_utilization, 1)
         self.value_label.setText(f"{self.current_value}{self.unit}")
         
         if self.isVisible():
@@ -405,16 +425,42 @@ class NodesPage(BaseResourcePage):
         checkbox_container.setStyleSheet(AppStyles.CHECKBOX_STYLE)
         self.table.setCellWidget(row, 0, checkbox_container)
         
-        # Get utilization data
-        cpu_util = self.cpu_graph.get_node_utilization(node_name)
+        # Get real utilization data from metrics service
+        try:
+            from Utils.kubernetes_client import get_kubernetes_client
+            kube_client = get_kubernetes_client()
+            
+            cpu_util = 0
+            mem_util = 0
+            disk_util = 0
+            
+            if hasattr(kube_client, 'metrics_service'):
+                node_metrics = kube_client.metrics_service.get_node_metrics(node_name)
+                if node_metrics:
+                    cpu_util = node_metrics.get("cpu", {}).get("usage", 0)
+                    mem_util = node_metrics.get("memory", {}).get("usage", 0)
+                    disk_usage = node_metrics.get("disk", {}).get("usage")
+                    disk_util = disk_usage if disk_usage is not None else 0
+            else:
+                # Fallback to graph utilization data
+                cpu_util = self.cpu_graph.get_node_utilization(node_name)
+                mem_util = self.mem_graph.get_node_utilization(node_name)
+                disk_util = self.disk_graph.get_node_utilization(node_name)
+        
+        except Exception as e:
+            logging.debug(f"Error getting real metrics for {node_name}: {e}")
+            # Fallback to graph data
+            cpu_util = self.cpu_graph.get_node_utilization(node_name)
+            mem_util = self.mem_graph.get_node_utilization(node_name)
+            disk_util = self.disk_graph.get_node_utilization(node_name)
+        
+        # Format display strings with capacity and real usage
         cpu_capacity = resource.get("cpu_capacity", "")
         display_cpu = f"{cpu_capacity} ({cpu_util:.1f}%)" if cpu_capacity else f"{cpu_util:.1f}%"
         
-        mem_util = self.mem_graph.get_node_utilization(node_name)
         mem_capacity = resource.get("memory_capacity", "")
         display_mem = f"{mem_capacity} ({mem_util:.1f}%)" if mem_capacity else f"{mem_util:.1f}%"
         
-        disk_util = self.disk_graph.get_node_utilization(node_name)
         disk_capacity = resource.get("disk_capacity", "")
         display_disk = f"{disk_capacity} ({disk_util:.1f}%)" if disk_capacity else f"{disk_util:.1f}%"
         
