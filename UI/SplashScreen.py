@@ -142,7 +142,7 @@ class SplashScreen(QWidget):
 
         try:
             # Load the splash screen image with resource_path
-            splash_path = resource_path("Images/orchetrix_splash.png")
+            splash_path = resource_path("Images/Orchetrix_splash.png")
             bg_pixmap = QPixmap(splash_path)
             
             if not bg_pixmap.isNull():

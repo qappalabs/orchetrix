@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
     QScrollArea, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView
 )
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QFont
 from typing import Dict, Any, Optional
 import logging
 
@@ -997,8 +997,8 @@ class DetailPageOverviewSection(BaseDetailSection):
         
         # Create table for rollback history
         self.history_table = QTableWidget()
-        self.history_table.setColumnCount(4)
-        self.history_table.setHorizontalHeaderLabels(["Revision", "Age", "Change Cause", "Action"])
+        self.history_table.setColumnCount(5)
+        self.history_table.setHorizontalHeaderLabels(["Revision", "Age", "Status", "Change Cause", "Action"])
         
         # Style the table
         self.history_table.setStyleSheet(f"""
@@ -1031,19 +1031,29 @@ class DetailPageOverviewSection(BaseDetailSection):
         self.history_table.setAlternatingRowColors(True)
         self.history_table.verticalHeader().setVisible(False)
         
-        # Set column widths
+        # Set consistent row height to accommodate widgets
+        self.history_table.verticalHeader().setDefaultSectionSize(40)
+        
+        # Ensure the table shows widgets properly
+        self.history_table.setShowGrid(True)
+        self.history_table.setWordWrap(False)
+        
+        # Set column widths and resize modes
         header = self.history_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)  # Revision
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)  # Age
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)  # Change Cause
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)  # Action
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)     # Revision
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  # Age (dynamic)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)     # Status
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)   # Change Cause (stretches)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)     # Action
         
+        # Set fixed column widths
         self.history_table.setColumnWidth(0, 80)   # Revision
-        self.history_table.setColumnWidth(1, 80)   # Age
-        self.history_table.setColumnWidth(3, 100)  # Action
+        self.history_table.setColumnWidth(2, 120)  # Status (wider for better visibility)
+        self.history_table.setColumnWidth(4, 120)  # Action (wider for button)
         
-        # Set maximum height for table (show max 5 rows)
-        self.history_table.setMaximumHeight(200)
+        # Set reasonable height for table (dynamic based on content)
+        self.history_table.setMinimumHeight(100)
+        self.history_table.setMaximumHeight(300)  # Allow more space for multiple revisions
         
         history_layout.addWidget(self.history_table)
         self.history_container.hide()  # Hide initially
@@ -1074,6 +1084,7 @@ class DetailPageOverviewSection(BaseDetailSection):
             logging.error(f"Error connecting rollback signals: {str(e)}")
         
         # Fetch rollback history
+        logging.info(f"Requesting rollout history for deployment {deployment_name} in namespace {namespace}")
         self.kubernetes_client.get_deployment_rollout_history_async(deployment_name, namespace)
 
     def _handle_deployment_history_loaded(self, history_data):
@@ -1098,23 +1109,26 @@ class DetailPageOverviewSection(BaseDetailSection):
             # Populate the table
             self.history_table.setRowCount(len(history_data))
             
+            logging.info(f"Processing {len(history_data)} rollback history items for display")
+            
             for row, revision_data in enumerate(history_data):
                 revision = revision_data.get("revision", 1)
                 creation_time = revision_data.get("creation_time", "")
+                age = self._calculate_age_from_timestamp(creation_time)
                 change_cause = revision_data.get("change_cause", "No change cause recorded")
                 current = revision_data.get("current", False)
+                status = revision_data.get("status", "Unknown")
+                images = revision_data.get("images", [])
                 
-                # Calculate age from creation time
-                age = self._calculate_age_from_timestamp(creation_time)
+                logging.debug(f"Row {row}: Revision {revision}, Current: {current}, Status: {status}")
                 
                 # Add revision cell
-                revision_text = f"{revision}"
-                if current:
-                    revision_text += " (current)"
+                revision_text = str(revision)
                 revision_item = QTableWidgetItem(revision_text)
                 revision_item.setFlags(revision_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 if current:
                     revision_item.setForeground(QColor(AppColors.STATUS_ACTIVE))
+                    revision_item.setFont(QFont("", -1, QFont.Weight.Bold))
                 self.history_table.setItem(row, 0, revision_item)
                 
                 # Add age cell
@@ -1122,40 +1136,84 @@ class DetailPageOverviewSection(BaseDetailSection):
                 age_item.setFlags(age_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 self.history_table.setItem(row, 1, age_item)
                 
-                # Add change cause cell
-                cause_item = QTableWidgetItem(change_cause)
-                cause_item.setFlags(cause_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                cause_item.setToolTip(change_cause)  # Show full text on hover
-                self.history_table.setItem(row, 2, cause_item)
+                # Add status cell
+                status_item = QTableWidgetItem(status)
+                status_item.setFlags(status_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                if current:
+                    status_item.setForeground(QColor(AppColors.STATUS_ACTIVE))
+                    status_item.setFont(QFont("", -1, QFont.Weight.Bold))
+                elif status == "Available":
+                    status_item.setForeground(QColor("#4CAF50"))
+                elif status == "Inactive":
+                    status_item.setForeground(QColor(AppColors.TEXT_SECONDARY))
+                self.history_table.setItem(row, 2, status_item)
                 
-                # Add rollback button cell
+                # Add change cause cell with enhanced tooltip
+                truncated_cause = change_cause[:50] + "..." if len(change_cause) > 50 else change_cause
+                cause_item = QTableWidgetItem(truncated_cause)
+                cause_item.setFlags(cause_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                
+                # Create detailed tooltip
+                tooltip_text = f"Change Cause: {change_cause}"
+                if images:
+                    tooltip_text += f"\nImages: {', '.join(images[:3])}"  # Show first 3 images
+                    if len(images) > 3:
+                        tooltip_text += f"\n... and {len(images)-3} more"
+                cause_item.setToolTip(tooltip_text)
+                self.history_table.setItem(row, 3, cause_item)
+                
+                # Add action cell (rollback button or current label)
+                logging.debug(f"Setting action widget for row {row}, current={current}, revision={revision}")
+                
+                # First, try a simple test widget to see if the column works at all
+                test_item = QTableWidgetItem("TEST")
+                self.history_table.setItem(row, 4, test_item)
+                
                 if not current:  # Don't show rollback button for current revision
                     rollback_btn = QPushButton("Rollback")
-                    rollback_btn.setStyleSheet(f"""
-                        QPushButton {{
-                            background-color: {AppColors.ACCENT_BLUE};
+                    # Simplified styling first to test basic functionality
+                    rollback_btn.setStyleSheet("""
+                        QPushButton {
+                            background-color: #4CAF50;
                             color: white;
                             border: none;
-                            border-radius: 4px;
-                            padding: 4px 8px;
-                            font-size: 12px;
+                            padding: 6px 12px;
                             font-weight: bold;
-                        }}
-                        QPushButton:hover {{
-                            background-color: {AppColors.HOVER_BG};
-                        }}
-                        QPushButton:pressed {{
-                            background-color: {AppColors.HOVER_BG_DARKER};
-                        }}
+                        }
                     """)
                     rollback_btn.clicked.connect(lambda checked, rev=revision: self._rollback_to_revision(rev))
-                    self.history_table.setCellWidget(row, 3, rollback_btn)
+                    self.history_table.setCellWidget(row, 4, rollback_btn)
+                    logging.debug(f"Added rollback button for row {row}")
                 else:
                     # Show "Current" label for current revision
                     current_label = QLabel("Current")
-                    current_label.setStyleSheet(f"color: {AppColors.STATUS_ACTIVE}; font-weight: bold;")
+                    current_label.setStyleSheet("""
+                        QLabel {
+                            color: #4CAF50;
+                            font-weight: bold;
+                            padding: 6px 12px;
+                        }
+                    """)
                     current_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                    self.history_table.setCellWidget(row, 3, current_label)
+                    self.history_table.setCellWidget(row, 4, current_label)
+                    logging.debug(f"Added current label for row {row}")
+                
+                # Verify the widget was set
+                test_widget = self.history_table.cellWidget(row, 4)
+                if test_widget:
+                    logging.debug(f"Successfully set action widget for row {row}: {type(test_widget).__name__}")
+                else:
+                    logging.error(f"Failed to set action widget for row {row}")
+                    # If widget setting failed, at least keep the text item
+                    if not current:
+                        fallback_item = QTableWidgetItem("Rollback (Fallback)")
+                        self.history_table.setItem(row, 4, fallback_item)
+            
+            # Ensure Age column adjusts to content (already set to ResizeToContents)
+            # Other columns maintain their fixed/stretch settings from table setup
+            
+            # Adjust table height based on content
+            self._adjust_table_height(len(history_data))
             
             logging.info(f"Populated rollback history table with {len(history_data)} revisions")
             
@@ -1192,6 +1250,27 @@ class DetailPageOverviewSection(BaseDetailSection):
                 
         except Exception:
             return "Unknown"
+
+    def _adjust_table_height(self, row_count):
+        """Adjust table height based on number of rows"""
+        try:
+            # Calculate height: header + rows + padding
+            header_height = 35  # Header row height
+            row_height = 40     # Each row height (matches defaultSectionSize)
+            padding = 10        # Extra padding
+            
+            # Calculate optimal height
+            calculated_height = header_height + (row_count * row_height) + padding
+            
+            # Ensure it's within our min/max bounds
+            min_height = 120    # Minimum to show at least header + one row
+            max_height = 350    # Allow more space for widget containers
+            final_height = max(min_height, min(calculated_height, max_height))
+            
+            self.history_table.setFixedHeight(final_height)
+            logging.debug(f"Adjusted table height to {final_height}px for {row_count} rows")
+        except Exception as e:
+            logging.error(f"Error adjusting table height: {str(e)}")
 
     def _rollback_to_revision(self, revision):
         """Initiate rollback to specific revision"""
@@ -1232,7 +1311,7 @@ class DetailPageOverviewSection(BaseDetailSection):
             
             # Show progress indicator
             for i in range(self.history_table.rowCount()):
-                widget = self.history_table.cellWidget(i, 3)
+                widget = self.history_table.cellWidget(i, 4)  # Action column widget
                 if isinstance(widget, QPushButton):
                     widget.setText("Rolling back...")
                     widget.setEnabled(False)
@@ -1255,7 +1334,7 @@ class DetailPageOverviewSection(BaseDetailSection):
             
             # Re-enable buttons
             for i in range(self.history_table.rowCount()):
-                widget = self.history_table.cellWidget(i, 3)
+                widget = self.history_table.cellWidget(i, 4)  # Action column widget
                 if isinstance(widget, QPushButton):
                     widget.setText("Rollback")
                     widget.setEnabled(True)
