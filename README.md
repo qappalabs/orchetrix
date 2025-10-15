@@ -9,7 +9,11 @@ This major release introduces significant performance optimizations and powerful
 
 ---
 
+<<<<<<< HEAD
 ![OX](./Images/softwareupdate.png)
+=======
+![OX](./Images/Orchetrix_splash.png)
+>>>>>>> 41972945f922b2d1195c8b56b97ddb5bfbfb853a
 
 ##  Table of content
 
@@ -150,12 +154,19 @@ Follow the instructions below to install and run **Orchetrix (OX)** on your oper
 2. Unzip the file to any location.
 
    **Note:** The ZIP file is password protected. Use the password `orchetrix` to extract it.
+<<<<<<< HEAD
   
+=======
+
+>>>>>>> 41972945f922b2d1195c8b56b97ddb5bfbfb853a
 3. Open the extracted folder.
 4. Double-click `orchetrix.exe` to launch the application.
 
 > If Windows shows a security warning, click "More info" → "Run anyway".
+<<<<<<< HEAD
 
+=======
+>>>>>>> 41972945f922b2d1195c8b56b97ddb5bfbfb853a
 ---
 
 ### macOS
@@ -165,10 +176,16 @@ Follow the instructions below to install and run **Orchetrix (OX)** on your oper
 3. Open `orchetrix.app`.
 
 > If you get a message like *“App can’t be opened because it is from an unidentified developer”*, go to `System Preferences > Security & Privacy > General`, and click **Open Anyway**.
+<<<<<<< HEAD
 
 ---
 
 ### Linux
+=======
+---
+
+### Linux (.deb package)
+>>>>>>> 41972945f922b2d1195c8b56b97ddb5bfbfb853a
 
 1. [Download Orchetrix for Linux](https://github.com/qappalabs/orchetrix/releases/download/v0.0.2-beta/orchetrix_0.0.2_amd64.deb)
 2. Open a terminal and navigate to the download folder.
@@ -178,7 +195,25 @@ Follow the instructions below to install and run **Orchetrix (OX)** on your oper
 4. Launch Orchetrix from your applications menu.
 
 ---   
+<<<<<<< HEAD
    
+=======
+
+### Linux (.rpm package)
+1. [Download Orchetrix for Linux](https://github.com/qappalabs/orchetrix/releases/download/v0.0.2-beta/orchetrix-0.0.2-1.x86_64.rpm)
+2. Open a terminal and navigate to the download folder.
+3. Run
+   ```bash
+   sudo dnf install -y orchetrix-0.0.2-1.x86_64.rpm
+   
+   Or
+   
+   sudo rpm -ivh orchetrix-0.0.2-1.x86_64.rpm
+4.Launch Orchetrix from your applications menu.
+
+---  
+
+>>>>>>> 41972945f922b2d1195c8b56b97ddb5bfbfb853a
 ## Troubleshooting & Dependencies
 If you encounter any issues or module-related errors while installing or running **Orchetrix (OX)**, ensure all required dependencies are properly installed.
 
