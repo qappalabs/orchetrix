@@ -4,12 +4,43 @@ import sys
 from pathlib import Path
 
 # Get absolute path to icon
-icon_path = os.path.abspath(os.path.join('Icons', 'logoIcon.ico'))
-if not os.path.exists(icon_path):
-    icon_path = os.path.abspath(os.path.join('Icons', 'logoIcon.png'))
-    if not os.path.exists(icon_path):
-        icon_path = None
+icon_path = os.path.abspath(os.path.join('icons', 'logoIcon.ico'))
 
+def collect_icons():
+    """Collect all icon files from the icons directory"""
+    icon_files = []
+    icons_dir = Path('icons')
+    
+    if icons_dir.exists():
+        # Get all icon file types
+        for ext in ['*.svg', '*.png', '*.ico', '*.jpg', '*.jpeg', '*.gif']:
+            for icon_file in icons_dir.glob(ext):
+                icon_files.append((str(icon_file), 'icons'))
+        
+        print(f"Found {len(icon_files)} icon files to include")
+    else:
+        print("Icons directory not found!")
+    
+    return icon_files
+
+def collect_ui_files():
+    """Collect UI-related files"""
+    ui_files = []
+    
+    # Collect any additional UI files if they exist
+    ui_dirs = ['images', 'logos', 'styles']
+    for ui_dir in ui_dirs:
+        ui_path = Path(ui_dir)
+        if ui_path.exists():
+            for file in ui_path.rglob('*'):
+                if file.is_file():
+                    ui_files.append((str(file), ui_dir))
+    
+    return ui_files
+
+# Get all resource files
+icon_data = collect_icons()
+ui_data = collect_ui_files()
 def collect_data_files():
     """Collect all necessary data files"""
     data_files = []
@@ -21,8 +52,7 @@ def collect_data_files():
             data_files.append((dir_name, dir_name))
     
     return data_files
-
-# Comprehensive hidden imports
+# Comprehensive hidden imports list
 hidden_imports = [
     'PyQt6', 'PyQt6.QtCore', 'PyQt6.QtGui', 'PyQt6.QtWidgets', 'PyQt6.QtSvg',
     'kubernetes', 'kubernetes.client', 'kubernetes.config', 'kubernetes.stream',
@@ -43,6 +73,9 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+
+# Filter out None values from datas
+a.datas = [(dest, source, kind) for dest, source, kind in a.datas if dest is not None]
 
 pyz = PYZ(a.pure)
 
