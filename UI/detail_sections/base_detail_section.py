@@ -80,9 +80,37 @@ class BaseDetailSection(QWidget, metaclass=QWidgetMeta):
             self.loading_finished.emit(self.section_name)
 
     def show_error(self, error_message: str):
-        """Show error message"""
+        """Show error message only for real errors, not missing resources"""
         self.hide_loading()
-        self.error_widget.setText(f"Error in {self.section_name}: {error_message}")
+        
+        # Don't show error for resources that don't exist in cluster
+        if ("not found" in error_message.lower() or 
+            "404" in error_message or
+            "not available in this cluster" in error_message.lower()):
+            # Just show that resource is not available
+            self.error_widget.setText(f"{self.section_name}: Resource not available in this cluster")
+            self.error_widget.setStyleSheet(f"""
+                QLabel {{
+                    color: #888888;
+                    background-color: rgba(136, 136, 136, 0.1);
+                    padding: 10px;
+                    border-radius: 4px;
+                    border: 1px solid rgba(136, 136, 136, 0.3);
+                }}
+            """)
+        else:
+            # Show actual errors in red
+            self.error_widget.setText(f"Error in {self.section_name}: {error_message}")
+            self.error_widget.setStyleSheet(f"""
+                QLabel {{
+                    color: #ff4444;
+                    background-color: rgba(255, 68, 68, 0.1);
+                    padding: 10px;
+                    border-radius: 4px;
+                    border: 1px solid rgba(255, 68, 68, 0.3);
+                }}
+            """)
+        
         self.error_widget.show()
         self.error_occurred.emit(self.section_name, error_message)
 

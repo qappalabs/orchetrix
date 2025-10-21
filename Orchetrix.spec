@@ -42,197 +42,29 @@ def collect_ui_files():
 icon_data = collect_icons()
 ui_data = collect_ui_files()
 def collect_data_files():
-    """Collect all data files, filtering out non-existent directories"""
+    """Collect all necessary data files"""
     data_files = []
     
-    # Add collected icons and UI files
-    data_files.extend(icon_data)
-    data_files.extend(ui_data)
-    
-    # Add directories that exist
-    directories_to_check = [
-        ('icons', 'icons'),
-        ('images', 'images'), 
-        ('logos', 'logos'),
-        ('UI', 'UI'),
-        ('Pages', 'Pages'),
-        ('utils', 'utils'),
-        ('base_components', 'base_components'),
-    ]
-    
-    for src_dir, dest_dir in directories_to_check:
-        if os.path.exists(src_dir) and os.path.isdir(src_dir):
-            data_files.append((src_dir, dest_dir))
-            print(f"Including directory: {src_dir} -> {dest_dir}")
-        else:
-            print(f"Skipping missing directory: {src_dir}")
+    # Add resource directories
+    resource_dirs = ['Icons', 'Images', 'UI', 'Pages', 'Utils', 'Services', 'Base_Components']
+    for dir_name in resource_dirs:
+        if os.path.exists(dir_name) and os.path.isdir(dir_name):
+            data_files.append((dir_name, dir_name))
     
     return data_files
 # Comprehensive hidden imports list
 hidden_imports = [
-    # PyQt6 modules
-    'PyQt6',
-    'PyQt6.QtCore',
-    'PyQt6.QtGui',
-    'PyQt6.QtWidgets',
-    'PyQt6.QtSvg',
-    'PyQt6.QtSvgWidgets',
-    'PyQt6.sip',
-    
-    # Standard library modules
-    'yaml',
-    'logging',
-    'datetime',
-    'json',
-    'subprocess',
-    'threading',
-    'socket',
-    'time',
-    'os',
-    'sys',
-    'traceback',
-    'gc',
-    'webbrowser',
-    'tempfile',
-    'shutil',
-    'random',
-    'string',
-    'math',
-    'queue',
-    'weakref',
-    'functools',
-    'typing',
-    'dataclasses',
-    'enum',
-    're',
-    'platform',
-    'select',
-    
-    # Third-party modules
-    'requests',
-    'requests.auth',
-    'requests.models',
-    'requests.sessions',
-    'requests.adapters',
-    'requests.exceptions',
-    'urllib3',
-    'urllib3.util',
-    'urllib3.util.retry',
-    'urllib3.exceptions',
-    'certifi',
-    'psutil',
-    
-    # Kubernetes client modules
-    'kubernetes',
-    'kubernetes.client',
-    'kubernetes.client.rest',
-    'kubernetes.client.api',
-    'kubernetes.client.models',
-    'kubernetes.client.api_client',
-    'kubernetes.client.configuration',
-    'kubernetes.config',
-    'kubernetes.config.config_exception',
-    'kubernetes.stream',
-    'kubernetes.watch',
-    
-    # Kubernetes API modules
-    'kubernetes.client.CoreV1Api',
-    'kubernetes.client.AppsV1Api',
-    'kubernetes.client.NetworkingV1Api',
-    'kubernetes.client.StorageV1Api',
-    'kubernetes.client.RbacAuthorizationV1Api',
-    'kubernetes.client.BatchV1Api',
-    'kubernetes.client.AutoscalingV1Api',
-    'kubernetes.client.CustomObjectsApi',
-    'kubernetes.client.VersionApi',
-    'kubernetes.client.ApiextensionsV1Api',
-    'kubernetes.client.AdmissionregistrationV1Api',
-    'kubernetes.client.CoordinationV1Api',
-    'kubernetes.client.PolicyV1Api',
-    'kubernetes.client.SchedulingV1Api',
-    'kubernetes.client.NodeV1Api',
-    'kubernetes.client.EventsV1Api',
-    
-    # Additional Kubernetes modules
-    'kubernetes.client.V1Pod',
-    'kubernetes.client.V1Service',
-    'kubernetes.client.V1Deployment',
-    'kubernetes.client.V1Node',
-    'kubernetes.client.V1Namespace',
-    'kubernetes.client.V1Event',
-    'kubernetes.client.V1DeleteOptions',
-    
-    # PyYAML
-    'yaml.loader',
-    'yaml.dumper',
-    'yaml.constructor',
-    'yaml.representer',
-    'yaml.resolver',
-    'yaml.scanner',
-    'yaml.parser',
-    'yaml.composer',
-    'yaml.emitter',
-    'yaml.serializer',
-    
-    # Additional networking modules
-    'socket',
-    'ssl',
-    'http',
-    'http.client',
-    'http.server',
-    
-    # Date/time modules
-    'datetime',
-    'time',
-    'calendar',
-    
-    # Logging modules
-    'logging.handlers',
-    'logging.config',
-    
-    # File handling
-    'pathlib',
-    'glob',
-    'fnmatch',
-    
-    # JSON handling
-    'json.encoder',
-    'json.decoder',
-    
-    # Base64 and encoding
-    'base64',
-    'encodings',
-    'encodings.utf_8',
-    'encodings.ascii',
-    
-    # Collections
-    'collections',
-    'collections.abc',
-    
-    # Crypto/security (for kubernetes)
-    'cryptography',
-    'cryptography.hazmat',
-    'cryptography.hazmat.primitives',
-    'cryptography.hazmat.backends',
-    'cryptography.x509',
-    
-    # Additional dependencies that might be dynamically imported
-    'pkg_resources',
-    'setuptools',
-    'six',
-    'google',
-    'google.auth',
-    'oauthlib',
-    'cachetools',
-    'pyasn1',
-    'rsa',
+    'PyQt6', 'PyQt6.QtCore', 'PyQt6.QtGui', 'PyQt6.QtWidgets', 'PyQt6.QtSvg',
+    'kubernetes', 'kubernetes.client', 'kubernetes.config', 'kubernetes.stream',
+    'yaml', 'requests', 'psutil', 'logging', 'json', 'datetime', 'threading',
+    'subprocess', 'tempfile', 'shutil', 'base64', 'ssl', 'socket'
 ]
 
 a = Analysis(
-    ['main.py'],  # Main entry point
-    pathex=['.'],  # Add current directory to path
+    ['main.py'],
+    pathex=['.'],
     binaries=[],
-    datas=collect_data_files(),  # Use the function that properly filters None values
+    datas=collect_data_files(),
     hiddenimports=hidden_imports,
     hookspath=[],
     hooksconfig={},
@@ -257,13 +89,13 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=False,  # Set to True for debugging if needed
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=icon_path if os.path.exists(icon_path) else None,
+    icon=icon_path if icon_path and os.path.exists(icon_path) else None,
 )
 
 coll = COLLECT(

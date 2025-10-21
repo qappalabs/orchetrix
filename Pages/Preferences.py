@@ -294,7 +294,7 @@ class PreferencesWidget(QWidget):
 
     def create_back_button(self):
         back_btn = QPushButton()
-        icon = resource_path("icons/back_arrow.png")
+        icon = resource_path("Icons/back_arrow.png")
         back_btn.setIcon(QIcon(icon))
         back_btn.setIconSize(QSize(24, 24))
         back_btn.setFixedSize(30, 30)

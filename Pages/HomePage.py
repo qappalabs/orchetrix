@@ -1,18 +1,24 @@
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QLabel, QPushButton, QLineEdit, QTreeWidget,
-                             QTreeWidgetItem, QFrame, QMenu, QHeaderView,
+                             QTreeWidgetItem, QFrame, QMenu, QHeaderView,QApplication,
                              QMessageBox, QToolButton)
 from PyQt6.QtCore import Qt, QObject, pyqtSignal, QPoint, QSize, QTimer
 from PyQt6.QtGui import QColor, QPainter, QIcon, QMouseEvent, QFont, QPixmap # Added QPixmap
 
 from UI.Styles import AppColors, AppStyles, AppConstants
-from utils.kubernetes_client import get_kubernetes_client
-from utils.cluster_connector import get_cluster_connector
+from Utils.kubernetes_client import get_kubernetes_client
+from Utils.cluster_connector import get_cluster_connector
 import logging
+from collections import defaultdict
+from log_handler import method_logger, class_logger
 import webbrowser  # Added for opening URLs
 
 from math import sin, cos
 from UI.Icons import resource_path  # Add this import at the top of the file
+
+# Global icon cache to prevent redundant operations
+ICON_CACHE = {}
+COLORED_ICON_CACHE = {}
 
 class HomePageSignals(QObject):
     """Centralized signals for navigation between pages"""
@@ -146,6 +152,7 @@ class SidebarButton(QPushButton):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setStyleSheet(AppStyles.SIDEBAR_BUTTON_STYLE)
 
+@class_logger(log_level=logging.INFO, exclude_methods=['__init__', 'set_cluster_icon', 'context_menu_requested', 'open_cluster_signal', 'open_preferences_signal', 'update_pinned_items_signal'])
 class OrchestrixGUI(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -158,26 +165,22 @@ class OrchestrixGUI(QMainWindow):
         self.cluster_connector = get_cluster_connector()
 
         try:
-            from utils.cluster_state_manager import get_cluster_state_manager
+            from Utils.cluster_state_manager import get_cluster_state_manager
             self.cluster_state_manager = get_cluster_state_manager()
             logging.info("Cluster state manager initialized in HomePage")
+            
+            # FIXED: Connect to cluster state manager signals for better status tracking
+            if self.cluster_state_manager:
+                self.cluster_state_manager.state_changed.connect(self._on_cluster_state_changed)
+                self.cluster_state_manager.switch_completed.connect(self._on_cluster_switch_completed)
+                
         except Exception as e:
             logging.error(f"Failed to initialize cluster state manager in HomePage: {e}")
             self.cluster_state_manager = None
 
-
-        self.kube_client.clusters_loaded.connect(self.on_clusters_loaded)
-        self.kube_client.error_occurred.connect(self.show_error_message)
-
-        self.cluster_connector.connection_started.connect(self.on_cluster_connection_started)
-        self.cluster_connector.connection_complete.connect(self.on_cluster_connection_complete)
-        self.cluster_connector.error_occurred.connect(
-            lambda error_type, error_msg: self.show_error_message(error_msg)
-        )
-        # self.cluster_connector.error_occurred.connect(self.show_error_message)
-        self.cluster_connector.metrics_data_loaded.connect(self.check_cluster_data_loaded)
-        self.cluster_connector.issues_data_loaded.connect(self.check_cluster_data_loaded)
-
+        # Connect signals with error handling
+        self._connect_signals()
+        
         self.setWindowTitle("Kubernetes Manager")
         self.setGeometry(100, 100, 1300, 700)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
@@ -205,170 +208,197 @@ class OrchestrixGUI(QMainWindow):
         ]
         self.next_color_index = 0
         # --- End of new properties ---
+ 
+        self._pending_updates = []
+        self._update_timer = QTimer(self)  # Fixed: Added self as parent
+        self._update_timer.timeout.connect(self._process_pending_updates)
+        self._update_timer.setSingleShot(True)
 
         self.init_data_model()
         self.setup_ui()
         self.update_content_view("Browse All")
         QTimer.singleShot(100, self.load_kubernetes_clusters)
+        
+        # Set up periodic cluster status refresh (every 5 minutes for Docker Desktop)
+        self.cluster_refresh_timer = QTimer(self)  # Fixed: Added self as parent
+        self.cluster_refresh_timer.timeout.connect(self.refresh_cluster_status)
+        self.cluster_refresh_timer.start(300000)  # 5 minutes - much less aggressive
+        logging.info("HomePage: Set up periodic cluster status refresh (5min interval)")
 
-    # --- New method to get cluster color ---
+    def _connect_signals(self):
+        """Connect signals with error handling"""
+        try:
+            self.kube_client.clusters_loaded.connect(self.on_clusters_loaded)
+            self.kube_client.error_occurred.connect(self.show_error_message)
+            
+            self.cluster_connector.connection_started.connect(self.on_cluster_connection_started)
+            self.cluster_connector.connection_complete.connect(self.on_cluster_connection_complete)
+            # Comment out duplicate error handling - kube_client.error_occurred already handles this
+            # Prevents duplicate error dialogs from both kube_client and cluster_connector
+            # self.cluster_connector.error_occurred.connect(
+            #     lambda error_type, error_msg: self.show_error_message(error_msg)
+            # )
+            self.cluster_connector.metrics_data_loaded.connect(self.check_cluster_data_loaded)
+            self.cluster_connector.issues_data_loaded.connect(self.check_cluster_data_loaded)
+        except Exception as e:
+            logging.error(f"Error connecting signals: {e}")
+            
     def get_cluster_color(self, cluster_name: str) -> QColor:
-        """Assigns a unique vibrant color to a cluster name."""
+        """Get cached cluster color"""
         if cluster_name not in self.cluster_colors_cache:
             color = self.vibrant_cluster_colors[self.next_color_index % len(self.vibrant_cluster_colors)]
             self.cluster_colors_cache[cluster_name] = color
             self.next_color_index += 1
         return self.cluster_colors_cache[cluster_name]
-    # --- End of new method ---
 
-    def load_kubernetes_clusters(self):
-        self.kube_client.load_clusters_async()
-
-    def on_clusters_loaded(self, clusters):
-        for cluster in clusters:
-            exists = False
-            for item in self.all_data["Browse All"]:
-                if item.get("name") == cluster.name:
-                    status = "available"
-                    if cluster.status == "active":
-                        status = "available"
-                    elif cluster.status == "disconnect":
-                        status = "disconnect"
-
-                    item.update({
-                        "name": cluster.name,
-                        "kind": cluster.kind,
-                        "source": cluster.source,
-                        "label": cluster.label,
-                        "status": status,
-                        "badge_color": None,
-                        "action": self.navigate_to_cluster,
-                        "cluster_data": cluster
-                    })
-                    exists = True
-                    break
-            if not exists:
-                status = "available"
-                if cluster.status == "disconnect":
-                    status = "disconnect"
-
-                self.all_data["Browse All"].append({
-                    "name": cluster.name,
-                    "kind": cluster.kind,
-                    "source": cluster.source,
-                    "label": cluster.label,
-                    "status": status,
-                    "badge_color": None,
-                    "action": self.navigate_to_cluster,
-                    "cluster_data": cluster
-                })
-        self.update_filtered_views()
-        self.update_content_view(self.current_view)
-        self.update_pinned_items_signal.emit(list(self.pinned_items))
-
-    def check_cluster_data_loaded(self, data):
-        if self.waiting_for_cluster_load:
-            cluster_name = self.waiting_for_cluster_load
-
-            if hasattr(self.cluster_connector, 'is_data_loaded') and self.cluster_connector.is_data_loaded(cluster_name):
-                self.waiting_for_cluster_load = None
-                for view_type in self.all_data:
-                    for item in self.all_data[view_type]:
-                        if item.get("name") == cluster_name:
-                            item["status"] = "connected"
-                self.update_content_view(self.current_view)
-                QTimer.singleShot(100, lambda: self.open_cluster_signal.emit(cluster_name))
-
-    def on_cluster_connection_started(self, cluster_name):
-        self.connecting_clusters.add(cluster_name)
-        for view_type in self.all_data:
-            for item in self.all_data[view_type]:
-                if item.get("name") == cluster_name:
-                    item["status"] = "connecting"
-        self.update_content_view(self.current_view)
-
-    def on_cluster_connection_complete(self, cluster_name, success):
-        self.connecting_clusters.discard(cluster_name)
-        for view_type in self.all_data:
-            for item in self.all_data[view_type]:
-                if item.get("name") == cluster_name:
-                    if success:
-                        item["status"] = "loading"
-                        self.waiting_for_cluster_load = cluster_name
-                    else:
-                        item["status"] = "disconnect"
-        self.update_content_view(self.current_view)
-
-    def show_error_message(self, error_message):
-        """Display error messages with better formatting"""
+    def create_colored_icon(self, icon_path: str, color: QColor, size: int) -> QPixmap:
+        """Create colored icon with caching"""
+        cache_key = f"{icon_path}_{color.name()}_{size}"
+        
+        if cache_key in COLORED_ICON_CACHE:
+            return COLORED_ICON_CACHE[cache_key]
+        
         try:
-            # Clean up the message
-            if not error_message:
-                error_message = "An unknown error occurred."
+            # Check if base icon is cached
+            if icon_path not in ICON_CACHE:
+                resolved_path = resource_path(icon_path)
+                ICON_CACHE[icon_path] = QPixmap(resolved_path)
             
-            error_message = str(error_message).strip()
+            original_pixmap = ICON_CACHE[icon_path]
+            if original_pixmap.isNull():
+                return QPixmap()
             
-            # Log for debugging
-            logging.error(f"Showing error dialog: {error_message}")
+            # Scale the icon
+            scaled_pixmap = original_pixmap.scaled(
+                size, size,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            )
             
-            # Create message box
-            msg_box = QMessageBox(self)
-            msg_box.setIcon(QMessageBox.Icon.Critical)
-            msg_box.setWindowTitle("Connection Error")
-            msg_box.setText(error_message)
+            # Create colored version
+            colored_pixmap = QPixmap(scaled_pixmap.size())
+            colored_pixmap.fill(Qt.GlobalColor.transparent)
             
-            # Add helpful suggestions for Docker Desktop issues
-            if "docker-desktop" in error_message.lower() and "refused" in error_message.lower():
-                msg_box.setInformativeText(
-                    "💡 Try these solutions:\n"
-                    "• Start Docker Desktop\n"
-                    "• Enable Kubernetes in Docker Desktop settings\n"
-                    "• Wait for Kubernetes to initialize completely"
-                )
+            painter = QPainter(colored_pixmap)
+            try:
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+                painter.drawPixmap(0, 0, scaled_pixmap)
+                painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+                painter.fillRect(colored_pixmap.rect(), color)
+            finally:
+                painter.end()
             
-            # Style the dialog
-            msg_box.setStyleSheet("""
-                QMessageBox {
-                    background-color: #2d2d2d;
-                    color: #ffffff;
-                    font-size: 12px;
-                    min-width: 400px;
-                }
-                QMessageBox QLabel {
-                    color: #ffffff;
-                    padding: 10px;
-                }
-                QMessageBox QPushButton {
-                    background-color: #404040;
-                    color: #ffffff;
-                    border: 1px solid #555555;
-                    padding: 8px 15px;
-                    border-radius: 3px;
-                }
-                QMessageBox QPushButton:hover {
-                    background-color: #505050;
-                }
-            """)
-            
-            msg_box.exec()
+            # Cache the result
+            COLORED_ICON_CACHE[cache_key] = colored_pixmap
+            return colored_pixmap
             
         except Exception as e:
-            logging.error(f"Error showing dialog: {e}")
-            # Fallback
-            QMessageBox.critical(self, "Error", str(error_message))
+            logging.error(f"Error creating colored icon for {icon_path}: {e}")
+            return QPixmap()
 
+    def handle_disconnect_item(self, item):
+        """Optimized disconnect handler with batch updates"""
+        original_name = item.data(0, Qt.ItemDataRole.UserRole)
+        
+        logging.info(f"Disconnecting cluster: {original_name}")
+        
+        # Queue status update
+        self._queue_cluster_update(original_name, {"status": "disconnect"})
+        
+        # Clean up cluster connector data asynchronously
+        QTimer.singleShot(0, lambda: self._cleanup_cluster_data(original_name))
+        
+        # Notify cluster state manager
+        if self.cluster_state_manager:
+            try:
+                self.cluster_state_manager.disconnect_cluster(original_name)
+                logging.info(f"Notified cluster state manager about disconnect: {original_name}")
+            except Exception as e:
+                logging.error(f"Error notifying cluster state manager: {e}")
+        
+        # Process updates with small delay to batch multiple operations
+        self._schedule_batch_update()
+
+    def _queue_cluster_update(self, cluster_name, updates):
+        """Queue cluster updates for batch processing"""
+        self._pending_updates.append((cluster_name, updates))
+
+    def _schedule_batch_update(self):
+        """Schedule batch update with debouncing"""
+        if not self._update_timer.isActive():
+            self._update_timer.start(50)  # 50ms delay for batching
+
+    def _process_pending_updates(self):
+        """Process all pending updates in batch"""
+        if not self._pending_updates:
+            return
+        
+        # Group updates by cluster
+        updates_by_cluster = defaultdict(dict)
+        for cluster_name, updates in self._pending_updates:
+            updates_by_cluster[cluster_name].update(updates)
+        
+        # Apply updates
+        for view_type in self.all_data:
+            for item in self.all_data[view_type]:
+                cluster_name = item.get("name")
+                if cluster_name in updates_by_cluster:
+                    item.update(updates_by_cluster[cluster_name])
+        
+        # Clear pending updates
+        self._pending_updates.clear()
+        
+        # Update view once
+        self.update_content_view(self.current_view)
+
+    def _cleanup_cluster_data(self, cluster_name):
+        """Clean up cluster data asynchronously"""
+        try:
+            if hasattr(self.cluster_connector, 'data_cache') and cluster_name in self.cluster_connector.data_cache:
+                del self.cluster_connector.data_cache[cluster_name]
+                
+            if hasattr(self.cluster_connector, 'loading_complete') and cluster_name in self.cluster_connector.loading_complete:
+                del self.cluster_connector.loading_complete[cluster_name]
+                
+            if (hasattr(self.cluster_connector, 'kube_client') and 
+                hasattr(self.cluster_connector.kube_client, 'current_cluster') and
+                self.cluster_connector.kube_client.current_cluster == cluster_name):
+                self.cluster_connector.stop_polling()
+                self.cluster_connector.kube_client.current_cluster = None
+                
+            if hasattr(self.cluster_connector, 'disconnect_cluster'):
+                self.cluster_connector.disconnect_cluster(cluster_name)
+                
+            # Remove from connecting clusters set
+            self.connecting_clusters.discard(cluster_name)
+            
+            # Reset waiting for cluster load
+            if self.waiting_for_cluster_load == cluster_name:
+                self.waiting_for_cluster_load = None
+                
+        except Exception as e:
+            logging.error(f"Error during cluster cleanup for {cluster_name}: {e}")
 
     def update_content_view(self, view_type):
+        """Update content view with optimized rendering"""
         self.current_view = view_type
         self.browser_label.setText(view_type)
+        
+        # Update sidebar buttons efficiently
         for button in self.sidebar_buttons:
             button.setChecked(view_type in button.text())
+        
         self.filter_content(self.search_filter)
 
     def filter_content(self, search_text=None):
+        """Optimized content filtering with batch updates"""
         if search_text is not None:
             self.search_filter = search_text
+            
         view_data = self.all_data[self.current_view]
+        
+        # Efficient filtering
         if self.search_filter:
             search_term = self.search_filter.lower()
             filtered_data = [
@@ -379,10 +409,283 @@ class OrchestrixGUI(QMainWindow):
             ]
         else:
             filtered_data = view_data
+        
+        # Update count
         self.items_label.setText(f"{len(filtered_data)} item{'s' if len(filtered_data) != 1 else ''}")
-        self.tree_widget.clear()
-        for item in filtered_data:
-            self.add_table_item(**{k: item[k] for k in ["name", "kind", "source", "label", "status", "badge_color"]}, original_data=item)
+        
+        # Batch update table
+        self._batch_update_table(filtered_data)
+
+    def _batch_update_table(self, data):
+        """Update table with batch operations"""
+        self.tree_widget.setUpdatesEnabled(False)
+        try:
+            self.tree_widget.clear()
+            
+            # # Pre-allocate rows
+            # self.tree_widget.setRowCount(len(data))
+            
+            # Add items in batch
+            for i, item in enumerate(data):
+                self.add_table_item(**{k: item[k] for k in ["name", "kind", "source", "label", "status", "badge_color"]}, original_data=item)
+                
+                # Process events periodically for large datasets
+                if i % 100 == 0:
+                    QApplication.processEvents()
+                    
+        finally:
+            self.tree_widget.setUpdatesEnabled(True)
+
+    def load_kubernetes_clusters(self):
+        """Load clusters asynchronously"""
+        logging.info("HomePage: Loading Kubernetes clusters...")
+        self.kube_client.load_clusters_async()
+        
+    def refresh_cluster_status(self):
+        """Force refresh of cluster status"""
+        logging.info("HomePage: Forcing cluster status refresh...")
+        self.load_kubernetes_clusters()
+
+    def on_clusters_loaded(self, clusters):
+        """Handle loaded clusters with batch updates"""
+        logging.info(f"HomePage: Received {len(clusters)} clusters from kubernetes client")
+        updates = []
+        
+        for cluster in clusters:
+            logging.debug(f"HomePage: Processing cluster {cluster.name} with status {cluster.status}")
+            # FIXED: Check actual cluster state instead of just cluster.status
+            actual_status = "available"
+            if self.cluster_state_manager:
+                from Utils.cluster_state_manager import ClusterState
+                cluster_state = self.cluster_state_manager.get_cluster_state(cluster.name)
+                
+                if cluster_state == ClusterState.CONNECTED:
+                    actual_status = "connected"
+                elif cluster_state == ClusterState.CONNECTING:
+                    actual_status = "connecting"
+                else:
+                    # Use the cluster's actual status from the service
+                    actual_status = cluster.status if cluster.status in ["available", "connected", "connecting"] else "available"
+            else:
+                # Use the cluster's actual status from the service
+                actual_status = cluster.status if cluster.status in ["available", "connected", "connecting"] else "available"
+            
+            logging.debug(f"HomePage: Final status for {cluster.name}: {actual_status} (original: {cluster.status})")
+            
+            cluster_data = {
+                "name": cluster.name,
+                "kind": cluster.kind,
+                "source": cluster.source,
+                "label": cluster.label,
+                "status": actual_status,
+                "badge_color": None,
+                "action": self.navigate_to_cluster,
+                "cluster_data": cluster
+            }
+            
+            # Check if cluster exists
+            exists = False
+            for item in self.all_data["Browse All"]:
+                if item.get("name") == cluster.name:
+                    item.update(cluster_data)
+                    exists = True
+                    break
+                    
+            if not exists:
+                self.all_data["Browse All"].append(cluster_data)
+        
+        # Update filtered views
+        self.update_filtered_views()
+        self.update_content_view(self.current_view)
+        self.update_pinned_items_signal.emit(list(self.pinned_items))
+
+    def _on_cluster_state_changed(self, cluster_name, state):
+        """Handle cluster state changes from cluster state manager"""
+        try:
+            from Utils.cluster_state_manager import ClusterState
+            
+            # FIXED: Update status mapping to properly reflect cluster states
+            status_mapping = {
+                ClusterState.DISCONNECTED: "available",
+                ClusterState.CONNECTING: "connecting", 
+                ClusterState.CONNECTED: "connected",
+                ClusterState.ERROR: "available",  # Error state shows as available to allow retry
+                ClusterState.MANUALLY_DISCONNECTED: "available"  # Manual disconnect shows as available to allow reconnect
+            }
+            
+            new_status = status_mapping.get(state, "available")
+            
+            for view_type in self.all_data:
+                for item in self.all_data[view_type]:
+                    if item.get("name") == cluster_name:
+                        item["status"] = new_status
+                        logging.info(f"Updated HomePage status for {cluster_name}: {new_status}")
+                        break
+            
+            self.update_content_view(self.current_view)
+            
+        except Exception as e:
+            logging.error(f"Error handling cluster state change in HomePage: {e}")
+    
+    def _on_cluster_switch_completed(self, cluster_name, success):
+        """Handle cluster switch completion"""
+        try:
+            if success:
+                # Update status to connected
+                for view_type in self.all_data:
+                    for item in self.all_data[view_type]:
+                        if item.get("name") == cluster_name:
+                            item["status"] = "connected"
+                            logging.info(f"Cluster {cluster_name} successfully connected")
+                            break
+            else:
+                # Update status back to available on failure
+                for view_type in self.all_data:
+                    for item in self.all_data[view_type]:
+                        if item.get("name") == cluster_name:
+                            item["status"] = "available" 
+                            logging.info(f"Cluster {cluster_name} connection failed, status reset to available")
+                            break
+            
+            self.update_content_view(self.current_view)
+            
+        except Exception as e:
+            logging.error(f"Error handling cluster switch completion in HomePage: {e}")
+
+    def check_cluster_data_loaded(self, data):
+        if self.waiting_for_cluster_load:
+            cluster_name = self.waiting_for_cluster_load
+            logging.info(f"HomePage: Checking data loaded for {cluster_name}")
+
+            if hasattr(self.cluster_connector, 'is_data_loaded') and self.cluster_connector.is_data_loaded(cluster_name):
+                self.waiting_for_cluster_load = None
+                for view_type in self.all_data:
+                    for item in self.all_data[view_type]:
+                        if item.get("name") == cluster_name:
+                            item["status"] = "connected"
+                            logging.info(f"HomePage: Set {cluster_name} status to connected - data is loaded")
+                self.update_content_view(self.current_view)
+                QTimer.singleShot(100, lambda: self.open_cluster_signal.emit(cluster_name))
+            else:
+                logging.info(f"HomePage: Data not yet loaded for {cluster_name}")
+        else:
+            logging.debug("HomePage: No cluster waiting for data load")
+
+    def on_cluster_connection_started(self, cluster_name):
+        logging.info(f"HomePage: Connection started for {cluster_name}")
+        self.connecting_clusters.add(cluster_name)
+        for view_type in self.all_data:
+            for item in self.all_data[view_type]:
+                if item.get("name") == cluster_name:
+                    item["status"] = "connecting"
+        self.update_content_view(self.current_view)
+        
+        # Add a timeout to check if connection completes within reasonable time
+        QTimer.singleShot(10000, lambda: self._check_connection_timeout(cluster_name))
+
+    def on_cluster_connection_complete(self, cluster_name, success):
+        logging.info(f"HomePage: on_cluster_connection_complete called for {cluster_name}, success={success}")
+        self.connecting_clusters.discard(cluster_name)
+        for view_type in self.all_data:
+            for item in self.all_data[view_type]:
+                if item.get("name") == cluster_name:
+                    if success:
+                        item["status"] = "loading"
+                        self.waiting_for_cluster_load = cluster_name
+                        logging.info(f"HomePage: Set {cluster_name} to loading, waiting for data")
+                    else:
+                        item["status"] = "available"
+                        # Clear waiting state on failure
+                        if self.waiting_for_cluster_load == cluster_name:
+                            self.waiting_for_cluster_load = None
+                        logging.info(f"HomePage: Set {cluster_name} status to available on failure")
+        self.update_content_view(self.current_view)
+        
+    def _check_connection_timeout(self, cluster_name):
+        """Check if connection is stuck and try to recover"""
+        try:
+            # If cluster is still in connecting state after timeout, check actual state
+            if cluster_name in self.connecting_clusters or self.waiting_for_cluster_load == cluster_name:
+                logging.warning(f"HomePage: Connection timeout for {cluster_name}, checking actual state")
+                
+                # Check if cluster is actually connected via state manager
+                if self.cluster_state_manager:
+                    from Utils.cluster_state_manager import ClusterState
+                    actual_state = self.cluster_state_manager.get_cluster_state(cluster_name)
+                    
+                    if actual_state == ClusterState.CONNECTED:
+                        logging.info(f"HomePage: {cluster_name} is actually connected, updating UI")
+                        # Force update to connected state
+                        self.connecting_clusters.discard(cluster_name)
+                        self.waiting_for_cluster_load = None
+                        
+                        for view_type in self.all_data:
+                            for item in self.all_data[view_type]:
+                                if item.get("name") == cluster_name:
+                                    item["status"] = "connected"
+                                    logging.info(f"HomePage: Forced {cluster_name} status to connected")
+                        
+                        self.update_content_view(self.current_view)
+                        # Emit signal to switch to cluster view
+                        QTimer.singleShot(100, lambda: self.open_cluster_signal.emit(cluster_name))
+                    else:
+                        logging.info(f"HomePage: {cluster_name} is in state {actual_state}, resetting to available")
+                        # Reset to available if not actually connected
+                        self.connecting_clusters.discard(cluster_name)
+                        if self.waiting_for_cluster_load == cluster_name:
+                            self.waiting_for_cluster_load = None
+                            
+                        for view_type in self.all_data:
+                            for item in self.all_data[view_type]:
+                                if item.get("name") == cluster_name:
+                                    item["status"] = "available"
+                        
+                        self.update_content_view(self.current_view)
+                        
+        except Exception as e:
+            logging.error(f"Error in connection timeout check for {cluster_name}: {e}")
+
+    def show_error_message(self, error_message):
+        """Display error messages using centralized error handler to prevent duplicates"""
+        try:
+            # Clean up the message
+            if not error_message:
+                error_message = "An unknown error occurred."
+            
+            error_message = str(error_message).strip()
+            
+            # Check if this error is for a cancelled cluster connection
+            # Extract cluster name from error message if possible
+            cancelled_cluster = None
+            for view_type in self.all_data:
+                for item in self.all_data[view_type]:
+                    cluster_name = item.get("name", "")
+                    if (cluster_name in error_message and 
+                        item.get("status") == "available" and 
+                        cluster_name not in self.connecting_clusters):
+                        cancelled_cluster = cluster_name
+                        break
+            
+            if cancelled_cluster:
+                logging.info(f"Suppressing error for cancelled cluster {cancelled_cluster}: {error_message}")
+                return
+            
+            # Log for debugging
+            logging.error(f"HomePage error: {error_message}")
+            
+            # Use centralized error handler - this prevents duplicate dialogs
+            from Utils.error_handler import get_error_handler
+            error_handler = get_error_handler()
+            error_handler.handle_error(
+                Exception(error_message), 
+                context="cluster connection", 
+                show_dialog=True
+            )
+            
+        except Exception as e:
+            logging.error(f"Error in centralized error handling: {e}")
+            # Only show fallback if centralized handler fails
+            QMessageBox.critical(self, "Error", str(error_message))
 
     def add_table_item(self, name, kind, source, label, status, badge_color=None, original_data=None):
         item = QTreeWidgetItem(self.tree_widget)
@@ -415,7 +718,7 @@ class OrchestrixGUI(QMainWindow):
             # Load and color the cluster icon
             try:
                 cluster_color = self.get_cluster_color(name)
-                colored_pixmap = self.create_colored_icon("icons/Cluster_Logo.svg", cluster_color, icon_size)
+                colored_pixmap = self.create_colored_icon("Icons/Cluster_Logo.svg", cluster_color, icon_size)
 
                 if not colored_pixmap.isNull():
                     cluster_icon_label.setPixmap(colored_pixmap)
@@ -436,7 +739,7 @@ class OrchestrixGUI(QMainWindow):
         if original_data and 'cluster_data' in original_data:
             pin_btn = QPushButton()
             pin_btn.setFixedSize(20, 20)
-            pin_icon_path = resource_path("icons/pin.svg") if name not in self.pinned_items else resource_path("icons/unpin.svg")
+            pin_icon_path = resource_path("Icons/pin.svg") if name not in self.pinned_items else resource_path("Icons/unpin.svg")
             pin_btn.setIcon(QIcon(pin_icon_path))
             pin_btn.setIconSize(QSize(16, 16))
             pin_btn.setStyleSheet("""
@@ -549,7 +852,7 @@ class OrchestrixGUI(QMainWindow):
         action_layout.setSpacing(0)
         action_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         menu_btn = QToolButton()
-        icon = QIcon(resource_path("icons/Moreaction_Button.svg"))
+        icon = QIcon(resource_path("Icons/Moreaction_Button.svg"))
         menu_btn.setIcon(icon)
         menu_btn.setIconSize(QSize(AppConstants.SIZES["ICON_SIZE"], AppConstants.SIZES["ICON_SIZE"]))
         menu_btn.setText("")
@@ -610,46 +913,6 @@ class OrchestrixGUI(QMainWindow):
         item.setSizeHint(3, QSize(0, AppConstants.SIZES["ROW_HEIGHT"]))
         item.setSizeHint(4, QSize(0, AppConstants.SIZES["ROW_HEIGHT"]))
 
-    def create_colored_icon(self, icon_path: str, color: QColor, size: int) -> QPixmap:
-        """
-        Creates a colored version of an icon while preserving its shape and details.
-        """
-        try:
-            # Load the original icon
-            original_pixmap = QPixmap(resource_path(icon_path))
-            if original_pixmap.isNull():
-                return QPixmap()  # Return empty pixmap if loading fails
-
-            # Scale the icon to the desired size
-            scaled_pixmap = original_pixmap.scaled(
-                size, size,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation
-            )
-
-            # Create a new pixmap with the same size and transparency
-            colored_pixmap = QPixmap(scaled_pixmap.size())
-            colored_pixmap.fill(Qt.GlobalColor.transparent)
-
-            # Use QPainter to draw the colored version
-            painter = QPainter(colored_pixmap)
-            try:
-                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-                painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-
-                # Draw the original icon
-                painter.drawPixmap(0, 0, scaled_pixmap)
-
-                # Apply color overlay using composition mode
-                painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
-                painter.fillRect(colored_pixmap.rect(), color)
-            finally:
-                painter.end()
-            
-            return colored_pixmap
-        except Exception as e:
-            print(f"Error creating colored icon for {icon_path}: {e}")
-            return QPixmap()
 
     def create_colored_icon_alternative(self, icon_path: str, color: QColor, size: int) -> QPixmap:
         """
@@ -763,70 +1026,16 @@ class OrchestrixGUI(QMainWindow):
         original_name = item.data(0, Qt.ItemDataRole.UserRole)
         original_data = item.data(0, Qt.ItemDataRole.UserRole + 1)
         if original_data and "Cluster" in original_data["kind"]:
+            # Update UI to show connecting state
             for view_type in self.all_data:
                 for d_item in self.all_data[view_type]: # renamed item to d_item to avoid conflict
                     if d_item["name"] == original_name: d_item["status"] = "connecting"
             self.connecting_clusters.add(original_name)
             self.update_content_view(self.current_view)
-            QTimer.singleShot(100, lambda: self.cluster_connector.connect_to_cluster(original_name))
-
-    def handle_disconnect_item(self, item):
-        original_name = item.data(0, Qt.ItemDataRole.UserRole)
-        
-        logging.info(f"Disconnecting cluster: {original_name}")
-        
-        # Update UI status first
-        for view_type in self.all_data:
-            for data_item in self.all_data[view_type]:
-                if data_item["name"] == original_name: 
-                    data_item["status"] = "disconnect"
-                    logging.info(f"Updated UI status for {original_name} to disconnect")
-        
-        # Clean up cluster connector data
-        try:
-            if hasattr(self.cluster_connector, 'data_cache') and original_name in self.cluster_connector.data_cache:
-                del self.cluster_connector.data_cache[original_name]
-                logging.info(f"Cleared data cache for {original_name}")
-                
-            if hasattr(self.cluster_connector, 'loading_complete') and original_name in self.cluster_connector.loading_complete:
-                del self.cluster_connector.loading_complete[original_name]
-                logging.info(f"Cleared loading complete flag for {original_name}")
-                
-            if (hasattr(self.cluster_connector, 'kube_client') and 
-                hasattr(self.cluster_connector.kube_client, 'current_cluster') and
-                self.cluster_connector.kube_client.current_cluster == original_name):
-                self.cluster_connector.stop_polling()
-                # Also reset the current cluster in kube_client
-                self.cluster_connector.kube_client.current_cluster = None
-                logging.info(f"Stopped polling and reset current cluster for {original_name}")
-                
-            if hasattr(self.cluster_connector, 'disconnect_cluster'):
-                self.cluster_connector.disconnect_cluster(original_name)
-                logging.info(f"Called cluster_connector.disconnect_cluster for {original_name}")
-        except Exception as e:
-            logging.error(f"Error during cluster connector cleanup for {original_name}: {e}")
-        
-        # IMPORTANT: Notify the cluster state manager about the disconnection
-        try:
-            if self.cluster_state_manager:
-                self.cluster_state_manager.disconnect_cluster(original_name)
-                logging.info(f"Notified cluster state manager about disconnect: {original_name}")
-            else:
-                logging.warning("Cluster state manager not available for disconnect notification")
-        except Exception as e:
-            logging.error(f"Error notifying cluster state manager about disconnect: {e}")
-        
-        # Remove from connecting clusters set if present
-        self.connecting_clusters.discard(original_name)
-        
-        # Reset waiting for cluster load if it matches
-        if self.waiting_for_cluster_load == original_name:
-            self.waiting_for_cluster_load = None
-            logging.info(f"Reset waiting_for_cluster_load for {original_name}")
-        
-        # Update the view
-        self.update_content_view(self.current_view)
-        logging.info(f"Cluster disconnect completed for: {original_name}")
+            
+            # FIXED: Use the same connection flow as direct click to ensure consistent error handling
+            # Let the main window handle the connection through cluster state manager
+            QTimer.singleShot(100, lambda: self.open_cluster_signal.emit(original_name))
 
     def disconnect_cluster(self, cluster_name):
         """Disconnect from a specific cluster"""
@@ -881,15 +1090,57 @@ class OrchestrixGUI(QMainWindow):
     def navigate_to_cluster(self, item):
         cluster_name = item["name"]
         cluster_status = item["status"]
-        if cluster_status in ["connecting", "loading"]: return
-        if hasattr(self.cluster_connector, 'is_data_loaded') and self.cluster_connector.is_data_loaded(cluster_name):
-            self.open_cluster_signal.emit(cluster_name)
+        
+        # Prevent multiple connection attempts - check both local and global state
+        if cluster_status in ["connecting", "loading"]: 
+            logging.info(f"Cluster {cluster_name} already {cluster_status}, ignoring duplicate click")
             return
+            
+        # Check if any other cluster is currently connecting - cancel it and connect to new one
+        connecting_clusters = []
         for view_type in self.all_data:
             for data_item in self.all_data[view_type]:
-                if data_item["name"] == cluster_name: data_item["status"] = "connecting"
+                if data_item.get("status") in ["connecting", "loading"] and data_item.get("name") != cluster_name:
+                    connecting_clusters.append(data_item.get("name"))
+                    logging.info(f"Cancelling connection to {data_item.get('name')} to switch to {cluster_name}")
+                    # Reset the previous cluster status
+                    data_item["status"] = "available"
+        
+        # Remove from connecting clusters set and update UI
+        for old_cluster in connecting_clusters:
+            self.connecting_clusters.discard(old_cluster)
+            if self.waiting_for_cluster_load == old_cluster:
+                self.waiting_for_cluster_load = None
+        
+        # Update UI to reflect cancellation of previous connections
+        if connecting_clusters:
+            self.update_content_view(self.current_view)
+        
+        # FIXED: Check actual cluster state before proceeding
+        if self.cluster_state_manager:
+            from Utils.cluster_state_manager import ClusterState
+            actual_state = self.cluster_state_manager.get_cluster_state(cluster_name)
+            
+            # If already connected, go directly to cluster view
+            if actual_state == ClusterState.CONNECTED:
+                logging.info(f"Cluster {cluster_name} already connected, opening cluster view")
+                self.open_cluster_signal.emit(cluster_name)
+                return
+        
+        # Update UI to show connecting state for any non-connected cluster
+        for view_type in self.all_data:
+            for data_item in self.all_data[view_type]:
+                if data_item["name"] == cluster_name: 
+                    data_item["status"] = "connecting"
+                    logging.info(f"HomePage: Set {cluster_name} status to connecting")
+        
+        self.connecting_clusters.add(cluster_name)
         self.update_content_view(self.current_view)
-        QTimer.singleShot(100, lambda: self.cluster_connector.connect_to_cluster(cluster_name))
+        logging.info(f"HomePage: Updated UI to show {cluster_name} as connecting")
+        
+        # FIXED: Only emit signal to main window, don't call cluster_connector directly
+        # Let the main window handle the connection through cluster state manager
+        self.open_cluster_signal.emit(cluster_name)
 
     def open_web_link(self, item):
         """Open web links in the default browser"""
@@ -952,10 +1203,10 @@ class OrchestrixGUI(QMainWindow):
         self.sidebar_layout.setContentsMargins(0, 0, 0, 0)
         self.sidebar_layout.setSpacing(2)
         sidebar_options = [
-            {"text": "Browse All", "icon": "🔍", "icon_path": "icons/browse.svg", "action": lambda: self.update_content_view("Browse All")},
-            {"text": "General", "icon": "⚙️", "icon_path": "icons/settings.svg", "action": lambda: self.update_content_view("General")},
-            {"text": "All Clusters", "icon": "🔄", "icon_path": "icons/clusters.svg", "action": lambda: self.update_content_view("All Clusters")},
-            {"text": "Web Links", "icon": "🔗", "icon_path": "icons/links.svg", "action": lambda: self.update_content_view("Web Links")}
+            {"text": "Browse All", "icon": "🔍", "icon_path": "Icons/browse.svg", "action": lambda: self.update_content_view("Browse All")},
+            {"text": "General", "icon": "⚙️", "icon_path": "Icons/settings.svg", "action": lambda: self.update_content_view("General")},
+            {"text": "All Clusters", "icon": "🔄", "icon_path": "Icons/clusters.svg", "action": lambda: self.update_content_view("All Clusters")},
+            {"text": "Web Links", "icon": "🔗", "icon_path": "Icons/links.svg", "action": lambda: self.update_content_view("Web Links")}
         ]
         self.sidebar_buttons = []
         for option in sidebar_options:
@@ -1073,6 +1324,14 @@ class OrchestrixGUI(QMainWindow):
                         if isinstance(child_widget, QPushButton) and hasattr(child_widget, 'setIcon'): # Check if it's the pin button
                             # Check the actual name again to be super sure it's a pin button for this item
                             # This logic assumes the pin button is a direct child and identifiable
-                            current_pin_icon_path = resource_path("icons/pin.svg") if name not in self.pinned_items else resource_path("icons/unpin.svg")
+                            current_pin_icon_path = resource_path("Icons/pin.svg") if name not in self.pinned_items else resource_path("Icons/unpin.svg")
                             child_widget.setIcon(QIcon(current_pin_icon_path))
                             break # Found and updated the pin button
+
+        def cleanup(self):
+            """Cleanup resources"""
+            ICON_CACHE.clear()
+            COLORED_ICON_CACHE.clear()
+            if self._update_timer.isActive():
+                self._update_timer.stop()
+            self._pending_updates.clear()

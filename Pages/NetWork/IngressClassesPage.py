@@ -4,9 +4,9 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor
 
-from base_components.base_components import SortableTableWidgetItem
-from base_components.base_resource_page import BaseResourcePage
-from UI.Styles import AppStyles, AppColors
+from Base_Components.base_components import SortableTableWidgetItem
+from Base_Components.base_resource_page import BaseResourcePage
+from UI.Styles import AppStyles
 
 class IngressClassesPage(BaseResourcePage):
     """
@@ -22,6 +22,7 @@ class IngressClassesPage(BaseResourcePage):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.resource_type = "ingressclasses"
+        self.show_namespace_dropdown = False  # IngressClasses are cluster-scoped
         self.setup_page_ui()
         
     def setup_page_ui(self):
@@ -41,43 +42,7 @@ class IngressClassesPage(BaseResourcePage):
         self.configure_columns()
         
         # Add delete selected button
-        self._add_delete_selected_button()
-        
-    def _add_delete_selected_button(self):
-        """Add a button to delete selected resources."""
-        delete_btn = QPushButton("Delete Selected")
-        delete_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #d32f2f;
-                color: #ffffff;
-                border: none;
-                border-radius: 4px;
-                padding: 5px 10px;
-            }
-            QPushButton:hover {
-                background-color: #b71c1c;
-            }
-            QPushButton:pressed {
-                background-color: #d32f2f;
-            }
-            QPushButton:disabled {
-                background-color: #555555;
-                color: #888888;
-            }
-        """)
-        delete_btn.clicked.connect(self.delete_selected_resources)
-        
-        # Find the header layout
-        for i in range(self.layout().count()):
-            item = self.layout().itemAt(i)
-            if item.layout():
-                for j in range(item.layout().count()):
-                    widget = item.layout().itemAt(j).widget()
-                    if isinstance(widget, QPushButton) and widget.text() == "Refresh":
-                        # Insert before the refresh button
-                        item.layout().insertWidget(item.layout().count() - 1, delete_btn)
-                        break
-    
+
     def configure_columns(self):
         """Configure column widths for full screen utilization"""
         if not self.table:

@@ -29,11 +29,17 @@ def resource_path(relative_path):
                     logging.debug(f"Found alternative path: {alt_path}")
                     return alt_path
                 
-                # Try in root directory
-                alt_path2 = os.path.join(base_path, "icons", filename)
+                # Try in _internal/Icons directory (PyInstaller structure)
+                alt_path2 = os.path.join(base_path, "_internal", "Icons", filename)
                 if os.path.exists(alt_path2):
-                    logging.debug(f"Found in icons subdirectory: {alt_path2}")
+                    logging.debug(f"Found in _internal/Icons subdirectory: {alt_path2}")
                     return alt_path2
+                
+                # Try in Icons subdirectory
+                alt_path3 = os.path.join(base_path, "Icons", filename)
+                if os.path.exists(alt_path3):
+                    logging.debug(f"Found in icons subdirectory: {alt_path3}")
+                    return alt_path3
             
             return full_path
         else:
@@ -54,7 +60,7 @@ class Icons:
     """Static class to provide consistent icons throughout the app"""
     
     # Base path for icons - change this to your local directory
-    ICONS_BASE_PATH = "icons/"
+    ICONS_BASE_PATH = "Icons/"
     
     # Emoji-based fallback icons
     CLUSTER = "⚙️"
@@ -263,7 +269,7 @@ class Icons:
         """Get the application logo, trying SVG first, then PNG"""
         try:
             # Try SVG first
-            svg_path = resource_path("icons/logoIcon.svg")
+            svg_path = resource_path("Icons/logoIcon.svg")
             if os.path.exists(svg_path):
                 pixmap = QPixmap(svg_path)
                 if not pixmap.isNull():
@@ -271,7 +277,7 @@ class Icons:
                                             Qt.TransformationMode.SmoothTransformation))
                                          
             # Try PNG as fallback
-            png_path = resource_path("icons/logoIcon.png")
+            png_path = resource_path("Icons/logoIcon.png")
             if os.path.exists(png_path):
                 pixmap = QPixmap(png_path)
                 if not pixmap.isNull():

@@ -9,7 +9,7 @@ from .DetailManager import DetailManager
 from UI.Sidebar import Sidebar
 from UI.Styles import AppColors
 from UI.TerminalPanel import TerminalPanel
-from utils.cluster_connector import get_cluster_connector
+from Utils.cluster_connector import get_cluster_connector
 from UI.DetailPageComponent import DetailPageComponent as DetailPage
 
 # Import all page classes (required for PyInstaller compatibility)
@@ -44,7 +44,7 @@ from Pages.Config.ValidatingWebhookConfigsPage import ValidatingWebhookConfigsPa
 
 # Network pages
 from Pages.NetWork.ServicesPage import ServicesPage
-from Pages.NetWork.EndpointesPage import EndpointsPage
+from Pages.NetWork.EndpointsPage import EndpointsPage
 from Pages.NetWork.IngressesPage import IngressesPage
 from Pages.NetWork.IngressClassesPage import IngressClassesPage
 from Pages.NetWork.NetworkPoliciesPage import NetworkPoliciesPage
@@ -60,7 +60,7 @@ from Pages.AccessControl.ServiceAccountsPage import ServiceAccountsPage
 from Pages.AccessControl.ClusterRolesPage import ClusterRolesPage
 from Pages.AccessControl.RolesPage import RolesPage
 from Pages.AccessControl.ClusterRoleBindingsPage import ClusterRoleBindingsPage
-from Pages.AccessControl.RoleBinidingsPage import RoleBindingsPage
+from Pages.AccessControl.RoleBindingsPage import RoleBindingsPage
 
 # Helm pages
 # from Pages.Helm.ChartsPage import ChartsPage
@@ -68,6 +68,12 @@ from Pages.AccessControl.RoleBinidingsPage import RoleBindingsPage
 
 # Custom Resource pages
 from Pages.CustomResources.DefinitionsPage import DefinitionsPage
+
+# Apps page
+from Pages.AppsChartPage import AppsPage
+
+# AI Assistant page
+# from Pages.AIAssistantPage import AIAssistantPage
 
 # Page configuration with direct class references (PyInstaller compatible)
 PAGE_CONFIG = {
@@ -127,6 +133,12 @@ PAGE_CONFIG = {
 
     # Custom Resource pages
     'Definitions': DefinitionsPage,
+    
+    # Apps page
+    'AppsChart': AppsPage,
+    
+    # AI Assistant page
+    # 'AI Assistant': AIAssistantPage,
 }
 
 # Dropdown menu configuration
@@ -184,7 +196,7 @@ class LoadingOverlay(QWidget):
         self.spinner_label.setMinimumSize(64, 64)
         self.spinner_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        self.message = QLabel("Connecting to cluster...")
+        self.message = QLabel("Loading...")
         self.message.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         layout.addWidget(self.spinner_label)
@@ -234,7 +246,7 @@ class LoadingOverlay(QWidget):
             painter.setPen(Qt.PenStyle.NoPen)
             painter.drawEllipse(QPointF(x, y), 5, 5)
 
-    def show_loading(self, message: str = "Connecting to cluster...") -> None:
+    def show_loading(self, message: str = "Loading...") -> None:
         """Show loading overlay with custom message"""
         self.message.setText(message)
         self.spinner_timer.start(50)
@@ -363,21 +375,16 @@ class ClusterView(QWidget):
             if page_name and page_name in self.pages:
                 page = self.pages[page_name]
 
-                # Force reload the page data
-                if hasattr(page, 'force_load_data'):
-                    QTimer.singleShot(500, page.force_load_data)  # Small delay to let Kubernetes propagate changes
-                elif hasattr(page, 'load_data'):
-                    QTimer.singleShot(500, page.load_data)
+                # Use async refresh instead of timer-based delays
+                self._refresh_page_async(page, page_name)
 
                 logging.info(f"Refreshed page: {page_name}")
 
             # Always refresh Events page as well since events may be generated
             if "Events" in self.pages:
                 events_page = self.pages["Events"]
-                if hasattr(events_page, 'force_load_data'):
-                    QTimer.singleShot(1000, events_page.force_load_data)  # Slightly longer delay for events
-                elif hasattr(events_page, 'load_data'):
-                    QTimer.singleShot(1000, events_page.load_data)
+                # Use async refresh for events page too
+                self._refresh_page_async(events_page, "Events", delay_ms=1000)
 
         except Exception as e:
             logging.error(f"Error refreshing main page: {e}")
@@ -513,6 +520,71 @@ class ClusterView(QWidget):
         }
 
         return type_to_page.get(resource_type_lower, None)
+
+    def _refresh_page_async(self, page, page_name: str, delay_ms: int = 500):
+        """Refresh a page asynchronously without blocking UI"""
+        try:
+            from Utils.thread_manager import get_thread_manager
+            from Utils.enhanced_worker import EnhancedBaseWorker
+            
+            # Create a worker for the refresh operation (only for delay, not Qt operations)
+            class PageRefreshWorker(EnhancedBaseWorker):
+                def __init__(self, delay_ms):
+                    super().__init__(f"page_refresh_{page_name}")
+                    self.delay_ms = delay_ms
+                    self._timeout = 30  # 30 second timeout for refresh operations
+                
+                def execute(self):
+                    # Small delay to let Kubernetes propagate changes
+                    import time
+                    time.sleep(self.delay_ms / 1000.0)
+                    
+                    # Don't call Qt methods from worker thread - just return success
+                    return f"Delay completed for {page_name}"
+            
+            # Submit the worker to thread manager
+            thread_manager = get_thread_manager()
+            worker = PageRefreshWorker(delay_ms)
+            
+            def on_refresh_complete(result):
+                # Now perform the actual Qt refresh operations on the main thread
+                try:
+                    logging.debug(f"Page refresh delay completed: {result}")
+                    if hasattr(page, 'force_load_data'):
+                        page.force_load_data()
+                    elif hasattr(page, 'load_data'):
+                        page.load_data()
+                    logging.debug(f"Page {page_name} refreshed successfully")
+                except Exception as e:
+                    logging.error(f"Error refreshing page {page_name} on main thread: {e}")
+            
+            def on_refresh_error(error):
+                logging.error(f"Page refresh error for {page_name}: {error}")
+            
+            # Use queued connection to ensure the completion handler runs on main thread
+            worker.signals.finished.connect(on_refresh_complete, Qt.ConnectionType.QueuedConnection)
+            worker.signals.error.connect(on_refresh_error, Qt.ConnectionType.QueuedConnection)
+            
+            thread_manager.submit_worker(f"page_refresh_{page_name}_{id(page)}", worker)
+            
+        except Exception as e:
+            logging.error(f"Error starting async page refresh for {page_name}: {e}")
+            # Fallback to sync refresh if async fails - use QTimer to ensure main thread execution
+            try:
+                def perform_sync_refresh():
+                    try:
+                        if hasattr(page, 'force_load_data'):
+                            page.force_load_data()
+                        elif hasattr(page, 'load_data'):
+                            page.load_data()
+                        logging.debug(f"Sync fallback refresh completed for {page_name}")
+                    except Exception as sync_error:
+                        logging.error(f"Sync fallback refresh failed for {page_name}: {sync_error}")
+                
+                # Use QTimer to ensure execution on main thread
+                QTimer.singleShot(500, perform_sync_refresh)
+            except Exception as fallback_error:
+                logging.error(f"Fallback sync refresh setup failed for {page_name}: {fallback_error}")
 
     def _initialize_terminal(self) -> None:
         """Initialize the terminal panel"""
@@ -666,48 +738,55 @@ class ClusterView(QWidget):
             page_widget.load_data()
 
     def _update_cached_cluster_data(self, cluster_name: str) -> bool:
-        """Update UI with cached cluster data if available"""
-        if not (hasattr(self.cluster_connector, 'is_data_loaded') and
-                self.cluster_connector.is_data_loaded(cluster_name)):
-            return False
+        """Cache system removed - always return False"""
+        return False
 
-        cached_data = self.cluster_connector.get_cached_data(cluster_name)
-
-        # Update cluster info
-        if 'cluster_info' in cached_data:
-            self._on_cluster_data_loaded(cached_data['cluster_info'])
-
-        # Update cluster page if loaded
-        if 'Cluster' in self.pages:
-            cluster_page = self.pages['Cluster']
-            if 'metrics' in cached_data:
-                cluster_page.update_metrics(cached_data['metrics'])
-            if 'issues' in cached_data:
-                cluster_page.update_issues(cached_data['issues'])
-
-        self.loading_overlay.hide_loading()
-        return True
-
-    # Public API methods
     def set_active_cluster(self, cluster_name: str) -> None:
-        """Set the active cluster and update the UI accordingly"""
+        """Set the active cluster and update the UI accordingly - FIXED for proper cluster switching"""
         if self.active_cluster == cluster_name:
+            logging.info(f"ClusterView: Already active cluster {cluster_name}, ensuring data is loaded")
+            
+            # FIXED: Even if same cluster, ensure UI is updated
+            if 'Cluster' in self.pages:
+                cluster_page = self.pages['Cluster']
+                if hasattr(cluster_page, 'refresh_data'):
+                    QTimer.singleShot(100, cluster_page.refresh_data)
             return
 
+        # FIXED: Clear data from all loaded pages when switching clusters
+        old_cluster = self.active_cluster
+        if old_cluster and old_cluster != cluster_name:
+            logging.info(f"ClusterView: Switching from cluster '{old_cluster}' to '{cluster_name}'")
+            self._clear_all_page_data()
+            
         self.active_cluster = cluster_name
+        logging.info(f"ClusterView: Setting active cluster to {cluster_name}")
 
-        # Try to use cached data first
-        if self._update_cached_cluster_data(cluster_name):
-            return
+        # FIXED: Ensure cluster connector knows about the current cluster
+        if hasattr(self, 'cluster_connector') and self.cluster_connector:
+            self.cluster_connector.set_current_cluster(cluster_name)
+            logging.info(f"ClusterView: Set cluster connector current cluster to {cluster_name}")
 
-        # Show loading and connect to cluster
-        self.loading_overlay.show_loading(f"Loading cluster: {cluster_name}")
-        self.loading_overlay.resize(self.size())
-
-        if self.cluster_connector:
-            self.cluster_connector.connect_to_cluster(cluster_name)
-        else:
-            self._on_error("Cluster connector not initialized")
+        # Check if cluster state manager already connected
+        if (hasattr(self, 'cluster_connector') and 
+            self.cluster_connector and
+            hasattr(self.cluster_connector, 'connection_states')):
+            
+            current_state = self.cluster_connector.connection_states.get(cluster_name, "disconnected")
+            
+            # If already connected, try to update UI with cached data
+            if current_state == "connected":
+                logging.info(f"ClusterView: Cluster {cluster_name} already connected, updating from cache")
+                if not self._update_cached_cluster_data(cluster_name):
+                    # If no cached data, request fresh data
+                    logging.info(f"ClusterView: No cached data for {cluster_name}, requesting fresh data")
+                    if 'Cluster' in self.pages:
+                        cluster_page = self.pages['Cluster']
+                        if hasattr(cluster_page, 'refresh_data'):
+                            QTimer.singleShot(500, cluster_page.refresh_data)
+                return
+        
+        logging.info(f"ClusterView: Set active cluster to {cluster_name}, waiting for connection events")
 
     def show_detail_for_table_item(self, row: int, col: int, page, page_name: str) -> None:
         """Show detail page for clicked table item"""
@@ -808,18 +887,18 @@ class ClusterView(QWidget):
         if self.terminal_panel.is_visible:
             self._adjust_terminal_position()
 
-    # Event handlers
     def _on_connection_started(self, cluster_name: str) -> None:
         """Handle connection start"""
         if cluster_name == self.active_cluster:
-            self.loading_overlay.show_loading(f"Connecting to cluster: {cluster_name}")
-            self.loading_overlay.resize(self.size())
+            # Don't show loading message during connection
+            pass
 
     def _on_connection_complete(self, cluster_name: str, success: bool) -> None:
         """Handle connection completion"""
         if cluster_name == self.active_cluster:
             if success:
-                self.loading_overlay.show_loading(f"Loading data from: {cluster_name}")
+                # Don't show loading message, just load data silently
+                self._update_cached_cluster_data(cluster_name)
             else:
                 self.loading_overlay.hide_loading()
                 if hasattr(self.parent_window, 'show_error_message'):
@@ -828,30 +907,39 @@ class ClusterView(QWidget):
     def _on_cluster_data_loaded(self, cluster_info: Dict[str, Any]) -> None:
         """Handle cluster data loaded"""
         self.loading_overlay.hide_loading()
-
+        
     def _on_error(self, error_message: str) -> None:
         """Handle error messages"""
         self.loading_overlay.hide_loading()
         logging.warning(f"ClusterView received error: {error_message}")
 
     def _handle_resource_updated(self, resource_type: str, resource_name: str, namespace: Optional[str]) -> None:
-        """Handle resource updates"""
-        page_name = resource_type + "s"
+        """Handle resource updates - use QTimer to ensure main thread execution"""
+        def perform_resource_update():
+            try:
+                page_name = resource_type + "s"
 
-        if page_name in self.pages:
-            page = self.pages[page_name]
-            if hasattr(page, 'force_load_data'):
-                page.force_load_data()
-            elif hasattr(page, 'load_data'):
-                page.load_data()
+                if page_name in self.pages:
+                    page = self.pages[page_name]
+                    if hasattr(page, 'force_load_data'):
+                        page.force_load_data()
+                    elif hasattr(page, 'load_data'):
+                        page.load_data()
 
-        # Always refresh Events page
-        if "Events" in self.pages:
-            events_page = self.pages["Events"]
-            if hasattr(events_page, 'force_load_data'):
-                events_page.force_load_data()
-            elif hasattr(events_page, 'load_data'):
-                events_page.load_data()
+                # Always refresh Events page
+                if "Events" in self.pages:
+                    events_page = self.pages["Events"]
+                    if hasattr(events_page, 'force_load_data'):
+                        events_page.force_load_data()
+                    elif hasattr(events_page, 'load_data'):
+                        events_page.load_data()
+                        
+                logging.debug(f"Resource update completed for {resource_type}/{resource_name}")
+            except Exception as e:
+                logging.error(f"Error in resource update for {resource_type}/{resource_name}: {e}")
+        
+        # Use QTimer to ensure execution on main thread
+        QTimer.singleShot(0, perform_resource_update)
 
     def _update_terminal_on_sidebar_toggle(self) -> None:
         """Update terminal position when sidebar toggles"""
@@ -970,4 +1058,79 @@ class ClusterView(QWidget):
         self._set_active_navigation(page_name)
 
         # Load data with delay to allow UI update
-        QTimer.singleShot(50, lambda: self._load_page_data(page_widget))
+        QTimer.singleShot(50, lambda: self._load_page_data(page_widget))    
+    def _clear_all_page_data(self):
+        """Clear data from all loaded pages when switching clusters - FIXED"""
+        try:
+            logging.info("ClusterView: Clearing data from all loaded pages for cluster switch")
+            
+            for page_name, page_widget in self.pages.items():
+                if hasattr(page_widget, 'clear_for_cluster_change'):
+                    try:
+                        page_widget.clear_for_cluster_change()
+                        logging.debug(f"Cleared data for page: {page_name}")
+                    except Exception as e:
+                        logging.error(f"Error clearing data for page {page_name}: {e}")
+                elif hasattr(page_widget, 'resources') and hasattr(page_widget.resources, 'clear'):
+                    # Fallback: directly clear resources if available
+                    page_widget.resources.clear()
+                    if hasattr(page_widget, 'table') and hasattr(page_widget.table, 'setRowCount'):
+                        page_widget.table.setRowCount(0)
+                    logging.debug(f"Cleared resources for page: {page_name}")
+            
+            logging.info("ClusterView: Completed clearing page data for cluster switch")
+            
+        except Exception as e:
+            logging.error(f"Error clearing page data for cluster switch: {e}")
+    
+    def cleanup_on_destroy(self):
+        """Cleanup method called when ClusterView is being destroyed"""
+        try:
+            logging.debug("ClusterView cleanup_on_destroy called")
+            
+            # Close any open detail panels
+            if hasattr(self, 'detail_manager') and self.detail_manager:
+                if self.detail_manager.is_detail_visible():
+                    self.detail_manager.hide_detail()
+            
+            # Stop and cleanup terminal
+            if hasattr(self, 'terminal_panel') and self.terminal_panel:
+                if hasattr(self.terminal_panel, 'cleanup'):
+                    self.terminal_panel.cleanup()
+            
+            # Disconnect cluster connector signals
+            if hasattr(self, 'cluster_connector') and self.cluster_connector:
+                try:
+                    # Disconnect all signals
+                    self.cluster_connector.connection_started.disconnect()
+                    self.cluster_connector.connection_complete.disconnect()
+                    self.cluster_connector.cluster_data_loaded.disconnect()
+                    self.cluster_connector.error_occurred.disconnect()
+                except Exception as e:
+                    logging.error(f"Error disconnecting cluster connector signals: {e}")
+            
+            # Cleanup individual pages
+            for page_name, page_widget in self.pages.items():
+                if hasattr(page_widget, 'cleanup_on_destroy'):
+                    try:
+                        page_widget.cleanup_on_destroy()
+                    except Exception as e:
+                        logging.error(f"Error cleaning up page {page_name}: {e}")
+            
+            # Clear pages dictionary
+            self.pages.clear()
+            self._loaded_pages.clear()
+            
+            logging.debug("ClusterView cleanup completed")
+            
+        except Exception as e:
+            logging.error(f"Error in ClusterView cleanup_on_destroy: {e}")
+    
+    def __del__(self):
+        """Destructor to ensure cleanup when ClusterView is destroyed"""
+        try:
+            if hasattr(self, 'pages'):
+                logging.debug("ClusterView destructor called, performing cleanup")
+                self.cleanup_on_destroy()
+        except Exception as e:
+            logging.error(f"Error in ClusterView destructor: {e}")

@@ -6,8 +6,8 @@ from PyQt6.QtWidgets import QHeaderView, QPushButton
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor
 
-from base_components.base_components import SortableTableWidgetItem
-from base_components.base_resource_page import BaseResourcePage
+from Base_Components.base_components import SortableTableWidgetItem
+from Base_Components.base_resource_page import BaseResourcePage
 from UI.Styles import AppColors, AppStyles
 
 class DaemonSetsPage(BaseResourcePage):
@@ -43,43 +43,6 @@ class DaemonSetsPage(BaseResourcePage):
         self.configure_columns()
         
         # Add delete selected button
-        self._add_delete_selected_button()
-        
-    def _add_delete_selected_button(self):
-        """Add a button to delete selected resources."""
-        delete_btn = QPushButton("Delete Selected")
-        delete_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #d32f2f;
-                color: #ffffff;
-                border: none;
-                border-radius: 4px;
-                padding: 5px 10px;
-            }
-            QPushButton:hover {
-                background-color: #b71c1c;
-            }
-            QPushButton:pressed {
-                background-color: #d32f2f;
-            }
-            QPushButton:disabled {
-                background-color: #555555;
-                color: #888888;
-            }
-        """)
-        delete_btn.clicked.connect(self.delete_selected_resources)
-        
-        # Find the header layout
-        for i in range(self.layout().count()):
-            item = self.layout().itemAt(i)
-            if item.layout():
-                for j in range(item.layout().count()):
-                    widget = item.layout().itemAt(j).widget()
-                    if isinstance(widget, QPushButton) and widget.text() == "Refresh":
-                        # Insert before the refresh button
-                        item.layout().insertWidget(item.layout().count() - 1, delete_btn)
-                        break
-        
 
     def configure_columns(self):
         """Configure column widths for full screen utilization"""
@@ -92,10 +55,10 @@ class DaemonSetsPage(BaseResourcePage):
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
             (1, 140, "interactive"), # Name
-            (2, 90, "interactive"),  # Namespace
-            (3, 80, "interactive"),  # Pods
-            (4, 70, "interactive"),  # Node Selector
-            (5, 130, "stretch"), # Age
+            (2, 100, "interactive"),  # Namespace
+            (3, 90, "interactive"),  # Pods
+            (4, 180, "interactive"),  # Node Selector
+            (5, 80, "stretch"), # Age
             (6, 40, "fixed"), # Actions
 
         ]
@@ -116,7 +79,6 @@ class DaemonSetsPage(BaseResourcePage):
         # Ensure full width utilization after configuration
         QTimer.singleShot(100, self._ensure_full_width_utilization)
 
-    
     def populate_resource_row(self, row, resource):
         """
         Populate a single row with DaemonSet data

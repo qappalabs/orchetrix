@@ -6,8 +6,8 @@ from PyQt6.QtWidgets import (QHeaderView, QWidget, QLabel)
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor
 
-from base_components.base_components import SortableTableWidgetItem
-from base_components.base_resource_page import BaseResourcePage
+from Base_Components.base_components import SortableTableWidgetItem
+from Base_Components.base_resource_page import BaseResourcePage
 from UI.Styles import AppStyles, AppColors
 
 class DefinitionsPage(BaseResourcePage):
@@ -35,7 +35,9 @@ class DefinitionsPage(BaseResourcePage):
         
         # Configure column widths
         self.configure_columns()
-    
+        
+        # Add delete selected button
+
     def configure_columns(self):
         """Configure column widths for full screen utilization"""
         if not self.table:
@@ -46,12 +48,12 @@ class DefinitionsPage(BaseResourcePage):
         # Column specifications with optimized default widths
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
-            (1, 140, "interactive"), # Resource
-            (2, 90, "interactive"),  # Group
-            (3, 180, "interactive"),  # Version
-            (3, 150, "interactive"),  # Scope  
-            (4, 80, "stretch"),  # Age
-            (5, 40, "fixed")        # Actions
+            (1, 180, "interactive"), # Resource
+            (2, 150, "interactive"),  # Group
+            (3, 120, "interactive"),  # Version
+            (4, 150, "interactive"),  # Scope  
+            (5, 80, "stretch"),  # Age
+            (6, 40, "fixed")        # Actions
         ]
         
         # Apply column configuration
@@ -69,7 +71,6 @@ class DefinitionsPage(BaseResourcePage):
         
         # Ensure full width utilization after configuration
         QTimer.singleShot(100, self._ensure_full_width_utilization)
-
     def populate_resource_row(self, row, resource):
         """
         Populate a single row with CustomResourceDefinition data from live Kubernetes resources
@@ -146,11 +147,6 @@ class DefinitionsPage(BaseResourcePage):
         action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
         self.table.setCellWidget(row, len(columns) + 1, action_container)
     
-    # def handle_row_click(self, row, column):
-    #     """Handle row selection when a table cell is clicked"""
-    #     if column != self.table.columnCount() - 1:  # Skip action column
-    #         # Select the row
-    #         self.table.selectRow(row)
 
     def handle_row_click(self, row, column):
         if column != self.table.columnCount() - 1:  # Skip action column

@@ -9,13 +9,14 @@ from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QColor, QIcon
 from PyQt6.QtCore import QSize
 
-from base_components.base_components import SortableTableWidgetItem
-from base_components.base_resource_page import BaseResourcePage
+from Base_Components.base_components import SortableTableWidgetItem
+from Base_Components.base_resource_page import BaseResourcePage
 from UI.Styles import AppColors, AppStyles
-from utils.port_forward_manager import get_port_forward_manager, PortForwardConfig
-from utils.port_forward_dialog import PortForwardDialog, ActivePortForwardsDialog
+from Utils.port_forward_manager import get_port_forward_manager, PortForwardConfig
+from Utils.port_forward_dialog import PortForwardDialog, ActivePortForwardsDialog
 from functools import partial
 import time
+import logging
 from UI.Icons import resource_path
 
 
@@ -92,26 +93,6 @@ class PortForwardingPage(BaseResourcePage):
     def _add_management_buttons(self):
         """Add port forwarding management buttons"""
         
-        # Create Port Forward button
-        create_btn = QPushButton("Create Port Forward")
-        create_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: #ffffff;
-                border: none;
-                border-radius: 4px;
-                padding: 5px 10px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-            QPushButton:pressed {
-                background-color: #3d8b40;
-            }
-        """)
-        create_btn.clicked.connect(self.show_create_port_forward_dialog)
-        
         # Stop All button
         stop_all_btn = QPushButton("Stop All")
         stop_all_btn.setStyleSheet("""
@@ -139,8 +120,7 @@ class PortForwardingPage(BaseResourcePage):
                 for j in range(item.layout().count()):
                     widget = item.layout().itemAt(j).widget()
                     if isinstance(widget, QPushButton) and widget.text() == "Refresh":
-                        # Insert buttons before refresh
-                        item.layout().insertWidget(item.layout().count() - 1, create_btn)
+                        # Insert stop all button before refresh
                         item.layout().insertWidget(item.layout().count() - 1, stop_all_btn)
                         break
     
@@ -181,6 +161,14 @@ class PortForwardingPage(BaseResourcePage):
         # Ensure full width utilization after configuration
         QTimer.singleShot(100, self._ensure_full_width_utilization)
 
+    def force_load_data(self):
+        """Override to prevent calling unified resource loader for port forwarding"""
+        self.load_data()
+    
+    def _start_loading_thread(self, continue_token=None):
+        """Override to prevent starting resource loading thread for port forwarding"""
+        self.load_data()
+
     def load_data(self, load_more=False):
         """Load port forwarding data - override to use real data"""
         if hasattr(self, 'is_loading') and self.is_loading:
@@ -195,20 +183,25 @@ class PortForwardingPage(BaseResourcePage):
         # Convert to resource format expected by base class
         self.resources = []
         for config in port_forwards:
-            resource = {
-                'name': f"{config.resource_name}",
-                'resource_name': config.resource_name,
-                'namespace': config.namespace,
-                'resource_type': config.resource_type,
-                'local_port': config.local_port,
-                'target_port': config.target_port,
-                'protocol': config.protocol,
-                'status': config.status,
-                'created_at': config.created_at,
-                'error_message': config.error_message,
-                'key': config.key
-            }
-            self.resources.append(resource)
+            try:
+                resource = {
+                    'name': getattr(config, 'resource_name', 'Unknown'),
+                    'resource_name': getattr(config, 'resource_name', 'Unknown'),
+                    'namespace': getattr(config, 'namespace', 'default'),
+                    'resource_type': getattr(config, 'resource_type', 'service'),
+                    'local_port': getattr(config, 'local_port', 0),
+                    'target_port': getattr(config, 'target_port', 0),
+                    'protocol': getattr(config, 'protocol', 'TCP'),
+                    'status': getattr(config, 'status', 'unknown'),
+                    'created_at': getattr(config, 'created_at', 0),
+                    'error_message': getattr(config, 'error_message', ''),
+                    'key': getattr(config, 'key', f"{config.resource_name}:{config.local_port}" if hasattr(config, 'resource_name') and hasattr(config, 'local_port') else 'unknown'),
+                    'age': 'N/A'  # Port forwards don't have age like Kubernetes resources
+                }
+                self.resources.append(resource)
+            except Exception as e:
+                logging.error(f"Error processing port forward config: {e}")
+                continue
         
         # Apply search filter if any
         search_text = self.search_bar.text().lower() if self.search_bar and self.search_bar.text() else ""
@@ -222,7 +215,7 @@ class PortForwardingPage(BaseResourcePage):
             self.resources = filtered_resources
         
         # Update table
-        self.populate_table(self.resources)
+        self._display_resources(self.resources)
         self.items_count.setText(f"{len(self.resources)} items")
         
         self.is_loading = False
@@ -324,7 +317,7 @@ class PortForwardingPage(BaseResourcePage):
         from PyQt6.QtWidgets import QToolButton
         
         button = QToolButton()
-        icon = resource_path("icons/Moreaction_Button.svg")
+        icon = resource_path("Icons/Moreaction_Button.svg")
         button.setIcon(QIcon(icon))
         button.setIconSize(QSize(16, 16))
         button.setText("")
@@ -345,14 +338,14 @@ class PortForwardingPage(BaseResourcePage):
         
         if resource:
             if resource['status'] == 'active':
-                actions.append({"text": "Open in Browser", "icon": "icons/web.png", "dangerous": False})
-                actions.append({"text": "Copy URL", "icon": "icons/copy.png", "dangerous": False})
-                actions.append({"text": "Restart", "icon": "icons/refresh.png", "dangerous": False})
+                actions.append({"text": "Open in Browser", "icon": "Icons/web.png", "dangerous": False})
+                actions.append({"text": "Copy URL", "icon": "Icons/copy.png", "dangerous": False})
+                actions.append({"text": "Restart", "icon": "Icons/refresh.png", "dangerous": False})
             elif resource['status'] in ['inactive', 'error']:
-                actions.append({"text": "Restart", "icon": "icons/refresh.png", "dangerous": False})
+                actions.append({"text": "Restart", "icon": "Icons/refresh.png", "dangerous": False})
             
-            actions.append({"text": "Stop", "icon": "icons/stop.png", "dangerous": True})
-            actions.append({"text": "Delete", "icon": "icons/delete.png", "dangerous": True})
+            actions.append({"text": "Stop", "icon": "Icons/stop.png", "dangerous": True})
+            actions.append({"text": "Delete", "icon": "Icons/delete.png", "dangerous": True})
 
         # Add actions to menu
         for action_info in actions:
@@ -457,14 +450,6 @@ class PortForwardingPage(BaseResourcePage):
         if reply == QMessageBox.StandardButton.Yes:
             self._stop_port_forward(key)
 
-    def show_create_port_forward_dialog(self):
-        """Show dialog to create new port forward"""
-        # This could be enhanced to show a resource selector
-        QMessageBox.information(
-            self, "Create Port Forward",
-            "To create port forwards, navigate to the Pods or Services page "
-            "and use the 'Port Forward' action on specific resources."
-        )
 
     def stop_all_port_forwards(self):
         """Stop all active port forwards"""

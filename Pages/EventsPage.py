@@ -6,10 +6,12 @@ from PyQt6.QtCore import Qt, QTimer, QSize
 from PyQt6.QtGui import QColor, QIcon
 import logging
 
-from base_components.base_components import SortableTableWidgetItem
-from base_components.base_resource_page import BaseResourcePage, KubernetesResourceLoader
+from Base_Components.base_components import SortableTableWidgetItem
+from Base_Components.base_resource_page import BaseResourcePage
 from UI.Styles import AppStyles, AppColors, AppConstants
-from utils.thread_manager import get_thread_manager
+from Utils.thread_manager import get_thread_manager
+
+from UI.Icons import resource_path
 
 class EventsPage(BaseResourcePage):
     """
@@ -21,9 +23,9 @@ class EventsPage(BaseResourcePage):
         super().__init__(parent)
         self.resource_type = "events"
 
-        # Disable pagination and lazy loading
-        self.items_per_page = None
-        self.all_data_loaded = True
+        # FIXED: Enable pagination for events to prevent loading massive datasets
+        self.items_per_page = 100  # Load 100 events at a time
+        self.all_data_loaded = False
 
         self.setup_page_ui()
 
@@ -77,8 +79,8 @@ class EventsPage(BaseResourcePage):
 
         # Configure column widths
         self.configure_columns()
-
-        # Force load data after setup is complete
+        
+        # Add delete selected button        # Force load data after setup is complete
         QTimer.singleShot(100, self.force_load_data)
 
         return layout
@@ -93,132 +95,62 @@ class EventsPage(BaseResourcePage):
         # FIXED: Ensure proper column resize behavior and dragging
         header.setSectionsMovable(False)  # Disable moving columns but allow resizing
         header.setMinimumSectionSize(50)  # Minimum width for resizing
+        header.setStretchLastSection(False)  # We'll manually control stretching
 
-        # Set column resize modes and widths
-        for col_index in range(self.table.columnCount()):
-            if col_index == 0:  # Hide checkbox column completely
-                header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Fixed)
-                self.table.setColumnWidth(col_index, 0)
-                self.table.setColumnHidden(col_index, True)
-            elif col_index == 2:  # FIXED: Message column - make it interactive and resizable
-                header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Interactive)
-                self.table.setColumnWidth(col_index, 300)  # Start with reasonable width
-            elif col_index == self.table.columnCount() - 1:  # Action column - FIXED: Tighter spacing
-                header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Fixed)
-                self.table.setColumnWidth(col_index, 50)  # Increased from 30 to give more space on right
-            else:  # All other columns - FIXED: Enable proper interactive resizing
-                header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Interactive)
+        # Simple column configuration for better performance
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        
+        # Hide first column (checkbox)
+        self.table.setColumnHidden(0, True)
+        
+        # Set last column as stretch to fill remaining space
+        header.setSectionResizeMode(self.table.columnCount() - 2, QHeaderView.ResizeMode.Stretch)
 
-        # Set initial widths for interactive columns
-        column_widths = {
-            1: 80,   # Type
-            2: 300,  # Message - increased width
-            3: 100,  # Namespace
-            4: 150,  # Involved object
-            5: 120,  # Source
-            6: 60,   # Count
-            7: 80,   # Age
-            8: 100,  # Last Seen
-        }
-
-        for col, width in column_widths.items():
-            if col < self.table.columnCount():
-                self.table.setColumnWidth(col, width)
-
-        # FIXED: Ensure the header properly handles the hidden first column
-        header.setSectionHidden(0, True)
-
+        # Simple width setting - message column will stretch automatically
+        widths = [0, 80, 0, 100, 150, 120, 60, 80, 100, 50]
+        for i, width in enumerate(widths):
+            if i < self.table.columnCount() and width > 0:
+                self.table.setColumnWidth(i, width)
+    
     def _handle_scroll(self, value):
-        """Override to disable infinite scrolling"""
-        pass
-
-    def load_data(self, load_more=False):
-        """Override to always load all data at once"""
-        if self._shutting_down:
-            return
-
-        if self.is_loading_initial:
-            return
-
-        self.is_loading_initial = True
-        self.resources = []
-        self.selected_items.clear()
-        self.current_continue_token = None
-        self.all_data_loaded = True
-
-        if self.table:
-            self.table.setRowCount(0)
-        if hasattr(self, '_show_skeleton_loader') and self.table.rowCount() == 0:
-            self._show_skeleton_loader()
-        else:
-            self._show_table_area()
-
-        # Create worker without pagination parameters
-        worker = KubernetesResourceLoader(
-            self.resource_type,
-            self.namespace_filter,
-            limit=None,
-            continue_token=None
-        )
-
-        worker.signals.finished.connect(
-            lambda result: self.on_resources_loaded(result[0], result[1], result[2], False)
-        )
-        worker.signals.error.connect(
-            lambda err_msg: self.on_load_error(err_msg, False)
-        )
-
-        thread_manager = get_thread_manager()
-        thread_manager.submit_worker(f"resource_load_{self.resource_type}_all", worker)
+        """FIXED: Re-enable scroll handling for pagination"""
+        # Use base class scroll handling which includes pagination
+        super()._handle_scroll(value)
 
     def on_resources_loaded(self, new_resources, resource_type, next_continue_token, load_more=False):
-        """Override to handle all data loading"""
+        """FIXED: Handle paginated data loading for events"""
         if self._shutting_down:
             return
 
-        search_text = self.search_bar.text().lower() if self.search_bar and self.search_bar.text() else ""
-
-        filtered_new_resources = []
-        if search_text:
-            for r_item in new_resources:
-                match = search_text in r_item.get("name", "").lower()
-                if not match and r_item.get("namespace"):
-                    match = search_text in r_item.get("namespace", "").lower()
-                if not match and r_item.get("raw_data", {}).get("message", ""):
-                    match = search_text in r_item.get("raw_data", {}).get("message", "").lower()
-                if match:
-                    filtered_new_resources.append(r_item)
-        else:
-            filtered_new_resources = new_resources
-
-        if self.is_showing_skeleton:
-            self.is_showing_skeleton = False
-            if hasattr(self, 'skeleton_timer') and self.skeleton_timer.isActive():
-                self.skeleton_timer.stop()
-
-        self.is_loading_initial = False
-        self.resources = filtered_new_resources
-        self.all_data_loaded = True
-
-        self._clear_empty_state()
-
-        if filtered_new_resources:
-            self.table.setRowCount(0)
-            self.populate_table(self.resources)
-            self._show_table_area()
-            self.table.setSortingEnabled(True)
-        else:
-            empty_message = f"No {self.resource_type} found"
-            if search_text:
-                empty_message = f"No {self.resource_type} found matching '{search_text}'"
-                description = "Try adjusting your search criteria or check if resources exist in other namespaces."
+        # FIXED: Use base class pagination handling instead of custom logic
+        try:
+            # Call the base class method which handles pagination properly
+            super()._on_resources_loaded((new_resources, resource_type, next_continue_token))
+            
+        except AttributeError:
+            # Fallback to manual pagination handling if base method not available
+            if load_more:
+                # Append to existing resources
+                self.resources.extend(new_resources)
             else:
-                description = f"No {self.resource_type} are currently available in the selected namespace."
-
-            self._show_message_in_table_area(empty_message, description)
-
-        self.items_count.setText(f"{len(self.resources)} items")
-        QApplication.processEvents()
+                # Replace resources 
+                self.resources = new_resources
+            
+            # Update pagination state
+            self.current_continue_token = next_continue_token
+            self.all_data_loaded = not next_continue_token
+            
+            # Update UI
+            self._display_resources(self.resources)
+            self._update_items_count()
+            
+            self.is_loading_initial = False
+            self.is_loading_more = False
+            
+            if self.all_data_loaded:
+                self.all_items_loaded_signal.emit()
+            
+            self.load_more_complete.emit()
 
     def populate_resource_row(self, row, resource):
         """FIXED: Populate a single row with event data - no message truncation, add tooltips"""
@@ -390,9 +322,10 @@ class EventsPage(BaseResourcePage):
         button = QToolButton()
 
         # Use custom SVG icon
-        icon = QIcon("icons/Moreaction_Button.svg")
+        moreaction_icon = resource_path("Icons/Moreaction_Button.svg")
+        icon = QIcon(moreaction_icon)
         button.setIcon(icon)
-        button.setIconSize(QSize(12, 12))  # Even smaller icon
+        button.setIconSize(QSize(AppConstants.SIZES["ICON_SIZE"], AppConstants.SIZES["ICON_SIZE"]))  # Even smaller icon
 
         # Very compact button styling
         button.setStyleSheet(f"""

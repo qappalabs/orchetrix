@@ -152,7 +152,7 @@ class SearchWidget(QFrame):
 
         # Previous button with icon
         self.prev_button = QPushButton()
-        prev_icon = resource_path("icons/Yaml_uparrow.svg")
+        prev_icon = resource_path("Icons/Yaml_uparrow.svg")
         self.prev_button.setIcon(QIcon(prev_icon))
         self.prev_button.setIconSize(QSize(14, 14))
         self.prev_button.setFixedSize(24, 24)
@@ -162,7 +162,7 @@ class SearchWidget(QFrame):
 
         # Next button with icon
         self.next_button = QPushButton()
-        next_icon =resource_path("icons/Yaml_downarrow.svg")
+        next_icon =resource_path("Icons/Yaml_downarrow.svg")
         self.next_button.setIcon(QIcon(next_icon))
         self.next_button.setIconSize(QSize(14, 14))
         self.next_button.setFixedSize(24, 24)
@@ -172,7 +172,7 @@ class SearchWidget(QFrame):
 
         # Case sensitive toggle with icon
         self.case_button = QPushButton()
-        case_icon = resource_path("icons/Yaml_Casesensitive.svg")
+        case_icon = resource_path("Icons/Yaml_Casesensitive.svg")
         self.case_button.setIcon(QIcon(case_icon))
         self.case_button.setIconSize(QSize(14, 14))
         self.case_button.setFixedSize(24, 24)
@@ -183,7 +183,7 @@ class SearchWidget(QFrame):
 
         # Close button with icon
         self.close_button = QPushButton()
-        close_icon = resource_path("icons/close.svg")
+        close_icon = resource_path("Icons/close.svg")
         self.close_button.setIcon(QIcon(close_icon))
         self.close_button.setIconSize(QSize(12, 12))
         self.close_button.setFixedSize(18, 18)
@@ -688,9 +688,18 @@ class DetailPageYAMLSection(BaseDetailSection):
         self.content_layout.addWidget(yaml_toolbar)
         self.content_layout.addWidget(self.yaml_editor)
 
-        # Connect kubernetes client signals for updates
-        if hasattr(self.kubernetes_client, 'resource_updated'):
-            self.kubernetes_client.resource_updated.connect(self.handle_resource_update_result)
+        # Connect kubernetes client signals for updates using queued connection for thread safety
+        try:
+            if hasattr(self.kubernetes_client, 'resource_updated'):
+                self.kubernetes_client.resource_updated.connect(
+                    self.handle_resource_update_result, 
+                    Qt.ConnectionType.QueuedConnection
+                )
+                logging.debug("YAML section: Connected to resource_updated signal with queued connection")
+            else:
+                logging.warning("YAML section: kubernetes_client does not have resource_updated signal")
+        except Exception as e:
+            logging.error(f"YAML section: Failed to connect resource_updated signal: {str(e)}")
 
     def set_resource(self, resource_type: str, resource_name: str, namespace=None):
         """Set the resource information and check if it's a helm resource"""
@@ -736,15 +745,32 @@ class DetailPageYAMLSection(BaseDetailSection):
     def update_ui_with_data(self, data: Dict[str, Any]):
         """Update YAML UI with loaded resource data"""
         try:
+            if not data:
+                self.yaml_editor.setPlainText("# No data available for this resource")
+                return
+                
             # Convert snake_case back to camelCase for proper Kubernetes YAML
             kubernetes_yaml = self._convert_to_kubernetes_yaml(data)
-            yaml_text = yaml.dump(kubernetes_yaml, default_flow_style=False, sort_keys=False)
+            
+            # Use better YAML dump settings for readability
+            yaml_text = yaml.dump(
+                kubernetes_yaml, 
+                default_flow_style=False, 
+                sort_keys=False,
+                indent=2,
+                width=120,
+                allow_unicode=True
+            )
             self.yaml_editor.setPlainText(yaml_text)
             self.original_yaml = yaml_text
+            
+            logging.debug(f"Successfully rendered YAML for {self.resource_type}/{self.resource_name}")
 
         except Exception as e:
-            self.yaml_editor.setPlainText(f"Error rendering YAML: {str(e)}")
-            self.handle_error(f"Error rendering YAML: {str(e)}")
+            error_message = f"Error rendering YAML: {str(e)}"
+            logging.error(f"YAML rendering error for {self.resource_type}/{self.resource_name}: {e}")
+            self.yaml_editor.setPlainText(f"# {error_message}\n# Raw data:\n{str(data)}")
+            self.handle_error(error_message)
 
     def _convert_to_kubernetes_yaml(self, data):
         """Convert Python client dict format to Kubernetes YAML format - Pod-safe version"""
@@ -799,6 +825,33 @@ class DetailPageYAMLSection(BaseDetailSection):
             # Remove events as they're read-only
             if 'events' in converted_data:
                 del converted_data['events']
+
+            # Add apiVersion if missing for better YAML completeness
+            if 'apiVersion' not in converted_data and 'kind' in converted_data:
+                kind = converted_data['kind']
+                # Add appropriate apiVersion based on resource kind
+                api_version_mapping = {
+                    'PriorityClass': 'scheduling.k8s.io/v1',
+                    'RuntimeClass': 'node.k8s.io/v1',
+                    'HorizontalPodAutoscaler': 'autoscaling/v2',
+                    'PodDisruptionBudget': 'policy/v1',
+                    'MutatingWebhookConfiguration': 'admissionregistration.k8s.io/v1',
+                    'ValidatingWebhookConfiguration': 'admissionregistration.k8s.io/v1',
+                    'Lease': 'coordination.k8s.io/v1',
+                    'CustomResourceDefinition': 'apiextensions.k8s.io/v1',
+                    # Common v1 resources
+                    'ReplicationController': 'v1',
+                    'LimitRange': 'v1', 
+                    'ResourceQuota': 'v1',
+                    'ServiceAccount': 'v1',
+                    'Endpoints': 'v1',
+                    'Role': 'rbac.authorization.k8s.io/v1',
+                    'RoleBinding': 'rbac.authorization.k8s.io/v1',
+                    'ClusterRole': 'rbac.authorization.k8s.io/v1',
+                    'ClusterRoleBinding': 'rbac.authorization.k8s.io/v1',
+                }
+                if kind in api_version_mapping:
+                    converted_data['apiVersion'] = api_version_mapping[kind]
 
             # For Pods specifically, clean up the spec to only include editable fields
             if converted_data.get('kind') == 'Pod' and 'spec' in converted_data:
@@ -878,72 +931,138 @@ class DetailPageYAMLSection(BaseDetailSection):
 
     def save_yaml_changes(self):
         """Save YAML changes using Kubernetes API"""
-        if self.is_helm_resource:
-            self.handle_error("Helm resources cannot be edited via YAML")
-            return
-
-        yaml_text = self.yaml_editor.toPlainText()
-
-        if yaml_text == self.original_yaml:
-            self.toggle_yaml_edit_mode()
-            return
-
         try:
-            # Step 1: Validate YAML syntax
-            yaml_data = yaml.safe_load(yaml_text)
-            if not yaml_data:
-                self.handle_error("Invalid YAML: Empty or null document")
+            if self.is_helm_resource:
+                self.handle_error("Helm resources cannot be edited via YAML")
                 return
 
-            # Step 2: Validate Kubernetes schema
-            schema_valid, schema_error = self.kubernetes_client.validate_kubernetes_schema(yaml_data)
-            if not schema_valid:
-                self.handle_error(f"Schema validation failed: {schema_error}")
+            # Check if editor exists
+            if not hasattr(self, 'yaml_editor') or not self.yaml_editor:
+                self.handle_error("YAML editor not available")
                 return
 
-            # Step 3: Show loading state
-            self.show_loading()
-            self.yaml_save_button.setEnabled(False)
-            self.yaml_save_button.setText("Deploying...")
+            yaml_text = self.yaml_editor.toPlainText()
 
-            # Step 4: Update resource asynchronously
-            self.kubernetes_client.update_resource_async(
-                self.resource_type,
-                self.resource_name,
-                self.resource_namespace,
-                yaml_data
-            )
+            if yaml_text == self.original_yaml:
+                self.toggle_yaml_edit_mode()
+                return
 
-        except yaml.YAMLError as e:
-            self.handle_error(f"Invalid YAML syntax: {str(e)}")
+            # Check if kubernetes client is available
+            if not self.kubernetes_client:
+                self.handle_error("Kubernetes client not available")
+                return
+
+            try:
+                # Step 1: Validate YAML syntax
+                yaml_data = yaml.safe_load(yaml_text)
+                if not yaml_data:
+                    self.handle_error("Invalid YAML: Empty or null document")
+                    return
+
+                # Step 2: Validate Kubernetes schema
+                if hasattr(self.kubernetes_client, 'validate_kubernetes_schema'):
+                    schema_valid, schema_error = self.kubernetes_client.validate_kubernetes_schema(yaml_data)
+                    if not schema_valid:
+                        self.handle_error(f"Schema validation failed: {schema_error}")
+                        return
+                else:
+                    logging.warning("Schema validation not available, proceeding without validation")
+
+                # Step 3: Show loading state
+                if hasattr(self, 'show_loading'):
+                    self.show_loading()
+                
+                if hasattr(self, 'yaml_save_button') and self.yaml_save_button:
+                    self.yaml_save_button.setEnabled(False)
+                    self.yaml_save_button.setText("Deploying...")
+
+                # Step 4: Update resource asynchronously
+                if hasattr(self.kubernetes_client, 'update_resource_async'):
+                    self.kubernetes_client.update_resource_async(
+                        self.resource_type,
+                        self.resource_name,
+                        self.resource_namespace,
+                        yaml_data
+                    )
+                    logging.info(f"YAML update initiated for {self.resource_type}/{self.resource_name}")
+                else:
+                    self.handle_error("Resource update functionality not available")
+                    self._reset_save_button()
+
+            except yaml.YAMLError as e:
+                self.handle_error(f"Invalid YAML syntax: {str(e)}")
+                self._reset_save_button()
+            except Exception as e:
+                self.handle_error(f"Error preparing YAML update: {str(e)}")
+                self._reset_save_button()
+
         except Exception as e:
-            self.handle_error(f"Error preparing YAML update: {str(e)}")
+            logging.error(f"Critical error in save_yaml_changes: {str(e)}")
+            self.handle_error(f"Critical error: {str(e)}")
+            self._reset_save_button()
+
+    def _reset_save_button(self):
+        """Reset save button state after error"""
+        try:
+            if hasattr(self, 'hide_loading'):
+                self.hide_loading()
+            if hasattr(self, 'yaml_save_button') and self.yaml_save_button:
+                self.yaml_save_button.setEnabled(True)
+                self.yaml_save_button.setText("Deploy")
+        except Exception as e:
+            logging.error(f"Error resetting save button: {str(e)}")
 
     def handle_resource_update_result(self, result):
         """Handle the result of resource update operation"""
         try:
-            self.hide_loading()
-            self.yaml_save_button.setEnabled(True)
-            self.yaml_save_button.setText("Deploy")
+            # Reset UI state safely
+            if hasattr(self, 'hide_loading'):
+                try:
+                    self.hide_loading()
+                except Exception as e:
+                    logging.error(f"Error hiding loading state: {str(e)}")
+
+            if hasattr(self, 'yaml_save_button') and self.yaml_save_button:
+                try:
+                    self.yaml_save_button.setEnabled(True)
+                    self.yaml_save_button.setText("Deploy")
+                except Exception as e:
+                    logging.error(f"Error resetting save button: {str(e)}")
+
+            # Handle result
+            if not result or not isinstance(result, dict):
+                self.handle_error("Invalid update result received")
+                return
 
             if result.get('success', False):
                 # Success
                 message = result.get('message', 'Resource updated successfully')
                 logging.info(f"YAML update successful: {message}")
 
-                # Exit edit mode
-                self.toggle_yaml_edit_mode()
+                try:
+                    # Exit edit mode
+                    self.toggle_yaml_edit_mode()
+                except Exception as e:
+                    logging.error(f"Error toggling edit mode: {str(e)}")
 
-                # Refresh the current YAML content
-                QTimer.singleShot(1000, self.load_data)
+                try:
+                    # Refresh the current YAML content - now thread-safe with queued connection
+                    if hasattr(self, 'load_data'):
+                        QTimer.singleShot(1000, self.load_data)
+                except Exception as e:
+                    logging.error(f"Error scheduling data reload: {str(e)}")
 
-                # Emit signal to refresh main resource list page
-                self.data_loaded.emit(self.section_name, {
-                    'action': 'refresh_main_page',
-                    'resource_type': self.resource_type,
-                    'resource_name': self.resource_name,
-                    'namespace': self.resource_namespace
-                })
+                try:
+                    # Emit signal to refresh main resource list page - now thread-safe with queued connection
+                    if hasattr(self, 'data_loaded') and hasattr(self, 'section_name'):
+                        self.data_loaded.emit(self.section_name, {
+                            'action': 'refresh_main_page',
+                            'resource_type': getattr(self, 'resource_type', ''),
+                            'resource_name': getattr(self, 'resource_name', ''),
+                            'namespace': getattr(self, 'resource_namespace', '')
+                        })
+                except Exception as e:
+                    logging.error(f"Error emitting refresh signal: {str(e)}")
 
             else:
                 # Error
@@ -951,7 +1070,11 @@ class DetailPageYAMLSection(BaseDetailSection):
                 self.handle_error(f"Deployment failed: {error_message}")
 
         except Exception as e:
-            self.handle_error(f"Error handling update result: {str(e)}")
+            logging.error(f"Critical error in handle_resource_update_result: {str(e)}")
+            try:
+                self.handle_error(f"Error handling update result: {str(e)}")
+            except Exception as inner_e:
+                logging.error(f"Failed to show error message: {str(inner_e)}")
 
     def cancel_yaml_edit(self):
         """Cancel YAML editing and restore original content"""

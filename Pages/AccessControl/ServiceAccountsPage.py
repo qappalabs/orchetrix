@@ -6,8 +6,8 @@ from PyQt6.QtWidgets import (QHeaderView, QWidget, QLabel)
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor
 
-from base_components.base_components import SortableTableWidgetItem
-from base_components.base_resource_page import BaseResourcePage
+from Base_Components.base_components import SortableTableWidgetItem
+from Base_Components.base_resource_page import BaseResourcePage
 from UI.Styles import AppStyles, AppColors
 
 class ServiceAccountsPage(BaseResourcePage):
@@ -35,7 +35,9 @@ class ServiceAccountsPage(BaseResourcePage):
         
         # Configure column widths
         self.configure_columns()
-    
+        
+        # Add delete selected button
+
     def configure_columns(self):
         """Configure column widths for full screen utilization"""
         if not self.table:
@@ -46,9 +48,9 @@ class ServiceAccountsPage(BaseResourcePage):
         # Column specifications with optimized default widths
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
-            (1, 140, "interactive"), # Name
-            (2, 90, "interactive"),  # Namespace
-            (3, 80, "stretch"),  # Age
+            (1, 240, "interactive"), # Name
+            (2, 220, "interactive"),  # Namespace
+            (3, 70, "stretch"),  # Age
             (4, 40, "fixed")        # Actions
         ]
         
@@ -67,8 +69,6 @@ class ServiceAccountsPage(BaseResourcePage):
         
         # Ensure full width utilization after configuration
         QTimer.singleShot(100, self._ensure_full_width_utilization)
-
-
     def populate_resource_row(self, row, resource):
         """
         Populate a single row with service account data from live Kubernetes resources

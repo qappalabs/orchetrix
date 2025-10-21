@@ -8,17 +8,14 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTimer
 from PyQt6.QtGui import QColor
 
-from base_components.base_components import SortableTableWidgetItem
-from base_components.base_resource_page import BaseResourcePage
+from Base_Components.base_components import SortableTableWidgetItem
+from Base_Components.base_resource_page import BaseResourcePage
 from UI.Styles import AppStyles, AppColors
-from utils.kubernetes_client import get_kubernetes_client
+from Utils.kubernetes_client import get_kubernetes_client
 from kubernetes.client.rest import ApiException
 from kubernetes import client
 import datetime
 import logging
-
-import subprocess
-import json
 
 class StatusLabel(QWidget):
     """Widget that displays a status with consistent styling and background handling."""
@@ -43,7 +40,6 @@ class StatusLabel(QWidget):
     def mousePressEvent(self, event):
         self.clicked.emit()
         super().mousePressEvent(event)
-
 
 class NamespaceOperationThread(QThread):
     """Thread for performing namespace operations asynchronously"""
@@ -117,6 +113,7 @@ class NamespacesPage(BaseResourcePage):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.resource_type = "namespaces"
+        self.show_namespace_dropdown = False  # Namespaces are cluster-scoped
         self.kube_client = get_kubernetes_client()
         self.operation_thread = None
         self.setup_page_ui()
@@ -178,16 +175,8 @@ class NamespacesPage(BaseResourcePage):
         self.table.setStyleSheet(AppStyles.TABLE_STYLE)
         self.table.horizontalHeader().setStyleSheet(AppStyles.CUSTOM_HEADER_STYLE)
         self.configure_columns()
-
-    # def configure_columns(self):
-    #     self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-    #     self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-    #     self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
-    #     self.table.setColumnWidth(3, 80)
-    #     self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
-    #     self.table.setColumnWidth(4, 100)
-    #     self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
-    #     self.table.setColumnWidth(5, 40)
+        
+        # Add delete selected button
 
     def configure_columns(self):
         """Configure column widths for full screen utilization"""
@@ -199,8 +188,8 @@ class NamespacesPage(BaseResourcePage):
         # Column specifications with optimized default widths
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
-            (1, 140, "interactive"), # Name
-            (2, 190, "interactive"),  # Labels
+            (1, 180, "interactive"), # Name
+            (2, 260, "interactive"),  # Labels
             (3, 60, "interactive"),  # Age
             (4, 80, "stretch"),      # Status - stretch to fill remaining space
             (5, 40, "fixed")        # Actions
@@ -221,8 +210,6 @@ class NamespacesPage(BaseResourcePage):
         
         # Ensure full width utilization after configuration
         QTimer.singleShot(100, self._ensure_full_width_utilization)
-
-
     def populate_resource_row(self, row, resource):
         self.table.setRowHeight(row, 40)
         resource_name = resource["name"]
@@ -283,32 +270,16 @@ class NamespacesPage(BaseResourcePage):
         self.table.setCellWidget(row, len(columns) + 2, action_container)
 
     def refresh_table(self):
-        """Refresh the namespaces table using Kubernetes API"""
+        """Refresh the namespaces table using async resource loading"""
         try:
-            if not self.kube_client.v1:
-                QMessageBox.critical(self, "Error", "Kubernetes client not initialized. Please connect to a cluster first.")
-                return
-
-            # Get namespaces using API
-            namespaces_list = self.kube_client.v1.list_namespace()
-
-            self.table.setRowCount(0)
-            for row, namespace_item in enumerate(namespaces_list.items):
-                self.table.insertRow(row)
-
-                # Convert API object to dict for consistency
-                namespace_dict = self.kube_client.v1.api_client.sanitize_for_serialization(namespace_item)
-
-                resource = {
-                    "name": namespace_item.metadata.name,
-                    "age": self._calculate_age(namespace_item.metadata.creation_timestamp),
-                    "raw_data": namespace_dict
-                }
-                self.populate_resource_row(row, resource)
-
-        except ApiException as e:
-            QMessageBox.critical(self, "API Error", f"Failed to refresh namespaces: {e.reason}")
+            # Clear table before loading
+            self.clear_table()
+            
+            # Use base class async loading method
+            self.load_data()
+            
         except Exception as e:
+            logging.error(f"Error refreshing namespace table: {e}")
             QMessageBox.critical(self, "Error", f"Unexpected error while refreshing: {str(e)}")
 
     def _calculate_age(self, creation_timestamp):
@@ -504,9 +475,13 @@ class NamespacesPage(BaseResourcePage):
             QMessageBox.critical(self, "Error", message)
 
         # Clean up thread
-        if self.operation_thread:
-            self.operation_thread.deleteLater()
-            self.operation_thread = None
+        if hasattr(self, 'operation_thread') and self.operation_thread:
+            try:
+                self.operation_thread.deleteLater()
+            except Exception as e:
+                logging.error(f"Error deleting operation thread: {e}")
+            finally:
+                self.operation_thread = None
 
     def delete_resource(self, resource_name, resource_namespace):
         """Override to handle namespace deletion specifics - called by base class"""
@@ -515,8 +490,29 @@ class NamespacesPage(BaseResourcePage):
     def closeEvent(self, event):
         """Clean up when the widget is closed"""
         # Stop any running operations
-        if self.operation_thread and self.operation_thread.isRunning():
-            self.operation_thread.quit()
-            self.operation_thread.wait(1000)
+        if hasattr(self, 'operation_thread') and self.operation_thread and self.operation_thread.isRunning():
+            try:
+                self.operation_thread.quit()
+                self.operation_thread.wait(1000)
+            except Exception as e:
+                logging.error(f"Error stopping operation thread: {e}")
 
         super().closeEvent(event)
+    
+    def load_data(self):
+        """Load namespace data using async resource loader"""
+        try:
+            # Use base class async loading with proper resource type
+            super().load_data()
+        except Exception as e:
+            logging.error(f"Error in load_data: {e}")
+            QMessageBox.critical(self, "Error", f"Failed to load namespaces: {str(e)}")
+    
+    def force_load_data(self):
+        """Force load namespace data using async resource loader"""
+        try:
+            # Use base class async loading with proper resource type
+            super().force_load_data()
+        except Exception as e:
+            logging.error(f"Error in force_load_data: {e}")
+            QMessageBox.critical(self, "Error", f"Failed to load namespaces: {str(e)}")

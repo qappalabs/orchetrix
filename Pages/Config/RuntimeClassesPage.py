@@ -5,8 +5,10 @@ Dynamic implementation of the RuntimeClasses page with live Kubernetes data.
 from PyQt6.QtWidgets import QHeaderView, QPushButton
 from PyQt6.QtCore import Qt, QTimer
 
-from base_components.base_components import SortableTableWidgetItem
-from base_components.base_resource_page import BaseResourcePage
+from Base_Components.base_components import SortableTableWidgetItem
+from Base_Components.base_resource_page import BaseResourcePage
+from UI.Styles import AppStyles
+
 
 class RuntimeClassesPage(BaseResourcePage):
     """
@@ -22,6 +24,7 @@ class RuntimeClassesPage(BaseResourcePage):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.resource_type = "runtimeclasses"
+        self.show_namespace_dropdown = False  # RuntimeClasses are cluster-scoped
         self.setup_page_ui()
         
     def setup_page_ui(self):
@@ -37,43 +40,7 @@ class RuntimeClassesPage(BaseResourcePage):
         self.configure_columns()
         
         # Add delete selected button
-        self._add_delete_selected_button()
-        
-    def _add_delete_selected_button(self):
-        """Add a button to delete selected resources."""
-        delete_btn = QPushButton("Delete Selected")
-        delete_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #d32f2f;
-                color: #ffffff;
-                border: none;
-                border-radius: 4px;
-                padding: 5px 10px;
-            }
-            QPushButton:hover {
-                background-color: #b71c1c;
-            }
-            QPushButton:pressed {
-                background-color: #d32f2f;
-            }
-            QPushButton:disabled {
-                background-color: #555555;
-                color: #888888;
-            }
-        """)
-        delete_btn.clicked.connect(self.delete_selected_resources)
-        
-        # Find the header layout
-        for i in range(self.layout().count()):
-            item = self.layout().itemAt(i)
-            if item.layout():
-                for j in range(item.layout().count()):
-                    widget = item.layout().itemAt(j).widget()
-                    if isinstance(widget, QPushButton) and widget.text() == "Refresh":
-                        # Insert before the refresh button
-                        item.layout().insertWidget(item.layout().count() - 1, delete_btn)
-                        break
-    
+
     def configure_columns(self):
         """Configure column widths for full screen utilization"""
         if not self.table:
@@ -116,6 +83,7 @@ class RuntimeClassesPage(BaseResourcePage):
         # Create checkbox for row selection
         resource_name = resource["name"]
         checkbox_container = self._create_checkbox_container(row, resource_name)
+        checkbox_container.setStyleSheet(AppStyles.CHECKBOX_STYLE)
         self.table.setCellWidget(row, 0, checkbox_container)
         
         # Prepare data columns
@@ -153,9 +121,10 @@ class RuntimeClassesPage(BaseResourcePage):
         
         # Create and add action button
         action_button = self._create_action_button(row, resource["name"], resource.get("namespace", ""))
+        action_button.setStyleSheet(AppStyles.ACTION_BUTTON_STYLE)
         action_container = self._create_action_container(row, action_button)
+        action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
         self.table.setCellWidget(row, len(columns) + 1, action_container)
-
 
     def handle_row_click(self, row, column):
         if column != self.table.columnCount() - 1:  # Skip action column

@@ -18,10 +18,10 @@
 # import hashlib
 # from urllib.parse import urljoin
 
-# from base_components.base_components import SortableTableWidgetItem
-# from base_components.base_resource_page import BaseResourcePage
+# from Base_Components.base_components import SortableTableWidgetItem
+# from Base_Components.base_resource_page import BaseResourcePage
 # from UI.Styles import AppColors, AppStyles
-# from utils.helm_utils import ChartInstallDialog, install_helm_chart
+# from Utils.helm_utils import ChartInstallDialog, install_helm_chart
 
 
 # class ChartDataThread(QThread):
@@ -143,10 +143,6 @@
 #                 except Exception as e:
 #                     pass
             
-#             # Final fallback: Use a curated list of popular Bitnami charts if API fails
-#             if not charts_data:
-#                 charts_data = self.get_fallback_bitnami_charts()
-#                 is_more_available = False
             
 #             # Filter to ensure only Bitnami charts are included
 #             bitnami_charts = [chart for chart in charts_data if 

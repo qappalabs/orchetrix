@@ -21,8 +21,8 @@
 # import time
 # import logging
 
-# from base_components.base_resource_page import BaseResourcePage
-# from base_components.base_components import SortableTableWidgetItem
+# from Base_Components.base_resource_page import BaseResourcePage
+# from Base_Components.base_components import SortableTableWidgetItem
 # from UI.Styles import AppColors, AppStyles
 
 
@@ -1298,8 +1298,8 @@
         
 #         # Add actions with icons
 #         actions = [
-#             {"text": "Upgrade", "icon": "icons/edit.png", "dangerous": False},
-#             {"text": "Delete", "icon": "icons/delete.png", "dangerous": True}
+#             {"text": "Upgrade", "icon": "Icons/edit.png", "dangerous": False},
+#             {"text": "Delete", "icon": "Icons/delete.png", "dangerous": True}
 #         ]
         
 #         # Add actions to menu

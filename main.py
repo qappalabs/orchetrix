@@ -46,13 +46,14 @@ try:
     from UI.TitleBar import TitleBar
     from UI.ClusterView import ClusterView, LoadingOverlay
     from UI.Styles import AppColors, AppStyles
-    from utils.cluster_connector import get_cluster_connector
+    from Utils.cluster_connector import get_cluster_connector
     from UI.DetailPageComponent import DetailPageComponent
     from UI.detail_sections.detailpage_yamlsection import DetailPageYAMLSection
 
-    from utils.cluster_state_manager import get_cluster_state_manager, ClusterState
-    from utils.thread_manager import get_thread_manager, shutdown_thread_manager
-    from utils.data_manager import get_data_manager
+    from Utils.cluster_state_manager import get_cluster_state_manager, ClusterState
+    from Utils.thread_manager import get_thread_manager, shutdown_thread_manager
+    from Utils.error_handler import get_error_handler, ResourceCleaner, error_handler
+
 
     logging.info("All modules imported successfully")
     
@@ -98,14 +99,14 @@ def initialize_resources():
         base_path = sys._MEIPASS
         logging.info(f"Running as PyInstaller bundle from: {base_path}")
 
-        resource_dirs = ['icons', 'images', 'logos']
+        resource_dirs = ['Icons', 'Images', 'logos']
         for dir_name in resource_dirs:
             dir_path = os.path.join(base_path, dir_name)
             if os.path.exists(dir_path):
                 files = os.listdir(dir_path)[:10]
                 logging.info(f"✓ Directory {dir_name} found with items: {files}")
 
-                if dir_name == 'icons':
+                if dir_name == 'Icons':
                     critical_icons = ['logoIcon.png', 'home.svg', 'browse.svg']
                     for icon in critical_icons:
                         if os.path.exists(os.path.join(dir_path, icon)):
@@ -118,7 +119,7 @@ def initialize_resources():
         logging.info("Running in normal Python environment")
 
 
-class OptimizedMainWindow(QMainWindow):
+class MainWindow(QMainWindow):
     """Optimized main window with improved resource management and performance"""
     
     def __init__(self):
@@ -130,16 +131,16 @@ class OptimizedMainWindow(QMainWindow):
         self._shutting_down = False
         self._is_switching_to_cluster = False
         self._target_cluster_for_switch = None
-        self._cleanup_timer = QTimer()
+        self._cleanup_timer = QTimer(self)  # Parent timer to main window
         self._cleanup_timer.timeout.connect(self._periodic_cleanup)
         self._cleanup_timer.start(30000)  # Cleanup every 30 seconds
 
         # Set application icon
-        icon_path = resource_path("icons/logoIcon.ico")
+        icon_path = resource_path("Icons/logoIcon.ico")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
         else:
-            png_path = resource_path("icons/logoIcon.png")
+            png_path = resource_path("Icons/logoIcon.png")
             if os.path.exists(png_path):
                 self.setWindowIcon(QIcon(png_path))
 
@@ -169,32 +170,99 @@ class OptimizedMainWindow(QMainWindow):
             self.home_page.initialize_cluster_connector()
 
     def _periodic_cleanup(self):
-        """Periodic cleanup to prevent memory leaks"""
+        """Enhanced periodic cleanup to prevent memory leaks and performance degradation"""
         try:
-            # Force garbage collection
-            gc.collect()
+            cleanup_start = time.time()
+            
+            # Force garbage collection with statistics
+            collected = gc.collect()
+            if collected > 0:
+                logging.debug(f"Periodic cleanup: {collected} objects collected")
+            
+            # Get memory usage statistics
+            total_objects = len(gc.get_objects())
             
             # Cleanup chart page caches if needed
             if hasattr(self, 'cluster_view') and hasattr(self.cluster_view, 'pages'):
                 charts_page = self.cluster_view.pages.get('Charts')
                 if charts_page and hasattr(charts_page, 'cleanup_cache'):
                     charts_page.cleanup_cache()
+            
+            # Cleanup age caches from base resource pages
+            try:
+                from Base_Components.base_resource_page import BaseResourcePage
+                if hasattr(BaseResourcePage, '_age_cache') and len(BaseResourcePage._age_cache) > 1000:
+                    BaseResourcePage._clean_age_cache()
+                    logging.debug("Cleaned base resource page age cache")
+            except Exception as cache_error:
+                logging.debug(f"Could not cleanup age cache: {cache_error}")
+            
+            # Cleanup debounced updater
+            try:
+                from Utils.debounced_updater import get_debounced_updater
+                updater = get_debounced_updater()
+                # Clear old throttle history to prevent memory accumulation
+                updater.clear_throttle_history()
+            except Exception as updater_error:
+                logging.debug(f"Could not cleanup debounced updater: {updater_error}")
+            
+            # Cleanup background workers that may be finished
+            self._cleanup_finished_workers()
+            
+            # Cleanup virtual scroll tables
+            self._cleanup_virtual_scroll_tables()
+            
+            # Monitor memory usage and log warnings if high (increased threshold)
+            if total_objects > 150000:  # Increased threshold for warning
+                logging.warning(f"High object count detected: {total_objects} objects in memory")
+                
+            cleanup_time = (time.time() - cleanup_start) * 1000
+            if cleanup_time > 100:  # Log if cleanup takes too long
+                logging.warning(f"Periodic cleanup took {cleanup_time:.1f}ms")
+            else:
+                logging.debug(f"Periodic cleanup completed in {cleanup_time:.1f}ms, {total_objects} objects")
                     
         except Exception as e:
             logging.error(f"Error during periodic cleanup: {e}")
-
-    def _post_switch_operations(self, cluster_name):
-        """Post-switch operations"""
+            
+    def _cleanup_finished_workers(self):
+        """Clean up finished background workers"""
         try:
-            self.cluster_view.set_active_cluster(cluster_name)
-            if (hasattr(self.cluster_view, 'terminal_panel') and
-                    self.cluster_view.terminal_panel.is_visible and
-                    hasattr(self.cluster_view.terminal_panel, 'reposition')):
-                self.cluster_view.terminal_panel.reposition()
-            if hasattr(self.cluster_view, 'handle_page_change'):
-                self.cluster_view.handle_page_change(self.cluster_view.stacked_widget.currentWidget())
+            # Cleanup workers in cluster view pages
+            if hasattr(self, 'cluster_view') and hasattr(self.cluster_view, 'pages'):
+                for page_name, page in self.cluster_view.pages.items():
+                    if hasattr(page, 'data_worker') and page.data_worker:
+                        if page.data_worker.isFinished():
+                            page.data_worker.deleteLater()
+                            page.data_worker = None
+                            logging.debug(f"Cleaned up finished worker for {page_name}")
+                            
+                    if hasattr(page, 'metrics_worker') and page.metrics_worker:
+                        if page.metrics_worker.isFinished():
+                            page.metrics_worker.deleteLater()
+                            page.metrics_worker = None
+                            logging.debug(f"Cleaned up finished metrics worker for {page_name}")
+                            
         except Exception as e:
-            logging.error(f"Error in post-switch operations: {e}")
+            logging.debug(f"Error cleaning up finished workers: {e}")
+            
+    def _cleanup_virtual_scroll_tables(self):
+        """Clean up virtual scroll table caches"""
+        try:
+            from PyQt6.QtWidgets import QApplication
+            
+            # Find all virtual scroll tables and clean them up
+            for widget in QApplication.allWidgets():
+                if hasattr(widget, 'cleanup') and 'VirtualScroll' in widget.__class__.__name__:
+                    try:
+                        # Only cleanup if widget is not currently visible
+                        if not widget.isVisible():
+                            widget.cleanup()
+                    except Exception as widget_error:
+                        logging.debug(f"Error cleaning up virtual scroll widget: {widget_error}")
+                        
+        except Exception as e:
+            logging.debug(f"Error cleaning up virtual scroll tables: {e}")
 
     def _setup_cluster_state_manager(self):
         """Setup cluster state manager"""
@@ -205,53 +273,6 @@ class OptimizedMainWindow(QMainWindow):
         except Exception as e:
             logging.error(f"Failed to setup cluster state manager: {e}")
             self.cluster_state_manager = None
-
-    def _on_cluster_state_changed(self, cluster_name: str, state: ClusterState):
-        """Handle cluster state changes"""
-        if state == ClusterState.CONNECTING:
-            self.loading_overlay.show_loading(f"Connecting to {cluster_name}...")
-            self.loading_overlay.resize(self.size())
-            self.loading_overlay.raise_()
-        elif state == ClusterState.CONNECTED:
-            self.loading_overlay.hide_loading()
-        elif state == ClusterState.ERROR:
-            self.loading_overlay.hide_loading()
-
-    def _on_cluster_switch_completed(self, cluster_name: str, success: bool):
-        """Handle cluster switch completion"""
-        if success:
-            # Always switch to cluster view when switch is completed successfully
-            # This ensures that even if we were "already connected", we still navigate to cluster view
-            current_widget = self.stacked_widget.currentWidget()
-            if current_widget != self.cluster_view:
-                logging.info(f"Switching to cluster view for {cluster_name}")
-                self.stacked_widget.setCurrentWidget(self.cluster_view)
-            
-            self.cluster_view.set_active_cluster(cluster_name)
-            QTimer.singleShot(50, lambda: self._post_switch_operations(cluster_name))
-        else:
-            self.show_error_message(f"Failed to switch to cluster: {cluster_name}")
-
-    def switch_to_cluster_view(self, cluster_name="docker-desktop"):
-        """Optimized cluster switching using state manager"""
-        if not self.cluster_state_manager:
-            self.show_error_message("Cluster state manager not initialized.")
-            return
-
-        self.previous_page = self.stacked_widget.currentWidget()
-        
-        # Check if we're already on cluster view with the same cluster
-        current_widget = self.stacked_widget.currentWidget()
-        if (current_widget == self.cluster_view and 
-            hasattr(self.cluster_view, 'active_cluster') and 
-            self.cluster_view.active_cluster == cluster_name):
-            logging.info(f"Already viewing cluster: {cluster_name}")
-            return
-        
-        # Request cluster switch through state manager
-        if not self.cluster_state_manager.request_cluster_switch(cluster_name):
-            logging.warning(f"Could not initiate switch to {cluster_name}")
-            return
 
     def resizeEvent(self, event):
         """Handle resize event"""
@@ -536,25 +557,148 @@ class OptimizedMainWindow(QMainWindow):
             self.switch_to_home()
         self.previous_page = None
 
+    def _on_cluster_state_changed(self, cluster_name: str, state: ClusterState):
+        """Handle cluster state changes with better error handling"""
+        try:
+            if state == ClusterState.CONNECTING:
+                # Don't show loading overlay during connection
+                pass
+                
+            elif state == ClusterState.CONNECTED:
+                # Don't show loading message, connect silently
+                logging.info(f"Successfully connected to cluster: {cluster_name}")
+                
+            elif state == ClusterState.ERROR:
+                # Hide any existing loading overlay on error
+                self.loading_overlay.hide_loading()
+                logging.error(f"Failed to connect to cluster: {cluster_name}")
+                
+        except Exception as e:
+            logging.error(f"Error handling cluster state change: {e}")
+
+    def _on_cluster_switch_completed(self, cluster_name: str, success: bool):
+        """Handle cluster switch completion with better error handling"""
+        try:
+            self.loading_overlay.hide_loading()
+            
+            if success:
+                # Always switch to cluster view when switch is completed successfully
+                current_widget = self.stacked_widget.currentWidget()
+                if current_widget != self.cluster_view:
+                    logging.info(f"Switching to cluster view for {cluster_name}")
+                    self.stacked_widget.setCurrentWidget(self.cluster_view)
+                
+                # FIXED: Set active cluster without triggering another connection
+                self.cluster_view.set_active_cluster(cluster_name)
+                
+                # FIXED: Update title bar ONLY after successful connection
+                if hasattr(self, 'title_bar'):
+                    self.title_bar.update_current_cluster(cluster_name)
+                    logging.info(f"Updated title bar cluster name to: {cluster_name}")
+                
+                # FIXED: Post-switch operations with error handling
+                QTimer.singleShot(50, lambda: self._post_switch_operations(cluster_name))
+                
+            else:
+                # FIXED: Better error handling - don't switch to cluster view on failure
+                error_msg = f"Failed to connect to cluster: {cluster_name}"
+                logging.error(error_msg)
+                self.show_error_message(error_msg)
+                
+                # FIXED: Reset title bar to previous cluster or clear it
+                if hasattr(self, 'title_bar'):
+                    # Don't update title bar on failed connection
+                    logging.info(f"Connection failed for {cluster_name}, keeping existing title bar")
+                
+                # FIXED: Stay on home page when connection fails
+                if self.stacked_widget.currentWidget() != self.home_page:
+                    logging.info(f"Connection failed for {cluster_name}, staying on home page")
+                    self.stacked_widget.setCurrentWidget(self.home_page)
+                    
+        except Exception as e:
+            logging.error(f"Error handling cluster switch completion: {e}")
+            self.loading_overlay.hide_loading()
+
+    def _post_switch_operations(self, cluster_name):
+        """Post-switch operations with better error handling"""
+        try:
+            # FIXED: Don't call set_active_cluster again, it was already called
+            
+            # Update terminal panel position if visible
+            if (hasattr(self.cluster_view, 'terminal_panel') and
+                    self.cluster_view.terminal_panel.is_visible and
+                    hasattr(self.cluster_view.terminal_panel, 'reposition')):
+                self.cluster_view.terminal_panel.reposition()
+                
+            # Handle page change for current cluster view page
+            if hasattr(self.cluster_view, 'handle_page_change'):
+                current_page = self.cluster_view.stacked_widget.currentWidget()
+                if current_page:
+                    self.cluster_view.handle_page_change(current_page)
+                    
+            logging.info(f"Post-switch operations completed for {cluster_name}")
+            
+        except Exception as e:
+            logging.error(f"Error in post-switch operations for {cluster_name}: {e}")
+
+    def switch_to_cluster_view(self, cluster_name="docker-desktop"):
+        """Improved cluster switching with better error handling"""
+        try:
+            if not self.cluster_state_manager:
+                self.show_error_message("Cluster state manager not initialized.")
+                return
+
+            self.previous_page = self.stacked_widget.currentWidget()
+            
+            # FIXED: Check actual connection state first
+            cluster_state = self.cluster_state_manager.get_cluster_state(cluster_name)
+            
+            # If already connected, switch to cluster view immediately
+            if cluster_state == ClusterState.CONNECTED:
+                logging.info(f"Cluster {cluster_name} already connected, switching to cluster view")
+                if self.stacked_widget.currentWidget() != self.cluster_view:
+                    self.stacked_widget.setCurrentWidget(self.cluster_view)
+                self.cluster_view.set_active_cluster(cluster_name)
+                return
+            
+            # FIXED: Only show loading overlay if we need to connect
+            if cluster_state in [ClusterState.DISCONNECTED, ClusterState.ERROR, ClusterState.MANUALLY_DISCONNECTED]:
+                logging.info(f"Requesting cluster switch to: {cluster_name}")
+                
+                if not self.cluster_state_manager.request_cluster_switch(cluster_name):
+                    error_msg = f"Could not initiate switch to {cluster_name}"
+                    logging.warning(error_msg)
+                    self.show_error_message(error_msg)
+                    return
+            else:
+                # Already connecting, just wait
+                logging.info(f"Cluster {cluster_name} already connecting, waiting...")
+                
+        except Exception as e:
+            logging.error(f"Error in switch_to_cluster_view for {cluster_name}: {e}")
+            self.show_error_message(f"Error switching to cluster: {str(e)}")
+
     def show_error_message(self, error_message):
-        """Display error messages"""
+        """Display error messages using centralized error handler"""
         if self._shutting_down:
             return
 
-        if not hasattr(self, '_error_shown'):
-            self._error_shown = False
-
-        if self._error_shown and not self._is_switching_to_cluster:
-            logging.error(f"Suppressed duplicate error dialog: {error_message}")
-            return
-
-        self._error_shown = True
-        QMessageBox.critical(self, "Error", error_message)
-        QTimer.singleShot(1000, self._reset_error_flag)
-
-    def _reset_error_flag(self):
-        """Reset the error dialog flag"""
-        self._error_shown = False
+        try:
+            # Hide loading overlay when showing error
+            if hasattr(self, 'loading_overlay'):
+                self.loading_overlay.hide_loading()
+            
+            # Use centralized error handler with proper context
+            error_handler = get_error_handler()
+            error_handler.handle_error(
+                Exception(error_message), 
+                context="application", 
+                show_dialog=True
+            )
+            
+        except Exception as e:
+            logging.error(f"Error showing error message: {e}")
+  
 
     def handle_page_change(self, index):
         """Handle page changes in the stacked widget"""
@@ -685,39 +829,54 @@ class OptimizedMainWindow(QMainWindow):
         except Exception as e:
             logging.error(f"Error in cleanup_ui_components: {e}")
 
+    @error_handler("cleanup_timers_and_threads")
     def cleanup_timers_and_threads(self):
-        """Clean up all QTimer objects and threads"""
-        logging.debug("Stopping active QTimers and threads.")
+        """Simplified cleanup using centralized ResourceCleaner"""
+        logging.info("Starting resource cleanup...")
 
-        potential_timer_parents = [self, self.main_widget, self.title_bar, self.stacked_widget,
-                                   self.home_page, self.cluster_view, self.preferences_page,
-                                   self.loading_overlay]
+        # Collect all widget parents for cleanup
+        widget_parents = [
+            self, self.main_widget, self.title_bar, self.stacked_widget,
+            self.home_page, self.cluster_view, self.preferences_page,
+            self.loading_overlay
+        ]
         
         if hasattr(self, 'cluster_view') and hasattr(self.cluster_view, 'terminal_panel'):
-            potential_timer_parents.append(self.cluster_view.terminal_panel)
+            widget_parents.append(self.cluster_view.terminal_panel)
 
-        timers_stopped = 0
-        for parent_obj in potential_timer_parents:
-            if parent_obj is None:
-                continue
-
-            try:
-                child_timers = parent_obj.findChildren(QTimer)
-                for timer in child_timers:
-                    if timer.isActive():
-                        timer.stop()
-                        timers_stopped += 1
-            except RuntimeError:
-                logging.warning(f"RuntimeError while finding timers for {type(parent_obj).__name__}")
-            except Exception as e:
-                logging.error(f"Error finding/stopping timers for {type(parent_obj).__name__}: {e}")
-
-        logging.info(f"Stopped {timers_stopped} active QTimers.")
-        QThread.msleep(100)
-
-
-# Use optimized main window
-MainWindow = OptimizedMainWindow
+        # Use centralized resource cleaner
+        total_cleaned = ResourceCleaner.cleanup_widgets(widget_parents)
+        
+        # Force garbage collection
+        collected = ResourceCleaner.force_garbage_collection()
+        
+        # Brief pause for cleanup to complete
+        QThread.msleep(50)
+        
+        logging.info(f"Resource cleanup completed: {total_cleaned} resources cleaned, {collected} objects collected")
+    
+    def _disconnect_cluster_signals(self):
+        """Disconnect cluster-related signals to prevent issues during shutdown"""
+        try:
+            if hasattr(self, 'cluster_connector'):
+                # Disconnect any signals from cluster connector
+                if hasattr(self.cluster_connector, 'disconnect'):
+                    self.cluster_connector.disconnect()
+        except Exception as e:
+            logging.error(f"Error disconnecting cluster signals: {e}")
+    
+    def __del__(self):
+        """Destructor to ensure cleanup when MainWindow is destroyed"""
+        try:
+            if hasattr(self, '_shutting_down') and not self._shutting_down:
+                logging.debug("MainWindow destructor called, performing cleanup")
+                # Force cleanup if not already done
+                self._shutting_down = True
+                if hasattr(self, '_cleanup_timer'):
+                    self._cleanup_timer.stop()
+                self.cleanup_timers_and_threads()
+        except Exception as e:
+            logging.error(f"Error in MainWindow destructor: {e}")
 
 def main():
     """Application entry point with platform-consistent styling"""
@@ -742,8 +901,8 @@ def main():
     app.setStyleSheet(AppStyles.GLOBAL_PLATFORM_OVERRIDE_STYLE)
     
     # Set application icon
-    icon_path_ico = resource_path("icons/logoIcon.ico")
-    icon_path_png = resource_path("icons/logoIcon.png")
+    icon_path_ico = resource_path("Icons/logoIcon.ico")
+    icon_path_png = resource_path("Icons/logoIcon.png")
     if os.path.exists(icon_path_ico):
         app.setWindowIcon(QIcon(icon_path_ico))
         logging.info(f"Application icon set from: {icon_path_ico}")

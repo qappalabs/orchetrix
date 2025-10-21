@@ -1,4 +1,5 @@
 from PyQt6.QtCore import QSize
+import os
 
 class AppColors:
     # Base colors
@@ -1417,9 +1418,9 @@ class AppStyles:
             width: 20px;
         }}
         QComboBox::down-arrow {{
-            image: url(icons/down_btn.svg);
-            width: 12px;
-            height: 12px;
+            width: 0px;
+            height: 0px;
+            border: none;
         }}
         QComboBox QAbstractItemView {{
             background-color: {AppColors.BG_DARKER};
@@ -1952,6 +1953,57 @@ class AppStyles:
         font-family: 'Segoe UI';
     """
 
+    @staticmethod
+    def get_dropdown_style_with_icon():
+        """Generate dropdown style with properly resolved icon path"""
+        try:
+            from UI.Icons import resource_path
+            down_arrow_icon = resource_path("Icons/down_btn.svg")
+            
+            return f"""
+            QComboBox {{ 
+                background-color: #2d2d2d; 
+                color: #ffffff; 
+                border: 1px solid #3d3d3d;
+                border-radius: 4px; 
+                padding: 5px 10px; 
+                font-size: 13px; 
+            }}
+            QComboBox:hover {{ 
+                border: 1px solid #555555; 
+            }}
+            QComboBox::drop-down {{ 
+                border: none; 
+                width: 20px;
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+            }}
+            QComboBox::down-arrow {{
+                image: url({down_arrow_icon.replace(os.sep, '/')});
+                width: 12px;
+                height: 12px;
+                margin-right: 4px;
+            }}
+            QComboBox::down-arrow:hover {{
+                opacity: 0.8;
+            }}
+            QComboBox QAbstractItemView {{ 
+                background-color: #2d2d2d; 
+                color: #ffffff; 
+                selection-background-color: #0078d7;
+                border: none;
+                outline: none;
+                padding: 0px;
+            }}
+            QComboBox QFrame {{
+                border: none;
+                background-color: #2d2d2d;
+            }}
+            """
+        except Exception as e:
+            # Fallback to style without icon if there are issues
+            return AppStyles.COMBO_BOX_STYLE
+
 
     COMBO_BOX_STYLE = f"""
         QComboBox {{ 
@@ -1971,7 +2023,9 @@ class AppStyles:
             width: 20px; 
         }}
         QComboBox::down-arrow {{ 
-            image: url(icons/down_btn.svg) ; 
+            width: 0px;
+            height: 0px;
+            border: none;
         }}
         QComboBox QAbstractItemView {{ 
             background-color: #2d2d2d; 
@@ -1987,43 +2041,77 @@ class AppStyles:
         }}
         """
 
-    BASE_CHECKBOX_STYLE = f"""
-        QCheckBox {{
-            margin: 0px;
-            padding: 0px;
-            spacing: 0px;
-            background: transparent;
-            border: none;
-            outline: none;
-            width: 16px;
-            height: 16px;   
-            max-width: 16px;
-            max-height: 16px;
-            min-width: 16px;
-            min-height: 16px;
-        }}
-        QCheckBox::indicator {{
-            width: 16px;
-            height: 16px;
-            border: none;
-            background: transparent;
-            margin: 0px;
-            padding: 0px;
-            spacing: 0px;
-            subcontrol-position: center;
-            subcontrol-origin: content;
-        }}
-        QCheckBox::indicator:unchecked {{
-            image: url(icons/check_box_unchecked.svg);
-        }}
-        QCheckBox::indicator:checked {{
-            image: url(icons/check_box_checked.svg);
-            background-color: transparent;
-        }}
-        QCheckBox::indicator:hover {{
-            opacity: 0.8;
-        }}
-    """
+    @staticmethod
+    def get_base_checkbox_style():
+        """Generate checkbox style with properly resolved icon paths"""
+        try:
+            from UI.Icons import resource_path
+            unchecked_path = resource_path("Icons/check_box_unchecked.svg")
+            checked_path = resource_path("Icons/check_box_checked.svg")
+            
+            return f"""
+            QCheckBox {{
+                margin: 0px;
+                padding: 0px;
+                spacing: 0px;
+                background: transparent;
+                border: none;
+                outline: none;
+                width: 16px;
+                height: 16px;   
+                max-width: 16px;
+                max-height: 16px;
+                min-width: 16px;
+                min-height: 16px;
+            }}
+            QCheckBox::indicator {{
+                width: 16px;
+                height: 16px;
+                border: none;
+                background: transparent;
+                margin: 0px;
+                padding: 0px;
+                spacing: 0px;
+                subcontrol-position: center;
+                subcontrol-origin: content;
+            }}
+            QCheckBox::indicator:unchecked {{
+                image: url({unchecked_path.replace(os.sep, '/')});
+            }}
+            QCheckBox::indicator:checked {{
+                image: url({checked_path.replace(os.sep, '/')});
+                background-color: transparent;
+            }}
+            QCheckBox::indicator:hover {{
+                opacity: 0.8;
+            }}
+            """
+        except Exception as e:
+            # Fallback to basic style without icons if there are issues
+            return f"""
+            QCheckBox {{
+                margin: 0px;
+                padding: 0px;
+                spacing: 0px;
+                background: transparent;
+                border: none;
+                outline: none;
+            }}
+            QCheckBox::indicator {{
+                width: 16px;
+                height: 16px;
+                border: 1px solid {AppColors.TEXT_SECONDARY};
+                border-radius: 3px;
+                background: transparent;
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: {AppColors.ACCENT_BLUE};
+                border-color: {AppColors.ACCENT_BLUE};
+            }}
+            """
+    
+    # Keep backward compatibility
+    BASE_CHECKBOX_STYLE = ""  # Will be set after class definition
 
     EMPTY_STATE_STYLE = f"""
         background-color: {AppColors.CARD_BG};
@@ -2143,3 +2231,73 @@ class EnhancedStyles:
                 padding: 2px 0px;
             }}
         """
+
+
+class StyleLoader:
+    """Lazy loading style manager to improve performance"""
+    
+    def __init__(self):
+        self._loaded_styles = {}
+        self._style_cache = {}
+    
+    def get_style(self, style_name):
+        """Get a style with caching"""
+        if style_name in self._style_cache:
+            return self._style_cache[style_name]
+        
+        # Get style from AppStyles
+        style = getattr(AppStyles, style_name, None)
+        if style:
+            self._style_cache[style_name] = style
+            return style
+        
+        return ""
+    
+    def get_component_styles(self, component_name):
+        """Get styles for a specific component"""
+        if component_name in self._loaded_styles:
+            return self._loaded_styles[component_name]
+        
+        styles = {}
+        
+        # Component-specific style mapping
+        component_styles = {
+            'table': ['TABLE_STYLE', 'TABLE_HEADER_STYLE', 'TABLE_ROW_STYLE'],
+            'button': ['BUTTON_STYLE', 'SECONDARY_BUTTON_STYLE', 'DANGER_BUTTON_STYLE'],
+            'input': ['INPUT_STYLE', 'SEARCH_BAR_STYLE', 'COMBO_BOX_STYLE'],
+            'terminal': ['TERMINAL_STYLE', 'TERMINAL_TEXTEDIT', 'TERMINAL_OUTPUT_STYLE'],
+            'sidebar': ['SIDEBAR_STYLE', 'SIDEBAR_BUTTON_STYLE'],
+            'main': ['MAIN_STYLE', 'TITLE_STYLE', 'COUNT_STYLE']
+        }
+        
+        if component_name in component_styles:
+            for style_name in component_styles[component_name]:
+                styles[style_name] = self.get_style(style_name)
+        
+        self._loaded_styles[component_name] = styles
+        return styles
+    
+    def clear_cache(self):
+        """Clear style cache"""
+        self._style_cache.clear()
+        self._loaded_styles.clear()
+
+
+# Global style loader instance
+_style_loader = StyleLoader()
+
+def get_style_loader():
+    """Get the global style loader instance"""
+    return _style_loader
+
+def get_component_styles(component_name):
+    """Convenience function to get component styles"""
+    return _style_loader.get_component_styles(component_name)
+
+# Convenience function for backward compatibility
+def get_dropdown_style_with_icon():
+    """Generate dropdown style with properly resolved icon path"""
+    return AppStyles.get_dropdown_style_with_icon()
+
+# Set the BASE_CHECKBOX_STYLE after class definition
+AppStyles.BASE_CHECKBOX_STYLE = AppStyles.get_base_checkbox_style()

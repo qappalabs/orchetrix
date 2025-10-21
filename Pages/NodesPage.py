@@ -12,10 +12,9 @@ from PyQt6.QtCore import Qt, QTimer, QRect, QRectF, pyqtSignal, QSize
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QLinearGradient, QPainterPath, QBrush, QCursor
 
 from UI.Styles import AppStyles, AppColors, AppConstants
-from base_components.base_components import SortableTableWidgetItem
-from base_components.base_resource_page import BaseResourcePage
-from utils.cluster_connector import get_cluster_connector
-from utils.data_manager import get_data_manager
+from Base_Components.base_components import SortableTableWidgetItem
+from Base_Components.base_resource_page import BaseResourcePage
+from Utils.cluster_connector import get_cluster_connector
 from UI.Icons import resource_path
 import random
 import datetime
@@ -284,6 +283,7 @@ class NodesPage(BaseResourcePage):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.resource_type = "nodes"
+        self.show_namespace_dropdown = False  # Hide namespace dropdown for Nodes page
         self.selected_row = -1
         self.has_loaded_data = False
         self.is_loading = False
@@ -307,15 +307,7 @@ class NodesPage(BaseResourcePage):
         
         layout = super().setup_ui("Nodes", headers, sortable_columns)
         
-        # Remove default checkbox header
-        header_widget = self._item_widgets.get("header_widget")
-        if header_widget:
-            header_widget.hide()
-        self.select_all_checkbox = None
-        
-        # Hide the checkbox column
-        if self.table:
-            self.table.hideColumn(0)
+        # Keep checkbox functionality enabled for Nodes page
             
         self.layout().setContentsMargins(16, 16, 16, 16)
         self.layout().setSpacing(16)
@@ -337,25 +329,28 @@ class NodesPage(BaseResourcePage):
         # Apply table style
         self.table.setStyleSheet(AppStyles.TABLE_STYLE)
         self.table.horizontalHeader().setStyleSheet(AppStyles.CUSTOM_HEADER_STYLE)
-        
+
         # Configure column widths
         self.configure_columns()
-        
+
         # Create no-data widget
         self.no_data_widget = NoDataWidget("No node data available. Please connect to a cluster.")
         self.no_data_widget.hide()
         self.layout().addWidget(self.no_data_widget)
+
+        # Use default blue spinner to match other pages
+        self._spinner_type = "circular"
 
     def configure_columns(self):
         """Configure column widths for full screen utilization"""
         if not self.table:
             return
             
-        self.table.hideColumn(0)
+        # Show checkbox column (column 0)
         header = self.table.horizontalHeader()
         
         column_specs = [
-            (0, 40, "fixed"),        # Hidden checkbox
+            (0, 40, "fixed"),        # Checkbox
             (1, 140, "interactive"), # Name
             (2, 110, "interactive"), # CPU
             (3, 110, "interactive"), # Memory
@@ -419,9 +414,9 @@ class NodesPage(BaseResourcePage):
         self.disk_graph.generate_utilization_data(nodes_data)
         
         # Clear and populate table
-        self.table.setRowCount(0)
-        self.populate_table(nodes_data)
-        self.table.setSortingEnabled(True)
+        # self.table.setRowCount(0)
+        # self.populate_table(nodes_data)
+        # self.table.setSortingEnabled(True)
         
         self.items_count.setText(f"{len(nodes_data)} items")
 
@@ -431,9 +426,9 @@ class NodesPage(BaseResourcePage):
         
         node_name = resource.get("name", "unknown")
         
-        # Create checkbox container (hidden)
+        # Create checkbox container (visible)
         checkbox_container = self._create_checkbox_container(row, node_name)
-        checkbox_container.setStyleSheet("background-color: transparent;")
+        checkbox_container.setStyleSheet(AppStyles.CHECKBOX_STYLE)
         self.table.setCellWidget(row, 0, checkbox_container)
         
         # Get utilization data
@@ -571,7 +566,7 @@ class NodesPage(BaseResourcePage):
         button = QToolButton()
 
         # Use custom SVG icon instead of text
-        icon = resource_path("icons/Moreaction_Button.svg")
+        icon = resource_path("Icons/Moreaction_Button.svg")
         button.setIcon(QIcon(icon))
         button.setIconSize(QSize(AppConstants.SIZES["ICON_SIZE"], AppConstants.SIZES["ICON_SIZE"]))
 
@@ -690,13 +685,3 @@ class NodesPage(BaseResourcePage):
         else:
             self.is_loading = False
             self.show_no_data_message()
-        
-    # Disable inherited methods that aren't needed for nodes
-    def _add_delete_selected_button(self):
-        pass
-        
-    def _handle_checkbox_change(self, state, item_name):
-        pass
-        
-    def _handle_select_all(self, state):
-        pass

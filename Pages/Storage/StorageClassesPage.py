@@ -6,8 +6,8 @@ from PyQt6.QtWidgets import (QHeaderView, QWidget, QLabel)
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor
 
-from base_components.base_components import SortableTableWidgetItem
-from base_components.base_resource_page import BaseResourcePage
+from Base_Components.base_components import SortableTableWidgetItem
+from Base_Components.base_resource_page import BaseResourcePage
 from UI.Styles import AppStyles, AppColors
 
 class StorageClassesPage(BaseResourcePage):
@@ -18,6 +18,7 @@ class StorageClassesPage(BaseResourcePage):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.resource_type = "storageclasses"  # Set resource type for kubectl
+        self.show_namespace_dropdown = False  # StorageClasses are cluster-scoped
         self.setup_page_ui()
         
     def setup_page_ui(self):
@@ -35,7 +36,9 @@ class StorageClassesPage(BaseResourcePage):
         
         # Configure column widths
         self.configure_columns()
-    
+        
+        # Add delete selected button
+
     def configure_columns(self):
         """Configure column widths for full screen utilization"""
         if not self.table:
@@ -70,7 +73,6 @@ class StorageClassesPage(BaseResourcePage):
         
         # Ensure full width utilization after configuration
         QTimer.singleShot(100, self._ensure_full_width_utilization)
-
     def populate_resource_row(self, row, resource):
         """
         Populate a single row with storage class data from live Kubernetes resources
