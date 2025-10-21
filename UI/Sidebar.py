@@ -4,9 +4,11 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QToolButton, QLa
 from PyQt6.QtCore import Qt, QSize, QPropertyAnimation, QEasingCurve, QEvent, QTimer, QPoint, QRect
 from PyQt6.QtGui import QIcon, QFont, QColor, QAction, QPixmap
 
-from UI.Styles import AppColors, AppStyles
-from UI.Icons import Icons
 import logging
+import platform
+
+from UI.Styles import AppColors, AppStyles
+from UI.Icons import Icons, resource_path
 
 class NavMenuDropdown(QMenu):
     def __init__(self, parent=None):
@@ -22,7 +24,6 @@ class NavMenuDropdown(QMenu):
         # Only add shadow effect on non-Windows platforms or disable it entirely
         # to avoid UpdateLayeredWindowIndirect errors
         try:
-            import platform
             if platform.system() != "Windows":
                 shadow = QGraphicsDropShadowEffect(self)
                 shadow.setColor(QColor(0, 0, 0, 100))
@@ -43,7 +44,6 @@ class SidebarToggleButton(QToolButton):
         self.expanded = True
 
         try:
-            from UI.Icons import resource_path  # Import the resource_path function
             back_icon_path = resource_path("Icons/back.svg")
             forward_icon_path = resource_path("Icons/forward.svg")
 
@@ -591,7 +591,7 @@ class Sidebar(QWidget):
             ("config", "Config", False, True),
             ("network", "Network", False, True),
             ("storage", "Storage", False, True),
-            ("helm", "Helm", False, True, True),
+            ("helm", "Helm", False, True, False),
             ("access_control", "Access Control", False, True),
             ("custom_resources", "Custom Resources", False, True),
             ("namespaces", "Namespaces", False),

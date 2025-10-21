@@ -21,6 +21,12 @@ class DetailPageOverviewSection(BaseDetailSection):
     def __init__(self, kubernetes_client, parent=None):
         super().__init__("Overview", kubernetes_client, parent)
         self.setup_overview_ui()
+    
+    def set_raw_data(self, raw_data):
+        """Set raw data for special resources like charts and releases"""
+        logging.info(f"OverviewSection: Received raw data for {self.resource_type}, keys: {list(raw_data.keys()) if raw_data else 'None'}")
+        self.current_data = raw_data
+        self.update_ui_with_data(raw_data)
 
     def setup_overview_ui(self):
         """Setup overview-specific UI"""
@@ -222,6 +228,17 @@ class DetailPageOverviewSection(BaseDetailSection):
             return
 
         try:
+            # Handle special resource types (charts and releases)
+            if self.resource_type and self.resource_type.lower() in ["chart", "helmchart"]:
+                logging.info(f"OverviewSection: Updating chart UI for {self.resource_type}")
+                self._update_chart_ui(data)
+                return
+            elif self.resource_type and self.resource_type.lower() in ["helmrelease", "release"]:
+                logging.info(f"OverviewSection: Updating release UI for {self.resource_type}")
+                self._update_release_ui(data)
+                return
+            
+            # Standard Kubernetes resource handling
             metadata = data.get("metadata", {})
 
             # Update resource header
@@ -2321,3 +2338,132 @@ class DetailPageOverviewSection(BaseDetailSection):
                 
         except Exception as e:
             logging.error(f"Error applying search to pods page: {e}")
+    def _update_chart_ui(self, data: Dict[str, Any]):
+        """Update UI with Helm chart data"""
+        try:
+            metadata = data.get("metadata", {})
+            spec = data.get("spec", {})
+            
+            # Update resource header
+            chart_name = metadata.get("name", "Unnamed Chart")
+            self.resource_name_label.setText(chart_name)
+            
+            chart_info = f"Helm Chart"
+            repository = spec.get("repository", metadata.get("labels", {}).get("repository", "Unknown"))
+            if repository:
+                chart_info += f" / {repository}"
+            self.resource_info_label.setText(chart_info)
+            
+            # Update creation/updated time
+            created_time = metadata.get("creationTimestamp", metadata.get("annotations", {}).get("updated", ""))
+            if created_time:
+                self.creation_time_label.setText(f"Last Updated: {created_time}")
+            else:
+                self.creation_time_label.setText("Created: unknown")
+            
+            # Update chart-specific status
+            self._update_chart_status(data)
+            
+        except Exception as e:
+            logging.error(f"Error updating chart UI: {e}")
+    
+
+    def _update_release_ui(self, data: Dict[str, Any]):
+        """Update UI with Helm release data"""
+        try:
+            metadata = data.get("metadata", {})
+            spec = data.get("spec", {})
+            status = data.get("status", {})
+            
+            # Update resource header
+            release_name = metadata.get("name", "Unnamed Release")
+            self.resource_name_label.setText(release_name)
+            
+            release_info = f"Helm Release"
+            namespace = metadata.get("namespace")
+            if namespace:
+                release_info += f" / {namespace}"
+            self.resource_info_label.setText(release_info)
+            
+            # Update creation/deployed time
+            deployed_time = status.get("lastDeployed", metadata.get("creationTimestamp", ""))
+            if deployed_time:
+                self.creation_time_label.setText(f"Last Deployed: {deployed_time}")
+            else:
+                self.creation_time_label.setText("Deployed: unknown")
+            
+            # Update release-specific status
+            self._update_release_status(data)
+            
+        except Exception as e:
+            logging.error(f"Error updating release UI: {e}")
+    
+
+    def _update_chart_status(self, data: Dict[str, Any]):
+        """Update status display for chart data"""
+        try:
+            metadata = data.get("metadata", {})
+            spec = data.get("spec", {})
+            labels = metadata.get("labels", {})
+            
+            # Chart version and status
+            version = spec.get("version", labels.get("version", "Unknown"))
+            repository = spec.get("repository", labels.get("repository", "Unknown"))
+            
+            if hasattr(self, "status_badge"):
+                self.status_badge.setText("Available")
+                self.status_badge.setStyleSheet("""
+                    QLabel {
+                        background-color: #4CAF50;
+                        color: white;
+                        padding: 4px 8px;
+                        border-radius: 4px;
+                        font-weight: bold;
+                    }
+                """)
+            
+            if hasattr(self, "status_text_label"):
+                self.status_text_label.setText(f"Version: {version} | Repository: {repository}")
+                self.status_text_label.setVisible(True)
+            
+        except Exception as e:
+            logging.error(f"Error updating chart status: {e}")
+
+    def _update_release_status(self, data: Dict[str, Any]):
+        """Update status display for release data"""
+        try:
+            status = data.get("status", {})
+            spec = data.get("spec", {})
+            
+            # Release status
+            release_status = status.get("phase", "Unknown")
+            chart = spec.get("chart", "Unknown")
+            revision = spec.get("revision", "1")
+            
+            if hasattr(self, "status_badge"):
+                # Set badge color based on status
+                if release_status.lower() in ["deployed", "success"]:
+                    badge_color = "#4CAF50"  # Green
+                elif release_status.lower() in ["failed", "error"]:
+                    badge_color = "#f44336"  # Red
+                else:
+                    badge_color = "#2196F3"  # Blue
+                
+                self.status_badge.setText(release_status)
+                self.status_badge.setStyleSheet(f"""
+                    QLabel {{
+                        background-color: {badge_color};
+                        color: white;
+                        padding: 4px 8px;
+                        border-radius: 4px;
+                        font-weight: bold;
+                    }}
+                """)
+            
+            if hasattr(self, "status_text_label"):
+                self.status_text_label.setText(f"Chart: {chart} | Revision: {revision}")
+                self.status_text_label.setVisible(True)
+            
+        except Exception as e:
+            logging.error(f"Error updating release status: {e}")
+

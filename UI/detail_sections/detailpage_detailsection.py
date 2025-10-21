@@ -19,6 +19,11 @@ class DetailPageDetailsSection(BaseDetailSection):
     def __init__(self, kubernetes_client, parent=None):
         super().__init__("Details", kubernetes_client, parent)
         self.setup_details_ui()
+    
+    def set_raw_data(self, raw_data):
+        """Set raw data for special resources like charts and releases"""
+        self.current_data = raw_data
+        self.update_ui_with_data(raw_data)
 
     def setup_details_ui(self):
         """Setup details-specific UI"""

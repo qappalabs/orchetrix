@@ -109,9 +109,16 @@ class DetailManager(QObject):
             'namespace': namespace
         })
 
-        # Handle special data for events
-        if raw_data and resource_type.lower() == "event":
-            detail_page.event_raw_data = raw_data
+        # Handle special data for different resource types
+        if raw_data:
+            if resource_type.lower() == "event":
+                detail_page.event_raw_data = raw_data
+            elif resource_type.lower() in ["chart", "helmchart"]:
+                detail_page.chart_raw_data = raw_data
+            elif resource_type.lower() in ["helmrelease", "release"]:
+                detail_page.release_raw_data = raw_data
+            else:
+                detail_page.resource_raw_data = raw_data
 
         # Update height before showing
         self._update_cached_height()

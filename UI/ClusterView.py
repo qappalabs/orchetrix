@@ -55,6 +55,10 @@ from Pages.Storage.PersistentVolumeClaimsPage import PersistentVolumeClaimsPage
 from Pages.Storage.PersistentVolumesPage import PersistentVolumesPage
 from Pages.Storage.StorageClassesPage import StorageClassesPage
 
+# Helm pages
+from Pages.Helm.ChartsPage import ChartsPage
+from Pages.Helm.ReleasesPage import ReleasesPage
+
 # Access Control pages
 from Pages.AccessControl.ServiceAccountsPage import ServiceAccountsPage
 from Pages.AccessControl.ClusterRolesPage import ClusterRolesPage
@@ -119,6 +123,10 @@ PAGE_CONFIG = {
     'Persistent Volume Claims': PersistentVolumeClaimsPage,
     'Persistent Volumes': PersistentVolumesPage,
     'Storage Classes': StorageClassesPage,
+    
+    # Helm pages
+    'Charts': ChartsPage,
+    'Releases': ReleasesPage,
 
     # Access Control pages
     'Service Accounts': ServiceAccountsPage,
@@ -815,8 +823,13 @@ class ClusterView(QWidget):
         if resource_type in CLUSTER_SCOPED_RESOURCES:
             namespace = None
 
+        # Get raw data from the page if available
+        raw_data = None
+        if hasattr(page, 'get_raw_data_for_row'):
+            raw_data = page.get_raw_data_for_row(row)
+
         if resource_name:
-            self.detail_manager.show_detail(resource_type, resource_name, namespace)
+            self.detail_manager.show_detail(resource_type, resource_name, namespace, raw_data)
 
     def handle_page_change(self, page_widget: QWidget) -> None:
         """Handle page changes with optimized performance"""

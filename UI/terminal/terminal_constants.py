@@ -78,7 +78,6 @@ class StyleConstants:
     @staticmethod
     def get_shell_dropdown_style():
         """Get shell dropdown style with proper icon resolution"""
-        from UI.Styles import AppStyles
         return AppStyles.get_dropdown_style_with_icon()
     
     # Keep old constant for backward compatibility but mark as deprecated

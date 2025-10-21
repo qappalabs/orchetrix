@@ -348,6 +348,10 @@ class DetailPageComponent(QWidget):
         # Clear and setup sections
         self.clear_all_sections()
         self.set_resource_for_all_sections(resource_type, resource_name, namespace)
+        
+        # Handle special raw data for charts and releases
+        self._handle_special_resource_data(resource_type)
+        
         self.tab_widget.setCurrentIndex(0)
 
         # Show with animation
@@ -356,6 +360,34 @@ class DetailPageComponent(QWidget):
 
         # Load data after animation completes
         QTimer.singleShot(300, self.load_current_tab_data)
+    
+    def _handle_special_resource_data(self, resource_type: str):
+        """Handle special resource data for charts and releases"""
+        raw_data = None
+        
+        # Get the appropriate raw data based on resource type
+        if resource_type.lower() in ["chart", "helmchart"] and hasattr(self, 'chart_raw_data'):
+            raw_data = self.chart_raw_data
+            logging.info(f"DetailPageComponent: Using chart raw data for {resource_type}")
+        elif resource_type.lower() in ["helmrelease", "release"] and hasattr(self, 'release_raw_data'):
+            raw_data = self.release_raw_data
+            logging.info(f"DetailPageComponent: Using release raw data for {resource_type}")
+        elif hasattr(self, 'resource_raw_data'):
+            raw_data = self.resource_raw_data
+            logging.info(f"DetailPageComponent: Using generic raw data for {resource_type}")
+        
+        if raw_data:
+            logging.info(f"DetailPageComponent: Processing raw data for {resource_type}, data keys: {list(raw_data.keys())}")
+            # Pass the raw data to all sections
+            sections = [self.overview_section, self.details_section, self.yaml_section, self.events_section]
+            for section in sections:
+                if hasattr(section, 'set_raw_data'):
+                    logging.info(f"DetailPageComponent: Setting raw data for {section.section_name}")
+                    section.set_raw_data(raw_data)
+                # Store data directly on the section for immediate access
+                section.current_data = raw_data
+        else:
+            logging.warning(f"DetailPageComponent: No raw data found for {resource_type}")
 
     def _post_show_setup(self):
         """Single post-show setup to avoid flickering"""
@@ -409,11 +441,144 @@ class DetailPageComponent(QWidget):
             self.action_button.hide()
 
     def handle_action_button(self):
-        # """Handle action button click"""
-        # if self.resource_type == "chart":
-        #     self._install_chart()
-        pass
-
+        """Handle action button click"""
+        if self.resource_type == "chart":
+            self._handle_install_chart()
+        elif self.resource_type == "helmrelease":
+            self._handle_upgrade_release()
+    
+    def _handle_install_chart(self):
+        """Handle chart installation - copied from ChartsPage._handle_install_chart"""
+        # Prevent multiple installations from running simultaneously
+        if getattr(self, 'installation_in_progress', False):
+            QMessageBox.warning(self, "Installation in Progress", 
+                               "Another chart installation is already in progress. Please wait for it to complete.")
+            return
+        
+        # Get chart data - look for the data in the right place
+        chart_data = None
+        if hasattr(self, 'chart_raw_data') and self.chart_raw_data:
+            chart_data = self.chart_raw_data
+        elif hasattr(self, 'resource_raw_data') and self.resource_raw_data:
+            chart_data = self.resource_raw_data
+        
+        if not chart_data:
+            QMessageBox.warning(self, "Installation Error", "Chart data not available.")
+            return
+        
+        # Extract chart information from raw data
+        metadata = chart_data.get("metadata", {})
+        labels = metadata.get("labels", {})
+        spec = chart_data.get("spec", {})
+        
+        chart_name = self.resource_name
+        repository = labels.get("repository", spec.get("repository", ""))
+        
+        if not repository:
+            QMessageBox.critical(self, "Installation Error", "Repository information is missing for this chart.")
+            return
+        
+        # Import the install dialog
+        from Utils.helm_utils import ChartInstallDialog, install_helm_chart
+        
+        # Create and show install dialog
+        dialog = ChartInstallDialog(chart_name, repository, self)
+        
+        # Store reference to prevent multiple dialogs
+        if getattr(self, 'current_installation_dialog', None) is not None:
+            return  # Dialog already open
+        
+        self.current_installation_dialog = dialog
+        
+        try:
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                # Get installation options
+                options = dialog.get_values()
+                
+                if options:
+                    # Set installation state
+                    self.installation_in_progress = True
+                    
+                    try:
+                        # Start installation
+                        success, message = install_helm_chart(chart_name, repository, options, self)
+                        
+                        # Show single result dialog
+                        if success:
+                            QMessageBox.information(self, "Installation Successful", 
+                                                   f"Chart '{chart_name}' has been successfully installed!\n\n{message}")
+                        else:
+                            QMessageBox.critical(self, "Installation Failed", 
+                                               f"Failed to install chart '{chart_name}'.\n\n{message}")
+                    finally:
+                        # Reset installation state
+                        self.installation_in_progress = False
+        finally:
+            # Clear dialog reference
+            self.current_installation_dialog = None
+    
+    def _handle_upgrade_release(self):
+        """Show upgrade dialog for Helm release - copied from ReleasesPage._show_upgrade_dialog"""
+        try:
+            release_name = self.resource_name
+            namespace = self.resource_namespace or "default"
+            
+            # Find the release data to get chart info
+            release_data = None
+            if hasattr(self, 'release_raw_data') and self.release_raw_data:
+                release_data = self.release_raw_data
+            elif hasattr(self, 'resource_raw_data') and self.resource_raw_data:
+                release_data = self.resource_raw_data
+            
+            if not release_data:
+                QMessageBox.warning(self, "Upgrade Error", f"Release data not found for {release_name}")
+                return
+            
+            # Try to extract chart info from release data (similar to ReleasesPage)
+            # The release_data comes from ReleasesPage with this structure:
+            # metadata.labels.chart contains the chart info
+            metadata = release_data.get("metadata", {})
+            labels = metadata.get("labels", {})
+            chart_info = labels.get("chart", "").split("-")
+            chart_name = chart_info[0] if chart_info else "unknown"
+            
+            # For now, we'll use a default repository (in real scenarios, this should be stored with the release)
+            repository = "bitnami"  # Default repository, could be enhanced to track original repo
+            
+            from Utils.helm_utils import ChartInstallDialog, upgrade_helm_release
+            
+            # Create and show upgrade dialog (reusing install dialog)
+            dialog = ChartInstallDialog(chart_name, repository, self)
+            dialog.setWindowTitle(f"Upgrade Release: {release_name}")
+            
+            # Pre-populate with current release info
+            dialog.release_name_input.setText(release_name)
+            dialog.release_name_input.setEnabled(False)  # Don't allow changing release name during upgrade
+            dialog.namespace_combo.setCurrentText(namespace)
+            dialog.namespace_combo.setEnabled(False)  # Don't allow changing namespace during upgrade
+            dialog.create_namespace_checkbox.setChecked(False)
+            dialog.create_namespace_checkbox.setEnabled(False)  # Namespace already exists
+            
+            # Change button text to indicate upgrade
+            dialog.install_button.setText("Upgrade Release")
+            
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                options = dialog.get_values()
+                if options:
+                    # Perform upgrade
+                    success, message = upgrade_helm_release(release_name, namespace, chart_name, repository, options, self)
+                    
+                    if success:
+                        QMessageBox.information(self, "Upgrade Successful", message)
+                        # Reload releases to show updated data - emit refresh signal
+                        self.refresh_main_page_signal.emit("helmrelease", release_name, namespace)
+                    else:
+                        QMessageBox.critical(self, "Upgrade Failed", message)
+                        
+        except Exception as e:
+            logging.error(f"Error showing upgrade dialog: {e}")
+            QMessageBox.critical(self, "Error", f"Failed to show upgrade dialog: {str(e)}")
+    
     def set_resource_for_all_sections(self, resource_type: str, resource_name: str, namespace: Optional[str]):
         """Set resource information for all sections"""
         sections = [self.overview_section, self.details_section, self.yaml_section, self.events_section]

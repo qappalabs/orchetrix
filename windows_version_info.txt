@@ -14,11 +14,11 @@ VSVersionInfo(
       [
         StringTable(
           u'040904B0',
-          [StringStruct(u'CompanyName', u'Your Company Name'),
+          [StringStruct(u'CompanyName', u'Qappalabs'),
            StringStruct(u'FileDescription', u'Orchestrix Kubernetes Manager'),
            StringStruct(u'FileVersion', u'1.0.0.0'),
            StringStruct(u'InternalName', u'Orchestrix'),
-           StringStruct(u'LegalCopyright', u'Copyright © 2025'),
+           StringStruct(u'LegalCopyright', u'Copyright © 2025 Qappa Labs'),
            StringStruct(u'OriginalFilename', u'Orchestrix.exe'),
            StringStruct(u'ProductName', u'Orchestrix'),
            StringStruct(u'ProductVersion', u'1.0.0.0')])

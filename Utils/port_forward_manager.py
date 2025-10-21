@@ -3,16 +3,18 @@ Fixed Port Forward Manager - Corrected implementation for Kubernetes port forwar
 Uses proper socket forwarding without subprocess, compatible with Kubernetes Python client
 """
 
+import logging
+import select
 import socket
 import threading
 import time
-import logging
-import select
-from typing import Dict, Optional, Tuple, List
 from dataclasses import dataclass
-from PyQt6.QtCore import QObject, pyqtSignal, QThread, QTimer
+from typing import Dict, Optional, Tuple, List
+
 from kubernetes import client
-from kubernetes.stream import stream
+from kubernetes.stream import stream, portforward
+from PyQt6.QtCore import QObject, pyqtSignal, QThread, QTimer
+
 from Utils.kubernetes_client import get_kubernetes_client
 
 
@@ -50,95 +52,146 @@ class KubernetesPortForwarder:
         self.monitor_thread = None
         
     def start(self):
-        """Start the port forwarder using kubectl port-forward"""
-        import subprocess
-        import os
-        import threading
+        """Start the port forwarder using native socket forwarding (subprocess removed for security)"""
         
         try:
             # Get target pod for service or use pod directly
             target_pod, target_port = self._resolve_target()
             
-            # Build kubectl port-forward command with better options
-            kubectl_cmd = [
-                'kubectl', 'port-forward',
-                f'pod/{target_pod}',
-                f'{self.config.local_port}:{target_port}',
-                '-n', self.config.namespace,
-                '--address=127.0.0.1'  # Bind only to localhost
-            ]
+            logging.info(f"Starting native port forward: localhost:{self.config.local_port} -> {target_pod}:{target_port}")
             
-            logging.info(f"Starting port forward: {' '.join(kubectl_cmd)}")
-            
-            # Start kubectl port-forward process with proper configuration
-            self.process = subprocess.Popen(
-                kubectl_cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                stdin=subprocess.PIPE,  # Provide stdin to prevent hanging
-                universal_newlines=True,
-                env=os.environ.copy(),
-                bufsize=1,  # Line buffered
-                preexec_fn=os.setsid if hasattr(os, 'setsid') else None  # Create new process group on Unix
-            )
-            
+            # Use native socket-based forwarding instead of subprocess
             self.running = True
-            logging.info(f"Port forwarder started: localhost:{self.config.local_port} -> {target_pod}:{target_port}")
+            self._start_native_forwarding(target_pod, target_port)
             
-            # Start monitoring in a separate thread
-            self.monitor_thread = threading.Thread(target=self._monitor_process, daemon=True)
-            self.monitor_thread.start()
+            logging.info(f"Port forwarder started: localhost:{self.config.local_port} -> {target_pod}:{target_port}")
             
         except Exception as e:
             logging.error(f"Error starting port forwarder: {e}")
             self.running = False
             raise e
     
-    def _monitor_process(self):
-        """Monitor the kubectl process continuously"""
-        import time
+    def _start_native_forwarding(self, target_pod, target_port):
+        """Start native Kubernetes port forwarding without subprocess"""
         
         try:
-            # Initial startup check
-            time.sleep(1.0)  # Give kubectl time to start up
+            # Create local server socket
+            self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.server_socket.bind(('127.0.0.1', self.config.local_port))
+            self.server_socket.listen(5)
             
-            if self.process.poll() is not None:
-                # Process terminated during startup
-                stdout, stderr = self.process.communicate(timeout=1)
-                output = (stderr or stdout or "Unknown error").strip()
-                logging.error(f"kubectl port-forward failed to start: {output}")
-                self.running = False
-                return
+            # Start accepting connections in a separate thread
+            self.accept_thread = threading.Thread(target=self._accept_connections, 
+                                                 args=(target_pod, target_port), daemon=True)
+            self.accept_thread.start()
             
-            logging.info(f"kubectl port-forward started successfully (PID: {self.process.pid})")
-            
-            # Continuous monitoring loop
-            while self.running and self.process.poll() is None:
-                time.sleep(2)  # Check every 2 seconds
-                
-                # Read any output to prevent buffer overflow
-                try:
-                    # Non-blocking read of stderr for error messages
-                    import select
-                    import sys
-                    if hasattr(select, 'select') and sys.platform != 'win32':
-                        ready, _, _ = select.select([self.process.stderr], [], [], 0)
-                        if ready:
-                            error_line = self.process.stderr.readline()
-                            if error_line.strip():
-                                logging.warning(f"kubectl stderr: {error_line.strip()}")
-                except Exception:
-                    pass  # Ignore select errors on Windows or other issues
-            
-            # Process has terminated
-            if self.process.poll() is not None:
-                exit_code = self.process.poll()
-                logging.info(f"kubectl port-forward process ended (exit code: {exit_code})")
-                self.running = False
-                
         except Exception as e:
-            logging.error(f"Error monitoring port forward process: {e}")
+            logging.error(f"Error starting native forwarding: {e}")
             self.running = False
+            raise
+            
+    def _accept_connections(self, target_pod, target_port):
+        """Accept and handle client connections"""
+        while self.running:
+            try:
+                client_socket, addr = self.server_socket.accept()
+                logging.info(f"Accepted connection from {addr}")
+                
+                # Handle connection in separate thread
+                handler_thread = threading.Thread(
+                    target=self._handle_connection,
+                    args=(client_socket, target_pod, target_port),
+                    daemon=True
+                )
+                handler_thread.start()
+                
+            except Exception as e:
+                if self.running:
+                    logging.error(f"Error accepting connection: {e}")
+                break
+                
+    def _handle_connection(self, client_socket, target_pod, target_port):
+        """Handle individual client connection with real Kubernetes port forwarding"""
+        try:
+            
+            logging.info(f"Creating port forward connection to {target_pod}:{target_port}")
+            
+            # Create Kubernetes port forward stream
+            pf = portforward(
+                self.kube_client.v1,
+                name=target_pod,
+                namespace=self.config.namespace,
+                ports=[str(target_port)],
+                address='127.0.0.1'
+            )
+            
+            # Start bidirectional data forwarding
+            forward_thread = threading.Thread(
+                target=self._forward_data,
+                args=(client_socket, pf, target_port),
+                daemon=True
+            )
+            forward_thread.start()
+            forward_thread.join()
+            
+        except Exception as e:
+            logging.error(f"Error handling connection: {e}")
+            try:
+                client_socket.close()
+            except:
+                pass
+                
+    def _forward_data(self, client_socket, pf, target_port):
+        """Forward data between client and Kubernetes pod"""
+        try:
+            # Get the port forward socket
+            pf_socket = pf.socket(target_port)
+            
+            def forward_client_to_pod():
+                """Forward data from client to pod"""
+                try:
+                    while self.running:
+                        data = client_socket.recv(4096)
+                        if not data:
+                            break
+                        pf_socket.send(data)
+                except Exception as e:
+                    logging.debug(f"Client to pod forwarding stopped: {e}")
+                    
+            def forward_pod_to_client():
+                """Forward data from pod to client"""
+                try:
+                    while self.running:
+                        data = pf_socket.recv(4096)
+                        if not data:
+                            break
+                        client_socket.send(data)
+                except Exception as e:
+                    logging.debug(f"Pod to client forwarding stopped: {e}")
+            
+            # Start both directions of forwarding
+            client_to_pod = threading.Thread(target=forward_client_to_pod, daemon=True)
+            pod_to_client = threading.Thread(target=forward_pod_to_client, daemon=True)
+            
+            client_to_pod.start()
+            pod_to_client.start()
+            
+            # Wait for either thread to complete
+            client_to_pod.join()
+            pod_to_client.join()
+            
+        except Exception as e:
+            logging.error(f"Error in data forwarding: {e}")
+        finally:
+            try:
+                client_socket.close()
+            except:
+                pass
+            try:
+                pf.close()
+            except:
+                pass
             
     def _resolve_target(self):
         """Resolve target pod and port"""
@@ -183,67 +236,29 @@ class KubernetesPortForwarder:
     
     def stop(self):
         """Stop the port forwarder gracefully"""
-        import subprocess
         
         logging.info(f"Stopping port forward for {self.config.key}")
         self.running = False
         
-        if self.process and self.process.poll() is None:
-            try:
-                import os
-                import signal
-                import time
+        # Stop native forwarding
+        try:
+            if hasattr(self, 'server_socket') and self.server_socket:
+                self.server_socket.close()
+                logging.info("Server socket closed")
                 
-                # Try graceful termination first
-                if hasattr(os, 'killpg') and hasattr(os, 'getpgid'):
-                    # Kill the process group to catch any child processes
-                    try:
-                        os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
-                        logging.info("Sent SIGTERM to process group")
-                    except ProcessLookupError:
-                        pass  # Process already terminated
-                    except Exception as e:
-                        logging.warning(f"Could not kill process group: {e}")
-                        self.process.terminate()
-                else:
-                    self.process.terminate()
+            if hasattr(self, 'accept_thread') and self.accept_thread:
+                # Thread will stop when self.running becomes False
+                logging.info("Accept thread will stop automatically")
                 
-                # Wait for graceful termination
-                try:
-                    self.process.wait(timeout=3)
-                    logging.info("Port forward process terminated gracefully")
-                except subprocess.TimeoutExpired:
-                    # Force kill if still running
-                    logging.warning("Port forward process did not terminate gracefully, force killing")
-                    if hasattr(os, 'killpg') and hasattr(os, 'getpgid'):
-                        try:
-                            os.killpg(os.getpgid(self.process.pid), signal.SIGKILL)
-                        except ProcessLookupError:
-                            pass
-                        except Exception:
-                            self.process.kill()
-                    else:
-                        self.process.kill()
-                    
-                    # Final wait
-                    try:
-                        self.process.wait(timeout=1)
-                    except subprocess.TimeoutExpired:
-                        logging.error("Could not kill port forward process")
-                        
-            except Exception as e:
-                logging.error(f"Error stopping port forward process: {e}")
+        except Exception as e:
+            logging.error(f"Error stopping native port forwarder: {e}")
         
-        # Wait for monitor thread to finish
-        if self.monitor_thread and self.monitor_thread.is_alive():
-            try:
-                self.monitor_thread.join(timeout=2)
-            except Exception:
-                pass
+        # No monitor thread cleanup needed for native forwarding
+        logging.info("Port forward stopped successfully")
     
     def is_running(self):
         """Check if the port forwarder is running"""
-        return self.running and self.process and self.process.poll() is None
+        return self.running and hasattr(self, 'server_socket') and self.server_socket
 
 
 class SimplePortForwarder:
@@ -350,7 +365,6 @@ class PortForwardWorker(QThread):
             self.forwarder.start()
             
             # Keep the worker running to maintain the port forward
-            import time
             while not self._stop_requested and self.forwarder.is_running():
                 time.sleep(1)
             

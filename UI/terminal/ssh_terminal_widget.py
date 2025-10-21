@@ -11,6 +11,7 @@ from datetime import datetime
 from PyQt6.QtGui import QColor, QTextCharFormat, QKeySequence
 from PyQt6.QtCore import Qt
 
+from Utils.kubernetes_client import KubernetesPodSSH
 from .terminal_widget import UnifiedTerminalWidget
 
 
@@ -54,7 +55,6 @@ class SSHTerminalWidget(UnifiedTerminalWidget):
     def init_ssh_session(self):
         """Initialize the SSH session to the pod."""
         try:
-            from Utils.kubernetes_client import KubernetesPodSSH
 
             self.ssh_session = KubernetesPodSSH(self.pod_name, self.namespace)
 

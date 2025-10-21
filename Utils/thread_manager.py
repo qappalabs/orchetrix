@@ -142,11 +142,30 @@ class EnhancedThreadPoolManager(QObject):
     def _force_thread_termination(self):
         """Force termination of remaining threads as last resort"""
         try:
-            # Try to clear the thread pool
+            # First, try to interrupt all running threads
+            active_thread_count = self.thread_pool.activeThreadCount()
+            if active_thread_count > 0:
+                logging.warning(f"Force terminating {active_thread_count} active threads")
+            
+            # Clear the thread pool queue
             self.thread_pool.clear()
+            
+            # Force exit any remaining threads
+            import gc
+            gc.collect()  # Force garbage collection to clean up thread references
+            
             logging.info("Forced thread pool clearing completed")
         except Exception as e:
             logging.error(f"Error during forced thread termination: {e}")
+            # Last resort - try to kill the thread pool entirely
+            try:
+                import threading
+                for thread in threading.enumerate():
+                    if thread != threading.current_thread() and thread.name.startswith('Thread-'):
+                        logging.warning(f"Force stopping thread: {thread.name}")
+                        thread._stop()  # Dangerous but necessary for cleanup
+            except:
+                pass  # Ignore errors in last resort cleanup
 
 # Singleton with better management
 _thread_manager_instance = None
