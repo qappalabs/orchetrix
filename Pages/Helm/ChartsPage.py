@@ -316,8 +316,36 @@ class ChartsPage(BaseResourcePage):
         # Override the base class resource loading to prevent it from trying to load "charts" as Kubernetes resources
         self.resource_type = None  # Clear resource type so base class doesn't try to load it
         
+        # Add loading state management to prevent concurrent requests
+        self._is_initializing = True
+        self._load_requested = False
+        self._initial_load_completed = False
+        
         # Initialize the UI
         self.setup_page_ui()
+        
+        # Mark initialization as complete
+        self._is_initializing = False
+    
+    def _ensure_ui_state(self):
+        """Ensure proper UI state without triggering data loads"""
+        if hasattr(self, 'table'):
+            self.table.setEnabled(True)
+            if hasattr(self, '_table_stack') and self._table_stack:
+                self._table_stack.setCurrentWidget(self.table)
+    
+    def _deferred_load_data(self):
+        """Perform deferred data loading to avoid concurrent requests"""
+        if getattr(self, '_initial_load_completed', False):
+            logging.info("ChartsPage._deferred_load_data: Initial load already completed, skipping")
+            return
+            
+        if hasattr(self, 'is_loading') and self.is_loading:
+            logging.info("ChartsPage._deferred_load_data: Already loading, skipping")
+            return
+            
+        logging.info("ChartsPage._deferred_load_data: Starting deferred chart data load")
+        self.load_chart_data()
         
     def _reset_loading_state(self):
         """Reset loading state if it gets stuck - now delegates to _reset_all_states"""
@@ -376,8 +404,9 @@ class ChartsPage(BaseResourcePage):
         # Find and reconnect the refresh button after the UI is set up
         QTimer.singleShot(100, self._override_refresh_button)
         
-        # Load initial data from ArtifactHub (not Kubernetes)
-        self.load_chart_data()
+        # Don't load data immediately - let the proper initialization sequence handle it
+        # This prevents concurrent loading issues
+        logging.info("ChartsPage.setup_page_ui: UI setup complete, data loading will be handled by auto-load")
         
         return layout
     
@@ -489,6 +518,11 @@ class ChartsPage(BaseResourcePage):
         super().showEvent(event)
         logging.info("ChartsPage.showEvent: Page becoming visible")
         
+        # Avoid multiple loading operations during initialization
+        if getattr(self, '_is_initializing', False):
+            logging.info("ChartsPage.showEvent: Still initializing, skipping show event handling")
+            return
+        
         # Reset any stuck states immediately
         self._reset_all_states()
         
@@ -497,10 +531,14 @@ class ChartsPage(BaseResourcePage):
             self.table.setEnabled(True)
             if hasattr(self, '_table_stack') and self._table_stack:
                 self._table_stack.setCurrentWidget(self.table)
-            
-            # If we have no data, load it
-            if not hasattr(self, 'resources') or not self.resources:
-                QTimer.singleShot(100, self.load_chart_data)
+        
+        # Only load data if we haven't completed initial load and aren't already loading
+        if (not getattr(self, '_initial_load_completed', False) and 
+            (not hasattr(self, 'resources') or not self.resources)):
+            if not getattr(self, '_load_requested', False):
+                logging.info("ChartsPage.showEvent: Requesting deferred data load")
+                self._load_requested = True
+                QTimer.singleShot(200, self._deferred_load_data)
         
     
     def configure_columns(self):
@@ -574,24 +612,35 @@ class ChartsPage(BaseResourcePage):
     def _auto_load_data(self):
         """Override auto load data to properly handle chart loading"""
         logging.info("ChartsPage._auto_load_data: Auto-loading called")
+        
+        # Avoid concurrent loading during initialization
+        if getattr(self, '_is_initializing', False):
+            logging.info("ChartsPage._auto_load_data: Still initializing, deferring auto-load")
+            return
+        
+        # Check if we already have a load request pending or completed
+        if getattr(self, '_load_requested', False) or getattr(self, '_initial_load_completed', False):
+            logging.info("ChartsPage._auto_load_data: Load already requested or completed, ensuring UI state")
+            self._ensure_ui_state()
+            return
+        
         # Reset states first
         self._reset_all_states()
         
         # Always ensure proper UI state
-        if hasattr(self, 'table'):
-            self.table.setEnabled(True)
-            if hasattr(self, '_table_stack') and self._table_stack:
-                self._table_stack.setCurrentWidget(self.table)
+        self._ensure_ui_state()
         
         # Load data if we don't have any
         if not hasattr(self, 'resources') or not self.resources:
-            logging.info("ChartsPage._auto_load_data: No data present, loading")
-            self.load_chart_data()
+            logging.info("ChartsPage._auto_load_data: No data present, requesting load")
+            self._load_requested = True
+            QTimer.singleShot(100, self._deferred_load_data)
         else:
             logging.info(f"ChartsPage._auto_load_data: Data already present ({len(self.resources)} items), ensuring table visibility")
             # Ensure existing data is visible
             if hasattr(self, 'table') and self.table.rowCount() == 0 and self.resources:
                 self.populate_table(self.resources)
+            self._initial_load_completed = True
     
     def load_chart_data(self, load_more=False):
         """Load chart data from ArtifactHub API"""
@@ -741,6 +790,10 @@ class ChartsPage(BaseResourcePage):
         
         self.is_loading = False
         self.resources = data
+        
+        # Mark initial load as completed
+        self._initial_load_completed = True
+        self._load_requested = False
         
         self.is_more_available = True if data else False
         

@@ -204,8 +204,8 @@ def add_helm_repository(repo_name, repo_url):
 
 
 def update_helm_repositories():
-    """Update Helm repositories"""
-    return run_helm_command(['repo', 'update'])
+    """Update Helm repositories with reasonable timeout"""
+    return run_helm_command(['repo', 'update'], timeout=60)
 
 
 def search_helm_chart(chart_name, repo=None):
@@ -235,7 +235,11 @@ def install_helm_chart_cli(release_name, chart, namespace, values_file=None, val
         for key, value in values.items():
             cmd.extend(['--set', f"{key}={value}"])
     
-    return run_helm_command(cmd, timeout=300)
+    # Add debugging flags to get more information if installation fails
+    # Remove --wait to allow installation to complete in background and not timeout
+    cmd.extend(['--debug'])
+    
+    return run_helm_command(cmd, timeout=180)  # 3 minutes should be enough without --wait
 
 
 def upgrade_helm_chart_cli(release_name, chart, namespace, values_file=None, values=None):
@@ -443,9 +447,9 @@ def add_repository_for_chart(chart_name, repository_name):
     
     try:
         # Check if repository is already added
-        success, output = run_helm_command(['repo', 'list'])
+        success, output = run_helm_command(['repo', 'list'], timeout=10)
         if success and repository_name in output:
-            logging.info(f"Repository {repository_name} already exists")
+            logging.info(f"Repository {repository_name} already exists, skipping update")
             return True, "Repository already exists"
         
         # Get repository URL
@@ -475,14 +479,9 @@ def add_repository_for_chart(chart_name, repository_name):
         success, message = add_helm_repository(repository_name, repo_url)
         if success:
             logging.info(f"Successfully added repository: {repository_name}")
-            # Update repositories after adding
-            update_success, update_message = update_helm_repositories()
-            if update_success:
-                logging.info(f"Added and updated repository: {repository_name}")
-                return True, f"Successfully added repository: {repository_name}"
-            else:
-                logging.warning(f"Added repository but update failed: {update_message}")
-                return True, f"Added repository (update warning): {repository_name}"
+            # Skip update since it takes too long and is optional for installation
+            logging.info(f"Skipping repository update to avoid timeout")
+            return True, f"Successfully added repository: {repository_name}"
         else:
             logging.error(f"Failed to add repository {repository_name}: {message}")
             return False, f"Failed to add repository {repository_name}: {message}"
@@ -513,13 +512,9 @@ def setup_helm_repositories():
         else:
             logging.warning(f"Failed to add repository {repo_name}: {message}")
     
-    # Update repositories
-    if success_count > 0:
-        success, message = update_helm_repositories()
-        if success:
-            logging.info("Updated Helm repositories successfully")
-        else:
-            logging.warning(f"Failed to update repositories: {message}")
+    # Skip repository update to speed up installation - it's optional
+    # Most repositories are already added and charts can be installed without update
+    logging.info("Skipping repository update to speed up installation")
     
     return success_count, total_count
 
@@ -807,7 +802,7 @@ class HelmInstallThread(QThread):
                 values_file = self._create_temp_values_file(values_yaml)
             
             try:
-                # Run Helm install command
+                # Run Helm install command with timeout handling
                 success, message = install_helm_chart_cli(
                     release_name=release_name,
                     chart=chart_ref,
@@ -1571,7 +1566,7 @@ def install_helm_chart(chart_name, repository, options, parent=None):
         
         # Process events while waiting to keep UI responsive and show progress
         timeout_counter = 0
-        max_timeout = 1200  # 60 seconds (1200 * 50ms)
+        max_timeout = 3600  # 180 seconds (3600 * 50ms) - match helm command timeout
         
         while install_thread.isRunning() and timeout_counter < max_timeout and not result["completed"]:
             QCoreApplication.processEvents()
@@ -1582,11 +1577,16 @@ def install_helm_chart(chart_name, repository, options, parent=None):
         if timeout_counter >= max_timeout and not result["completed"]:
             logging.error("install_helm_chart: Installation timed out")
             install_thread.cancel()
-            install_thread.wait(1000)  # Wait 1 second for graceful shutdown
+            install_thread.wait(2000)  # Wait 2 seconds for graceful shutdown
             if install_thread.isRunning():
                 install_thread.terminate()  # Force terminate if still running
             result["success"] = False
-            result["message"] = "Installation timed out after 60 seconds"
+            result["message"] = ("Installation command timed out after 180 seconds. This usually happens when:\n\n"
+                              "1. Chart download is slow\n"
+                              "2. Kubernetes cluster is not responding\n"
+                              "3. Network connectivity issues\n\n"
+                              "Note: The chart may still be installing in the background.\n"
+                              "Check the Releases page to see if installation completed.")
             result["completed"] = True
         
         # Ensure thread is fully finished

@@ -1475,9 +1475,14 @@ class ReleasesPage(BaseResourcePage):
         
         def on_operation_complete(success, message):
             operation_completed["completed"] = True
-            self.active_operation = None
             
             logging.info(f"Helm delete completed: success={success}, message={message}")
+            
+            # Cleanup thread properly
+            if self.active_operation:
+                if self.active_operation.isRunning():
+                    self.active_operation.wait(1000)  # Wait for thread to finish
+                self.active_operation = None
             
             try:
                 if progress and not progress.wasCanceled():
@@ -2098,11 +2103,24 @@ class ReleasesPage(BaseResourcePage):
     
     def closeEvent(self, event):
         """Handle close event and cleanup active operations"""
-        # Cancel any active operation
-        if self.active_operation and self.active_operation.isRunning():
-            self.active_operation.cancel()
-            self.active_operation.wait(2000)
-            if self.active_operation.isRunning():
-                self.active_operation.terminate()
-        
+        self._cleanup_active_operation()
         super().closeEvent(event)
+    
+    def _cleanup_active_operation(self):
+        """Properly cleanup the active operation thread"""
+        if self.active_operation and self.active_operation.isRunning():
+            logging.info("Cleaning up active Helm operation thread...")
+            self.active_operation.cancel()
+            
+            # Wait for thread to finish gracefully
+            if not self.active_operation.wait(3000):  # Wait 3 seconds
+                logging.warning("Thread did not finish gracefully, terminating...")
+                self.active_operation.terminate()
+                
+                # Force wait after terminate
+                if not self.active_operation.wait(2000):  # Wait 2 more seconds
+                    logging.error("Thread failed to terminate, forcing cleanup...")
+                    
+            # Clear the reference
+            self.active_operation = None
+            logging.info("Active operation cleanup completed")

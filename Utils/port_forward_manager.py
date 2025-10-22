@@ -72,7 +72,7 @@ class KubernetesPortForwarder:
             raise e
     
     def _start_native_forwarding(self, target_pod, target_port):
-        """Start native Kubernetes port forwarding without subprocess"""
+        """Start native Kubernetes port forwarding using kubernetes client API"""
         
         try:
             # Create local server socket
@@ -112,28 +112,28 @@ class KubernetesPortForwarder:
                 break
                 
     def _handle_connection(self, client_socket, target_pod, target_port):
-        """Handle individual client connection with real Kubernetes port forwarding"""
+        """Handle individual client connection using Kubernetes API WebSocket"""
         try:
-            
             logging.info(f"Creating port forward connection to {target_pod}:{target_port}")
             
-            # Create Kubernetes port forward stream
-            pf = portforward(
-                self.kube_client.v1,
-                name=target_pod,
-                namespace=self.config.namespace,
-                ports=[str(target_port)],
-                address='127.0.0.1'
+            # Use kubernetes stream with proper WebSocket connection
+            from kubernetes.stream import stream
+            import base64
+            import struct
+            
+            # Create WebSocket connection for port forwarding
+            ws = stream(
+                self.kube_client.v1.connect_get_namespaced_pod_portforward,
+                target_pod,
+                self.config.namespace,
+                ports=str(target_port),
+                _preload_content=False
             )
             
-            # Start bidirectional data forwarding
-            forward_thread = threading.Thread(
-                target=self._forward_data,
-                args=(client_socket, pf, target_port),
-                daemon=True
-            )
-            forward_thread.start()
-            forward_thread.join()
+            logging.info(f"WebSocket connection established for {target_pod}:{target_port}")
+            
+            # Start bidirectional data forwarding using WebSocket
+            self._forward_data_websocket(client_socket, ws)
             
         except Exception as e:
             logging.error(f"Error handling connection: {e}")
@@ -142,31 +142,48 @@ class KubernetesPortForwarder:
             except:
                 pass
                 
-    def _forward_data(self, client_socket, pf, target_port):
-        """Forward data between client and Kubernetes pod"""
+    def _forward_data_websocket(self, client_socket, ws):
+        """Forward data between client and pod using WebSocket stream"""
         try:
-            # Get the port forward socket
-            pf_socket = pf.socket(target_port)
+            import select
             
             def forward_client_to_pod():
-                """Forward data from client to pod"""
+                """Forward data from client to pod via WebSocket"""
                 try:
                     while self.running:
-                        data = client_socket.recv(4096)
-                        if not data:
-                            break
-                        pf_socket.send(data)
+                        # Use select to avoid blocking
+                        ready, _, _ = select.select([client_socket], [], [], 1.0)
+                        if ready:
+                            data = client_socket.recv(4096)
+                            if not data:
+                                break
+                            
+                            # Send raw data directly to WebSocket (no channel encoding)
+                            ws.write_stdin(data)
                 except Exception as e:
                     logging.debug(f"Client to pod forwarding stopped: {e}")
                     
             def forward_pod_to_client():
-                """Forward data from pod to client"""
+                """Forward data from pod to client via WebSocket"""
                 try:
                     while self.running:
-                        data = pf_socket.recv(4096)
-                        if not data:
-                            break
-                        client_socket.send(data)
+                        try:
+                            # Read from WebSocket with timeout
+                            data = ws.read_stdout(timeout=1)
+                            if data:
+                                # Send data directly to client (no frame decoding)
+                                if isinstance(data, str):
+                                    # Convert string to bytes if needed
+                                    client_socket.send(data.encode('utf-8'))
+                                else:
+                                    # Send raw bytes
+                                    client_socket.send(data)
+                        except Exception as e:
+                            # Timeout or other errors
+                            if "timeout" not in str(e).lower():
+                                logging.debug(f"Pod to client read error: {e}")
+                            continue
+                            
                 except Exception as e:
                     logging.debug(f"Pod to client forwarding stopped: {e}")
             
@@ -178,18 +195,18 @@ class KubernetesPortForwarder:
             pod_to_client.start()
             
             # Wait for either thread to complete
-            client_to_pod.join()
-            pod_to_client.join()
+            client_to_pod.join(timeout=30)
+            pod_to_client.join(timeout=30)
             
         except Exception as e:
-            logging.error(f"Error in data forwarding: {e}")
+            logging.error(f"Error in WebSocket data forwarding: {e}")
         finally:
             try:
                 client_socket.close()
             except:
                 pass
             try:
-                pf.close()
+                ws.close()
             except:
                 pass
             

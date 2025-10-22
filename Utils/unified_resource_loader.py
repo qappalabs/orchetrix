@@ -1429,16 +1429,32 @@ class ResourceLoadWorker(EnhancedBaseWorker):
     
     def _get_service_external_ip(self, spec, status) -> Optional[str]:
         """Get service external IP efficiently"""
-        if spec and spec.external_i_ps:
-            return ', '.join(spec.external_i_ps)
+        external_ips = []
         
+        # Check for explicit external IPs
+        if spec and spec.external_i_ps:
+            external_ips.extend(spec.external_i_ps)
+        
+        # Check for LoadBalancer ingress IPs and hostnames
         if spec and spec.type == 'LoadBalancer' and status and status.load_balancer:
             if status.load_balancer.ingress:
-                ips = [ing.ip for ing in status.load_balancer.ingress if ing.ip]
-                if ips:
-                    return ', '.join(ips)
+                for ing in status.load_balancer.ingress:
+                    if ing.ip:
+                        external_ips.append(ing.ip)
+                    elif ing.hostname:
+                        external_ips.append(ing.hostname)
         
-        return None
+        # Check for NodePort external access
+        if spec and spec.type == 'NodePort':
+            # For NodePort services, indicate they are externally accessible
+            # We could show actual node IPs but that would require additional API calls
+            external_ips.append("<NodePort>")
+        
+        # Check for ExternalName services
+        if spec and spec.type == 'ExternalName' and spec.external_name:
+            external_ips.append(spec.external_name)
+        
+        return ', '.join(external_ips) if external_ips else None
     
     def _add_replicationcontroller_fields(self, processed_item: Dict[str, Any], item: Any):
         """Add ReplicationController-specific fields"""
