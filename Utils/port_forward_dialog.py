@@ -31,8 +31,8 @@ class PortForwardDialog(QDialog):
         
         self.setWindowTitle(f"Create Port Forward")
         self.setModal(True)
-        self.setMinimumSize(500, 600)
-        self.setMaximumSize(600, 800)
+        self.setMinimumSize(450, 500)
+        self.setMaximumSize(550, 650)
         
         # Set dialog properties for better display
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.WindowCloseButtonHint)
@@ -45,24 +45,25 @@ class PortForwardDialog(QDialog):
     
     def setup_ui(self):
         """Setup the improved dialog UI"""
-        # Create main layout with proper spacing
+        # Create main layout with compact spacing
         main_layout = QVBoxLayout(self)
-        main_layout.setSpacing(20)
-        main_layout.setContentsMargins(25, 25, 25, 25)
+        main_layout.setSpacing(15)
+        main_layout.setContentsMargins(20, 20, 20, 20)
         
         # Header section
         self.create_header_section(main_layout)
         
-        # Create scroll area for main content
+        # Create scroll area for main content with custom scrollbar
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setFrameShape(QFrame.Shape.NoFrame)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll_area.setStyleSheet(AppStyles.UNIFIED_SCROLL_BAR_STYLE)
         
         # Content widget inside scroll area
         content_widget = QWidget()
         content_layout = QVBoxLayout(content_widget)
-        content_layout.setSpacing(20)
+        content_layout.setSpacing(15)
         
         # Resource information section
         self.create_resource_info_section(content_layout)
@@ -78,7 +79,7 @@ class PortForwardDialog(QDialog):
         
         # Set content widget in scroll area
         scroll_area.setWidget(content_widget)
-        main_layout.addWidget(scroll_area)
+        main_layout.addWidget(scroll_area, 1)  # Give scroll area stretch priority
         
         # Button section (fixed at bottom)
         self.create_button_section(main_layout)
@@ -87,43 +88,37 @@ class PortForwardDialog(QDialog):
         self.connect_preview_signals()
     
     def create_header_section(self, layout):
-        """Create the header section with title and icon"""
+        """Create the compact header section with title and icon"""
         header_frame = QFrame()
         header_frame.setFrameStyle(QFrame.Shape.Box)
         header_frame.setStyleSheet(f"""
             QFrame {{
                 background-color: {AppColors.BG_MEDIUM};
                 border: 1px solid {AppColors.BORDER_COLOR};
-                border-radius: 8px;
-                padding: 15px;
+                border-radius: 6px;
+                padding: 10px;
             }}
         """)
         
         header_layout = QHBoxLayout(header_frame)
-        header_layout.setSpacing(15)
+        header_layout.setSpacing(10)
+        header_layout.setContentsMargins(8, 8, 8, 8)
         
-        # Icon (if available)
+        # Smaller icon
         icon_label = QLabel("🚀")
-        icon_label.setFont(QFont("Arial", 24))
+        icon_label.setFont(QFont("Arial", 16))
         icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon_label.setFixedSize(50, 50)
+        icon_label.setFixedSize(32, 32)
         header_layout.addWidget(icon_label)
         
-        # Title and description
-        title_section = QVBoxLayout()
-        
+        # Compact title only
         title_label = QLabel("Create Port Forward")
         title_font = QFont()
-        title_font.setPointSize(16)
+        title_font.setPointSize(14)
         title_font.setBold(True)
         title_label.setFont(title_font)
-        title_section.addWidget(title_label)
+        header_layout.addWidget(title_label)
         
-        desc_label = QLabel("Forward local traffic to your Kubernetes resource")
-        desc_label.setStyleSheet(f"color: {AppColors.TEXT_SECONDARY}; font-size: 12px;")
-        title_section.addWidget(desc_label)
-        
-        header_layout.addLayout(title_section)
         header_layout.addStretch()
         
         layout.addWidget(header_frame)
@@ -171,7 +166,7 @@ class PortForwardDialog(QDialog):
         
         self.target_port_combo = QComboBox()
         self.target_port_combo.setEditable(True)
-        self.target_port_combo.setStyleSheet(self.get_input_style())
+        self.target_port_combo.setStyleSheet(AppStyles.get_dropdown_style_with_icon())
         self.target_port_combo.setMinimumHeight(35)
         target_layout.addWidget(self.target_port_combo)
         
@@ -222,7 +217,7 @@ class PortForwardDialog(QDialog):
         
         self.protocol_combo = QComboBox()
         self.protocol_combo.addItems(["TCP", "UDP"])
-        self.protocol_combo.setStyleSheet(self.get_input_style())
+        self.protocol_combo.setStyleSheet(AppStyles.get_dropdown_style_with_icon())
         self.protocol_combo.setMinimumHeight(35)
         protocol_layout.addWidget(self.protocol_combo)
         
@@ -282,6 +277,7 @@ class PortForwardDialog(QDialog):
                 font-size: 11px;
                 line-height: 1.4;
             }}
+            {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
         """)
         preview_layout.addWidget(self.preview_text)
         
@@ -546,7 +542,7 @@ Automatically finds an available local port if the suggested port is already in 
     def get_input_style(self):
         """Get input field styling"""
         return f"""
-            QSpinBox, QComboBox, QLineEdit {{
+            QSpinBox, QLineEdit {{
                 background-color: {AppColors.BG_LIGHT};
                 color: {AppColors.TEXT_LIGHT};
                 border: 2px solid {AppColors.BORDER_COLOR};
@@ -554,19 +550,9 @@ Automatically finds an available local port if the suggested port is already in 
                 padding: 8px 12px;
                 font-size: 12px;
             }}
-            QSpinBox:focus, QComboBox:focus, QLineEdit:focus {{
+            QSpinBox:focus, QLineEdit:focus {{
                 border-color: {AppColors.ACCENT_BLUE};
                 background-color: {AppColors.BG_MEDIUM};
-            }}
-            QComboBox::drop-down {{
-                border: none;
-                width: 30px;
-            }}
-            QComboBox::down-arrow {{
-                image: none;
-                border-left: 5px solid transparent;
-                border-right: 5px solid transparent;
-                border-top: 5px solid {AppColors.TEXT_LIGHT};
             }}
         """
     
@@ -657,10 +643,11 @@ class ActivePortForwardsDialog(QDialog):
         
         layout.addLayout(header_layout)
         
-        # Content area with scroll
+        # Content area with scroll and custom scrollbar
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_area.setStyleSheet(AppStyles.UNIFIED_SCROLL_BAR_STYLE)
         
         self.content_area = QTextEdit()
         self.content_area.setReadOnly(True)
@@ -704,6 +691,7 @@ class ActivePortForwardsDialog(QDialog):
                 font-size: 12px;
                 line-height: 1.5;
             }}
+            {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
             QPushButton {{
                 background-color: {AppColors.BG_MEDIUM};
                 color: {AppColors.TEXT_LIGHT};
