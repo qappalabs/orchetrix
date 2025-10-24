@@ -10,10 +10,9 @@ from PyQt6.QtGui import QColor
 from Base_Components.base_components import SortableTableWidgetItem, StatusLabel
 from Base_Components.base_resource_page import BaseResourcePage
 from UI.Styles import AppColors, AppStyles
-from UI.Icons import resource_path
-
 from Utils.port_forward_manager import get_port_forward_manager, PortForwardConfig
 from Utils.port_forward_dialog import PortForwardDialog, ActivePortForwardsDialog
+from UI.Icons import resource_path
 
 class PodsPage(BaseResourcePage):
     """
@@ -25,8 +24,6 @@ class PodsPage(BaseResourcePage):
         self.resource_type = "pods"
         self.port_manager = get_port_forward_manager()
         self.setup_page_ui()
-        
-        # Connect to port forward manager signals
         self.port_manager.port_forward_started.connect(self.on_port_forward_started)
         self.port_manager.port_forward_stopped.connect(self.on_port_forward_stopped)
         self.port_manager.port_forward_error.connect(self.on_port_forward_error)

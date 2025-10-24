@@ -11,10 +11,10 @@ from PyQt6.QtGui import QColor
 from Base_Components.base_components import SortableTableWidgetItem, StatusLabel
 from Base_Components.base_resource_page import BaseResourcePage
 from UI.Styles import AppColors, AppStyles
-from kubernetes import client
-from kubernetes.client.rest import ApiException
 from Utils.port_forward_manager import get_port_forward_manager, PortForwardConfig
 from Utils.port_forward_dialog import PortForwardDialog, ActivePortForwardsDialog
+from kubernetes import client
+from kubernetes.client.rest import ApiException
 from UI.Icons import resource_path
 
 
@@ -26,6 +26,7 @@ class ServicesPage(BaseResourcePage):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.resource_type = "services"
+        self.port_manager = get_port_forward_manager()
         # Use managed kubernetes client instead of direct client instantiation
         from Utils.kubernetes_client import get_kubernetes_client
         managed_client = get_kubernetes_client()

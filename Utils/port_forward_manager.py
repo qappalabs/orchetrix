@@ -6,6 +6,7 @@ Uses proper socket forwarding without subprocess, compatible with Kubernetes Pyt
 import logging
 import select
 import socket
+import subprocess
 import threading
 import time
 from dataclasses import dataclass
@@ -46,23 +47,39 @@ class KubernetesPortForwarder:
     
     def __init__(self, config: PortForwardConfig):
         self.config = config
-        self.kube_client = get_kubernetes_client()
+        try:
+            managed_client = get_kubernetes_client()
+            self.kube_client = managed_client if managed_client else None
+        except Exception as e:
+            logging.error(f"Failed to get kubernetes client: {e}")
+            self.kube_client = None
         self.process = None
         self.running = False
         self.monitor_thread = None
         
     def start(self):
-        """Start the port forwarder using native socket forwarding (subprocess removed for security)"""
+        """Start the port forwarder using kubectl subprocess"""
         
         try:
+            if not self.kube_client:
+                raise RuntimeError("Kubernetes client not available")
+            
+            # Check if kubectl is available
+            if not self._check_kubectl_available():
+                raise RuntimeError(
+                    "kubectl is not available or not configured properly.\n"
+                    "Please ensure kubectl is installed and configured to access your Kubernetes cluster.\n"
+                    "You can test with: kubectl cluster-info"
+                )
+            
             # Get target pod for service or use pod directly
             target_pod, target_port = self._resolve_target()
             
-            logging.info(f"Starting native port forward: localhost:{self.config.local_port} -> {target_pod}:{target_port}")
+            logging.info(f"Starting kubectl port forward: localhost:{self.config.local_port} -> {target_pod}:{target_port}")
             
-            # Use native socket-based forwarding instead of subprocess
+            # Use kubectl port-forward subprocess for reliability
             self.running = True
-            self._start_native_forwarding(target_pod, target_port)
+            self._start_kubectl_forwarding(target_pod, target_port)
             
             logging.info(f"Port forwarder started: localhost:{self.config.local_port} -> {target_pod}:{target_port}")
             
@@ -71,144 +88,178 @@ class KubernetesPortForwarder:
             self.running = False
             raise e
     
-    def _start_native_forwarding(self, target_pod, target_port):
-        """Start native Kubernetes port forwarding using kubernetes client API"""
+    def _start_kubectl_forwarding(self, target_pod, target_port):
+        """Start kubectl port forwarding using subprocess"""
         
         try:
-            # Create local server socket
-            self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self.server_socket.bind(('127.0.0.1', self.config.local_port))
-            self.server_socket.listen(5)
+            import subprocess
+            import shlex
             
-            # Start accepting connections in a separate thread
-            self.accept_thread = threading.Thread(target=self._accept_connections, 
-                                                 args=(target_pod, target_port), daemon=True)
-            self.accept_thread.start()
+            # Build kubectl command
+            cmd = [
+                'kubectl',
+                'port-forward',
+                f'pod/{target_pod}',
+                f'{self.config.local_port}:{target_port}',
+                '--namespace', self.config.namespace
+            ]
+            
+            logging.info(f"Executing: {' '.join(cmd)}")
+            
+            # Start kubectl subprocess
+            self.process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+                universal_newlines=True
+            )
+            
+            # Start monitoring thread
+            self.monitor_thread = threading.Thread(
+                target=self._monitor_process, 
+                daemon=True
+            )
+            self.monitor_thread.start()
+            
+            # Give kubectl a moment to start
+            time.sleep(3)
+            
+            # Check if process started successfully
+            if self.process.poll() is not None:
+                # Process already terminated
+                stderr_output = ""
+                try:
+                    stderr_output = self.process.stderr.read() if self.process.stderr else "No error output"
+                except:
+                    stderr_output = "Could not read error output"
+                raise RuntimeError(f"kubectl port-forward failed to start: {stderr_output}")
+            
+            # Verify port is actually listening
+            if not self._wait_for_port_to_be_ready(self.config.local_port, timeout=10):
+                raise RuntimeError(f"Port {self.config.local_port} is not ready after 10 seconds")
             
         except Exception as e:
-            logging.error(f"Error starting native forwarding: {e}")
+            logging.error(f"Error starting kubectl forwarding: {e}")
             self.running = False
             raise
             
-    def _accept_connections(self, target_pod, target_port):
-        """Accept and handle client connections"""
-        while self.running:
-            try:
-                client_socket, addr = self.server_socket.accept()
-                logging.info(f"Accepted connection from {addr}")
-                
-                # Handle connection in separate thread
-                handler_thread = threading.Thread(
-                    target=self._handle_connection,
-                    args=(client_socket, target_pod, target_port),
-                    daemon=True
-                )
-                handler_thread.start()
-                
-            except Exception as e:
-                if self.running:
-                    logging.error(f"Error accepting connection: {e}")
-                break
-                
-    def _handle_connection(self, client_socket, target_pod, target_port):
-        """Handle individual client connection using Kubernetes API WebSocket"""
+    def _monitor_process(self):
+        """Monitor kubectl subprocess"""
+        if not self.process:
+            return
+            
         try:
-            logging.info(f"Creating port forward connection to {target_pod}:{target_port}")
+            while self.running and self.process.poll() is None:
+                time.sleep(1)
             
-            # Use kubernetes stream with proper WebSocket connection
-            from kubernetes.stream import stream
-            import base64
-            import struct
+            # Process has terminated
+            if self.running:
+                exit_code = self.process.poll()
+                logging.info(f"kubectl port-forward process exited with code: {exit_code}")
+                
+                if exit_code != 0:
+                    try:
+                        stderr_output = ""
+                        if self.process.stderr:
+                            stderr_output = self.process.stderr.read()
+                        if not stderr_output:
+                            stderr_output = "No error output available"
+                        logging.error(f"kubectl port-forward failed: {stderr_output}")
+                    except Exception as e:
+                        logging.error(f"Could not read stderr: {e}")
+                
+                self.running = False
+                
+        except Exception as e:
+            logging.error(f"Error monitoring kubectl process: {e}")
+            self.running = False
+                
+    def _get_available_ports(self, resource):
+        """Extract available ports from resource"""
+        ports = []
+        try:
+            if self.config.resource_type == 'pod':
+                raw_data = resource.get('raw_data', {})
+                if raw_data and 'spec' in raw_data:
+                    containers = raw_data['spec'].get('containers', [])
+                    for container in containers:
+                        container_ports = container.get('ports', [])
+                        for port_spec in container_ports:
+                            port_num = port_spec.get('containerPort')
+                            if port_num:
+                                ports.append(port_num)
             
-            # Create WebSocket connection for port forwarding
-            ws = stream(
-                self.kube_client.v1.connect_get_namespaced_pod_portforward,
-                target_pod,
-                self.config.namespace,
-                ports=str(target_port),
-                _preload_content=False
+            elif self.config.resource_type == 'service':
+                raw_data = resource.get('raw_data', {})
+                if raw_data and 'spec' in raw_data:
+                    service_ports = raw_data['spec'].get('ports', [])
+                    for port_spec in service_ports:
+                        port_num = port_spec.get('port')
+                        if port_num:
+                            ports.append(port_num)
+                            
+        except Exception as e:
+            logging.error(f"Error extracting ports: {e}")
+            
+        return sorted(list(set(ports)))  # Remove duplicates and sort
+                
+    def _check_kubectl_available(self):
+        """Check if kubectl is available and configured"""
+        try:
+            import subprocess
+            # First check if kubectl binary exists
+            result = subprocess.run(
+                ['kubectl', 'version', '--client'],
+                capture_output=True,
+                text=True,
+                timeout=5
             )
+            if result.returncode != 0:
+                logging.warning(f"kubectl client check failed: {result.stderr}")
+                return False
             
-            logging.info(f"WebSocket connection established for {target_pod}:{target_port}")
-            
-            # Start bidirectional data forwarding using WebSocket
-            self._forward_data_websocket(client_socket, ws)
-            
-        except Exception as e:
-            logging.error(f"Error handling connection: {e}")
-            try:
-                client_socket.close()
-            except:
-                pass
+            # Then check if kubectl can access cluster
+            cluster_info = subprocess.run(
+                ['kubectl', 'cluster-info'],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if cluster_info.returncode != 0:
+                logging.warning(f"kubectl cluster access failed: {cluster_info.stderr}")
+                return False
                 
-    def _forward_data_websocket(self, client_socket, ws):
-        """Forward data between client and pod using WebSocket stream"""
-        try:
-            import select
-            
-            def forward_client_to_pod():
-                """Forward data from client to pod via WebSocket"""
-                try:
-                    while self.running:
-                        # Use select to avoid blocking
-                        ready, _, _ = select.select([client_socket], [], [], 1.0)
-                        if ready:
-                            data = client_socket.recv(4096)
-                            if not data:
-                                break
-                            
-                            # Send raw data directly to WebSocket (no channel encoding)
-                            ws.write_stdin(data)
-                except Exception as e:
-                    logging.debug(f"Client to pod forwarding stopped: {e}")
-                    
-            def forward_pod_to_client():
-                """Forward data from pod to client via WebSocket"""
-                try:
-                    while self.running:
-                        try:
-                            # Read from WebSocket with timeout
-                            data = ws.read_stdout(timeout=1)
-                            if data:
-                                # Send data directly to client (no frame decoding)
-                                if isinstance(data, str):
-                                    # Convert string to bytes if needed
-                                    client_socket.send(data.encode('utf-8'))
-                                else:
-                                    # Send raw bytes
-                                    client_socket.send(data)
-                        except Exception as e:
-                            # Timeout or other errors
-                            if "timeout" not in str(e).lower():
-                                logging.debug(f"Pod to client read error: {e}")
-                            continue
-                            
-                except Exception as e:
-                    logging.debug(f"Pod to client forwarding stopped: {e}")
-            
-            # Start both directions of forwarding
-            client_to_pod = threading.Thread(target=forward_client_to_pod, daemon=True)
-            pod_to_client = threading.Thread(target=forward_pod_to_client, daemon=True)
-            
-            client_to_pod.start()
-            pod_to_client.start()
-            
-            # Wait for either thread to complete
-            client_to_pod.join(timeout=30)
-            pod_to_client.join(timeout=30)
-            
+            return True
+        except subprocess.TimeoutExpired:
+            logging.error("kubectl commands timed out")
+            return False
+        except FileNotFoundError:
+            logging.error("kubectl binary not found")
+            return False
         except Exception as e:
-            logging.error(f"Error in WebSocket data forwarding: {e}")
-        finally:
+            logging.error(f"kubectl not available: {e}")
+            return False
+    
+    def _wait_for_port_to_be_ready(self, port, timeout=10):
+        """Wait for port to be ready for connections"""
+        import socket
+        import time
+        
+        start_time = time.time()
+        while time.time() - start_time < timeout:
             try:
-                client_socket.close()
-            except:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(1)
+                result = sock.connect_ex(('localhost', port))
+                sock.close()
+                if result == 0:
+                    return True
+            except Exception:
                 pass
-            try:
-                ws.close()
-            except:
-                pass
+            time.sleep(0.5)
+        return False
             
     def _resolve_target(self):
         """Resolve target pod and port"""
@@ -217,39 +268,47 @@ class KubernetesPortForwarder:
         
         elif self.config.resource_type == 'service':
             # Find pods for service
-            service = self.kube_client.v1.read_namespaced_service(
-                name=self.config.resource_name,
-                namespace=self.config.namespace
-            )
-            
-            if not service.spec.selector:
-                raise ValueError(f"Service {self.config.resource_name} has no selector")
-            
-            # Find pods matching selector
-            selector = ','.join([f"{k}={v}" for k, v in service.spec.selector.items()])
-            pods = self.kube_client.v1.list_namespaced_pod(
-                namespace=self.config.namespace,
-                label_selector=selector
-            )
-            
-            if not pods.items:
-                raise ValueError(f"No pods found for service {self.config.resource_name}")
-            
-            # Use first running pod
-            for pod in pods.items:
-                if pod.status.phase == 'Running':
-                    target_port = self.config.target_port
-                    
-                    # Map service port to container port
-                    if service.spec.ports:
-                        for port in service.spec.ports:
-                            if port.port == self.config.target_port:
-                                target_port = port.target_port or port.port
-                                break
-                    
-                    return pod.metadata.name, target_port
-            
-            raise ValueError(f"No running pods found for service {self.config.resource_name}")
+            try:
+                # Get the actual v1 API client
+                v1_client = self.kube_client.v1 if hasattr(self.kube_client, 'v1') else self.kube_client
+                
+                service = v1_client.read_namespaced_service(
+                    name=self.config.resource_name,
+                    namespace=self.config.namespace
+                )
+                
+                if not service.spec.selector:
+                    raise ValueError(f"Service {self.config.resource_name} has no selector")
+                
+                # Find pods matching selector
+                selector = ','.join([f"{k}={v}" for k, v in service.spec.selector.items()])
+                pods = v1_client.list_namespaced_pod(
+                    namespace=self.config.namespace,
+                    label_selector=selector
+                )
+                
+                if not pods.items:
+                    raise ValueError(f"No pods found for service {self.config.resource_name}")
+                
+                # Use first running pod
+                for pod in pods.items:
+                    if pod.status.phase == 'Running':
+                        target_port = self.config.target_port
+                        
+                        # Map service port to container port
+                        if service.spec.ports:
+                            for port in service.spec.ports:
+                                if port.port == self.config.target_port:
+                                    target_port = port.target_port or port.port
+                                    break
+                        
+                        logging.info(f"Service {self.config.resource_name} resolved to pod {pod.metadata.name}:{target_port}")
+                        return pod.metadata.name, target_port
+                
+                raise ValueError(f"No running pods found for service {self.config.resource_name}")
+            except Exception as e:
+                logging.error(f"Error resolving service target: {e}")
+                raise
     
     def stop(self):
         """Stop the port forwarder gracefully"""
@@ -257,25 +316,49 @@ class KubernetesPortForwarder:
         logging.info(f"Stopping port forward for {self.config.key}")
         self.running = False
         
-        # Stop native forwarding
+        # Stop kubectl subprocess
         try:
-            if hasattr(self, 'server_socket') and self.server_socket:
-                self.server_socket.close()
-                logging.info("Server socket closed")
+            if self.process and self.process.poll() is None:
+                logging.info("Terminating kubectl process")
+                self.process.terminate()
                 
-            if hasattr(self, 'accept_thread') and self.accept_thread:
+                # Wait a moment for graceful termination
+                try:
+                    self.process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    logging.warning("kubectl process didn't terminate gracefully, killing")
+                    self.process.kill()
+                    self.process.wait()
+                
+                logging.info("kubectl process stopped")
+            
+            # Close file handles
+            if self.process:
+                if self.process.stdout:
+                    self.process.stdout.close()
+                if self.process.stderr:
+                    self.process.stderr.close()
+                
+            if self.monitor_thread and self.monitor_thread.is_alive():
                 # Thread will stop when self.running becomes False
-                logging.info("Accept thread will stop automatically")
+                logging.info("Monitor thread will stop automatically")
+                # Give monitor thread time to exit
+                self.monitor_thread.join(timeout=2)
                 
         except Exception as e:
-            logging.error(f"Error stopping native port forwarder: {e}")
+            logging.error(f"Error stopping kubectl port forwarder: {e}")
         
-        # No monitor thread cleanup needed for native forwarding
         logging.info("Port forward stopped successfully")
     
     def is_running(self):
         """Check if the port forwarder is running"""
-        return self.running and hasattr(self, 'server_socket') and self.server_socket
+        if not self.running:
+            return False
+            
+        if self.process:
+            return self.process.poll() is None
+            
+        return False
 
 
 class SimplePortForwarder:
