@@ -19,7 +19,6 @@ def collect_data_files():
         data_files.append(('Icons', 'Icons'))
     
     # Add only essential images (exclude screenshot samples)
-    import os
     if os.path.exists('Images') and os.path.isdir('Images'):
         essential_images = [
             'Orchetrix_splash.png',  # App splash screen
@@ -46,7 +45,8 @@ hidden_imports = [
     'PyQt6', 'PyQt6.QtCore', 'PyQt6.QtGui', 'PyQt6.QtWidgets', 'PyQt6.QtSvg',
     'kubernetes', 'kubernetes.client', 'kubernetes.config', 'kubernetes.stream',
     'yaml', 'requests', 'psutil', 'logging', 'json', 'datetime', 'threading',
-    'tempfile', 'shutil', 'base64', 'ssl', 'socket'
+    'tempfile', 'shutil', 'base64', 'ssl', 'socket', 'subprocess', 'time',
+    'dataclasses', 'functools', 'select', 'asyncio'
 ]
 
 a = Analysis(
