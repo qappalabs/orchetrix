@@ -1806,8 +1806,15 @@ class ComparePage(QWidget):
                             matching_lines1.add(i)
                         else:
                             LOG.info(f"[COMPARE_LOG] Line {i} path '{path}': VALUES DIFFERENT -> GRANULAR")
-                            LOG.info(f"[COMPARE_LOG] Value1: {repr(dict1[path][:100])}")
-                            LOG.info(f"[COMPARE_LOG] Value2: {repr(dict2[path][:100])}")
+                            # CRITICAL FIX: Safe logging with type checking to prevent 'int' object is not subscriptable
+                            try:
+                                value1_preview = repr(dict1[path][:100]) if isinstance(dict1[path], (str, list, tuple)) else repr(dict1[path])
+                                value2_preview = repr(dict2[path][:100]) if isinstance(dict2[path], (str, list, tuple)) else repr(dict2[path])
+                                LOG.info(f"[COMPARE_LOG] Value1: {value1_preview}")
+                                LOG.info(f"[COMPARE_LOG] Value2: {value2_preview}")
+                            except Exception as log_error:
+                                LOG.error(f"[COMPARE_LOG] ERROR in value logging: {log_error}")
+                                LOG.info(f"[COMPARE_LOG] Value1 type: {type(dict1[path])}, Value2 type: {type(dict2[path])}")
                             # Apply granular or full highlighting for different values
                             LOG.info(f"[COMPARE_LOG] Calling _create_granular_highlight for line {i}...")
                             granular_highlight = self._create_granular_highlight(lines1[i], dict1[path], dict2[path])
