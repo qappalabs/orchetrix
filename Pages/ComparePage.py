@@ -3,7 +3,6 @@ import logging
 import yaml
 import json
 import os
-import re
 import sys
 import tempfile
 from datetime import datetime
@@ -22,84 +21,32 @@ from UI.detail_sections.detailpage_yamlsection import YamlEditorWithLineNumbers,
 
 from UI.Styles import AppStyles
 
-
 LOG = logging.getLogger(__name__)
 
 
 class YAMLCompareHighlighter(QSyntaxHighlighter):
-    """Granular line-by-line highlighter for YAML comparison with syntax error detection"""
+    """Granular line-by-line highlighter for YAML comparison"""
 
     def __init__(self, document):
         super().__init__(document)
         self.different_lines = set()
         self.matching_lines = set()
-        self.granular_highlights = {}  # {line_number: [(start, end, format)]}
-        LOG.info(f"[HIGHLIGHTER_LOG] YAMLCompareHighlighter created for document: {type(document).__name__ if document else 'None'}")
-        
         self.fmt_red = QTextCharFormat()
         self.fmt_red.setForeground(QColor("red"))
         self.fmt_green = QTextCharFormat()
         self.fmt_green.setForeground(QColor("green"))
-        
-        # Format for syntax errors
-        self.error_format = QTextCharFormat()
-        self.error_format.setUnderlineColor(QColor("#FF0000"))
-        self.error_format.setUnderlineStyle(QTextCharFormat.UnderlineStyle.WaveUnderline)
-        self.error_format.setForeground(QColor("#FF4444"))
 
-    def set_comparison_lines(self, different_lines, matching_lines, granular_highlights=None):
+    def set_comparison_lines(self, different_lines, matching_lines):
         self.different_lines = set(different_lines or [])
         self.matching_lines = set(matching_lines or [])
-        self.granular_highlights = granular_highlights or {}
-        
-        try:
-            self.rehighlight()
-        except Exception as rehighlight_error:
-            LOG.error(f"Error in rehighlight(): {rehighlight_error}")
+        self.rehighlight()
 
     def highlightBlock(self, text: str):
-        try:
-            block_number = self.currentBlock().blockNumber()
-            
-            # Check for granular highlighting first
-            if block_number in self.granular_highlights:
-                granular_data = self.granular_highlights[block_number]
-                
-                if not isinstance(granular_data, (list, tuple)):
-                    return
-                
-                # Apply granular character-level highlighting
-                for highlight_data in granular_data:
-                    try:
-                        # Validate highlight data structure
-                        if not isinstance(highlight_data, (tuple, list)) or len(highlight_data) < 3:
-                            continue
-                        
-                        start, end, format_type = highlight_data[0], highlight_data[1], highlight_data[2]
-                        
-                        # Validate range
-                        if not isinstance(start, int) or not isinstance(end, int) or start < 0 or end < 0 or start >= end or end > len(text):
-                            continue
-                        
-                        # Apply formatting
-                        if format_type == 'red':
-                            self.setFormat(start, end - start, self.fmt_red)
-                        elif format_type == 'green':
-                            self.setFormat(start, end - start, self.fmt_green)
-                            
-                    except Exception:
-                        continue
-            else:
-                # Fall back to line-level highlighting
-                if block_number in self.different_lines:
-                    self.setFormat(0, len(text), self.fmt_red)
-                elif block_number in self.matching_lines:
-                    self.setFormat(0, len(text), self.fmt_green)
-            
-        except Exception as main_error:
-            LOG.error(f"Error in highlightBlock for block {block_number}: {main_error}")
-    
-
+        block_number = self.currentBlock().blockNumber()
+        if block_number in self.different_lines:
+            self.setFormat(0, len(text), self.fmt_red)
+        elif block_number in self.matching_lines:
+            self.setFormat(0, len(text), self.fmt_green)
 
 
 class ComparePage(QWidget):
@@ -595,7 +542,7 @@ class ComparePage(QWidget):
             self._apply_comparison_highlighting(left_yaml, right_yaml)
             
         except Exception as e:
-            LOG.info(f"Error in real-time highlighting: {e}")
+            LOG.debug(f"Error in real-time highlighting: {e}")
 
     def _setup_search_widgets(self, left_layout, right_layout):
         """Create search widgets for both editors positioned above each editor"""
@@ -859,8 +806,6 @@ class ComparePage(QWidget):
         if old_namespace == namespace:
             return  # No change, skip reload
 
-
-
         # Update internal filter
         self.namespace_filter = namespace
 
@@ -925,16 +870,11 @@ class ComparePage(QWidget):
     def _on_namespace_or_type_changed(self, _=None):
         ns = self.namespace_combo.currentText().strip()
         rt = self.resource_type_combo.currentText().strip()
-        
         if not ns or ns.startswith(("Loading", "No ", "Unable", "kubernetes package")):
             return
         if not rt or rt.startswith(("Select", "Loading", "No ", "Unable", "kubernetes package")):
             return
-        
         names = self._list_resources_for_namespace(ns, rt)
-        
-
-        
         self._populate_resource_combos(names)
 
     def _populate_resource_combos(self, names):
@@ -1044,162 +984,34 @@ class ComparePage(QWidget):
     def parse_yaml_string(self, yaml_string):
         """Convert YAML string to dictionary for comparison"""
         try:
-            if not yaml_string:
-                return {}
-            
-            result = yaml.safe_load(yaml_string)
-            if result is None:
-                return {}
-            
-            return result
-            
+            return yaml.safe_load(yaml_string) or {}
         except yaml.YAMLError:
             return {}  # Return empty dict if YAML is invalid
-        except Exception:
-            return {}
 
     def build_comprehensive_line_map(self, yaml_string):
-        """Build comprehensive mapping tracking all lines with context - FIXED for array items"""
+        """Build comprehensive mapping tracking all lines with context"""
         lines = yaml_string.splitlines()
-        
         path_to_line = {}
         line_to_path = {}
-        path_stack = []  # Stack of (path_component, indent_level, is_array_item)
+        path_stack = []
         current_context = None
-        in_quoted_string = False
-        quoted_string_path = None
-        array_index_stack = []  # Track array indices at each level
 
         for i, line in enumerate(lines):
             stripped = line.strip()
-            indent = len(line) - len(line.lstrip())
 
             # Handle empty lines and comments - inherit context
             if not stripped or stripped.startswith('#'):
-                if in_quoted_string:
-                    line_to_path[i] = quoted_string_path
-                else:
-                    line_to_path[i] = current_context
+                line_to_path[i] = current_context
                 continue
 
-            # If we're in a quoted string, all lines get the same path
-            if in_quoted_string:
-                line_to_path[i] = quoted_string_path
-                # Check if this line closes the quoted string
-                if '"' in stripped and stripped.rstrip().endswith('"'):
-                    in_quoted_string = False
-                    quoted_string_path = None
-                continue
+            indent = len(line) - len(line.lstrip())
 
-            # CRITICAL FIX: Handle array items (lines starting with '-')
-            if stripped.startswith('-'):
-                # Adjust path stack based on indentation - pop items with same or greater indent
-                while path_stack and path_stack[-1][1] >= indent:
-                    path_stack.pop()
-                
-                # Also adjust array index stack
-                while len(array_index_stack) > len(path_stack):
-                    array_index_stack.pop()
-                
-                # Determine array index for this level
-                current_array_level = len(path_stack)
-                
-                # Safe array index handling
-                if current_array_level >= len(array_index_stack):
-                    # Extend array_index_stack to have enough elements
-                    array_index_stack.extend([0] * (current_array_level - len(array_index_stack) + 1))
-
-                # Use current array index (0-based) then increment for next item
-                current_array_index = array_index_stack[current_array_level]
-                array_index_stack[current_array_level] = array_index_stack[current_array_level] + 1
-                
-                # Build path up to this array item (using 0-based indexing to match flatten_dict)
-                if path_stack:
-                    array_parent_path = '.'.join([p[0] for p in path_stack])
-                    array_item_path = f"{array_parent_path}.{current_array_index}"
-                else:
-                    array_item_path = str(current_array_index)
-                
-                # Check if this array item has a key-value pair on the same line
-                array_content = stripped[1:].strip()  # Remove the '-' and whitespace
-                
-                if ':' in array_content:
-                    # Array item with key-value on same line: "- name: value"
-                    key = array_content.split(':', 1)[0].strip()
-                    
-                    if key:
-                        full_path = f"{array_item_path}.{key}"
-                        
-                        path_to_line[full_path] = i
-                        line_to_path[i] = full_path
-                        current_context = full_path
-                        
-                        # Add to path stack for potential children
-                        path_stack.append((str(current_array_index), indent, True))  # Array item marker
-                        path_stack.append((key, indent, False))  # The key within the array item
-                        
-                        # Check for quoted string
-                        value_part = array_content.split(':', 1)[1].strip()
-                        if '"' in value_part:
-                            quote_count = value_part.count('"')
-                            if quote_count == 1 or (quote_count > 1 and not value_part.rstrip().endswith('"')):
-                                in_quoted_string = True
-                                quoted_string_path = full_path
-                else:
-                    # Array item without key-value: just "- " (children will follow)
-                    line_to_path[i] = array_item_path
-                    current_context = array_item_path
-                    
-                    # Add array item to path stack
-                    path_stack.append((str(current_array_index), indent, True))
-                
-                continue
-
-            # Check if we're starting a multiline string
-            if ':' in stripped and ('|' in stripped or '>' in stripped):
-                key = stripped.split(':', 1)[0].strip()
-                if key:
-                    # Adjust path stack based on indentation
-                    while path_stack and path_stack[-1][1] >= indent:
-                        path_stack.pop()
-                    
-                    # Adjust array index stack
-                    while len(array_index_stack) > len(path_stack):
-                        array_index_stack.pop()
-
-                    # Build full path
-                    if path_stack:
-                        full_path = '.'.join([p[0] for p in path_stack] + [key])
-                    else:
-                        full_path = key
-
-                    path_to_line[full_path] = i
-                    line_to_path[i] = full_path
-                    current_context = full_path
-                    path_stack.append((key, indent, False))
-                    
-                continue
-
-            # Regular key-value processing
             if ':' in stripped:
                 key = stripped.split(':', 1)[0].strip()
                 if key:
-                    # Check if this line starts a quoted string value
-                    value_part = stripped.split(':', 1)[1].strip()
-                    
-                    if '"' in value_part:
-                        quote_count = value_part.count('"')
-                        # Check if quote opens but doesn't close on same line
-                        if quote_count == 1 or (quote_count > 1 and not value_part.rstrip().endswith('"')):
-                            in_quoted_string = True
-
                     # Adjust path stack based on indentation
                     while path_stack and path_stack[-1][1] >= indent:
                         path_stack.pop()
-                    
-                    # Adjust array index stack
-                    while len(array_index_stack) > len(path_stack):
-                        array_index_stack.pop()
 
                     # Build full path
                     if path_stack:
@@ -1210,575 +1022,136 @@ class ComparePage(QWidget):
                     path_to_line[full_path] = i
                     line_to_path[i] = full_path
                     current_context = full_path
-                    path_stack.append((key, indent, False))
-                    
-                    # If this line started a quoted string, save its path
-                    if in_quoted_string:
-                        quoted_string_path = full_path
+                    path_stack.append((key, indent))
             else:
                 # Non-key lines (like multi-line values) inherit context
                 line_to_path[i] = current_context
-        
         return path_to_line, line_to_path
 
     def flatten_dict(self, d, parent_key='', sep='.'):
         """Flatten nested dictionary to dot-notation paths"""
-        try:
-            if not isinstance(d, dict):
-                return {}
-            
-            items = []
-            for k, v in d.items():
-                try:
-                    if not isinstance(k, (str, int, float)):
-                        k = str(k)
-                    
-                    new_key = f"{parent_key}{sep}{k}" if parent_key else str(k)
-                    
-                    if isinstance(v, dict):
-                        items.extend(self.flatten_dict(v, new_key, sep=sep).items())
-                    elif isinstance(v, list):
-                        # Flatten list items instead of treating list as leaf value
-                        for i, item in enumerate(v):
-                            try:
-                                if isinstance(item, dict):
-                                    items.extend(self.flatten_dict(item, f"{new_key}.{i}", sep=sep).items())
-                                else:
-                                    items.append((f"{new_key}.{i}", item))
-                            except Exception:
-                                continue
-                    else:
-                        items.append((new_key, v))
-                        
-                except Exception:
-                    continue
-            
-            return dict(items)
-            
-        except Exception:
-            return {}
-
-
-
-    def _get_direct_children(self, parent_path, flattened_dict):
-        """Get direct child keys for a given parent path with edge case handling - optimized"""
-        if not flattened_dict:
-            return set()
-            
-        if not parent_path or parent_path.strip() == "":
-            # Return top-level keys (everything before first dot)
-            children = set()
-            for key in flattened_dict:
-                if key and '.' in key:
-                    top_key = key.split('.', 1)[0]  # Only split once
-                    if top_key:
-                        children.add(top_key)
-                elif key:
-                    children.add(key)
-            return children
-        
-        prefix = f"{parent_path}."
-        prefix_len = len(prefix)
-        children = set()
-        
-        for key in flattened_dict:
-            if key and key.startswith(prefix):
-                remainder = key[prefix_len:]
-                if remainder:
-                    dot_pos = remainder.find('.')
-                    child_key = remainder[:dot_pos] if dot_pos != -1 else remainder
-                    if child_key:
-                        children.add(child_key)
-        
-        return children
-
-    def _is_parent_only_line(self, line):
-        """Check if line is a parent-only line with edge case handling"""
-        if not line:
-            return False
-            
-        stripped = line.strip()
-        if not stripped or stripped.startswith('#') or ':' not in stripped:
-            return False
-        
-        colon_pos = stripped.find(':')
-        if colon_pos == -1 or colon_pos == len(stripped) - 1:
-            # Colon at end of line = parent-only
-            is_parent = colon_pos == len(stripped) - 1
-        else:
-            after_colon = stripped[colon_pos + 1:].strip()
-            # Handle edge cases: empty objects {}, arrays [], null values
-            is_parent = not after_colon or after_colon in ['{}', '[]', 'null', '~']
-            
-        return is_parent
-
-
-
-    # OLD SEMANTIC COMPARISON - Replaced by DeepDiff approach
-    # Commented out 2025-01-XX - Can delete after testing
-    # 
-    # The entire compare_yaml_semantically method (~500 lines) has been replaced
-    # by the more efficient compare_yaml_with_deepdiff method.
-    # This old implementation is kept temporarily for reference but is no longer used.
-    # 
-    # def compare_yaml_semantically(self, yaml1, yaml2):
-    #     """Compare YAML semantically with granular value highlighting - optimized with hybrid path matching"""
-    #     [ENTIRE METHOD BODY COMMENTED OUT - REPLACED BY DEEPDIFF APPROACH]
-    #     pass
-    #         LOG.info(f"[SEMANTIC_LOG] Method called with parameters:")
-    #         LOG.info(f"[SEMANTIC_LOG]   - yaml1 type: {type(yaml1)}")
-    #         LOG.info(f"[SEMANTIC_LOG]   - yaml2 type: {type(yaml2)}")
-    #         LOG.info(f"[SEMANTIC_LOG]   - yaml1 length: {len(yaml1) if yaml1 else 'None'}")
-    #         LOG.info(f"[SEMANTIC_LOG]   - yaml2 length: {len(yaml2) if yaml2 else 'None'}")
-            
-    #         if not yaml1 or not yaml2:
-    #             LOG.error(f"[SEMANTIC_LOG] ERROR: One or both YAMLs are empty/None")
-    #             return (set(), set(), {}), (set(), set(), {})
-            
-    #         LOG.info(f"[COMPARE_LOG] === SEMANTIC COMPARISON START ===")
-            
-    #         # Test YAML parsing first
-    #         LOG.info(f"[SEMANTIC_LOG] Testing YAML parsing...")
-    #         try:
-    #             parsed1 = self.parse_yaml_string(yaml1)
-    #             LOG.info(f"[SEMANTIC_LOG] yaml1 parsed successfully: {type(parsed1)}")
-    #         except Exception as parse1_error:
-    #             LOG.error(f"[SEMANTIC_LOG] ERROR parsing yaml1: {parse1_error}")
-    #             return (set(), set(), {}), (set(), set(), {})
-            
-    #         try:
-    #             parsed2 = self.parse_yaml_string(yaml2)
-    #             LOG.info(f"[SEMANTIC_LOG] yaml2 parsed successfully: {type(parsed2)}")
-    #         except Exception as parse2_error:
-    #             LOG.error(f"[SEMANTIC_LOG] ERROR parsing yaml2: {parse2_error}")
-    #             return (set(), set(), {}), (set(), set(), {})
-            
-    #         # Test flattening
-    #         LOG.info(f"[SEMANTIC_LOG] Testing dictionary flattening...")
-    #         try:
-    #             flattened1 = self.flatten_dict(parsed1)
-    #             LOG.info(f"[SEMANTIC_LOG] yaml1 flattened successfully: {len(flattened1)} keys")
-    #         except Exception as flatten1_error:
-    #             LOG.error(f"[SEMANTIC_LOG] ERROR flattening yaml1: {flatten1_error}")
-    #             return (set(), set(), {}), (set(), set(), {})
-            
-    #         try:
-    #             flattened2 = self.flatten_dict(parsed2)
-    #             LOG.info(f"[SEMANTIC_LOG] yaml2 flattened successfully: {len(flattened2)} keys")
-    #         except Exception as flatten2_error:
-    #             LOG.error(f"[SEMANTIC_LOG] ERROR flattening yaml2: {flatten2_error}")
-    #             return (set(), set(), {}), (set(), set(), {})
-            
-    #     except Exception as semantic_error:
-    #         LOG.error(f"[SEMANTIC_LOG] CRITICAL ERROR in compare_yaml_semantically setup: {semantic_error}")
-    #         LOG.error(f"[SEMANTIC_LOG] Traceback: {traceback.format_exc()}")
-    #         return (set(), set(), {}), (set(), set(), {})
-        
-    #     # Use already tested flattened dictionaries
-    #     dict1 = flattened1
-    #     dict2 = flattened2
-    #     
-    #     LOG.info(f"[COMPARE_LOG] Dict1 keys: {list(dict1.keys())}")
-    #     LOG.info(f"[COMPARE_LOG] Dict2 keys: {list(dict2.keys())}")
-    #     LOG.info(f"[COMPARE_LOG] Dicts identical: {dict1 == dict2}")
-
-    #     # Build comprehensive line mappings
-    #     paths1, line_to_path1 = self.build_comprehensive_line_map(yaml1)
-    #     paths2, line_to_path2 = self.build_comprehensive_line_map(yaml2)
-    #     
-    #     LOG.info(f"[COMPARE_LOG] Line mappings built - Lines1: {len(line_to_path1)}, Lines2: {len(line_to_path2)}")
-        
-    #     # Log line-to-path mapping for debugging
-    #     lines1 = yaml1.splitlines()
-    #     for i in range(min(10, len(lines1))):
-    #         path = line_to_path1.get(i, "NO_PATH")
-    #         LOG.info(f"[COMPARE_LOG] Line {i}: path='{path}' | text='{lines1[i][:60]}'")
-        
-    #     # DEBUG: Check if Corefile values are actually different
-    #     if 'data.Corefile' in dict1 and 'data.Corefile' in dict2:
-    #         corefile1 = dict1['data.Corefile']
-    #         corefile2 = dict2['data.Corefile']
-    #         if corefile1 != corefile2:
-    #             LOG.warning(f"=== COREFILE VALUES ARE DIFFERENT ===")
-    #             LOG.warning(f"Left Corefile length: {len(corefile1)}")
-    #             LOG.warning(f"Right Corefile length: {len(corefile2)}")
-    #             LOG.warning(f"Left Corefile (first 200 chars): {repr(corefile1[:200])}")
-    #             LOG.warning(f"Right Corefile (first 200 chars): {repr(corefile2[:200])}")
-    #         else:
-    #             LOG.warning(f"=== COREFILE VALUES ARE IDENTICAL ===")
-    #     elif 'data.Corefile' in dict1:
-    #         LOG.warning(f"=== COREFILE ONLY IN LEFT YAML ===")
-    #     elif 'data.Corefile' in dict2:
-    #         LOG.warning(f"=== COREFILE ONLY IN RIGHT YAML ===")
-
-    #     # LOG ACTUAL DATA for first 30 lines
-    #     lines1 = yaml1.splitlines()
-    #     LOG.warning("=== ACTUAL LINE-TO-PATH MAPPING (LEFT YAML) ===")
-    #     for i in range(min(30, len(lines1))):
-    #         line_text = lines1[i][:60]
-    #         path = line_to_path1.get(i, "NO_PATH")
-    #         LOG.warning(f"Line {i:3d}: path='{path}' | text='{line_text}'")
-    #     LOG.warning("=== END ACTUAL MAPPING ===")
-        
-
-
-    #     lines2 = yaml2.splitlines()
-    # 
-    #     # Cache for memoizing direct children lookups
-    #     children_cache = {}
-    #     
-    #     def get_cached_children(path, flattened_dict, cache_key):
-    #         """Get direct children with memoization"""
-    #         if cache_key not in children_cache:
-    #             children_cache[cache_key] = self._get_direct_children(path, flattened_dict) or set()
-    #         return children_cache[cache_key]
-
-    #     # Pre-identify parent-only lines to avoid repeated checks
-    #     parent_lines1 = {i for i in range(len(lines1)) if self._is_parent_only_line(lines1[i])}
-    #     parent_lines2 = {i for i in range(len(lines2)) if self._is_parent_only_line(lines2[i])}
-    #     LOG.info(f"[PARENT_LOG] Identified parent lines1: {sorted(parent_lines1)}")
-    #     LOG.info(f"[PARENT_LOG] Identified parent lines2: {sorted(parent_lines2)}")
-
-    #     matching_lines1 = set()
-    #     matching_lines2 = set()
-    #     different_lines1 = set()
-    #     different_lines2 = set()
-    #     granular_highlights1 = {}
-    #     granular_highlights2 = {}
-
-    #     # Process lines1 with hybrid path matching
-    # ORPHANED LEGACY BLOCK REMOVED (2025-10-30)
-    # The hybrid/text-fallback comparison block was removed. Keep history in git if needed.
-
-    def compare_yaml_with_deepdiff(self, yaml1, yaml2):
-        '''New comparison using deepdiff with existing highlighting logic'''
-        try:
-            from deepdiff import DeepDiff
-            
-            # Parse YAML
-            dict1 = yaml.safe_load(yaml1)
-            dict2 = yaml.safe_load(yaml2)
-            
-            # Get differences using DeepDiff
-            diff = DeepDiff(dict1, dict2, ignore_order=False, view='tree')
-            
-            # Initialize result structures
-            granular_highlights1 = {}
-            granular_highlights2 = {}
-            
-            # Get line counts
-            left_lines = yaml1.splitlines()
-            right_lines = yaml2.splitlines()
-            
-            # Map DeepDiff changes to lines
-            left_mapping = self.map_deepdiff_to_lines(yaml1, diff)
-            right_mapping = self.map_deepdiff_to_lines(yaml2, diff)
-
-            different_lines1 = left_mapping['mapped_lines']
-            different_lines2 = right_mapping['mapped_lines']
-
-            # All other lines are matching
-            all_lines1 = set(range(len(left_lines)))
-            all_lines2 = set(range(len(right_lines)))
-            matching_lines1 = all_lines1 - different_lines1
-            matching_lines2 = all_lines2 - different_lines2
-            
-            # For each different line, apply simple granular highlighting
-            all_different_lines = different_lines1.union(different_lines2)
-            for line_num in all_different_lines:
-                line1 = left_lines[line_num] if line_num < len(left_lines) else ''
-                line2 = right_lines[line_num] if line_num < len(right_lines) else ''
-                
-                granular = self.create_simple_granular_highlight(line1, line2)
-                if granular:
-                    if line_num in different_lines1:
-                        granular_highlights1[line_num] = granular
-                        different_lines1.discard(line_num)
-                    if line_num in different_lines2:
-                        granular_highlights2[line_num] = granular
-                        different_lines2.discard(line_num)
-            
-            # Store the DeepDiff object to return
-            deepdiff_obj = diff  # The DeepDiff object created earlier
-            highlights = ((different_lines1, matching_lines1, granular_highlights1),
-                         (different_lines2, matching_lines2, granular_highlights2))
-
-            # Return BOTH DeepDiff object and highlights
-            return (deepdiff_obj, highlights)
-            
-        except Exception as e:
-            LOG.error(f'Error in compare_yaml_with_deepdiff: {e}')
-            return (None, 
-                    ((set(), set(), {}), (set(), set(), {})))
-
-    def _parse_deepdiff_path_tokens(self, path_str):
-        '''Parse DeepDiff path string into tokens and dot notation'''
-        # Remove 'root' prefix if present
-        if path_str.startswith('root'):
-            path_str = path_str[4:]
-        
-        # Extract keys using regex to match ['key'] or [0] patterns
-        pattern = r"\['([^']+)'\]|\[(\d+)\]"
-        matches = re.findall(pattern, path_str)
-        
-        # Convert matches to tokens
-        tokens = [m[0] if m[0] else m[1] for m in matches]
-        dot_path = '.'.join(tokens)
-        
-        return tokens, dot_path
-
-    def map_deepdiff_to_lines(self, yaml_string, diff):
-        '''Map deepdiff change objects to YAML line numbers'''
-        
-        # Explicit normalization block
-        if diff is None:
-            return {'mapped_lines': set(), 'path_to_line': {}, 'paths': []}
-        elif hasattr(diff, 'to_dict'):
-            dd = diff.to_dict()
-        elif isinstance(diff, dict):
-            dd = diff
-        else:
-            return {'mapped_lines': set(), 'path_to_line': {}, 'paths': []}
-        
-        # Use existing build_comprehensive_line_map for better mapping
-        path_to_line, line_to_path = self.build_comprehensive_line_map(yaml_string)
-        changed_lines = set()
-        
-        diff_paths = []
-        repr_path_re = re.compile(r"(root(?:\[(?:'[^']+'|\d+)\])+)")
-
-        change_types = [
-            'values_changed', 'type_changes', 'iterable_item_moved',
-            'iterable_item_removed', 'iterable_item_added',
-            'dictionary_item_added', 'dictionary_item_removed'
-        ]
-
-        for change_type in change_types:
-            if change_type not in dd:
-                continue
-            items = dd[change_type]
-
-            # Case A: items is a dict of paths -> details
-            if isinstance(items, dict):
-                for path_str in items.keys():
-                    diff_paths.append(path_str)
-                continue
-
-            # Case B: items is iterable (list, set, SetOrdered, etc.)
-            try:
-                iterable = list(items)
-            except Exception:
-                iterable = None
-
-            if iterable is not None:
-                for item in iterable:
-                    # 1) If item is a plain string path, take it
-                    if isinstance(item, str):
-                        diff_paths.append(item)
-                        continue
-
-                    # 2) If item has .path() method, call it (tree view compatibility)
-                    if hasattr(item, 'path') and callable(getattr(item, 'path')):
-                        try:
-                            p = item.path()
-                            diff_paths.append(p)
-                            continue
-                        except Exception:
-                            pass
-
-                    # 3) If item is a tuple whose first element is a string path
-                    if isinstance(item, tuple) and len(item) >= 1 and isinstance(item[0], str):
-                        diff_paths.append(item[0])
-                        continue
-
-                    # 4) Last resort: parse repr(item) for patterns like root['a']['b'] or root[0]
-                    item_repr = repr(item)
-                    m = repr_path_re.search(item_repr)
-                    if m:
-                        path_str = m.group(1)
-                        diff_paths.append(path_str)
-                        continue
-
-        # Deduplicate while preserving order
-        seen = set()
-        unique_paths = []
-        for p in diff_paths:
-            if p not in seen:
-                seen.add(p)
-                unique_paths.append(p)
-        diff_paths = unique_paths
-
-        # Try to flatten the left YAML for detecting direct children
-        try:
-            parsed_left = self.parse_yaml_string(yaml_string) if hasattr(self, 'parse_yaml_string') else {}
-            flattened = self.flatten_dict(parsed_left) if parsed_left else {}
-        except Exception:
-            flattened = {}
-
-        resolved_dot_paths = []
-
-        for raw_path in diff_paths:
-            try:
-                tokens, dot_path = self._parse_deepdiff_path_tokens(raw_path)
-
-                if not dot_path:
-                    continue
-
-                # If there are direct children in flattened keys, expand to them
-                children = self._get_direct_children(dot_path, flattened) if flattened else set()
-                if children:
-                    for child in sorted(children):
-                        child_dot = f"{dot_path}.{child}"
-                        resolved_dot_paths.append(child_dot)
-                    continue
-
-                # No children -> fallback to original dot_path
-                resolved_dot_paths.append(dot_path)
-
-            except Exception:
-                pass
-
-        # Deduplicate preserving order
-        seen = set()
-        final_paths = []
-        for p in resolved_dot_paths:
-            if p not in seen:
-                seen.add(p)
-                final_paths.append(p)
-        
-        # Parse canonical DeepDiff path strings and map to lines
-        for dot_path in final_paths:
-            
-            # Try exact match first
-            if dot_path in path_to_line:
-                lines = path_to_line[dot_path]
-                if isinstance(lines, int):
-                    changed_lines.add(lines)
-                elif isinstance(lines, (list, set)):
-                    changed_lines.update(lines)
-                continue
-            
-            # Try parent paths (walk up from full path)
-            tokens = dot_path.split('.')
-            for depth in range(len(tokens), 0, -1):
-                parent_path = '.'.join(tokens[:depth])
-                if parent_path in path_to_line:
-                    lines = path_to_line[parent_path]
-                    if isinstance(lines, int):
-                        changed_lines.add(lines)
-                    elif isinstance(lines, (list, set)):
-                        changed_lines.update(lines)
-                    break
+        items = []
+        for k, v in d.items():
+            new_key = f"{parent_key}{sep}{k}" if parent_key else k
+            if isinstance(v, dict):
+                items.extend(self.flatten_dict(v, new_key, sep=sep).items())
             else:
-                # Last resort: substring search
-                search_key = tokens[-1] if tokens else dot_path
-                yaml_lines = yaml_string.splitlines()
-                for i, line in enumerate(yaml_lines):
-                    if f'{search_key}:' in line or f'- {search_key}:' in line:
-                        changed_lines.add(i)
-        
-        return {'mapped_lines': changed_lines}
+                items.append((new_key, v))
+        return dict(items)
 
+    def compare_yaml_semantically(self, yaml1, yaml2):
+        """Compare YAML semantically with parent section detection"""
+        # Parse YAML to dictionaries and flatten
+        dict1 = self.flatten_dict(self.parse_yaml_string(yaml1))
+        dict2 = self.flatten_dict(self.parse_yaml_string(yaml2))
 
+        # Build comprehensive line mappings
+        paths1, line_to_path1 = self.build_comprehensive_line_map(yaml1)
+        paths2, line_to_path2 = self.build_comprehensive_line_map(yaml2)
+
+        # Find different paths for parent section detection
+        different_paths = set()
+        for path in dict1:
+            if path not in dict2 or dict1[path] != dict2[path]:
+                different_paths.add(path)
+        for path in dict2:
+            if path not in dict1:
+                different_paths.add(path)
+
+        matching_lines1 = set()
+        matching_lines2 = set()
+        different_lines1 = set()
+        different_lines2 = set()
+
+        lines1 = yaml1.splitlines()
+        lines2 = yaml2.splitlines()
+
+        for i in range(len(lines1)):
+            path = line_to_path1.get(i)
+            if path and path in dict1:
+                value1 = dict1[path]
+                # Check if this is a structural parent (list/dict) vs leaf value
+                if isinstance(value1, (list, dict)):
+                    # Structural parent - check presence only
+                    if path in dict2:
+                        matching_lines1.add(i)
+                    else:
+                        different_lines1.add(i)
+                else:
+                    # Leaf value - compare actual values
+                    if path in dict2 and dict1[path] == dict2[path]:
+                        matching_lines1.add(i)
+                    else:
+                        different_lines1.add(i)
+            else:
+                line_text = lines1[i].strip()
+                # Check if this is a parent section header - Path-based semantic comparison
+                if ':' in line_text and not line_text.split(':', 1)[1].strip():
+                    # Use semantic path comparison (order-independent)
+                    if path and path in paths2:
+                        matching_lines1.add(i)
+                    else:
+                        different_lines1.add(i)
+                else:
+                    # Direct line comparison
+                    line2 = lines2[i].strip() if i < len(lines2) else ""
+                    if line_text == line2:
+                        matching_lines1.add(i)
+                    else:
+                        different_lines1.add(i)
+
+        for i in range(len(lines2)):
+            path = line_to_path2.get(i)
+            if path and path in dict2:
+                value2 = dict2[path]
+                # Check if this is a structural parent (list/dict) vs leaf value
+                if isinstance(value2, (list, dict)):
+                    # Structural parent - check presence only
+                    if path in dict1:
+                        matching_lines2.add(i)
+                    else:
+                        different_lines2.add(i)
+                else:
+                    # Leaf value - compare actual values
+                    if path in dict1 and dict1[path] == dict2[path]:
+                        matching_lines2.add(i)
+                    else:
+                        different_lines2.add(i)
+            else:
+                line_text = lines2[i].strip()
+                # Check if this is a parent section header - Path-based semantic comparison
+                if ':' in line_text and not line_text.split(':', 1)[1].strip():
+                    # Use semantic path comparison (order-independent)
+                    if path and path in paths1:
+                        matching_lines2.add(i)
+                    else:
+                        different_lines2.add(i)
+                else:
+                    line1 = lines1[i].strip() if i < len(lines1) else ""
+                    if line_text == line1:
+                        matching_lines2.add(i)
+                    else:
+                        different_lines2.add(i)
+
+        return (different_lines1, matching_lines1), (different_lines2, matching_lines2)
 
     def _apply_comparison_highlighting(self, left_yaml, right_yaml):
         """Apply granular line highlighting to both YAML text boxes"""
-        try:
-            if not left_yaml or not right_yaml:
-                return
-            
-            yamls_identical = left_yaml == right_yaml
-            
-        except Exception:
-            return
-        
         # Only set text if not called from real-time highlighting
         if not hasattr(self, '_realtime_highlighting_enabled') or not self._realtime_highlighting_enabled or not (self._left_edit_mode or self._right_edit_mode):
-            # Force process events before setting text
-            from PyQt6.QtWidgets import QApplication
-            QApplication.processEvents()
-            
             self.left_box.setPlainText(left_yaml)
-            
-            # Force process events after setting left text
-            QApplication.processEvents()
-            
             self.right_box.setPlainText(right_yaml)
-            
-            # Force process events after setting right text
-            QApplication.processEvents()
 
-        # Use DeepDiff comparison method
-        yamls_identical = left_yaml == right_yaml
+        # Compare semantically and get different/matching sets
+        (left_diff, left_match), (right_diff, right_match) = self.compare_yaml_semantically(left_yaml, right_yaml)
         
-        try:
-            # Use DeepDiff comparison method (replaces old semantic comparison)
-            deepdiff_obj, highlights = self.compare_yaml_with_deepdiff(left_yaml, right_yaml)
-            
-            # Use highlights directly from compare_yaml_with_deepdiff
-            left_highlights, right_highlights = highlights
-            different_lines1, matching_lines1, granular_highlights1 = left_highlights
-            different_lines2, matching_lines2, granular_highlights2 = right_highlights
-            
-            # Create comparison result in expected format
-            comparison_result = ((different_lines1, matching_lines1, granular_highlights1), (different_lines2, matching_lines2, granular_highlights2))
-            
-
-            
-            # Also run simple granular highlighting test in parallel
-            self._test_simple_granular_highlighting(left_yaml, right_yaml)
-            
-            # Validate the result structure
-            if not isinstance(comparison_result, (tuple, list)) or len(comparison_result) != 2:
-                return
-            
-            left_result, right_result = comparison_result
-            
-            # Validate individual result structures
-            if not isinstance(left_result, (tuple, list)) or len(left_result) != 3:
-                return
-            
-            if not isinstance(right_result, (tuple, list)) or len(right_result) != 3:
-                return
-            
-            different_lines1, matching_lines1, granular_highlights1 = left_result
-            different_lines2, matching_lines2, granular_highlights2 = right_result
-            
-        except Exception as comparison_error:
-            LOG.error(f"Error in DeepDiff comparison: {comparison_error}")
-            return
-        
-        # Check for identical YAML bug before applying highlighting
-        if yamls_identical and (different_lines1 or different_lines2 or granular_highlights1 or granular_highlights2):
-            LOG.error(f"BUG DETECTED: Identical YAMLs have differences!")
-        
-
-        # Update highlighters with both different and matching lines plus granular highlights
-        
-        try:
-            self.left_highlighter.set_comparison_lines(different_lines1, matching_lines1, granular_highlights1)
-        except Exception as left_highlight_error:
-            LOG.error(f"Error in left highlighter.set_comparison_lines(): {left_highlight_error}")
-        
-        try:
-            self.right_highlighter.set_comparison_lines(different_lines2, matching_lines2, granular_highlights2)
-        except Exception as right_highlight_error:
-            LOG.error(f"Error in right highlighter.set_comparison_lines(): {right_highlight_error}")
-        
-
+        # Update highlighters with both different and matching lines
+        self.left_highlighter.set_comparison_lines(left_diff, left_match)
+        self.right_highlighter.set_comparison_lines(right_diff, right_match)
 
         # Ensure UI sees the change immediately
-        # Force process events before viewport update
-        from PyQt6.QtWidgets import QApplication
-        QApplication.processEvents()
-        
         self.left_box.viewport().update()
         self.right_box.viewport().update()
-        
-        # Force process events after viewport update
-        QApplication.processEvents()
-    
-
 
     # ---------- resource YAML reading & compare ----------
     def _get_resource_yaml(self, namespace: str, kind: str, name: str) -> str:
@@ -1802,7 +1175,7 @@ class ComparePage(QWidget):
 
             # Convert to YAML using the same method as DetailPageYAMLSection
             kubernetes_yaml = self._convert_to_kubernetes_yaml(data)
-            yaml_result = yaml.dump(
+            return yaml.dump(
                 kubernetes_yaml,
                 default_flow_style=False,
                 sort_keys=False,
@@ -1810,8 +1183,6 @@ class ComparePage(QWidget):
                 width=120,
                 allow_unicode=True
             )
-            
-            return yaml_result
 
         except Exception:
             LOG.exception("ComparePage: Error reading resource YAML")
@@ -1854,8 +1225,6 @@ class ComparePage(QWidget):
         rt = self.resource_type_combo.currentText().strip()
         a = self.resource1_combo.currentText().strip()
         b = self.resource2_combo.currentText().strip()
-        
-
 
         if not ns or ns.startswith(("Loading", "No ", "Unable", "kubernetes package")):
             return
@@ -1878,17 +1247,8 @@ class ComparePage(QWidget):
         cluster = self._get_current_cluster_name()
 
         # Try to load saved YAML first, fallback to cluster
-        saved_left = self._load_saved_yaml(cluster, a_ns, rt, a_name)
-        if saved_left:
-            left_yaml = saved_left
-        else:
-            left_yaml = self._get_resource_yaml(a_ns, rt, a_name)
-        
-        saved_right = self._load_saved_yaml(cluster, b_ns, rt, b_name)
-        if saved_right:
-            right_yaml = saved_right
-        else:
-            right_yaml = self._get_resource_yaml(b_ns, rt, b_name)
+        left_yaml = self._load_saved_yaml(cluster, a_ns, rt, a_name) or self._get_resource_yaml(a_ns, rt, a_name)
+        right_yaml = self._load_saved_yaml(cluster, b_ns, rt, b_name) or self._get_resource_yaml(b_ns, rt, b_name)
 
         self.left_label.setText(f"{rt} / {a_name} @ {a_ns}")
         self.right_label.setText(f"{rt} / {b_name} @ {b_ns}")
@@ -1896,14 +1256,12 @@ class ComparePage(QWidget):
         # Store resource info for editing
         self._left_resource_info = (a_ns, rt, a_name)
         self._right_resource_info = (b_ns, rt, b_name)
-        
+
         self._apply_comparison_highlighting(left_yaml, right_yaml)
 
         self.compare_area.show()
         self.main_layout.update()
         self.compare_area.updateGeometry()
-        
-
 
     def _list_resources_for_namespace(self, namespace: str, resource_type: str):
         rt = (resource_type or "").strip().lower()
@@ -2054,7 +1412,6 @@ class ComparePage(QWidget):
             self.left_deploy_btn.hide()
             self.left_cancel_btn.hide()
             self._left_edit_mode = False
-
             # Re-enable resource dropdowns when exiting edit mode
             self._update_resource_dropdowns_state()
         else:
@@ -2078,7 +1435,6 @@ class ComparePage(QWidget):
             self.left_deploy_btn.show()
             self.left_cancel_btn.show()
             self._left_edit_mode = True
-
             # Disable resource dropdowns when entering edit mode
             self._update_resource_dropdowns_state()
 
@@ -2094,7 +1450,6 @@ class ComparePage(QWidget):
             self.right_deploy_btn.hide()
             self.right_cancel_btn.hide()
             self._right_edit_mode = False
-
             # Re-enable resource dropdowns when exiting edit mode
             self._update_resource_dropdowns_state()
         else:
@@ -2118,7 +1473,6 @@ class ComparePage(QWidget):
             self.right_deploy_btn.show()
             self.right_cancel_btn.show()
             self._right_edit_mode = True
-
             # Disable resource dropdowns when entering edit mode
             self._update_resource_dropdowns_state()
 
@@ -2246,8 +1600,6 @@ class ComparePage(QWidget):
                 self._clear_error(side)
                 message = result.get('message', 'Resource updated successfully')
                 LOG.info(f"Successfully deployed {side} resource changes: {message}")
-                
-
 
                 # Exit edit mode and refresh content
                 if side == 'left':
@@ -2264,8 +1616,6 @@ class ComparePage(QWidget):
                 error_message = result.get('message', 'Unknown error occurred')
                 self._show_error(side, f"Deployment failed: {error_message}")
                 LOG.error(f"Deployment failed: {error_message}")
-                
-
 
         except Exception as e:
             LOG.error(f"Critical error in _handle_update_result: {str(e)}")
@@ -2330,8 +1680,6 @@ class ComparePage(QWidget):
 
             # Save locally to disk
             self._save_yaml_locally('left', yaml_text)
-            
-
 
             # Update the original YAML to current content (save changes)
             self._left_original_yaml = yaml_text
@@ -2367,8 +1715,6 @@ class ComparePage(QWidget):
 
             # Save locally to disk
             self._save_yaml_locally('right', yaml_text)
-            
-
 
             # Update the original YAML to current content (save changes)
             self._right_original_yaml = yaml_text
@@ -2624,6 +1970,8 @@ class ComparePage(QWidget):
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump(save_data, f, indent=2, ensure_ascii=False)
 
+            LOG.info(f"Saved {side} YAML locally: {file_path}")
+
         except Exception as e:
             LOG.error(f"Error saving {side} YAML locally: {e}")
 
@@ -2648,82 +1996,9 @@ class ComparePage(QWidget):
 
             return None
 
-        except Exception:
+        except Exception as e:
+            LOG.debug(f"Error loading saved YAML: {e}")
             return None
-
-    def _is_array_item_line(self, line_text):
-        """Check if a line is an array item (starts with -)"""
-        stripped = line_text.strip()
-        return stripped.startswith('-') and len(stripped) > 1
-
-    def create_simple_granular_highlight(self, line1, line2):
-        '''
-        Simple granular highlighting without path complexity.
-        If keys match, highlight value difference.
-        '''
-        # Must have colons
-        if ':' not in line1 or ':' not in line2:
-            return None
-        
-        # Extract keys (everything before first colon, ignoring '- ')
-        key1 = line1.split(':', 1)[0].strip().lstrip('- ')
-        key2 = line2.split(':', 1)[0].strip().lstrip('- ')
-        
-        # Keys must match
-        if key1 != key2:
-            return None
-        
-        # Find colon position in original line (not stripped)
-        colon_pos = line1.find(':')
-        if colon_pos == -1:
-            return None
-        
-        # Create highlight: green up to colon, red after
-        green_start, green_end = 0, colon_pos + 1
-        red_start, red_end = colon_pos + 1, len(line1)
-        
-        # Clamp/validate green range
-        green_start = max(0, min(green_start, len(line1)))
-        green_end = max(0, min(green_end, len(line1)))
-        if green_start >= green_end:
-            return None
-        
-        # Clamp/validate red range
-        red_start = max(0, min(red_start, len(line1)))
-        red_end = max(0, min(red_end, len(line1)))
-        if red_start >= red_end:
-            return None
-        
-        result = [
-            (green_start, green_end, 'green'),  # Key part + colon
-            (red_start, red_end, 'red')         # Value part
-        ]
-        
-        return result
-
-    def _test_simple_granular_highlighting(self, yaml1, yaml2):
-        '''Test simple granular highlighting on actual YAML comparison'''
-        try:
-            lines1 = yaml1.splitlines()
-            lines2 = yaml2.splitlines()
-            
-            test_count = 0
-            highlight_count = 0
-            
-            # Test first 20 lines for performance
-            for i in range(min(20, len(lines1), len(lines2))):
-                line1 = lines1[i]
-                line2 = lines2[i]
-                
-                # Only test lines with colons
-                if ':' in line1 and ':' in line2:
-                    test_count += 1
-                    result = self.create_simple_granular_highlight(line1, line2)
-                    if result:
-                        highlight_count += 1
-            
-        except Exception:
-            pass
 
     def _clear_all_local_saves(self):
         """Clear all saved files on app shutdown"""
@@ -2735,8 +2010,10 @@ class ComparePage(QWidget):
                         file_path = os.path.join(save_dir, filename)
                         try:
                             os.remove(file_path)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            LOG.debug(f"Error removing saved file {filename}: {e}")
+
+                LOG.info("Cleared all local save files")
 
         except Exception as e:
             LOG.error(f"Error clearing local saves: {e}")
