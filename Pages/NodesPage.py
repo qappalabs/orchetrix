@@ -92,7 +92,7 @@ class GraphWidget(QFrame):
         self.timer.start(int(self._update_interval * 1000))
 
     def generate_utilization_data(self, nodes_data):
-        """Generate utilization data for nodes from real metrics"""
+        """Generate utilization data for nodes from real metrics - NON-BLOCKING"""
         if not nodes_data or self._is_updating:
             return
             
@@ -103,56 +103,95 @@ class GraphWidget(QFrame):
         self._is_updating = True
         self._last_update_time = current_time
         
-        try:
-            # Get real metrics from the metrics service
-            from Utils.kubernetes_client import get_kubernetes_client
-            kube_client = get_kubernetes_client()
+        # IMPORTANT: Do metrics fetching in a separate thread to prevent UI freezing
+        from PyQt6.QtCore import QThread, QObject, pyqtSignal
+        
+        class MetricsWorker(QObject):
+            metrics_ready = pyqtSignal(dict)
             
-            if hasattr(kube_client, 'metrics_service'):
-                # Get all node metrics in batch for efficiency
-                all_node_metrics = kube_client.metrics_service.get_all_node_metrics_fast(
-                    node_names=[node.get("name") for node in nodes_data],
-                    include_disk_usage=(self.title == "Disk Usage")
-                )
-                
-                for node in nodes_data:
-                    node_name = node.get("name", "unknown")
+            def __init__(self, node_names, graph_title):
+                super().__init__()
+                self.node_names = node_names
+                self.graph_title = graph_title
+            
+            def fetch_metrics(self):
+                try:
+                    from Utils.kubernetes_client import get_kubernetes_client
+                    kube_client = get_kubernetes_client()
                     
-                    # Try to get real metrics for this node
-                    node_metrics = all_node_metrics.get(node_name)
+                    metrics_data = {}
                     
-                    if node_metrics:
-                        if self.title == "CPU Usage":
-                            utilization = node_metrics.get("cpu", {}).get("usage", 0)
-                        elif self.title == "Memory Usage":
-                            utilization = node_metrics.get("memory", {}).get("usage", 0)
-                        else:  # Disk Usage
-                            disk_usage = node_metrics.get("disk", {}).get("usage")
-                            utilization = disk_usage if disk_usage is not None else 0
+                    if hasattr(kube_client, 'metrics_service'):
+                        # Get all node metrics in batch for efficiency
+                        all_node_metrics = kube_client.metrics_service.get_all_node_metrics_fast(
+                            node_names=self.node_names,
+                            include_disk_usage=(self.graph_title == "Disk Usage")
+                        )
                         
-                        # Ensure utilization is within reasonable bounds
-                        utilization = max(0, min(100, utilization))
-                        self.utilization_data[node_name] = utilization
-                        
-                        logging.debug(f"Real {self.title} for {node_name}: {utilization:.1f}%")
+                        for node_name in self.node_names:
+                            node_metrics = all_node_metrics.get(node_name)
+                            
+                            if node_metrics:
+                                if self.graph_title == "CPU Usage":
+                                    utilization = node_metrics.get("cpu", {}).get("usage", 0)
+                                elif self.graph_title == "Memory Usage":
+                                    utilization = node_metrics.get("memory", {}).get("usage", 0)
+                                else:  # Disk Usage
+                                    disk_usage = node_metrics.get("disk", {}).get("usage")
+                                    utilization = disk_usage if disk_usage is not None else 0
+                                
+                                # Ensure utilization is within reasonable bounds
+                                utilization = max(0, min(100, utilization))
+                                metrics_data[node_name] = utilization
+                                
+                                logging.debug(f"Real {self.graph_title} for {node_name}: {utilization:.1f}%")
+                            else:
+                                # If we can't get real metrics, show 0 instead of random data
+                                metrics_data[node_name] = 0
+                                logging.debug(f"No real metrics available for {node_name}, showing 0%")
                     else:
-                        # If we can't get real metrics, show 0 instead of random data
-                        self.utilization_data[node_name] = 0
-                        logging.debug(f"No real metrics available for {node_name}, showing 0%")
-            else:
-                # No metrics service available, show 0 for all nodes
-                for node in nodes_data:
-                    node_name = node.get("name", "unknown")
-                    self.utilization_data[node_name] = 0
-                    
+                        # No metrics service available, show 0 for all nodes
+                        for node_name in self.node_names:
+                            metrics_data[node_name] = 0
+                            
+                except Exception as e:
+                    logging.error(f"Error getting real node metrics for graphs: {e}")
+                    # On error, show 0 instead of random data
+                    for node_name in self.node_names:
+                        metrics_data[node_name] = 0
+                
+                self.metrics_ready.emit(metrics_data)
+        
+        # Create worker and thread
+        self.metrics_worker = MetricsWorker(
+            [node.get("name") for node in nodes_data],
+            self.title
+        )
+        self.metrics_thread = QThread()
+        
+        # Connect signals
+        self.metrics_worker.metrics_ready.connect(self._on_metrics_ready)
+        self.metrics_worker.moveToThread(self.metrics_thread)
+        self.metrics_thread.started.connect(self.metrics_worker.fetch_metrics)
+        
+        # Start the thread
+        self.metrics_thread.start()
+    
+    def _on_metrics_ready(self, metrics_data):
+        """Handle metrics data received from background thread"""
+        try:
+            self.utilization_data.update(metrics_data)
+            logging.info(f"Updated {self.title} metrics for {len(metrics_data)} nodes")
         except Exception as e:
-            logging.error(f"Error getting real node metrics for graphs: {e}")
-            # On error, show 0 instead of random data
-            for node in nodes_data:
-                node_name = node.get("name", "unknown")
-                self.utilization_data[node_name] = 0
+            logging.error(f"Error updating metrics data: {e}")
         finally:
             self._is_updating = False
+            # Clean up thread
+            if hasattr(self, 'metrics_thread') and self.metrics_thread:
+                self.metrics_thread.quit()
+                self.metrics_thread.wait()
+                self.metrics_thread.deleteLater()
+                self.metrics_worker.deleteLater()
 
     def get_node_utilization(self, node_name):
         return self.utilization_data.get(node_name, 0)
@@ -402,20 +441,64 @@ class NodesPage(BaseResourcePage):
         
         self.show_table()
         
-        # Generate utilization data for graphs
-        self.cpu_graph.generate_utilization_data(nodes_data)
-        self.mem_graph.generate_utilization_data(nodes_data)
-        self.disk_graph.generate_utilization_data(nodes_data)
+        # Generate utilization data for graphs in background
+        try:
+            self.cpu_graph.generate_utilization_data(nodes_data)
+            self.mem_graph.generate_utilization_data(nodes_data)
+            self.disk_graph.generate_utilization_data(nodes_data)
+        except Exception as e:
+            logging.warning(f"Error generating graph data: {e}")
         
-        # Clear and populate table
-        # self.table.setRowCount(0)
-        # self.populate_table(nodes_data)
-        # self.table.setSortingEnabled(True)
+        # FIX: Enable table population - this was commented out causing no data display
+        logging.info(f"Populating node table with {len(nodes_data)} nodes")
+        try:
+            self.table.setRowCount(0)  # Clear existing rows
+            self._populate_nodes_table_optimized(nodes_data)  # Use optimized method
+            self.table.setSortingEnabled(True)
+            logging.info("Node table population completed successfully")
+        except Exception as e:
+            logging.error(f"Error populating node table: {e}")
+            # Fallback to showing error message
+            self.show_no_data_message()
         
         self.items_count.setText(f"{len(nodes_data)} items")
 
-    def populate_resource_row(self, row, resource):
-        """Populate a single row with Node data"""
+    def _populate_nodes_table_optimized(self, nodes_data):
+        """Optimized method to populate nodes table without blocking the UI thread"""
+        if not nodes_data:
+            return
+            
+        # Set row count
+        self.table.setRowCount(len(nodes_data))
+        
+        # Disable sorting during population for performance
+        self.table.setSortingEnabled(False)
+        
+        # Process nodes in batches to keep UI responsive
+        batch_size = 25  # Process 25 nodes at a time
+        for i in range(0, len(nodes_data), batch_size):
+            batch_end = min(i + batch_size, len(nodes_data))
+            batch = nodes_data[i:batch_end]
+            
+            # Populate this batch
+            for j, node_data in enumerate(batch):
+                row = i + j
+                try:
+                    self._populate_node_row_fast(row, node_data)
+                except Exception as e:
+                    logging.warning(f"Error populating node row {row}: {e}")
+                    # Continue with next row instead of crashing
+                    continue
+            
+            # Process UI events every batch to keep responsive
+            QApplication.processEvents()
+        
+        # Re-enable sorting after all rows are populated
+        self.table.setSortingEnabled(True)
+        logging.info(f"Successfully populated {len(nodes_data)} node rows")
+
+    def _populate_node_row_fast(self, row, resource):
+        """Fast node row population without blocking API calls"""
         self.table.setRowHeight(row, 40)
         
         node_name = resource.get("name", "unknown")
@@ -425,36 +508,13 @@ class NodesPage(BaseResourcePage):
         checkbox_container.setStyleSheet(AppStyles.CHECKBOX_STYLE)
         self.table.setCellWidget(row, 0, checkbox_container)
         
-        # Get real utilization data from metrics service
-        try:
-            from Utils.kubernetes_client import get_kubernetes_client
-            kube_client = get_kubernetes_client()
-            
-            cpu_util = 0
-            mem_util = 0
-            disk_util = 0
-            
-            if hasattr(kube_client, 'metrics_service'):
-                node_metrics = kube_client.metrics_service.get_node_metrics(node_name)
-                if node_metrics:
-                    cpu_util = node_metrics.get("cpu", {}).get("usage", 0)
-                    mem_util = node_metrics.get("memory", {}).get("usage", 0)
-                    disk_usage = node_metrics.get("disk", {}).get("usage")
-                    disk_util = disk_usage if disk_usage is not None else 0
-            else:
-                # Fallback to graph utilization data
-                cpu_util = self.cpu_graph.get_node_utilization(node_name)
-                mem_util = self.mem_graph.get_node_utilization(node_name)
-                disk_util = self.disk_graph.get_node_utilization(node_name)
+        # Get utilization data from graphs (already loaded in background)
+        # This avoids the synchronous API calls that were causing freezing
+        cpu_util = self.cpu_graph.get_node_utilization(node_name)
+        mem_util = self.mem_graph.get_node_utilization(node_name) 
+        disk_util = self.disk_graph.get_node_utilization(node_name)
         
-        except Exception as e:
-            logging.debug(f"Error getting real metrics for {node_name}: {e}")
-            # Fallback to graph data
-            cpu_util = self.cpu_graph.get_node_utilization(node_name)
-            mem_util = self.mem_graph.get_node_utilization(node_name)
-            disk_util = self.disk_graph.get_node_utilization(node_name)
-        
-        # Format display strings with capacity and real usage
+        # Format display strings with capacity and utilization
         cpu_capacity = resource.get("cpu_capacity", "")
         display_cpu = f"{cpu_capacity} ({cpu_util:.1f}%)" if cpu_capacity else f"{cpu_util:.1f}%"
         
@@ -570,6 +630,13 @@ class NodesPage(BaseResourcePage):
         action_layout.addWidget(action_button)
         
         self.table.setCellWidget(row, status_col + 1, action_container)
+
+    def populate_resource_row(self, row, resource):
+        """Populate a single row with Node data - FIXED to avoid blocking API calls"""
+        # IMPORTANT: Delegate to optimized method to prevent UI freezing
+        # The old implementation made synchronous API calls for every row which
+        # caused the application to freeze and crash with large node counts
+        self._populate_node_row_fast(row, resource)
     
     def _highlight_active_row(self, row, is_active):
         """Highlight the row when its menu is active"""
@@ -583,47 +650,69 @@ class NodesPage(BaseResourcePage):
 
     def _create_node_action_button(self, row, node_name):
         """Create an action button with node-specific options"""
-        button = QToolButton()
+        try:
+            button = QToolButton()
 
-        # Use custom SVG icon instead of text
-        icon = resource_path("Icons/Moreaction_Button.svg")
-        button.setIcon(QIcon(icon))
-        button.setIconSize(QSize(AppConstants.SIZES["ICON_SIZE"], AppConstants.SIZES["ICON_SIZE"]))
+            # Use custom SVG icon instead of text
+            icon = resource_path("Icons/Moreaction_Button.svg")
+            button.setIcon(QIcon(icon))
+            button.setIconSize(QSize(AppConstants.SIZES["ICON_SIZE"], AppConstants.SIZES["ICON_SIZE"]))
 
-        # Remove text and change to icon-only style
-        button.setText("")
-        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+            # Remove text and change to icon-only style
+            button.setText("")
+            button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
 
-        button.setFixedWidth(30)
-        button.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE)
-        button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setFixedWidth(30)
+            button.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE)
+            button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
 
-        # Create menu
-        menu = QMenu(button)
-        menu.setStyleSheet(AppStyles.MENU_STYLE)
+            # Create menu
+            menu = QMenu(button)
+            menu.setStyleSheet(AppStyles.MENU_STYLE)
 
-        # Connect signals to change row appearance when menu opens/closes
-        menu.aboutToShow.connect(lambda: self._highlight_active_row(row, True))
-        menu.aboutToHide.connect(lambda: self._highlight_active_row(row, False))
+            # Connect signals to change row appearance when menu opens/closes
+            menu.aboutToShow.connect(lambda: self._highlight_active_row(row, True))
+            menu.aboutToHide.connect(lambda: self._highlight_active_row(row, False))
 
-        # Add actions to menu
-        detail_action = menu.addAction("Detail")
-        detail_action.setIcon(QIcon(resource_path("icons/edit.png")))
-        detail_action.triggered.connect(lambda: self._handle_node_action("Detail", row, node_name))
-        
-        delete_action = menu.addAction("Delete")
-        delete_action.setIcon(QIcon(resource_path("icons/delete.png")))
-        delete_action.setProperty("dangerous", True)
-        delete_action.triggered.connect(lambda: self._handle_node_action("Delete", row, node_name))
-        
-        view_metrics = menu.addAction("View Metrics")
-        view_metrics.setIcon(QIcon(resource_path("icons/chart.png")))
-        view_metrics.triggered.connect(lambda: self._handle_node_action("View Metrics", row, node_name))
+            # Add actions to menu
+            detail_action = menu.addAction("Detail")
+            try:
+                detail_action.setIcon(QIcon(resource_path("icons/edit.png")))
+            except:
+                pass  # Icon not critical
+            detail_action.triggered.connect(lambda: self._handle_node_action("Detail", row, node_name))
+            
+            delete_action = menu.addAction("Delete")
+            try:
+                delete_action.setIcon(QIcon(resource_path("icons/delete.png")))
+            except:
+                pass  # Icon not critical
+            delete_action.setProperty("dangerous", True)
+            delete_action.triggered.connect(lambda: self._handle_node_action("Delete", row, node_name))
+            
+            view_metrics = menu.addAction("View Metrics")
+            try:
+                view_metrics.setIcon(QIcon(resource_path("icons/chart.png")))
+            except:
+                pass  # Icon not critical
+            view_metrics.triggered.connect(lambda: self._handle_node_action("View Metrics", row, node_name))
 
-        button.setMenu(menu)
-        self._item_widgets[f"action_button_{row}"] = button
-        return button
+            button.setMenu(menu)
+            
+            # Store reference safely
+            if not hasattr(self, '_item_widgets'):
+                self._item_widgets = {}
+            self._item_widgets[f"action_button_{row}"] = button
+            
+            return button
+        except Exception as e:
+            logging.warning(f"Error creating action button for row {row}: {e}")
+            # Return a simple button as fallback
+            button = QToolButton()
+            button.setText("...")
+            button.setFixedWidth(30)
+            return button
     
     def _handle_node_action(self, action, row, node_name):
         """Handle node-specific actions"""
@@ -694,14 +783,27 @@ class NodesPage(BaseResourcePage):
                     parent.detail_manager.show_detail(resource_type, resource_name, None)
             
     def load_data(self, load_more=False):
-        """Override to fetch node data from cluster connector"""
+        """Override to fetch node data from cluster connector with proper error handling"""
         if self.is_loading:
+            logging.debug("Node data loading already in progress, skipping")
             return
             
         self.is_loading = True
+        logging.info("Starting node data loading process")
         
-        if hasattr(self, 'cluster_connector') and self.cluster_connector:
-            self.cluster_connector.load_nodes()
-        else:
+        try:
+            if hasattr(self, 'cluster_connector') and self.cluster_connector:
+                # Show loading indicator
+                self.show_loading_indicator("Loading nodes...")
+                self.cluster_connector.load_nodes()
+                logging.info("Node data loading request sent to cluster connector")
+            else:
+                logging.error("No cluster connector available")
+                self.is_loading = False
+                self.show_no_data_message()
+                self.hide_loading_indicator()
+        except Exception as e:
+            logging.error(f"Error loading node data: {e}")
             self.is_loading = False
             self.show_no_data_message()
+            self.hide_loading_indicator()
