@@ -5,7 +5,9 @@ import json
 import os
 import sys
 import tempfile
+import re
 from datetime import datetime
+from deepdiff import DeepDiff
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
@@ -1040,99 +1042,87 @@ class ComparePage(QWidget):
         return dict(items)
 
     def compare_yaml_semantically(self, yaml1, yaml2):
-        """Compare YAML semantically with parent section detection"""
-        # Parse YAML to dictionaries and flatten
-        dict1 = self.flatten_dict(self.parse_yaml_string(yaml1))
-        dict2 = self.flatten_dict(self.parse_yaml_string(yaml2))
-
-        # Build comprehensive line mappings
+        """Compare YAML semantically using DeepDiff (handles field reordering)"""
+        dict1 = self.parse_yaml_string(yaml1)
+        dict2 = self.parse_yaml_string(yaml2)
+        
+        # Use DeepDiff to find structural differences (ignore order)
+        diff = DeepDiff(dict1, dict2, ignore_order=True, view='tree')
+        
+        # Extract changed paths from DeepDiff
+        changed_paths = set()
+        
+        if 'values_changed' in diff:
+            for item in diff['values_changed']:
+                changed_paths.add(str(item.path()))
+        
+        if 'dictionary_item_added' in diff:
+            for item in diff['dictionary_item_added']:
+                changed_paths.add(str(item.path()))
+        
+        if 'dictionary_item_removed' in diff:
+            for item in diff['dictionary_item_removed']:
+                changed_paths.add(str(item.path()))
+        
+        if 'iterable_item_added' in diff:
+            for item in diff['iterable_item_added']:
+                changed_paths.add(str(item.path()))
+        
+        if 'iterable_item_removed' in diff:
+            for item in diff['iterable_item_removed']:
+                changed_paths.add(str(item.path()))
+        
+        # Build line mappings
         paths1, line_to_path1 = self.build_comprehensive_line_map(yaml1)
         paths2, line_to_path2 = self.build_comprehensive_line_map(yaml2)
-
-        # Find different paths for parent section detection
-        different_paths = set()
-        for path in dict1:
-            if path not in dict2 or dict1[path] != dict2[path]:
-                different_paths.add(path)
-        for path in dict2:
-            if path not in dict1:
-                different_paths.add(path)
-
+        
+        # Convert DeepDiff paths to our path format
+        def convert_deepdiff_path(dd_path):
+            # Convert root['spec']['containers'][0]['image'] to spec.containers.image
+            path = dd_path.replace("root", "").replace("['", ".").replace("']", "").replace("[", ".").replace("]", "")
+            if path.startswith("."):
+                path = path[1:]
+            # Remove array indices for matching
+            path = re.sub(r'\.\d+\.', '.', path)
+            path = re.sub(r'\.\d+$', '', path)
+            return path
+        
+        converted_changed_paths = {convert_deepdiff_path(cp) for cp in changed_paths}
+        
         matching_lines1 = set()
-        matching_lines2 = set()
         different_lines1 = set()
+        matching_lines2 = set()
         different_lines2 = set()
-
+        
         lines1 = yaml1.splitlines()
         lines2 = yaml2.splitlines()
-
+        
         for i in range(len(lines1)):
             path = line_to_path1.get(i)
-            if path and path in dict1:
-                value1 = dict1[path]
-                # Check if this is a structural parent (list/dict) vs leaf value
-                if isinstance(value1, (list, dict)):
-                    # Structural parent - check presence only
-                    if path in dict2:
-                        matching_lines1.add(i)
-                    else:
-                        different_lines1.add(i)
+            if path:
+                # Only mark as changed if exact match or this is a child of changed path
+                is_changed = any(
+                    path == cp or path.startswith(cp + ".")
+                    for cp in converted_changed_paths
+                )
+                if is_changed:
+                    different_lines1.add(i)
                 else:
-                    # Leaf value - compare actual values
-                    if path in dict2 and dict1[path] == dict2[path]:
-                        matching_lines1.add(i)
-                    else:
-                        different_lines1.add(i)
-            else:
-                line_text = lines1[i].strip()
-                # Check if this is a parent section header - Path-based semantic comparison
-                if ':' in line_text and not line_text.split(':', 1)[1].strip():
-                    # Use semantic path comparison (order-independent)
-                    if path and path in paths2:
-                        matching_lines1.add(i)
-                    else:
-                        different_lines1.add(i)
-                else:
-                    # Direct line comparison
-                    line2 = lines2[i].strip() if i < len(lines2) else ""
-                    if line_text == line2:
-                        matching_lines1.add(i)
-                    else:
-                        different_lines1.add(i)
-
+                    matching_lines1.add(i)
+        
         for i in range(len(lines2)):
             path = line_to_path2.get(i)
-            if path and path in dict2:
-                value2 = dict2[path]
-                # Check if this is a structural parent (list/dict) vs leaf value
-                if isinstance(value2, (list, dict)):
-                    # Structural parent - check presence only
-                    if path in dict1:
-                        matching_lines2.add(i)
-                    else:
-                        different_lines2.add(i)
+            if path:
+                # Only mark as changed if exact match or this is a child of changed path
+                is_changed = any(
+                    path == cp or path.startswith(cp + ".")
+                    for cp in converted_changed_paths
+                )
+                if is_changed:
+                    different_lines2.add(i)
                 else:
-                    # Leaf value - compare actual values
-                    if path in dict1 and dict1[path] == dict2[path]:
-                        matching_lines2.add(i)
-                    else:
-                        different_lines2.add(i)
-            else:
-                line_text = lines2[i].strip()
-                # Check if this is a parent section header - Path-based semantic comparison
-                if ':' in line_text and not line_text.split(':', 1)[1].strip():
-                    # Use semantic path comparison (order-independent)
-                    if path and path in paths1:
-                        matching_lines2.add(i)
-                    else:
-                        different_lines2.add(i)
-                else:
-                    line1 = lines1[i].strip() if i < len(lines1) else ""
-                    if line_text == line1:
-                        matching_lines2.add(i)
-                    else:
-                        different_lines2.add(i)
-
+                    matching_lines2.add(i)
+        
         return (different_lines1, matching_lines1), (different_lines2, matching_lines2)
 
     def _apply_comparison_highlighting(self, left_yaml, right_yaml):
