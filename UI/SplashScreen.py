@@ -5,8 +5,7 @@ from UI.Styles import AppStyles
 from UI.Icons import resource_path
 import logging
 import math
-import os
-import sys
+
 
 class PulsatingSpinner(QWidget):
     def __init__(self, parent=None):
