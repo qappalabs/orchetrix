@@ -5,14 +5,16 @@ import json
 import os
 import sys
 import tempfile
+import re
 from datetime import datetime
+from deepdiff import DeepDiff
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
     QSizePolicy, QPushButton, QSplitter, QListView, QLineEdit, QMenu, QWidgetAction
 )
 from PyQt6.QtGui import QFont, QSyntaxHighlighter, QTextCharFormat, QColor, QKeySequence, QShortcut, QAction
-from PyQt6.QtCore import Qt, QEvent, QRect, QPoint
+from PyQt6.QtCore import Qt, QPoint, QTimer
 
 from Utils.unified_resource_loader import get_unified_resource_loader
 from Utils.cluster_connector import get_cluster_connector
@@ -22,6 +24,7 @@ from UI.detail_sections.detailpage_yamlsection import YamlEditorWithLineNumbers,
 from UI.Styles import AppStyles
 
 LOG = logging.getLogger(__name__)
+
 
 class YAMLCompareHighlighter(QSyntaxHighlighter):
     """Granular line-by-line highlighter for YAML comparison"""
@@ -55,7 +58,7 @@ class ComparePage(QWidget):
       - rejects stale/irrelevant loader responses
       - refreshes on showEvent and after cluster switches
       - simple YAML side-by-side view for Compare button
-    """ 
+    """
 
     KNOWN_KINDS = [
         "Pod", "Service", "ConfigMap", "Secret", "PersistentVolumeClaim",
@@ -72,7 +75,7 @@ class ComparePage(QWidget):
         # Simple loader state
         self._namespaces_loaded = False
         self.namespace_filter = "default"  # Initialize namespace filter for state persistence
-        
+
         # Edit state management
         self._left_edit_mode = False
         self._right_edit_mode = False
@@ -80,6 +83,12 @@ class ComparePage(QWidget):
         self._right_original_yaml = None
         self._left_resource_info = None  # (namespace, resource_type, name)
         self._right_resource_info = None
+        
+        # Real-time highlighting state
+        self._highlight_timer = QTimer()
+        self._highlight_timer.setSingleShot(True)
+        self._highlight_timer.timeout.connect(self._update_realtime_highlighting)
+        self._realtime_highlighting_enabled = True
 
         # Initialize cluster connector
         self.cluster_connector = get_cluster_connector()
@@ -257,7 +266,7 @@ class ComparePage(QWidget):
 
         # Header row with resource labels and edit buttons
         header_row = QHBoxLayout()
-        
+
         # Left side: label + edit buttons
         left_container = QHBoxLayout()
         self.left_label = QLabel("")
@@ -265,7 +274,7 @@ class ComparePage(QWidget):
         self.left_save_btn = QPushButton("Save")
         self.left_deploy_btn = QPushButton("Deploy")
         self.left_cancel_btn = QPushButton("Cancel")
-        
+
         # Style buttons like DetailPageYAMLSection
         self.left_edit_btn.setStyleSheet("""
             QPushButton {
@@ -319,19 +328,19 @@ class ComparePage(QWidget):
                 background-color: #d32f2f;
             }
         """)
-        
+
         # Initially hide save/deploy/cancel buttons
         self.left_save_btn.hide()
         self.left_deploy_btn.hide()
         self.left_cancel_btn.hide()
-        
+
         left_container.addWidget(self.left_label)
         left_container.addWidget(self.left_edit_btn)
         left_container.addWidget(self.left_save_btn)
         left_container.addWidget(self.left_deploy_btn)
         left_container.addWidget(self.left_cancel_btn)
         left_container.addStretch()
-        
+
         # Right side: label + edit buttons
         right_container = QHBoxLayout()
         self.right_label = QLabel("")
@@ -339,7 +348,7 @@ class ComparePage(QWidget):
         self.right_save_btn = QPushButton("Save")
         self.right_deploy_btn = QPushButton("Deploy")
         self.right_cancel_btn = QPushButton("Cancel")
-        
+
         # Style buttons like DetailPageYAMLSection
         self.right_edit_btn.setStyleSheet("""
             QPushButton {
@@ -393,34 +402,34 @@ class ComparePage(QWidget):
                 background-color: #d32f2f;
             }
         """)
-        
+
         # Initially hide save/deploy/cancel buttons
         self.right_save_btn.hide()
         self.right_deploy_btn.hide()
         self.right_cancel_btn.hide()
-        
+
         right_container.addStretch()
         right_container.addWidget(self.right_label)
         right_container.addWidget(self.right_edit_btn)
         right_container.addWidget(self.right_save_btn)
         right_container.addWidget(self.right_deploy_btn)
         right_container.addWidget(self.right_cancel_btn)
-        
+
         header_row.addLayout(left_container)
         header_row.addStretch()
         header_row.addLayout(right_container)
         header_row.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         compare_layout.addLayout(header_row)
-        
+
         # YAML comparison editors inside a splitter with individual search widgets
         splitter = QSplitter(Qt.Orientation.Horizontal)
-        
+
         # Create left editor container with search widget
         left_container = QWidget()
         left_layout = QVBoxLayout(left_container)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(0)
-        
+
         self.left_box = YamlEditorWithLineNumbers()
         self.left_box.setFont(QFont(self.font_family, self.font_size))
         self.left_box.setReadOnly(True)
@@ -428,15 +437,15 @@ class ComparePage(QWidget):
         self.left_box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.left_box.setMinimumHeight(200)
         self.left_box.setStyleSheet(AppStyles.DETAIL_PAGE_YAML_TEXT_STYLE)
-        
+
         left_layout.addWidget(self.left_box)
-        
+
         # Create right editor container with search widget
         right_container = QWidget()
         right_layout = QVBoxLayout(right_container)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(0)
-        
+
         self.right_box = YamlEditorWithLineNumbers()
         self.right_box.setFont(QFont(self.font_family, self.font_size))
         self.right_box.setReadOnly(True)
@@ -444,15 +453,15 @@ class ComparePage(QWidget):
         self.right_box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.right_box.setMinimumHeight(200)
         self.right_box.setStyleSheet(AppStyles.DETAIL_PAGE_YAML_TEXT_STYLE)
-        
+
         right_layout.addWidget(self.right_box)
-        
+
         # Add search functionality with keyboard shortcuts first
         self._setup_search_shortcuts()
-        
+
         # Create search widgets for both editors
         self._setup_search_widgets(left_layout, right_layout)
-        
+
         # Create error widgets for both editors
         self._setup_error_widgets(left_layout, right_layout)
 
@@ -476,7 +485,7 @@ class ComparePage(QWidget):
         self.resource1_combo.currentIndexChanged.connect(self._on_resource_selection_changed)
         self.resource2_combo.currentIndexChanged.connect(self._on_resource_selection_changed)
         self.compare_btn.clicked.connect(self._on_compare_clicked)
-        
+
         # Connect edit button signals
         self.left_edit_btn.clicked.connect(self._toggle_left_edit_mode)
         self.left_save_btn.clicked.connect(self._save_left_changes)
@@ -486,22 +495,61 @@ class ComparePage(QWidget):
         self.right_save_btn.clicked.connect(self._save_right_changes)
         self.right_deploy_btn.clicked.connect(self._deploy_right_changes)
         self.right_cancel_btn.clicked.connect(self._cancel_right_edit)
-        
+
         # Add click handlers to set focus on editors
         def create_focus_handler(editor):
             original_mouse_press = editor.mousePressEvent
+
             def mouse_press_with_focus(event):
                 editor.setFocus()
                 original_mouse_press(event)
             return mouse_press_with_focus
-        
+
         self.left_box.mousePressEvent = create_focus_handler(self.left_box)
         self.right_box.mousePressEvent = create_focus_handler(self.right_box)
+        
+        # Connect real-time highlighting
+        self._setup_realtime_highlighting()
+
+    def _setup_realtime_highlighting(self):
+        """Setup real-time highlighting for both editors"""
+        # Connect textChanged signals with debouncing
+        self.left_box.textChanged.connect(self._on_text_changed)
+        self.right_box.textChanged.connect(self._on_text_changed)
+    
+    def _on_text_changed(self):
+        """Handle text change with debouncing"""
+        if not self._realtime_highlighting_enabled:
+            return
+            
+        # Only trigger during edit mode
+        if not (self._left_edit_mode or self._right_edit_mode):
+            return
+            
+        # Debounce: restart timer on each change
+        self._highlight_timer.stop()
+        self._highlight_timer.start(200)  # 200ms delay
+    
+    def _update_realtime_highlighting(self):
+        """Update highlighting in real-time"""
+        try:
+            left_yaml = self.left_box.toPlainText()
+            right_yaml = self.right_box.toPlainText()
+            
+            # Skip if either editor is empty
+            if not left_yaml.strip() or not right_yaml.strip():
+                return
+            
+            # Apply comparison highlighting
+            self._apply_comparison_highlighting(left_yaml, right_yaml)
+            
+        except Exception as e:
+            LOG.debug(f"Error in real-time highlighting: {e}")
 
     def _setup_search_widgets(self, left_layout, right_layout):
         """Create search widgets for both editors positioned above each editor"""
         from UI.detail_sections.detailpage_yamlsection import SearchWidget
-        
+
         # Create and configure search widgets
         for side, editor, layout, close_handler in [
             ('left', self.left_box, left_layout, self._on_left_search_closed),
@@ -512,23 +560,23 @@ class ComparePage(QWidget):
             search_widget.search_previous.connect(editor.search_previous)
             search_widget.search_closed.connect(close_handler)
             search_widget.hide()
-            
+
             # Store widget reference
             setattr(self, f'{side}_search_widget', search_widget)
-            
+
             # Insert search widget at position 0 (above editor) following DetailPageYAMLSection pattern
             layout.insertWidget(0, search_widget)
             editor.search_widget = search_widget
-            
+
             # Disable built-in search shortcuts to avoid conflicts
             for child in editor.findChildren(QShortcut):
                 if child.key() == QKeySequence.StandardKey.Find:
                     child.setEnabled(False)
-    
+
     def _setup_error_widgets(self, left_layout, right_layout):
         """Create error widgets for both editors positioned above each editor"""
         from PyQt6.QtWidgets import QLabel
-        
+
         # Create and configure error widgets
         for side, layout in [('left', left_layout), ('right', right_layout)]:
             error_widget = QLabel()
@@ -543,18 +591,18 @@ class ComparePage(QWidget):
             """)
             error_widget.setWordWrap(True)
             error_widget.hide()
-            
+
             # Store widget reference
             setattr(self, f'{side}_error_widget', error_widget)
-            
+
             # Insert error widget at position 0 (above search and editor)
             layout.insertWidget(0, error_widget)
-    
+
     def _on_left_search_closed(self):
         """Handle left search widget closed"""
         self.left_box.close_search()
         self.left_box.setFocus()
-    
+
     def _on_right_search_closed(self):
         """Handle right search widget closed"""
         self.right_box.close_search()
@@ -565,36 +613,36 @@ class ComparePage(QWidget):
         # Ctrl+F: Open/refocus search on focused editor
         self.search_shortcut = QShortcut(QKeySequence.StandardKey.Find, self)
         self.search_shortcut.activated.connect(self._on_search_requested)
-        
+
         # Ctrl+Shift+F: Switch to other editor's search
         self.switch_search_shortcut = QShortcut(QKeySequence("Ctrl+Shift+F"), self)
         self.switch_search_shortcut.activated.connect(self._on_switch_search_requested)
-        
+
         # Also create shortcuts directly on the editors as fallback
         self.left_search_shortcut = QShortcut(QKeySequence.StandardKey.Find, self.left_box)
         self.left_search_shortcut.activated.connect(self._show_left_search)
-        
+
         self.right_search_shortcut = QShortcut(QKeySequence.StandardKey.Find, self.right_box)
         self.right_search_shortcut.activated.connect(self._show_right_search)
-        
+
     def _on_search_requested(self):
         """Handle Ctrl+F - open/refocus search on focused editor (traditional behavior)"""
         focused_widget = self.focusWidget()
-        
+
         # Check which search is already visible
         left_visible = hasattr(self, 'left_search_widget') and self.left_search_widget.isVisible()
         right_visible = hasattr(self, 'right_search_widget') and self.right_search_widget.isVisible()
-        
+
         # Check if search input has focus (search widget is ancestor of focused widget)
         left_search_focused = left_visible and self.left_search_widget.isAncestorOf(focused_widget)
         right_search_focused = right_visible and self.right_search_widget.isAncestorOf(focused_widget)
-        
+
         # Traditional behavior: refocus if search input already focused
         if left_search_focused:
             # Left search input has focus - just refocus it
             self.left_search_widget.focus_search()
         elif right_search_focused:
-            # Right search input has focus - just refocus it  
+            # Right search input has focus - just refocus it
             self.right_search_widget.focus_search()
         elif focused_widget == self.left_box or (focused_widget and self.left_box.isAncestorOf(focused_widget)):
             # Left editor has focus - show left search
@@ -606,12 +654,12 @@ class ComparePage(QWidget):
             # Default to left editor
             self.left_box.setFocus()
             self._show_left_search()
-    
+
     def _on_switch_search_requested(self):
         """Handle Ctrl+Shift+F - switch to other editor's search"""
         left_visible = hasattr(self, 'left_search_widget') and self.left_search_widget.isVisible()
         right_visible = hasattr(self, 'right_search_widget') and self.right_search_widget.isVisible()
-        
+
         if left_visible:
             # Left search is open, switch to right
             self._show_right_search()
@@ -625,24 +673,24 @@ class ComparePage(QWidget):
                 self._show_right_search()
             else:
                 self._show_left_search()
-    
+
     def _show_left_search(self):
         """Show search widget for left editor"""
         if hasattr(self, 'left_search_widget'):
             # Hide right search if visible
             if hasattr(self, 'right_search_widget') and self.right_search_widget.isVisible():
                 self.right_search_widget.hide()
-            
+
             self.left_search_widget.show()
             self.left_search_widget.focus_search()
-    
+
     def _show_right_search(self):
         """Show search widget for right editor"""
         if hasattr(self, 'right_search_widget'):
             # Hide left search if visible
             if hasattr(self, 'left_search_widget') and self.left_search_widget.isVisible():
                 self.left_search_widget.hide()
-            
+
             self.right_search_widget.show()
             self.right_search_widget.focus_search()
 
@@ -673,19 +721,19 @@ class ComparePage(QWidget):
         if result_obj.success:
             # Extract namespace names from the processed results (same as BaseResourcePage)
             namespaces = [item.get('name', '') for item in result_obj.items if item.get('name')]
-            
+
             # Sort namespaces with default first, then alphabetically (same as BaseResourcePage)
             important_namespaces = ["default", "kube-system", "kube-public", "kube-node-lease"]
             other_namespaces = sorted([ns for ns in namespaces if ns not in important_namespaces])
             sorted_namespaces = [ns for ns in important_namespaces if ns in namespaces] + other_namespaces
-            
+
             self._fill_namespace_combo(sorted_namespaces)
         else:
             self._on_namespace_error_unified('namespaces', result_obj.error_message or "Failed to load namespaces")
-        
+
         self._namespaces_loaded = True
         LOG.info(f"ComparePage: Loaded namespaces, current filter: {getattr(self, 'namespace_filter', 'not set')}")
-    
+
     def _on_namespace_error_unified(self, resource_type: str, error_message: str):
         """Handle namespace loading errors from unified loader"""
         if resource_type == 'namespaces':
@@ -698,13 +746,13 @@ class ComparePage(QWidget):
     def _fill_namespace_combo(self, namespaces):
         # Store current selection to restore it
         current_namespace = self.namespace_combo.currentText() if self.namespace_combo.count() > 0 else None
-        
+
         # Temporarily disconnect signal to prevent unwanted triggers
         try:
             self.namespace_combo.currentTextChanged.disconnect(self._on_namespace_changed)
         except:
             pass
-        
+
         self.namespace_combo.clear()
         if not namespaces:
             self.namespace_combo.addItem("No namespaces found")
@@ -715,7 +763,7 @@ class ComparePage(QWidget):
             self.namespace_combo.addItem("All Namespaces")
             for ns in namespaces:
                 self.namespace_combo.addItem(ns)
-            
+
             # Enhanced state persistence logic - default to "default" namespace (like other pages)
             if current_namespace and current_namespace not in ["Loading namespaces…", "No namespaces found"]:
                 restore_index = self.namespace_combo.findText(current_namespace)
@@ -740,17 +788,16 @@ class ComparePage(QWidget):
                 else:
                     self.namespace_combo.setCurrentIndex(0)
                     self.namespace_filter = "All Namespaces"
-        
+
         # Reconnect the signal
         self.namespace_combo.currentTextChanged.connect(self._on_namespace_changed)
-
 
     # ---------- namespace/type -> resources ----------
     def _on_namespace_changed(self, namespace=None):
         # Handle both direct calls and signal calls
         if namespace is None:
             namespace = self.namespace_combo.currentText().strip()
-        
+
         # Skip if loading placeholder or invalid namespace
         if not namespace or namespace.startswith(("Loading", "No ", "Unable", "kubernetes package")):
             self._clear_resource_combos()
@@ -760,7 +807,7 @@ class ComparePage(QWidget):
         old_namespace = getattr(self, 'namespace_filter', 'default')
         if old_namespace == namespace:
             return  # No change, skip reload
-            
+
         # Update internal filter
         self.namespace_filter = namespace
 
@@ -795,7 +842,7 @@ class ComparePage(QWidget):
             for k in sorted(available):
                 self.resource_type_combo.addItem(k)
             self.resource_type_combo.setEnabled(True)
-            
+
             # Enhanced state persistence for resource type
             if current_resource_type and current_resource_type not in ["Scanning…", "Select resource type", "No resource types found"]:
                 restore_index = self.resource_type_combo.findText(current_resource_type)
@@ -806,7 +853,7 @@ class ComparePage(QWidget):
             else:
                 self.resource_type_combo.setCurrentIndex(0)
         self.resource_type_combo.blockSignals(False)
-        
+
         # Force resource population after namespace change to ensure resource dropdowns are updated
         # This handles the case where resource type stays the same but namespace changes
         self._on_namespace_or_type_changed()
@@ -836,11 +883,11 @@ class ComparePage(QWidget):
         # Enhanced state persistence - store current selections to restore them
         current_resource1 = self.resource1_combo.currentText() if self.resource1_combo.count() > 0 else None
         current_resource2 = self.resource2_combo.currentText() if self.resource2_combo.count() > 0 else None
-        
+
         # Block signals to prevent unwanted triggers during population
         self.resource1_combo.blockSignals(True)
         self.resource2_combo.blockSignals(True)
-        
+
         self.resource1_combo.clear()
         self.resource2_combo.clear()
         if not names:
@@ -856,15 +903,15 @@ class ComparePage(QWidget):
             self.resource1_combo.setEnabled(True)
             self.resource1_combo.addItem("Select resource 1")
             self.resource1_combo.addItems(sorted(names))
-            
+
             self.resource2_combo.setEnabled(True)
             self.resource2_combo.addItem("Select resource 2")
             self.resource2_combo.addItems(sorted(names))
-            
+
             # Store original items for search functionality
             self.resource1_combo._original_items = ["Select resource 1"] + sorted(names)
             self.resource2_combo._original_items = ["Select resource 2"] + sorted(names)
-            
+
             # Enhanced state persistence - restore previous selections if they exist in the new list
             if current_resource1 and current_resource1 not in ["Select resource 1", "No resources found"]:
                 restore_index1 = self.resource1_combo.findText(current_resource1)
@@ -874,7 +921,7 @@ class ComparePage(QWidget):
                     self.resource1_combo.setCurrentIndex(0)  # Fallback to default
             else:
                 self.resource1_combo.setCurrentIndex(0)
-            
+
             if current_resource2 and current_resource2 not in ["Select resource 2", "No resources found"]:
                 restore_index2 = self.resource2_combo.findText(current_resource2)
                 if restore_index2 >= 0:
@@ -883,34 +930,34 @@ class ComparePage(QWidget):
                     self.resource2_combo.setCurrentIndex(0)  # Fallback to default
             else:
                 self.resource2_combo.setCurrentIndex(0)
-        
+
         # Re-enable signals
         self.resource1_combo.blockSignals(False)
         self.resource2_combo.blockSignals(False)
-        
+
         self._update_compare_button_state()
 
     def _on_resource_selection_changed(self):
         """Handle resource selection changes - update compare button and auto-recompare"""
         self._update_compare_button_state()
         self._try_auto_recompare()
-    
+
     def _update_compare_button_state(self):
         """Enable Compare button only when two valid resources are selected"""
         r1 = self.resource1_combo.currentText().strip()
         r2 = self.resource2_combo.currentText().strip()
-        
+
         valid_r1 = bool(r1 and not r1.startswith(("Select", "No ", "Error")))
         valid_r2 = bool(r2 and not r2.startswith(("Select", "No ", "Error")))
-        
+
         self.compare_btn.setEnabled(valid_r1 and valid_r2)
-    
+
     def _try_auto_recompare(self):
         """Auto-recompare if conditions are met (same logic as Compare button)"""
         # Block auto-recompare if either editor is in edit mode
         if self._left_edit_mode or self._right_edit_mode:
             return
-        
+
         # Use same validation logic as Compare button
         ns = self.namespace_combo.currentText().strip()
         rt = self.resource_type_combo.currentText().strip()
@@ -923,7 +970,7 @@ class ComparePage(QWidget):
             return
         if not a or a.startswith(("No ", "Select")) or not b or b.startswith(("No ", "Select")):
             return
-        
+
         # Only auto-recompare if compare area is already visible (user has compared before)
         if self.compare_area.isVisible():
             self._on_compare_clicked()
@@ -950,30 +997,30 @@ class ComparePage(QWidget):
         line_to_path = {}
         path_stack = []
         current_context = None
-        
+
         for i, line in enumerate(lines):
             stripped = line.strip()
-            
+
             # Handle empty lines and comments - inherit context
             if not stripped or stripped.startswith('#'):
                 line_to_path[i] = current_context
                 continue
-                
+
             indent = len(line) - len(line.lstrip())
-            
+
             if ':' in stripped:
                 key = stripped.split(':', 1)[0].strip()
                 if key:
                     # Adjust path stack based on indentation
                     while path_stack and path_stack[-1][1] >= indent:
                         path_stack.pop()
-                    
+
                     # Build full path
                     if path_stack:
                         full_path = '.'.join([p[0] for p in path_stack] + [key])
                     else:
                         full_path = key
-                    
+
                     path_to_line[full_path] = i
                     line_to_path[i] = full_path
                     current_context = full_path
@@ -995,27 +1042,56 @@ class ComparePage(QWidget):
         return dict(items)
 
     def compare_yaml_semantically(self, yaml1, yaml2):
-        """Compare YAML semantically with parent section detection"""
-        # Parse YAML to dictionaries and flatten
-        dict1 = self.flatten_dict(self.parse_yaml_string(yaml1))
-        dict2 = self.flatten_dict(self.parse_yaml_string(yaml2))
+        """Compare YAML semantically using DeepDiff (handles field reordering)"""
+        dict1 = self.parse_yaml_string(yaml1)
+        dict2 = self.parse_yaml_string(yaml2)
         
-        # Build comprehensive line mappings
+        # Use DeepDiff to find structural differences (ignore order)
+        diff = DeepDiff(dict1, dict2, ignore_order=True, view='tree')
+        
+        # Extract changed paths from DeepDiff
+        changed_paths = set()
+        
+        if 'values_changed' in diff:
+            for item in diff['values_changed']:
+                changed_paths.add(str(item.path()))
+        
+        if 'dictionary_item_added' in diff:
+            for item in diff['dictionary_item_added']:
+                changed_paths.add(str(item.path()))
+        
+        if 'dictionary_item_removed' in diff:
+            for item in diff['dictionary_item_removed']:
+                changed_paths.add(str(item.path()))
+        
+        if 'iterable_item_added' in diff:
+            for item in diff['iterable_item_added']:
+                changed_paths.add(str(item.path()))
+        
+        if 'iterable_item_removed' in diff:
+            for item in diff['iterable_item_removed']:
+                changed_paths.add(str(item.path()))
+        
+        # Build line mappings
         paths1, line_to_path1 = self.build_comprehensive_line_map(yaml1)
         paths2, line_to_path2 = self.build_comprehensive_line_map(yaml2)
         
-        # Find different paths for parent section detection
-        different_paths = set()
-        for path in dict1:
-            if path not in dict2 or dict1[path] != dict2[path]:
-                different_paths.add(path)
-        for path in dict2:
-            if path not in dict1:
-                different_paths.add(path)
+        # Convert DeepDiff paths to our path format
+        def convert_deepdiff_path(dd_path):
+            # Convert root['spec']['containers'][0]['image'] to spec.containers.image
+            path = dd_path.replace("root", "").replace("['", ".").replace("']", "").replace("[", ".").replace("]", "")
+            if path.startswith("."):
+                path = path[1:]
+            # Remove array indices for matching
+            path = re.sub(r'\.\d+\.', '.', path)
+            path = re.sub(r'\.\d+$', '', path)
+            return path
+        
+        converted_changed_paths = {convert_deepdiff_path(cp) for cp in changed_paths}
         
         matching_lines1 = set()
-        matching_lines2 = set()
         different_lines1 = set()
+        matching_lines2 = set()
         different_lines2 = set()
         
         lines1 = yaml1.splitlines()
@@ -1023,74 +1099,42 @@ class ComparePage(QWidget):
         
         for i in range(len(lines1)):
             path = line_to_path1.get(i)
-            if path and path in dict1:
-                if path in dict2 and dict1[path] == dict2[path]:
-                    matching_lines1.add(i)
-                else:
+            if path:
+                # Only mark as changed if exact match or this is a child of changed path
+                is_changed = any(
+                    path == cp or path.startswith(cp + ".")
+                    for cp in converted_changed_paths
+                )
+                if is_changed:
                     different_lines1.add(i)
-            else:
-                line_text = lines1[i].strip()
-                # Check if this is a parent section header
-                if ':' in line_text and not line_text.split(':', 1)[1].strip():
-                    section_key = line_text.split(':', 1)[0].strip()
-                    # Count child changes for this section
-                    child_changes = [p for p in different_paths if p.startswith(f'{section_key}.')]
-                    if len(child_changes) >= 1:  # Threshold: 1+ child changes
-                        different_lines1.add(i)
-                    else:
-                        line2 = lines2[i].strip() if i < len(lines2) else ""
-                        if line_text == line2:
-                            matching_lines1.add(i)
-                        else:
-                            different_lines1.add(i)
                 else:
-                    # Direct line comparison
-                    line2 = lines2[i].strip() if i < len(lines2) else ""
-                    if line_text == line2:
-                        matching_lines1.add(i)
-                    else:
-                        different_lines1.add(i)
+                    matching_lines1.add(i)
         
         for i in range(len(lines2)):
             path = line_to_path2.get(i)
-            if path and path in dict2:
-                if path in dict1 and dict1[path] == dict2[path]:
-                    matching_lines2.add(i)
-                else:
+            if path:
+                # Only mark as changed if exact match or this is a child of changed path
+                is_changed = any(
+                    path == cp or path.startswith(cp + ".")
+                    for cp in converted_changed_paths
+                )
+                if is_changed:
                     different_lines2.add(i)
-            else:
-                line_text = lines2[i].strip()
-                if ':' in line_text and not line_text.split(':', 1)[1].strip():
-                    section_key = line_text.split(':', 1)[0].strip()
-                    child_changes = [p for p in different_paths if p.startswith(f'{section_key}.')]
-                    if len(child_changes) >= 1:
-                        different_lines2.add(i)
-                    else:
-                        line1 = lines1[i].strip() if i < len(lines1) else ""
-                        if line_text == line1:
-                            matching_lines2.add(i)
-                        else:
-                            different_lines2.add(i)
                 else:
-                    line1 = lines1[i].strip() if i < len(lines1) else ""
-                    if line_text == line1:
-                        matching_lines2.add(i)
-                    else:
-                        different_lines2.add(i)
+                    matching_lines2.add(i)
         
         return (different_lines1, matching_lines1), (different_lines2, matching_lines2)
 
     def _apply_comparison_highlighting(self, left_yaml, right_yaml):
         """Apply granular line highlighting to both YAML text boxes"""
-        # Set text first
-        self.left_box.setPlainText(left_yaml)
-        self.right_box.setPlainText(right_yaml)
+        # Only set text if not called from real-time highlighting
+        if not hasattr(self, '_realtime_highlighting_enabled') or not self._realtime_highlighting_enabled or not (self._left_edit_mode or self._right_edit_mode):
+            self.left_box.setPlainText(left_yaml)
+            self.right_box.setPlainText(right_yaml)
 
         # Compare semantically and get different/matching sets
         (left_diff, left_match), (right_diff, right_match) = self.compare_yaml_semantically(left_yaml, right_yaml)
-
-
-
+        
         # Update highlighters with both different and matching lines
         self.left_highlighter.set_comparison_lines(left_diff, left_match)
         self.right_highlighter.set_comparison_lines(right_diff, right_match)
@@ -1102,7 +1146,7 @@ class ComparePage(QWidget):
     # ---------- resource YAML reading & compare ----------
     def _get_resource_yaml(self, namespace: str, kind: str, name: str) -> str:
         rt = (kind or "").strip().lower()
-        
+
         try:
             from Utils.kubernetes_client import get_kubernetes_client
             kube = get_kubernetes_client()
@@ -1166,7 +1210,6 @@ class ComparePage(QWidget):
         # Return the original if no mapping found
         return rt
 
-
     def _on_compare_clicked(self):
         ns = self.namespace_combo.currentText().strip()
         rt = self.resource_type_combo.currentText().strip()
@@ -1192,14 +1235,14 @@ class ComparePage(QWidget):
 
         # Get current cluster name for saved YAML lookup
         cluster = self._get_current_cluster_name()
-        
+
         # Try to load saved YAML first, fallback to cluster
         left_yaml = self._load_saved_yaml(cluster, a_ns, rt, a_name) or self._get_resource_yaml(a_ns, rt, a_name)
         right_yaml = self._load_saved_yaml(cluster, b_ns, rt, b_name) or self._get_resource_yaml(b_ns, rt, b_name)
 
         self.left_label.setText(f"{rt} / {a_name} @ {a_ns}")
         self.right_label.setText(f"{rt} / {b_name} @ {b_ns}")
-        
+
         # Store resource info for editing
         self._left_resource_info = (a_ns, rt, a_name)
         self._right_resource_info = (b_ns, rt, b_name)
@@ -1294,9 +1337,9 @@ class ComparePage(QWidget):
     def showEvent(self, event):
         super().showEvent(event)
         # Check if namespace dropdown is empty (could happen after cluster change)
-        if (hasattr(self, 'namespace_combo') and self.namespace_combo and 
-            self.namespace_combo.count() <= 1 and 
-            self.namespace_combo.itemText(0) == "Loading namespaces..."):
+        if (hasattr(self, 'namespace_combo') and self.namespace_combo and
+                self.namespace_combo.count() <= 1 and
+                self.namespace_combo.itemText(0) == "Loading namespaces..."):
             self._populate_namespaces()
         # Only populate namespaces if not already loaded to preserve selections
         elif not self._namespaces_loaded:
@@ -1306,7 +1349,7 @@ class ComparePage(QWidget):
             self.namespace_filter = "default"
 
     # Cluster switch handling now done via clear_for_cluster_change() method (called by ClusterView)
-    
+
     def _parse_resource_name(self, resource_display_name):
         """Parse resource name from 'name (namespace)' format"""
         if ' (' in resource_display_name and resource_display_name.endswith(')'):
@@ -1316,7 +1359,7 @@ class ComparePage(QWidget):
         else:
             # Fallback for resources without namespace info
             return resource_display_name, "default"
-    
+
     def clear_for_cluster_change(self):
         """Clear data when cluster changes to prevent showing stale data"""
         try:
@@ -1327,25 +1370,25 @@ class ComparePage(QWidget):
                 self.namespace_combo.addItem("Loading namespaces...")
                 self.namespace_combo.setEnabled(False)
                 self.namespace_combo.blockSignals(False)
-            
+
             # Clear resource combos
             self._clear_resource_combos()
-            
+
             # Hide compare area
             if hasattr(self, 'compare_area'):
                 self.compare_area.hide()
-            
+
             # Reset namespace loading flag and filter for new cluster
             self._namespaces_loaded = False
             self.namespace_filter = "default"  # Reset to default for new cluster
-            
+
             # Trigger namespace reload after clearing
             from PyQt6.QtCore import QTimer
             QTimer.singleShot(100, self._populate_namespaces)
-                
+
         except Exception as e:
             LOG.error(f"Error clearing ComparePage for cluster change: {e}")
-    
+
     # ---------- edit functionality ----------
     def _toggle_left_edit_mode(self):
         """Toggle left editor edit mode"""
@@ -1384,7 +1427,7 @@ class ComparePage(QWidget):
             self._left_edit_mode = True
             # Disable resource dropdowns when entering edit mode
             self._update_resource_dropdowns_state()
-    
+
     def _toggle_right_edit_mode(self):
         """Toggle right editor edit mode"""
         if self._right_edit_mode:
@@ -1422,97 +1465,97 @@ class ComparePage(QWidget):
             self._right_edit_mode = True
             # Disable resource dropdowns when entering edit mode
             self._update_resource_dropdowns_state()
-    
+
     def _cancel_left_edit(self):
         """Cancel left editor changes"""
         if self._left_original_yaml:
             self.left_box.setPlainText(self._left_original_yaml)
         self._toggle_left_edit_mode()
-    
+
     def _cancel_right_edit(self):
         """Cancel right editor changes"""
         if self._right_original_yaml:
             self.right_box.setPlainText(self._right_original_yaml)
         self._toggle_right_edit_mode()
-    
+
     def _deploy_left_changes(self):
         """Deploy left editor changes"""
         if not self._left_resource_info:
             return
-        
+
         yaml_text = self.left_box.toPlainText()
         if yaml_text == self._left_original_yaml:
             self._toggle_left_edit_mode()
             return
-        
+
         try:
             yaml_data = yaml.safe_load(yaml_text)
             if not yaml_data:
                 LOG.error("Invalid YAML: Empty or null document")
                 return
-            
+
             # Clean YAML data like DetailPageYAMLSection does
             cleaned_yaml_data = self._convert_to_kubernetes_yaml(yaml_data)
-            
+
             self.left_deploy_btn.setEnabled(False)
             self.left_deploy_btn.setText("Deploying...")
-            
+
             namespace, resource_type, name = self._left_resource_info
             self._update_resource(namespace, resource_type, name, cleaned_yaml_data, 'left')
-            
+
         except yaml.YAMLError as e:
             error_msg = f"Invalid YAML syntax: {str(e)}"
             self._show_error('left', error_msg)
             LOG.error(error_msg)
             self.left_deploy_btn.setEnabled(True)
             self.left_deploy_btn.setText("Deploy")
-    
+
     def _deploy_right_changes(self):
         """Deploy right editor changes"""
         if not self._right_resource_info:
             return
-        
+
         yaml_text = self.right_box.toPlainText()
         if yaml_text == self._right_original_yaml:
             self._toggle_right_edit_mode()
             return
-        
+
         try:
             yaml_data = yaml.safe_load(yaml_text)
             if not yaml_data:
                 LOG.error("Invalid YAML: Empty or null document")
                 return
-            
+
             # Clean YAML data like DetailPageYAMLSection does
             cleaned_yaml_data = self._convert_to_kubernetes_yaml(yaml_data)
-            
+
             self.right_deploy_btn.setEnabled(False)
             self.right_deploy_btn.setText("Deploying...")
-            
+
             namespace, resource_type, name = self._right_resource_info
             self._update_resource(namespace, resource_type, name, cleaned_yaml_data, 'right')
-            
+
         except yaml.YAMLError as e:
             error_msg = f"Invalid YAML syntax: {str(e)}"
             self._show_error('right', error_msg)
             LOG.error(error_msg)
             self.right_deploy_btn.setEnabled(True)
             self.right_deploy_btn.setText("Deploy")
-    
+
     def _update_resource(self, namespace: str, resource_type: str, name: str, yaml_data: dict, side: str):
         """Update Kubernetes resource"""
         try:
             from Utils.kubernetes_client import get_kubernetes_client
             kube = get_kubernetes_client()
-            
+
             # Connect to update result signal if not already connected
             if not hasattr(self, '_update_signals_connected'):
                 kube.resource_updated.connect(self._handle_update_result)
                 self._update_signals_connected = True
-            
+
             # Store which side is being updated
             self._updating_side = side
-            
+
             # Call async update
             kube.update_resource_async(
                 self._map_kind_to_resource_type(resource_type.lower()),
@@ -1520,34 +1563,34 @@ class ComparePage(QWidget):
                 namespace,
                 yaml_data
             )
-            
+
         except Exception as e:
             error_msg = f"Error updating resource: {str(e)}"
             self._show_error(side, error_msg)
             LOG.error(error_msg)
             self._reset_deploy_button(side)
-    
+
     def _handle_update_result(self, result):
         """Handle deployment result - copied from DetailPageYAMLSection"""
         try:
             side = getattr(self, '_updating_side', None)
             if not side:
                 return
-            
+
             # Reset button state first
             self._reset_deploy_button(side)
-            
+
             # Handle result - exact same logic as DetailPageYAMLSection
             if not result or not isinstance(result, dict):
                 LOG.error(f"Deployment failed: Invalid update result received")
                 return
-            
+
             if result.get('success', False):
                 # Success - clear any existing errors and refresh
                 self._clear_error(side)
                 message = result.get('message', 'Resource updated successfully')
                 LOG.info(f"Successfully deployed {side} resource changes: {message}")
-                
+
                 # Exit edit mode and refresh content
                 if side == 'left':
                     self._toggle_left_edit_mode()
@@ -1557,17 +1600,17 @@ class ComparePage(QWidget):
                     self._toggle_right_edit_mode()
                     if self._right_resource_info:
                         self._refresh_yaml_content('right')
-                
+
             else:
                 # Error - show error above the failing editor
                 error_message = result.get('message', 'Unknown error occurred')
                 self._show_error(side, f"Deployment failed: {error_message}")
                 LOG.error(f"Deployment failed: {error_message}")
-                
+
         except Exception as e:
             LOG.error(f"Critical error in _handle_update_result: {str(e)}")
             self._reset_deploy_button(getattr(self, '_updating_side', None))
-    
+
     def _refresh_yaml_content(self, side: str):
         """Refresh YAML content after successful deployment"""
         try:
@@ -1579,19 +1622,19 @@ class ComparePage(QWidget):
                 ns, rt, name = self._right_resource_info
                 updated_yaml = self._get_resource_yaml(ns, rt, name)
                 self.right_box.setPlainText(updated_yaml)
-            
+
             # Reapply comparison highlighting
             left_yaml = self.left_box.toPlainText()
             right_yaml = self.right_box.toPlainText()
             self._apply_comparison_highlighting(left_yaml, right_yaml)
-            
+
         except Exception as e:
             LOG.error(f"Error refreshing {side} YAML content: {str(e)}")
-    
+
     def _convert_to_kubernetes_yaml(self, data):
         """Convert Python client dict format to Kubernetes YAML format"""
         return DetailPageYAMLSection._convert_to_kubernetes_yaml(self, data)
-    
+
     def _show_error(self, side: str, error_message: str):
         """Show error message above the specified editor"""
         if side == 'left' and hasattr(self, 'left_error_widget'):
@@ -1600,74 +1643,74 @@ class ComparePage(QWidget):
         elif side == 'right' and hasattr(self, 'right_error_widget'):
             self.right_error_widget.setText(error_message)
             self.right_error_widget.show()
-    
+
     def _clear_error(self, side: str):
         """Clear error message for the specified editor"""
         if side == 'left' and hasattr(self, 'left_error_widget'):
             self.left_error_widget.hide()
         elif side == 'right' and hasattr(self, 'right_error_widget'):
             self.right_error_widget.hide()
-    
+
     def _save_left_changes(self):
         """Save left editor changes without deploying"""
         if not self._left_resource_info:
             return
-        
+
         yaml_text = self.left_box.toPlainText()
         if yaml_text == self._left_original_yaml:
             # No changes to save
             return
-        
+
         try:
             # Validate YAML syntax
             yaml_data = yaml.safe_load(yaml_text)
             if not yaml_data:
                 LOG.error("Invalid YAML: Empty or null document")
                 return
-            
+
             # Save locally to disk
             self._save_yaml_locally('left', yaml_text)
-            
+
             # Update the original YAML to current content (save changes)
             self._left_original_yaml = yaml_text
             self._clear_error('left')
             LOG.info("Left editor changes saved successfully")
-            
+
             # Update comparison highlighting with current editor content
             left_yaml = self.left_box.toPlainText()
             right_yaml = self.right_box.toPlainText()
             self._apply_comparison_highlighting(left_yaml, right_yaml)
-            
+
         except yaml.YAMLError as e:
             error_msg = f"Invalid YAML syntax: {str(e)}"
             self._show_error('left', error_msg)
             LOG.error(error_msg)
-    
+
     def _save_right_changes(self):
         """Save right editor changes without deploying"""
         if not self._right_resource_info:
             return
-        
+
         yaml_text = self.right_box.toPlainText()
         if yaml_text == self._right_original_yaml:
             # No changes to save
             return
-        
+
         try:
             # Validate YAML syntax
             yaml_data = yaml.safe_load(yaml_text)
             if not yaml_data:
                 LOG.error("Invalid YAML: Empty or null document")
                 return
-            
+
             # Save locally to disk
             self._save_yaml_locally('right', yaml_text)
-            
+
             # Update the original YAML to current content (save changes)
             self._right_original_yaml = yaml_text
             self._clear_error('right')
             LOG.info("Right editor changes saved successfully")
-            
+
             # Update comparison highlighting with current editor content
             left_yaml = self.left_box.toPlainText()
             right_yaml = self.right_box.toPlainText()
@@ -1686,15 +1729,15 @@ class ComparePage(QWidget):
         elif side == 'right':
             self.right_deploy_btn.setEnabled(True)
             self.right_deploy_btn.setText("Deploy")
-    
+
     def _update_resource_dropdowns_state(self):
         """Enable/disable resource dropdowns based on edit mode state"""
         # Disable dropdowns if either editor is in edit mode
         enable_dropdowns = not (self._left_edit_mode or self._right_edit_mode)
-        
+
         self.resource1_combo.setEnabled(enable_dropdowns)
         self.resource2_combo.setEnabled(enable_dropdowns)
-    
+
     def _create_searchable_combo(self, placeholder_text: str, combo_id: str):
         """Create a searchable combo box using QMenu approach"""
         combo = QComboBox()
@@ -1708,31 +1751,31 @@ class ComparePage(QWidget):
         combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         combo.setMinimumContentsLength(1)
         combo.setStyleSheet(AppStyles.get_dropdown_style_with_icon())
-        
+
         view = QListView()
         combo.setView(view)
         combo.setMaxVisibleItems(10)
         view.setUniformItemSizes(True)
         view.setVerticalScrollMode(QListView.ScrollMode.ScrollPerPixel)
-        
+
         # Store search state for this combo
         setattr(combo, '_search_menu', None)
         setattr(combo, '_search_input', None)
         setattr(combo, '_search_action', None)
         setattr(combo, '_original_items', [])
         setattr(combo, '_combo_id', combo_id)
-        
+
         # Override showPopup to show QMenu instead
         combo.showPopup = lambda: self._show_search_menu(combo)
-        
+
         return combo
-    
+
     def _show_search_menu(self, combo):
         """Show QMenu with search functionality instead of popup"""
         # Store original items on first use
         if not combo._original_items:
             combo._original_items = [combo.itemText(i) for i in range(combo.count())]
-        
+
         # Create or update the search menu
         if not combo._search_menu:
             combo._search_menu = QMenu(self)
@@ -1752,7 +1795,7 @@ class ComparePage(QWidget):
                     background-color: #0078d7;
                 }}
             """)
-        
+
         # Create search input if not exists
         if not combo._search_input:
             combo._search_input = QLineEdit(self)
@@ -1774,24 +1817,24 @@ class ComparePage(QWidget):
             combo._search_input.textChanged.connect(lambda text: self._filter_menu_items(combo, text))
             combo._search_action = QWidgetAction(self)
             combo._search_action.setDefaultWidget(combo._search_input)
-        
+
         # Update menu with current items
         self._update_search_menu(combo)
-        
+
         # Show menu below combo
         button_pos = combo.mapToGlobal(QPoint(0, combo.height()))
         combo._search_menu.move(button_pos)
         combo._search_menu.show()
-        
+
         # Focus search input
         combo._search_input.setFocus()
         combo._search_input.clear()
-    
+
     def _update_search_menu(self, combo):
         """Update the search menu with current items"""
         combo._search_menu.clear()
         combo._search_menu.addAction(combo._search_action)
-        
+
         # Add items as actions
         if combo._original_items:
             for item in combo._original_items:
@@ -1803,19 +1846,19 @@ class ComparePage(QWidget):
             action = QAction("No resources found", combo._search_menu)
             action.setEnabled(False)
             combo._search_menu.addAction(action)
-    
+
     def _filter_menu_items(self, combo, search_text):
         """Filter menu items based on search text"""
         if not combo._original_items:
             return
-        
+
         combo._search_menu.clear()
         combo._search_menu.addAction(combo._search_action)
-        
+
         search_lower = search_text.lower()
-        filtered_items = [item for item in combo._original_items 
-                         if not item.startswith("Select resource") and search_lower in item.lower()]
-        
+        filtered_items = [item for item in combo._original_items
+                          if not item.startswith("Select resource") and search_lower in item.lower()]
+
         if filtered_items:
             for item in filtered_items:
                 action = QAction(item, combo._search_menu)
@@ -1825,10 +1868,10 @@ class ComparePage(QWidget):
             action = QAction("No matching resources", combo._search_menu)
             action.setEnabled(False)
             combo._search_menu.addAction(action)
-        
+
         # Keep focus on search input
         combo._search_input.setFocus()
-    
+
     def _handle_menu_selection(self, combo, item):
         """Handle selection from search menu"""
         # Find the item in the combo and select it
@@ -1836,9 +1879,9 @@ class ComparePage(QWidget):
         if index >= 0:
             combo.setCurrentIndex(index)
         combo._search_menu.hide()
-    
+
     # ---------- Local Save Functionality ----------
-    
+
     def _get_current_cluster_name(self):
         """Get current cluster name with simplified fallback"""
         try:
@@ -1847,7 +1890,7 @@ class ComparePage(QWidget):
         except Exception as e:
             LOG.error(f"Error getting cluster name: {e}")
             return 'unknown-cluster'
-    
+
     def _get_save_directory(self):
         """Get or create save directory with fallback"""
         try:
@@ -1858,25 +1901,25 @@ class ComparePage(QWidget):
             else:
                 # Running as script
                 app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            
+
             save_dir = os.path.join(app_dir, 'saved_yamls')
-            
+
             # Test write permissions
             os.makedirs(save_dir, exist_ok=True)
             test_file = os.path.join(save_dir, '.test')
             with open(test_file, 'w') as f:
                 f.write('test')
             os.remove(test_file)
-            
+
             return save_dir
-            
+
         except (OSError, PermissionError):
             # Fallback to temp directory
             temp_dir = tempfile.gettempdir()
             save_dir = os.path.join(temp_dir, 'orchetrix_saved_yamls')
             os.makedirs(save_dir, exist_ok=True)
             return save_dir
-    
+
     def _get_save_file_path(self, cluster, namespace, resource_type, resource_name):
         """Generate file path for saved YAML"""
         save_dir = self._get_save_directory()
@@ -1885,10 +1928,10 @@ class ComparePage(QWidget):
         clean_namespace = ''.join(c for c in namespace if c.isalnum() or c in '-_')
         clean_type = ''.join(c for c in resource_type if c.isalnum() or c in '-_')
         clean_name = ''.join(c for c in resource_name if c.isalnum() or c in '-_')
-        
+
         filename = f"{clean_cluster}_{clean_namespace}_{clean_type}_{clean_name}.json"
         return os.path.join(save_dir, filename)
-    
+
     def _save_yaml_locally(self, side, yaml_content):
         """Save YAML to local file"""
         try:
@@ -1898,10 +1941,10 @@ class ComparePage(QWidget):
                 namespace, resource_type, resource_name = self._right_resource_info
             else:
                 return
-            
+
             cluster = self._get_current_cluster_name()
             file_path = self._get_save_file_path(cluster, namespace, resource_type, resource_name)
-            
+
             # Create save data
             save_data = {
                 "cluster": cluster,
@@ -1912,41 +1955,41 @@ class ComparePage(QWidget):
                 "original_yaml": getattr(self, f'_{side}_original_yaml', yaml_content),
                 "timestamp": datetime.now().isoformat()
             }
-            
+
             # Write to file
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump(save_data, f, indent=2, ensure_ascii=False)
-            
+
             LOG.info(f"Saved {side} YAML locally: {file_path}")
-            
+
         except Exception as e:
             LOG.error(f"Error saving {side} YAML locally: {e}")
-    
+
     def _load_saved_yaml(self, cluster, namespace, resource_type, resource_name):
         """Load saved YAML if exists"""
         try:
             file_path = self._get_save_file_path(cluster, namespace, resource_type, resource_name)
-            
+
             if not os.path.exists(file_path):
                 return None
-            
+
             with open(file_path, 'r', encoding='utf-8') as f:
                 save_data = json.load(f)
-            
+
             # Verify the saved data matches current resource
             if (save_data.get('cluster') == cluster and
-                save_data.get('namespace') == namespace and
-                save_data.get('resource_type') == resource_type and
-                save_data.get('resource_name') == resource_name):
-                
+                    save_data.get('namespace') == namespace and
+                    save_data.get('resource_type') == resource_type and
+                    save_data.get('resource_name') == resource_name):
+
                 return save_data.get('yaml_content')
-            
+
             return None
-            
+
         except Exception as e:
             LOG.debug(f"Error loading saved YAML: {e}")
             return None
-    
+
     def _clear_all_local_saves(self):
         """Clear all saved files on app shutdown"""
         try:
@@ -1959,8 +2002,8 @@ class ComparePage(QWidget):
                             os.remove(file_path)
                         except Exception as e:
                             LOG.debug(f"Error removing saved file {filename}: {e}")
-                
+
                 LOG.info("Cleared all local save files")
-                
+
         except Exception as e:
             LOG.error(f"Error clearing local saves: {e}")
