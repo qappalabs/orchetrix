@@ -877,6 +877,66 @@ class ClusterView(QWidget):
             for btn in self.sidebar.nav_buttons:
                 btn.update_style()
 
+    def get_available_crds(self):
+        """Get available CustomResourceDefinitions for sidebar menu"""
+        try:
+            # First try to fetch CRDs directly from API
+            from Utils.kubernetes_client import get_kubernetes_client
+            kubernetes_client = get_kubernetes_client()
+            if kubernetes_client:
+                try:
+                    logging.info("Attempting to fetch CRDs directly from API...")
+                    # Use the apiextensions_v1 API to list CRDs
+                    crd_list = kubernetes_client.apiextensions_v1.list_custom_resource_definition()
+                    if crd_list and hasattr(crd_list, 'items'):
+                        crds = []
+                        logging.info(f"Found {len(crd_list.items)} CRDs from API")
+                        for crd_item in crd_list.items:
+                            # Convert to dict format
+                            crd_dict = kubernetes_client.v1.api_client.sanitize_for_serialization(crd_item)
+                            spec = crd_dict.get("spec", {})
+                            names = spec.get("names", {})
+                            metadata = crd_dict.get("metadata", {})
+                            
+                            crd_info = {
+                                "name": metadata.get("name", ""),
+                                "kind": names.get("kind", metadata.get("name", "")),
+                                "spec": spec
+                            }
+                            crds.append(crd_info)
+                            logging.info(f"CRD found: {crd_info['kind']} ({crd_info['name']})")
+                        return crds
+                    else:
+                        logging.info("No CRD items found in API response")
+                except Exception as e:
+                    logging.warning(f"Failed to fetch CRDs directly: {e}")
+            
+            # Fallback: Try to get CRDs from the definitions page if it's loaded
+            if "Definitions" in self.pages:
+                definitions_page = self.pages["Definitions"]
+                if hasattr(definitions_page, 'resources') and definitions_page.resources:
+                    crds = []
+                    for resource in definitions_page.resources:
+                        raw_data = resource.get("raw_data", {})
+                        spec = raw_data.get("spec", {})
+                        names = spec.get("names", {})
+                        
+                        crd_info = {
+                            "name": resource["name"],
+                            "kind": names.get("kind", resource["name"]),
+                            "spec": spec
+                        }
+                        crds.append(crd_info)
+                    logging.info(f"Found {len(crds)} CRDs from Definitions page")
+                    return crds
+                else:
+                    logging.info("Definitions page loaded but no resources or resources empty")
+            
+            return []
+        except Exception as e:
+            logging.error(f"Error getting available CRDs: {e}")
+            return []
+
     def handle_dropdown_selection(self, item_name: str) -> None:
         """Handle dropdown menu selections"""
         if hasattr(self, 'detail_manager') and self.detail_manager.is_detail_visible():
@@ -886,12 +946,38 @@ class ClusterView(QWidget):
             page_widget = self._ensure_page_loaded(item_name)
             self.stacked_widget.setCurrentWidget(page_widget)
             self._load_page_data(page_widget)
+            
+            # If we just loaded the Definitions page, refresh the sidebar
+            if item_name == "Definitions" and hasattr(self, 'sidebar'):
+                # Wait a bit longer for the page to fully load
+                QTimer.singleShot(1000, self.sidebar.refresh_custom_resources_dropdown)
+        else:
+            # Check if this is a CRD kind - create dynamic page
+            crds = self.get_available_crds()
+            crd_match = None
+            for crd in crds:
+                if crd["kind"] == item_name:
+                    crd_match = crd
+                    break
+            
+            if crd_match:
+                # Create or get the CRD instance page
+                page_key = f"CRD_{crd_match['kind']}"
+                if page_key not in self.pages:
+                    from Pages.CustomResources.CustomResourceInstancePage import CustomResourceInstancePage
+                    crd_page = CustomResourceInstancePage(crd_match["name"], crd_match["spec"], self)
+                    self.pages[page_key] = crd_page
+                    self.stacked_widget.addWidget(crd_page)
+                
+                page_widget = self.pages[page_key]
+                self.stacked_widget.setCurrentWidget(page_widget)
+                self._load_page_data(page_widget)
 
-            # Close dropdown
-            for btn in self.sidebar.nav_buttons:
-                if hasattr(btn, 'dropdown_open') and btn.dropdown_open:
-                    btn.dropdown_open = False
-                    btn.update_style()
+        # Close dropdown
+        for btn in self.sidebar.nav_buttons:
+            if hasattr(btn, 'dropdown_open') and btn.dropdown_open:
+                btn.dropdown_open = False
+                btn.update_style()
 
     def toggle_terminal(self) -> None:
         """Toggle terminal visibility"""
