@@ -990,44 +990,107 @@ class ComparePage(QWidget):
         except yaml.YAMLError:
             return {}  # Return empty dict if YAML is invalid
 
-    def build_comprehensive_line_map(self, yaml_string):
-        """Build comprehensive mapping tracking all lines with context"""
+    def build_yaml_line_maps(self, yaml_string):
+        """Build deterministic line mappings using text-based parser"""
         lines = yaml_string.splitlines()
         path_to_line = {}
         line_to_path = {}
-        path_stack = []
-        current_context = None
-
-        for i, line in enumerate(lines):
+        path_stack = []  # Stack of (component, indent) tuples
+        array_indices = {}  # Track array indices per parent path
+        
+        def build_path_from_stack():
+            """Build path from stack, handling brackets without dots"""
+            path_parts = []
+            for component, _ in path_stack:
+                if component.startswith('['):
+                    if path_parts:
+                        path_parts[-1] += component
+                    else:
+                        path_parts.append(component)
+                else:
+                    path_parts.append(component)
+            return '.'.join(path_parts)
+        
+        for i, line in enumerate(lines, 1):  # 1-indexed
             stripped = line.strip()
-
-            # Handle empty lines and comments - inherit context
+            
+            # Handle empty lines and comments
             if not stripped or stripped.startswith('#'):
-                line_to_path[i] = current_context
+                if path_stack:
+                    line_to_path[i] = build_path_from_stack()
                 continue
-
+            
             indent = len(line) - len(line.lstrip())
-
-            if ':' in stripped:
+            
+            # Handle list items (check before popping stack)
+            if stripped.startswith('- '):
+                # Pop stack for items at GREATER indent
+                while path_stack and path_stack[-1][1] > indent:
+                    path_stack.pop()
+                # Also pop if last item is a list item at SAME indent
+                if path_stack and path_stack[-1][1] == indent and '[' in path_stack[-1][0]:
+                    path_stack.pop()
+                
+                # Get parent path and array index
+                parent_path = build_path_from_stack()
+                
+                # Initialize or get counter for this array
+                if parent_path not in array_indices:
+                    array_indices[parent_path] = 0
+                list_idx = array_indices[parent_path]
+                array_indices[parent_path] += 1
+                
+                # Check for inline key:value
+                rest = stripped[2:].strip()
+                if ':' in rest and not rest.startswith('{'):
+                    key = rest.split(':', 1)[0].strip()
+                    # Build path: spec.containers[0].name (no dot before bracket)
+                    if parent_path:
+                        full_path = f"{parent_path}[{list_idx}].{key}"
+                    else:
+                        full_path = f"[{list_idx}].{key}"
+                    line_to_path[i] = full_path
+                    path_to_line[full_path] = i
+                    path_stack.append((f"[{list_idx}]", indent))
+                    path_stack.append((key, indent + 2))
+                else:
+                    # Just list marker
+                    if parent_path:
+                        full_path = f"{parent_path}[{list_idx}]"
+                    else:
+                        full_path = f"[{list_idx}]"
+                    line_to_path[i] = full_path
+                    path_to_line[full_path] = i
+                    path_stack.append((f"[{list_idx}]", indent))
+                continue
+            else:
+                # For non-list items, pop stack for items at same or greater indent
+                while path_stack and path_stack[-1][1] >= indent:
+                    path_stack.pop()
+            
+            # Handle key:value pairs
+            if ':' in stripped and not stripped.startswith('{'):
                 key = stripped.split(':', 1)[0].strip()
                 if key:
-                    # Adjust path stack based on indentation
-                    while path_stack and path_stack[-1][1] >= indent:
-                        path_stack.pop()
-
-                    # Build full path
-                    if path_stack:
-                        full_path = '.'.join([p[0] for p in path_stack] + [key])
+                    parent_path = build_path_from_stack()
+                    if parent_path:
+                        full_path = f"{parent_path}.{key}"
                     else:
                         full_path = key
-
-                    path_to_line[full_path] = i
                     line_to_path[i] = full_path
-                    current_context = full_path
+                    path_to_line[full_path] = i
                     path_stack.append((key, indent))
-            else:
-                # Non-key lines (like multi-line values) inherit context
-                line_to_path[i] = current_context
+                    
+                    # Reset nested array counters when entering new section
+                    keys_to_remove = [k for k in array_indices.keys() if k.startswith(full_path + '.') or k.startswith(full_path + '[')]
+                    for k in keys_to_remove:
+                        del array_indices[k]
+                continue
+            
+            # Continuation lines
+            if path_stack:
+                line_to_path[i] = build_path_from_stack()
+        
         return path_to_line, line_to_path
 
     def flatten_dict(self, d, parent_key='', sep='.'):
@@ -1072,19 +1135,28 @@ class ComparePage(QWidget):
             for item in diff['iterable_item_removed']:
                 changed_paths.add(str(item.path()))
         
-        # Build line mappings
-        paths1, line_to_path1 = self.build_comprehensive_line_map(yaml1)
-        paths2, line_to_path2 = self.build_comprehensive_line_map(yaml2)
+        if 'type_changes' in diff:
+            for item in diff['type_changes']:
+                changed_paths.add(str(item.path()))
         
-        # Convert DeepDiff paths to our path format
+        # Build line mappings with new parser
+        paths1, line_to_path1 = self.build_yaml_line_maps(yaml1)
+        paths2, line_to_path2 = self.build_yaml_line_maps(yaml2)
+        
+        # Convert DeepDiff paths to our path format (preserves array indices)
         def convert_deepdiff_path(dd_path):
-            # Convert root['spec']['containers'][0]['image'] to spec.containers.image
-            path = dd_path.replace("root", "").replace("['", ".").replace("']", "").replace("[", ".").replace("]", "")
-            if path.startswith("."):
+            # Convert root['spec']['containers'][0]['image'] to spec.containers[0].image
+            if dd_path.startswith("root"):
+                path = dd_path[4:]
+            else:
+                path = dd_path
+            
+            # Convert dict access ['key'] to .key (preserves [0], [1] array indices)
+            path = re.sub(r"\['(.*?)'\]", r'.\1', path)
+            
+            if path.startswith('.'):
                 path = path[1:]
-            # Remove array indices for matching
-            path = re.sub(r'\.\d+\.', '.', path)
-            path = re.sub(r'\.\d+$', '', path)
+            
             return path
         
         converted_changed_paths = {convert_deepdiff_path(cp) for cp in changed_paths}
@@ -1098,11 +1170,11 @@ class ComparePage(QWidget):
         lines2 = yaml2.splitlines()
         
         for i in range(len(lines1)):
-            path = line_to_path1.get(i)
+            path = line_to_path1.get(i + 1)  # Use 1-indexed line numbers
             if path:
-                # Only mark as changed if exact match or this is a child of changed path
+                # Mark as changed if exact match or child of changed path (including array children)
                 is_changed = any(
-                    path == cp or path.startswith(cp + ".")
+                    path == cp or path.startswith(cp + ".") or path.startswith(cp + "[")
                     for cp in converted_changed_paths
                 )
                 if is_changed:
@@ -1111,11 +1183,11 @@ class ComparePage(QWidget):
                     matching_lines1.add(i)
         
         for i in range(len(lines2)):
-            path = line_to_path2.get(i)
+            path = line_to_path2.get(i + 1)  # Use 1-indexed line numbers
             if path:
-                # Only mark as changed if exact match or this is a child of changed path
+                # Mark as changed if exact match or child of changed path (including array children)
                 is_changed = any(
-                    path == cp or path.startswith(cp + ".")
+                    path == cp or path.startswith(cp + ".") or path.startswith(cp + "[")
                     for cp in converted_changed_paths
                 )
                 if is_changed:
