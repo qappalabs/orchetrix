@@ -1112,6 +1112,52 @@ class ComparePage(QWidget):
                 items.append((new_key, v))
         return dict(items)
 
+    def _get_value_at_path(self, data, path):
+        """Extract value from dictionary using dot notation path with array indices and multi-segment join"""
+        if not path or not isinstance(data, dict):
+            return None
+        
+        current = data
+        parts = path.split('.')
+        i = 0
+        
+        while i < len(parts):
+            found = False
+            # Try longest possible key first (multi-segment join)
+            for j in range(len(parts), i, -1):
+                key_to_try = ".".join(parts[i:j])
+                
+                # Check for list indices
+                list_match = re.match(r'^(.*?)\[(\d+)\]$', key_to_try)
+                
+                if list_match:
+                    key_part = list_match.group(1)
+                    index = int(list_match.group(2))
+                    
+                    temp_data = current
+                    if key_part:
+                        if isinstance(temp_data, dict) and key_part in temp_data:
+                            temp_data = temp_data[key_part]
+                        else:
+                            continue
+                    
+                    if isinstance(temp_data, list) and index < len(temp_data):
+                        current = temp_data[index]
+                        i = j
+                        found = True
+                        break
+                        
+                elif isinstance(current, dict) and key_to_try in current:
+                    current = current[key_to_try]
+                    i = j
+                    found = True
+                    break
+            
+            if not found:
+                return None
+        
+        return current
+
     def compare_yaml_semantically(self, yaml1, yaml2):
         """Compare YAML semantically using DeepDiff (handles field reordering)"""
         dict1 = self.parse_yaml_string(yaml1)
@@ -1180,11 +1226,24 @@ class ComparePage(QWidget):
         for i in range(len(lines1)):
             path = line_to_path1.get(i + 1)  # Use 1-indexed line numbers
             if path:
-                # Mark as changed if exact match or child of changed path (including array children)
-                is_changed = any(
-                    path == cp or path.startswith(cp + ".") or path.startswith(cp + "[")
-                    for cp in converted_changed_paths
-                )
+                # Compare actual values at each path
+                val1 = self._get_value_at_path(dict1, path)
+                val2 = self._get_value_at_path(dict2, path)
+                
+                # Check if this is a parent key (dict or list)
+                is_parent_key = isinstance(val1, (dict, list)) or isinstance(val2, (dict, list))
+                
+                if is_parent_key:
+                    # Parent headers are GREEN if key exists in both
+                    if val1 is not None and val2 is not None:
+                        is_changed = False
+                    else:
+                        is_changed = True
+                else:
+                    # Leaf values use DeepDiff
+                    value_diff = DeepDiff(val1, val2, ignore_order=True)
+                    is_changed = bool(value_diff)
+                
                 if is_changed:
                     different_lines1.add(i)
                 else:
@@ -1193,11 +1252,24 @@ class ComparePage(QWidget):
         for i in range(len(lines2)):
             path = line_to_path2.get(i + 1)  # Use 1-indexed line numbers
             if path:
-                # Mark as changed if exact match or child of changed path (including array children)
-                is_changed = any(
-                    path == cp or path.startswith(cp + ".") or path.startswith(cp + "[")
-                    for cp in converted_changed_paths
-                )
+                # Compare actual values at each path
+                val1 = self._get_value_at_path(dict1, path)
+                val2 = self._get_value_at_path(dict2, path)
+                
+                # Check if this is a parent key (dict or list)
+                is_parent_key = isinstance(val1, (dict, list)) or isinstance(val2, (dict, list))
+                
+                if is_parent_key:
+                    # Parent headers are GREEN if key exists in both
+                    if val1 is not None and val2 is not None:
+                        is_changed = False
+                    else:
+                        is_changed = True
+                else:
+                    # Leaf values use DeepDiff
+                    value_diff = DeepDiff(val1, val2, ignore_order=True)
+                    is_changed = bool(value_diff)
+                
                 if is_changed:
                     different_lines2.add(i)
                 else:
