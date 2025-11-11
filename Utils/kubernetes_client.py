@@ -5,6 +5,7 @@ Designed for minimal overhead and maximum performance.
 """
 
 import logging
+import sys
 from typing import Optional, Dict, List, Any
 from dataclasses import dataclass
 from PyQt6.QtCore import QObject, pyqtSignal
@@ -1349,6 +1350,14 @@ class KubernetesPodSSH(QObject):
             self.process.readyReadStandardError.connect(self._handle_stderr)
             self.process.finished.connect(self._handle_finished)
             self.process.errorOccurred.connect(self._handle_error)
+            
+            # Windows configuration to prevent terminal window
+            if sys.platform == 'win32':
+                from PyQt6.QtCore import QProcess
+                self.process.setProcessEnvironment(self.process.processEnvironment())
+                self.process.setCreateProcessArgumentsModifier(
+                    lambda args: args.setFlags(0x08000000)  # CREATE_NO_WINDOW
+                )
             
             # kubectl exec command to start interactive shell
             cmd = "kubectl"

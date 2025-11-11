@@ -20,6 +20,13 @@ import shutil
 import tempfile
 import time
 import logging
+import sys
+
+# Windows subprocess configuration to prevent terminal popup
+if sys.platform == 'win32':
+    SUBPROCESS_FLAGS = subprocess.CREATE_NO_WINDOW
+else:
+    SUBPROCESS_FLAGS = 0
 
 from Base_Components.base_resource_page import BaseResourcePage
 from Base_Components.base_components import SortableTableWidgetItem
@@ -85,7 +92,8 @@ class HelmOperationThread(QThread):
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True
+                text=True,
+                creationflags=SUBPROCESS_FLAGS if sys.platform == 'win32' else 0
             )
             
             self.progress_percentage.emit(50)
@@ -182,7 +190,8 @@ class HelmOperationThread(QThread):
                 self.progress_percentage.emit(25)
                 
                 info_cmd = [helm_path, "list", "--filter", f"^{release_name}$", "-n", namespace, "-o", "json"]
-                result = subprocess.run(info_cmd, capture_output=True, text=True, timeout=15)
+                result = subprocess.run(info_cmd, capture_output=True, text=True, timeout=15,
+                                       creationflags=SUBPROCESS_FLAGS if sys.platform == 'win32' else 0)
                 
                 if result.returncode == 0 and result.stdout.strip():
                     try:
@@ -248,7 +257,8 @@ class HelmOperationThread(QThread):
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True
+                text=True,
+                creationflags=SUBPROCESS_FLAGS if sys.platform == 'win32' else 0
             )
             
             # Monitor progress
@@ -314,7 +324,8 @@ class HelmOperationThread(QThread):
             
             try:
                 cmd = [helm_path, "uninstall", release_name, "-n", namespace]
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=30,
+                                       creationflags=SUBPROCESS_FLAGS if sys.platform == 'win32' else 0)
                 
                 if result.returncode == 0:
                     successful_deletions.append((release_name, namespace))
@@ -379,6 +390,7 @@ class HelmReleasesLoader(QThread):
                 cmd,
                 capture_output=True,
                 text=True,
+                creationflags=SUBPROCESS_FLAGS if sys.platform == 'win32' else 0,
                 check=True,
                 timeout=30
             )
@@ -794,7 +806,8 @@ class ReleaseUpgradeDialog(QDialog):
             
             # Get current chart from helm list
             list_cmd = [helm_path, "list", "--filter", f"^{self.release_name}$", "-n", self.namespace, "-o", "json"]
-            result = subprocess.run(list_cmd, capture_output=True, text=True, timeout=15)
+            result = subprocess.run(list_cmd, capture_output=True, text=True, timeout=15,
+                                   creationflags=SUBPROCESS_FLAGS if sys.platform == 'win32' else 0)
             
             if result.returncode == 0 and result.stdout.strip():
                 try:
@@ -809,7 +822,8 @@ class ReleaseUpgradeDialog(QDialog):
             
             # Get current values
             values_cmd = [helm_path, "get", "values", self.release_name, "-n", self.namespace, "-o", "yaml"]
-            result = subprocess.run(values_cmd, capture_output=True, text=True, timeout=15)
+            result = subprocess.run(values_cmd, capture_output=True, text=True, timeout=15,
+                                   creationflags=SUBPROCESS_FLAGS if sys.platform == 'win32' else 0)
             
             if result.returncode == 0:
                 # Check if stdout is empty
@@ -1067,7 +1081,8 @@ class ReleasesPage(BaseResourcePage):
                 result = subprocess.run(
                     cmd, 
                     capture_output=True, 
-                    text=True, 
+                    text=True,
+                    creationflags=SUBPROCESS_FLAGS if sys.platform == 'win32' else 0, 
                     timeout=20,
                     check=False
                 )
@@ -1801,7 +1816,8 @@ class ReleasesPage(BaseResourcePage):
             # Get release status information first (this is more reliable)
             status_cmd = [helm_path, "list", "--filter", f"^{release_name}$", "-n", namespace]
             logging.info(f"Running status command: {' '.join(status_cmd)}")
-            status_result = subprocess.run(status_cmd, capture_output=True, text=True, timeout=10)
+            status_result = subprocess.run(status_cmd, capture_output=True, text=True, timeout=10,
+                                          creationflags=SUBPROCESS_FLAGS if sys.platform == 'win32' else 0)
             
             status_info = {}
             if status_result.returncode == 0 and status_result.stdout.strip():
@@ -1874,7 +1890,8 @@ class ReleasesPage(BaseResourcePage):
             # Get values
             values_cmd = [helm_path, "get", "values", release_name, "-n", namespace]
             logging.info(f"Running values command: {' '.join(values_cmd)}")
-            values_result = subprocess.run(values_cmd, capture_output=True, text=True, timeout=10)
+            values_result = subprocess.run(values_cmd, capture_output=True, text=True, timeout=10,
+                                          creationflags=SUBPROCESS_FLAGS if sys.platform == 'win32' else 0)
             
             if values_result.returncode == 0:
                 try:
@@ -1913,7 +1930,8 @@ class ReleasesPage(BaseResourcePage):
             # Get manifest
             manifest_cmd = [helm_path, "get", "manifest", release_name, "-n", namespace]
             logging.info(f"Running manifest command: {' '.join(manifest_cmd)}")
-            manifest_result = subprocess.run(manifest_cmd, capture_output=True, text=True, timeout=10)
+            manifest_result = subprocess.run(manifest_cmd, capture_output=True, text=True, timeout=10,
+                                            creationflags=SUBPROCESS_FLAGS if sys.platform == 'win32' else 0)
             
             if manifest_result.returncode == 0:
                 detailed_release["manifest"] = manifest_result.stdout
@@ -1923,7 +1941,8 @@ class ReleasesPage(BaseResourcePage):
                 
             # Get notes if available
             notes_cmd = [helm_path, "get", "notes", release_name, "-n", namespace]
-            notes_result = subprocess.run(notes_cmd, capture_output=True, text=True, timeout=10)
+            notes_result = subprocess.run(notes_cmd, capture_output=True, text=True, timeout=10,
+                                         creationflags=SUBPROCESS_FLAGS if sys.platform == 'win32' else 0)
             
             if notes_result.returncode == 0:
                 detailed_release["info"] = {"notes": notes_result.stdout}
@@ -2004,7 +2023,8 @@ class ReleasesPage(BaseResourcePage):
                 
             # Get the manifest of deployed resources
             cmd = [helm_path, "get", "manifest", release_name, "-n", namespace]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10,
+                                   creationflags=SUBPROCESS_FLAGS if sys.platform == 'win32' else 0)
             
             if result.returncode == 0 and result.stdout.strip():
                 import yaml

@@ -86,6 +86,11 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=icon_path if icon_path and os.path.exists(icon_path) else None,
+    # Additional Windows configuration to prevent subprocess terminal windows
+    runtime_tmpdir=None,
+    # Ensure subprocess calls don't create visible windows
+    uac_admin=False,
+    uac_uiaccess=False,
 )
 
 coll = COLLECT(

@@ -21,6 +21,12 @@ import subprocess
 import sys
 import platform
 import shutil
+
+# Windows subprocess configuration to prevent terminal popup
+if sys.platform == 'win32':
+    SUBPROCESS_FLAGS = subprocess.CREATE_NO_WINDOW
+else:
+    SUBPROCESS_FLAGS = 0
 from typing import Dict, Any, Optional
 from kubernetes import client
 from PyQt6.QtWidgets import (
@@ -38,7 +44,8 @@ def check_helm_installed():
     """Check if Helm CLI is installed and available"""
     try:
         result = subprocess.run(['helm', 'version', '--short'], 
-                              capture_output=True, text=True, timeout=10)
+                              capture_output=True, text=True, timeout=10,
+                              creationflags=SUBPROCESS_FLAGS if sys.platform == 'win32' else 0)
         if result.returncode == 0:
             version = result.stdout.strip()
             logging.info(f"Helm is installed: {version}")
@@ -89,7 +96,8 @@ def _install_helm_linux():
         """
         
         result = subprocess.run(install_script, shell=True, capture_output=True, 
-                              text=True, timeout=300)
+                              text=True, timeout=300,
+                              creationflags=SUBPROCESS_FLAGS if sys.platform == 'win32' else 0)
         
         if result.returncode == 0:
             logging.info("Helm installed successfully on Linux")
@@ -110,7 +118,8 @@ def _install_helm_macos():
         # Try with Homebrew first
         if shutil.which('brew'):
             result = subprocess.run(['brew', 'install', 'helm'], 
-                                  capture_output=True, text=True, timeout=300)
+                                  capture_output=True, text=True, timeout=300,
+                                  creationflags=SUBPROCESS_FLAGS if sys.platform == 'win32' else 0)
             if result.returncode == 0:
                 return True, "Helm installed via Homebrew"
         
@@ -132,7 +141,8 @@ def _install_helm_script_macos():
         """
         
         result = subprocess.run(install_script, shell=True, capture_output=True, 
-                              text=True, timeout=300)
+                              text=True, timeout=300,
+                              creationflags=SUBPROCESS_FLAGS if sys.platform == 'win32' else 0)
         
         if result.returncode == 0:
             return True, "Helm installed successfully on macOS"
@@ -149,14 +159,16 @@ def _install_helm_windows():
         # Try with Chocolatey first
         if shutil.which('choco'):
             result = subprocess.run(['choco', 'install', 'kubernetes-helm', '-y'], 
-                                  capture_output=True, text=True, timeout=300)
+                                  capture_output=True, text=True, timeout=300,
+                                  creationflags=SUBPROCESS_FLAGS if sys.platform == 'win32' else 0)
             if result.returncode == 0:
                 return True, "Helm installed via Chocolatey"
         
         # Try with Scoop
         if shutil.which('scoop'):
             result = subprocess.run(['scoop', 'install', 'helm'], 
-                                  capture_output=True, text=True, timeout=300)
+                                  capture_output=True, text=True, timeout=300,
+                                  creationflags=SUBPROCESS_FLAGS if sys.platform == 'win32' else 0)
             if result.returncode == 0:
                 return True, "Helm installed via Scoop"
         
@@ -183,7 +195,8 @@ def run_helm_command(command_args, timeout=120):
         cmd = ['helm'] + command_args
         logging.info(f"Running Helm command: {' '.join(cmd)}")
         
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                                creationflags=SUBPROCESS_FLAGS if sys.platform == 'win32' else 0)
         
         if result.returncode == 0:
             logging.info(f"Helm command successful: {result.stdout[:200]}...")

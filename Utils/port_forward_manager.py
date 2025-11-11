@@ -9,6 +9,13 @@ import socket
 import subprocess
 import threading
 import time
+import sys
+
+# Windows subprocess configuration to prevent terminal popup  
+if sys.platform == 'win32':
+    SUBPROCESS_FLAGS = subprocess.CREATE_NO_WINDOW
+else:
+    SUBPROCESS_FLAGS = 0
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple, List
 
@@ -113,7 +120,8 @@ class KubernetesPortForwarder:
                 stderr=subprocess.PIPE,
                 text=True,
                 bufsize=1,
-                universal_newlines=True
+                universal_newlines=True,
+                creationflags=SUBPROCESS_FLAGS if sys.platform == 'win32' else 0
             )
             
             # Start monitoring thread
@@ -214,7 +222,8 @@ class KubernetesPortForwarder:
                 ['kubectl', 'version', '--client'],
                 capture_output=True,
                 text=True,
-                timeout=5
+                timeout=5,
+                creationflags=SUBPROCESS_FLAGS if sys.platform == 'win32' else 0
             )
             if result.returncode != 0:
                 logging.warning(f"kubectl client check failed: {result.stderr}")
@@ -225,7 +234,8 @@ class KubernetesPortForwarder:
                 ['kubectl', 'cluster-info'],
                 capture_output=True,
                 text=True,
-                timeout=5
+                timeout=5,
+                creationflags=SUBPROCESS_FLAGS if sys.platform == 'win32' else 0
             )
             if cluster_info.returncode != 0:
                 logging.warning(f"kubectl cluster access failed: {cluster_info.stderr}")
