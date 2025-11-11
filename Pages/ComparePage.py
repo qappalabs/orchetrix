@@ -75,6 +75,7 @@ class ComparePage(QWidget):
         # Simple loader state
         self._namespaces_loaded = False
         self.namespace_filter = "default"  # Initialize namespace filter for state persistence
+        self._initial_resource_types_loaded = False  # Track if resource types have been loaded once
 
         # Edit state management
         self._left_edit_mode = False
@@ -791,6 +792,10 @@ class ComparePage(QWidget):
 
         # Reconnect the signal
         self.namespace_combo.currentTextChanged.connect(self._on_namespace_changed)
+        
+        # Trigger resource type scan for initial load
+        if not self._initial_resource_types_loaded:
+            QTimer.singleShot(50, lambda: self._on_namespace_changed(self.namespace_combo.currentText()))
 
     # ---------- namespace/type -> resources ----------
     def _on_namespace_changed(self, namespace=None):
@@ -803,10 +808,10 @@ class ComparePage(QWidget):
             self._clear_resource_combos()
             return
 
-        # Enhanced state persistence - only proceed if namespace actually changed
-        old_namespace = getattr(self, 'namespace_filter', 'default')
-        if old_namespace == namespace:
-            return  # No change, skip reload
+        # Enhanced state persistence - skip reload only if namespace hasn't changed AND already loaded once
+        old_namespace = getattr(self, 'namespace_filter', None)
+        if old_namespace == namespace and self._initial_resource_types_loaded:
+            return  # No change and already loaded, skip reload
 
         # Update internal filter
         self.namespace_filter = namespace
@@ -853,6 +858,9 @@ class ComparePage(QWidget):
             else:
                 self.resource_type_combo.setCurrentIndex(0)
         self.resource_type_combo.blockSignals(False)
+        
+        # Mark resource types as loaded after first successful scan
+        self._initial_resource_types_loaded = True
 
         # Force resource population after namespace change to ensure resource dropdowns are updated
         # This handles the case where resource type stays the same but namespace changes
@@ -1453,6 +1461,7 @@ class ComparePage(QWidget):
             # Reset namespace loading flag and filter for new cluster
             self._namespaces_loaded = False
             self.namespace_filter = "default"  # Reset to default for new cluster
+            self._initial_resource_types_loaded = False  # Reset flag for new cluster
 
             # Trigger namespace reload after clearing
             from PyQt6.QtCore import QTimer
