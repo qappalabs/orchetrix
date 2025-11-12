@@ -985,12 +985,6 @@ class ComparePage(QWidget):
 
     # ---------- comparison functions ----------
 
-    def _clean_resource_data(self, data):
-        """Clean resource data for display"""
-        if not isinstance(data, dict):
-            return data
-        return data
-
     def parse_yaml_string(self, yaml_string):
         """Convert YAML string to dictionary for comparison"""
         try:
@@ -1100,17 +1094,6 @@ class ComparePage(QWidget):
                 line_to_path[i] = build_path_from_stack()
         
         return path_to_line, line_to_path
-
-    def flatten_dict(self, d, parent_key='', sep='.'):
-        """Flatten nested dictionary to dot-notation paths"""
-        items = []
-        for k, v in d.items():
-            new_key = f"{parent_key}{sep}{k}" if parent_key else k
-            if isinstance(v, dict):
-                items.extend(self.flatten_dict(v, new_key, sep=sep).items())
-            else:
-                items.append((new_key, v))
-        return dict(items)
 
     def _get_value_at_path(self, data, path):
         """Extract value from dictionary using dot notation path with array indices and multi-segment join"""
