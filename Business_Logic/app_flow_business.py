@@ -207,7 +207,7 @@ class AppFlowBusinessLogic:
         return connections
     
     def calculate_horizontal_layout(self, resources: List[ResourceInfo]) -> Dict[str, Tuple[float, float]]:
-        """Calculate horizontal layout positions for resources"""
+        """Calculate horizontal layout positions for ALL resources - Enhanced Layout"""
         positions = {}
         
         # Group resources by type in horizontal layers
@@ -218,33 +218,76 @@ class AppFlowBusinessLogic:
             ResourceType.POD: [r for r in resources if r.resource_type == ResourceType.POD],
         }
         
-        # Add config resources to bottom layer
-        config_resources = [r for r in resources if r.resource_type in 
-                          [ResourceType.CONFIGMAP, ResourceType.SECRET, ResourceType.PVC]]
-        if config_resources:
-            layers[ResourceType.CONFIGMAP] = config_resources
+        # Separate config resources by type for better organization
+        configmaps = [r for r in resources if r.resource_type == ResourceType.CONFIGMAP]
+        secrets = [r for r in resources if r.resource_type == ResourceType.SECRET]
+        pvcs = [r for r in resources if r.resource_type == ResourceType.PVC]
         
-        # Layout constants for horizontal arrangement - optimized for enhanced boxes with external text
-        LAYER_SPACING_X = 300  # Increased horizontal spacing for longer arrows between layers
-        ITEM_SPACING_Y = 60    # Reduced vertical spacing between items for pods
-        START_X = 50
-        START_Y = 50
+        # Add config layers if resources exist
+        if configmaps:
+            layers[ResourceType.CONFIGMAP] = configmaps
+        if secrets:
+            layers[ResourceType.SECRET] = secrets  
+        if pvcs:
+            layers[ResourceType.PVC] = pvcs
+        
+        # Layout constants optimized for readability with many resources
+        LAYER_SPACING_X = 400  # Increased spacing between resource type layers to reduce overlap
+        ITEM_SPACING_Y = 70    # Optimized spacing between items in same layer
+        START_X = 60
+        START_Y = 60
         
         layer_x = START_X
         
-        for layer_type, layer_resources in layers.items():
+        # Define layer order for proper flow visualization
+        layer_order = [
+            ResourceType.INGRESS,
+            ResourceType.SERVICE, 
+            ResourceType.DEPLOYMENT,
+            ResourceType.POD,
+            ResourceType.CONFIGMAP,
+            ResourceType.SECRET,
+            ResourceType.PVC
+        ]
+        
+        for layer_type in layer_order:
+            layer_resources = layers.get(layer_type, [])
             if not layer_resources:
                 continue
                 
-            # Position items vertically within the layer
-            layer_y = START_Y
-            for resource in layer_resources:
+            # Calculate starting Y position to center the layer vertically
+            total_layer_height = len(layer_resources) * ITEM_SPACING_Y
+            layer_start_y = START_Y
+            
+            # Smart spacing based on resource count to prevent overcrowding
+            resource_count = len(layer_resources)
+            
+            if resource_count > 10:
+                # Very dense layout for many resources
+                dynamic_spacing = max(45, ITEM_SPACING_Y - (resource_count - 10) * 2)
+            elif resource_count > 6:
+                # Moderately dense layout
+                dynamic_spacing = max(55, ITEM_SPACING_Y - (resource_count - 6) * 3)
+            elif resource_count > 3:
+                # Slightly reduced spacing
+                dynamic_spacing = ITEM_SPACING_Y - 10
+            else:
+                # Standard spacing for few resources
+                dynamic_spacing = ITEM_SPACING_Y
+            
+            # Apply smart centering for better visual balance
+            total_height = resource_count * dynamic_spacing
+            layer_start_y = START_Y + max(0, (400 - total_height) // 2)  # Center vertically in viewport
+            
+            layer_y = layer_start_y
+            for i, resource in enumerate(layer_resources):
                 key = f"{resource.resource_type.value}:{resource.name}"
                 positions[key] = (layer_x, layer_y)
-                layer_y += ITEM_SPACING_Y
+                layer_y += dynamic_spacing
             
             layer_x += LAYER_SPACING_X
         
+        logging.info(f"Calculated layout positions for {len(positions)} resources across {len([l for l in layers.values() if l])} layers")
         return positions
     
     def get_resource_icon_info(self, resource_type: ResourceType) -> K8sIconInfo:

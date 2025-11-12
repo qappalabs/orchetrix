@@ -1038,13 +1038,16 @@ class AppsPage(QWidget):
     
     
     def create_horizontal_app_flow_diagram(self, processed_data):
-        """Create horizontal app flow diagram with Kubernetes icons"""
+        """Create user-friendly horizontal app flow diagram with enhanced readability"""
         self.diagram_scene.clear()
         
         resources = processed_data.get("resources", [])
         if not resources:
             self.add_text_to_scene("No resources found in app flow", 10, 10, QColor(AppColors.TEXT_SECONDARY))
             return
+        
+        # Add resource summary at the top for better understanding
+        self.add_resource_summary(resources)
         
         # Calculate positions using business logic
         positions = self.business_logic.calculate_horizontal_layout(resources)
@@ -1058,6 +1061,9 @@ class AppsPage(QWidget):
         if pod_resources:
             self.draw_simple_pod_box(pod_resources, positions)
         
+        # Add layer headers for better organization
+        self.add_layer_headers(positions, resources)
+        
         # Draw resources with K8s icons
         for resource in resources:
             key = f"{resource.resource_type.value}:{resource.name}"
@@ -1065,18 +1071,78 @@ class AppsPage(QWidget):
                 x, y = positions[key]
                 self.draw_resource_with_icon(resource, x, y)
         
-        # Draw connections
-        for connection in processed_data.get("connections", []):
-            from_key = connection.from_resource
-            to_key = connection.to_resource
+        # Draw connections with smart routing
+        connections = processed_data.get("connections", [])
+        logging.info(f"Drawing {len(connections)} connections for enhanced readability")
+        logging.info(f"Available positions: {list(positions.keys())}")
+        
+        if not connections:
+            logging.warning("No connections found in processed_data!")
+        
+        for connection in connections:
+            # Handle both dict format and ConnectionInfo object format
+            if hasattr(connection, 'from_resource'):
+                from_key = connection.from_resource
+                to_key = connection.to_resource
+                connection_type = connection.connection_type
+            else:
+                from_key = connection.get("from")
+                to_key = connection.get("to") 
+                connection_type = connection.get("type")
+            
+            logging.info(f"Processing connection: {from_key} -> {to_key}")
             if from_key in positions and to_key in positions:
                 from_pos = positions[from_key]
                 to_pos = positions[to_key]
-                self.draw_horizontal_connection(from_pos, to_pos, connection.connection_type)
+                logging.info(f"Drawing connection from {from_pos} to {to_pos}")
+                self.draw_horizontal_connection(from_pos, to_pos, connection_type)
+            else:
+                logging.warning(f"Missing positions for connection: {from_key} -> {to_key}")
         
         # Enable live monitoring button if we have a valid graph
         if resources:
             self.live_monitor_btn.setEnabled(True)
+    
+    def add_resource_summary(self, resources):
+        """Add a helpful resource summary at the top of the diagram"""
+        # Count resources by type
+        resource_counts = {}
+        for resource in resources:
+            resource_type = resource.resource_type.value
+            resource_counts[resource_type] = resource_counts.get(resource_type, 0) + 1
+        
+        # Create summary text
+        summary_parts = []
+        for resource_type, count in resource_counts.items():
+            summary_parts.append(f"{count} {resource_type.title()}{'s' if count > 1 else ''}")
+        
+        summary_text = f"Showing: {', '.join(summary_parts)} ({len(resources)} total resources)"
+        
+        # Add to diagram
+        summary_font = QFont("Segoe UI", 10, QFont.Weight.Bold)
+        summary_item = self.diagram_scene.addText(summary_text, summary_font)
+        summary_item.setDefaultTextColor(QColor("#ffffff"))
+        summary_item.setPos(60, 10)
+    
+    def add_layer_headers(self, positions, resources):
+        """Add layer headers to show resource type organization"""
+        # Determine layer X positions
+        layer_positions = {}
+        for resource in resources:
+            key = f"{resource.resource_type.value}:{resource.name}"
+            if key in positions:
+                x, y = positions[key]
+                resource_type = resource.resource_type.value
+                if resource_type not in layer_positions:
+                    layer_positions[resource_type] = x
+        
+        # Add headers
+        header_font = QFont("Segoe UI", 9, QFont.Weight.Bold)
+        for resource_type, x_pos in layer_positions.items():
+            header_text = resource_type.title() + "s"
+            header_item = self.diagram_scene.addText(header_text, header_font)
+            header_item.setDefaultTextColor(QColor("#cccccc"))
+            header_item.setPos(x_pos, 35)  # Above the resources
     
     def draw_simple_pod_box(self, pod_resources, positions):
         """Draw a simple box around all pods, aligned with deployment center"""
@@ -1425,7 +1491,7 @@ class AppsPage(QWidget):
         return resource_path(os.path.join("Icons", icon_name))
     
     def draw_horizontal_connection(self, from_pos: tuple, to_pos: tuple, connection_type: str):
-        """Draw enhanced horizontal connection between resources"""
+        """Draw enhanced horizontal connection with smart routing to reduce overlaps"""
         from_x, from_y = from_pos
         to_x, to_y = to_pos
         
@@ -1439,81 +1505,134 @@ class AppsPage(QWidget):
         to_center_x = to_x + icon_width // 2
         to_center_y = to_y + icon_height // 2
         
-        # Determine connection points - keep horizontal straight lines
+        # Smart connection routing to reduce overlaps
         if connection_type == "deployment_to_pod":
-            # From deployment center to pod box - horizontal line
-            from_point_x = from_x + icon_width    # Right edge of deployment icon
-            from_point_y = from_center_y          # Center Y of deployment icon
+            # From deployment center to pod box with curved routing
+            from_point_x = from_x + icon_width
+            from_point_y = from_center_y
             
-            # Connect horizontally to pod container
             if hasattr(self, 'pod_container_bounds') and self.pod_container_bounds:
-                to_point_x = self.pod_container_bounds['min_x']  # Left edge of pod container
-                to_point_y = from_point_y  # Same Y as deployment center for horizontal line
+                to_point_x = self.pod_container_bounds['min_x']
+                to_point_y = from_point_y  # Keep horizontal alignment
             else:
-                to_point_x = to_x         # Left edge of pod icon
-                to_point_y = from_point_y  # Same Y as deployment center for horizontal line
+                to_point_x = to_x
+                to_point_y = from_point_y
                 
         elif connection_type in ["pod_to_config", "pod_to_secret", "pod_to_pvc"]:
-            # From pod box to config resource - horizontal line
-            to_point_x = to_x           # Left edge of target icon
-            to_point_y = to_center_y    # Center Y of target icon
-            
+            # From pod box RIGHT EDGE to config resource center for proper visual flow
             if hasattr(self, 'pod_container_bounds') and self.pod_container_bounds:
-                from_point_x = self.pod_container_bounds['max_x']  # Right edge of pod container
-                to_point_y = to_center_y  # Use target center Y for horizontal line
-                from_point_y = to_point_y  # Same Y as target for horizontal line
+                # Use pod container boundary for more accurate connection point
+                from_point_x = self.pod_container_bounds['max_x']
+                from_point_y = from_center_y
             else:
-                from_point_x = from_x + icon_width  # Right edge of pod icon
-                from_point_y = to_point_y           # Same Y as target for horizontal line
+                # Fallback to pod icon right edge
+                from_point_x = from_x + icon_width
+                from_point_y = from_center_y
+            
+            # To config resource center
+            to_point_x = to_center_x  
+            to_point_y = to_center_y
+            
+            # Add vertical offset based on connection type to prevent overlaps
+            type_offset = {
+                "pod_to_config": -15,    # Slightly above center
+                "pod_to_secret": 0,      # At center 
+                "pod_to_pvc": 15         # Slightly below center
+            }.get(connection_type, 0)
+            
+            from_point_y += type_offset
+            to_point_y += type_offset
             
         else:
-            # Default: icon center to icon center connections
-            from_point_x = from_x + icon_width  # Right edge of from icon
-            from_point_y = from_center_y        # Center Y of from icon
-            to_point_x = to_x                   # Left edge of to icon
-            to_point_y = to_center_y            # Center Y of to icon
+            # Default center-to-center routing for service-to-deployment connections
+            from_point_x = from_center_x
+            from_point_y = from_center_y
+            to_point_x = to_center_x
+            to_point_y = to_center_y
         
-        # Color mapping for connection types with improved colors
+        # Enhanced color mapping with better visibility
         color_map = {
-            "ingress_to_service": "#E91E63",
-            "service_to_deployment": "#28a745", 
-            "deployment_to_pod": "#007acc",
-            "pod_to_config": "#4CAF50",
-            "pod_to_secret": "#FF9800",
-            "pod_to_pvc": "#9C27B0"
+            "ingress_to_service": "#E91E63",    # Pink
+            "service_to_deployment": "#28a745",  # Green
+            "deployment_to_pod": "#007acc",     # Blue
+            "pod_to_config": "#4CAF50",         # Light Green
+            "pod_to_secret": "#FF9800",         # Orange
+            "pod_to_pvc": "#9C27B0"             # Purple
         }
         
         color = color_map.get(connection_type, "#666666")
         
-        # Draw straight line connection
-        # Main line
-        main_line = self.diagram_scene.addLine(
-            from_point_x, from_point_y,
-            to_point_x, to_point_y,
-            QPen(QColor(color), 3)
-        )
-        
-        # Add subtle shadow line
-        shadow_line = self.diagram_scene.addLine(
-            from_point_x, from_point_y + 1,
-            to_point_x, to_point_y + 1,
-            QPen(QColor(color).darker(200), 1)
-        )
+        # Draw smarter connection lines with reduced visual noise
+        if abs(from_point_y - to_point_y) < 5:
+            # Straight horizontal line for aligned connections
+            main_line = self.diagram_scene.addLine(
+                from_point_x, from_point_y,
+                to_point_x, to_point_y,
+                QPen(QColor(color), 2)  # Slightly thinner lines
+            )
+        else:
+            # Curved path for non-aligned connections to reduce crossing
+            self.draw_curved_connection(from_point_x, from_point_y, to_point_x, to_point_y, color)
         
         # Draw enhanced arrow head
         self.draw_enhanced_arrow_head(to_point_x, to_point_y, from_point_x, from_point_y, color)
         
-        # Add connection label for better understanding
-        mid_x = from_point_x + (to_point_x - from_point_x) / 2
-        mid_y = from_point_y + (to_point_y - from_point_y) / 2 - 10
+        # Simplified connection labels - only show on hover or for important connections
+        if connection_type in ["ingress_to_service", "service_to_deployment"]:
+            self.add_connection_label(from_point_x, from_point_y, to_point_x, to_point_y, connection_type)
+    
+    def draw_curved_connection(self, from_x: float, from_y: float, to_x: float, to_y: float, color: str):
+        """Draw a curved connection to avoid overlapping straight lines"""
+        from PyQt6.QtGui import QPainterPath
+        from PyQt6.QtWidgets import QGraphicsPathItem
         
-        # Connection type label
-        connection_label = connection_type.replace("_", " ").replace("to", "→")
-        label_font = QFont("Segoe UI", 8, QFont.Weight.Bold)  # Larger and bold
-        label_text = self.diagram_scene.addText(connection_label, label_font)
-        label_text.setDefaultTextColor(QColor("#ffffff"))  # White color
+        # Create curved path
+        path = QPainterPath()
+        path.moveTo(from_x, from_y)
         
-        # Center the text properly on the connection line
+        # Calculate control points for smooth curve
+        mid_x = (from_x + to_x) / 2
+        control1_x = from_x + (to_x - from_x) * 0.3
+        control2_x = from_x + (to_x - from_x) * 0.7
+        
+        # Add slight curve to avoid overlaps
+        if from_y != to_y:
+            curve_offset = (to_y - from_y) * 0.3
+            path.cubicTo(
+                control1_x, from_y + curve_offset,
+                control2_x, to_y - curve_offset,
+                to_x, to_y
+            )
+        else:
+            # Gentle arc for same-level connections
+            path.quadTo(mid_x, from_y - 20, to_x, to_y)
+        
+        # Add curved path to scene
+        path_item = QGraphicsPathItem(path)
+        path_item.setPen(QPen(QColor(color), 2))
+        self.diagram_scene.addItem(path_item)
+    
+    def add_connection_label(self, from_x: float, from_y: float, to_x: float, to_y: float, connection_type: str):
+        """Add simplified connection label for key connections only"""
+        mid_x = from_x + (to_x - from_x) / 2
+        mid_y = from_y + (to_y - from_y) / 2 - 15
+        
+        # Simplified labels
+        label_map = {
+            "ingress_to_service": "↳",
+            "service_to_deployment": "→",
+            "deployment_to_pod": "⬇",
+            "pod_to_config": "⚙",
+            "pod_to_secret": "🔐",
+            "pod_to_pvc": "💾"
+        }
+        
+        label = label_map.get(connection_type, "→")
+        label_font = QFont("Segoe UI", 10, QFont.Weight.Bold)
+        label_text = self.diagram_scene.addText(label, label_font)
+        label_text.setDefaultTextColor(QColor("#ffffff"))
+        
+        # Position label
         text_width = label_text.boundingRect().width()
         text_height = label_text.boundingRect().height()
         label_text.setPos(mid_x - text_width / 2, mid_y - text_height / 2)
@@ -1757,12 +1876,20 @@ class AppsPage(QWidget):
         
         # Draw connections
         for connection in processed_data.get("connections", []):
-            from_key = connection.from_resource
-            to_key = connection.to_resource
+            # Handle both dict format and ConnectionInfo object format
+            if hasattr(connection, 'from_resource'):
+                from_key = connection.from_resource
+                to_key = connection.to_resource
+                connection_type = connection.connection_type
+            else:
+                from_key = connection.get("from")
+                to_key = connection.get("to") 
+                connection_type = connection.get("type")
+                
             if from_key in positions and to_key in positions:
                 from_pos = positions[from_key]
                 to_pos = positions[to_key]
-                self.draw_horizontal_connection(from_pos, to_pos, connection.connection_type)
+                self.draw_horizontal_connection(from_pos, to_pos, connection_type)
     
     def draw_export_pod_box(self, pod_resources, positions):
         """Draw pod container box optimized for export with darker border, aligned with deployment center"""
@@ -1929,10 +2056,12 @@ class AppsPage(QWidget):
     def enhanced_wheel_event(self, event):
         """Enhanced wheel event for smooth zooming"""
         try:
-            # Check if Ctrl is pressed for zooming
-            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            # Enable zooming with or without Ctrl for better usability
+            enable_zoom = True
+            
+            if enable_zoom:
                 # Zoom in/out
-                zoom_in_factor = 1.25
+                zoom_in_factor = 1.15  # Slightly smoother zoom
                 zoom_out_factor = 1 / zoom_in_factor
                 
                 # Save the scene pos
