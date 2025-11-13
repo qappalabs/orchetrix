@@ -19,10 +19,15 @@ class BarChart(QWidget):
         self.setMinimumHeight(300)
         self.setStyleSheet(AppStyles.BAR_CHART_TOOLTIP_STYLE)
 
-        if color == "#ff0000":  # Red for CPU
+        # Use provided title, or fall back to color-based titles
+        if title:
+            self.chart_title = title
+        elif color == "#ff0000":  # Red for CPU
             self.chart_title = "CPU Usage"
-        else:  # Cyan for Memory
+        elif color == "#00ffff":  # Cyan for Memory  
             self.chart_title = "Memory Usage"
+        else:
+            self.chart_title = "Resource Usage"
             
         self.times = []
         self.bar_positions = []

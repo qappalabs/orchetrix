@@ -271,15 +271,44 @@ class EnhancedClusterConnector(QObject):
         try:
             if resource_type == "nodes" and load_result.success:
                 # The unified loader already processed the data into dictionaries
-                # No need to process again - just emit the processed data
+                # Ensure the data format is consistent with what Node page expects
                 nodes_data = load_result.items
                 
-                logging.info(f"Cluster Connector: Received {len(nodes_data)} processed nodes from unified loader")
+                # Validate and normalize the data format
+                normalized_nodes = []
+                for node_data in nodes_data:
+                    if isinstance(node_data, dict):
+                        # Ensure required fields are present with correct keys
+                        # Preserve all original data while ensuring required fields exist
+                        normalized_node = dict(node_data)  # Start with all original data
+                        
+                        # Ensure required fields exist with defaults
+                        required_defaults = {
+                            "name": "Unknown",
+                            "status": "Unknown", 
+                            "roles": ["<none>"],
+                            "cpu_capacity": "",
+                            "memory_capacity": "",
+                            "disk_capacity": "",
+                            "taints": "0",
+                            "version": "Unknown",
+                            "age": "Unknown",
+                            "raw_data": {}
+                        }
+                        
+                        for key, default_value in required_defaults.items():
+                            if key not in normalized_node or not normalized_node[key]:
+                                normalized_node[key] = default_value
+                        normalized_nodes.append(normalized_node)
+                    else:
+                        logging.warning(f"Cluster Connector: Unexpected node data format: {type(node_data)}")
                 
-                # Emit the processed data directly
-                logging.debug(f"Cluster Connector: Emitting node_data_loaded signal with {len(nodes_data)} nodes")
-                self.node_data_loaded.emit(nodes_data)
-                logging.info(f"Cluster Connector: Successfully emitted {len(nodes_data)} processed nodes to UI")
+                logging.info(f"Cluster Connector: Received {len(normalized_nodes)} processed nodes from unified loader")
+                
+                # Emit the normalized data
+                logging.debug(f"Cluster Connector: Emitting node_data_loaded signal with {len(normalized_nodes)} nodes")
+                self.node_data_loaded.emit(normalized_nodes)
+                logging.info(f"Cluster Connector: Successfully emitted {len(normalized_nodes)} processed nodes to UI")
                 
         except Exception as e:
             logging.error(f"Cluster Connector: Error handling resource loading completion for {resource_type}: {e}")
@@ -431,8 +460,8 @@ class EnhancedClusterConnector(QObject):
         logging.error(f"Error loading {data_type}: {error_message}")
         self.error_occurred.emit(f"{data_type}_loading", error_message)
     
-    def _process_nodes_data(self, raw_nodes: List) -> List[NodeInfo]:
-        """Process raw Kubernetes node objects into NodeInfo objects"""
+    def _process_nodes_data(self, raw_nodes: List) -> List[Dict]:
+        """Process raw Kubernetes node objects into dictionary format for UI compatibility"""
         logging.info(f"Cluster Connector: Starting to process {len(raw_nodes) if raw_nodes else 0} raw node objects")
         if not raw_nodes:
             logging.warning("Cluster Connector: No raw nodes data to process")
@@ -468,21 +497,21 @@ class EnhancedClusterConnector(QObject):
                 kubelet_version = node.status.node_info.kubelet_version if node.status.node_info else "Unknown"
                 age = self._calculate_age(node.metadata.creation_timestamp)
                 
-                # Create NodeInfo object
-                node_info = NodeInfo(
-                    name=node_name,
-                    status=status,
-                    roles=roles,
-                    cpu_capacity=cpu_capacity,
-                    memory_capacity=memory_capacity,
-                    disk_capacity=storage_capacity,
-                    taints=str(taints_count),
-                    version=kubelet_version,
-                    age=age,
-                    raw_data=self.kube_client.v1.api_client.sanitize_for_serialization(node)
-                )
+                # Create dictionary format that matches what Node page expects
+                node_dict = {
+                    "name": node_name,
+                    "status": status,
+                    "roles": roles,
+                    "cpu_capacity": cpu_capacity,
+                    "memory_capacity": memory_capacity,
+                    "disk_capacity": storage_capacity,
+                    "taints": str(taints_count),
+                    "version": kubelet_version,
+                    "age": age,
+                    "raw_data": self.kube_client.v1.api_client.sanitize_for_serialization(node)
+                }
                 
-                processed_nodes.append(node_info)
+                processed_nodes.append(node_dict)
                 
             except Exception as e:
                 node_name = getattr(node, 'metadata', {}).get('name', 'unknown')

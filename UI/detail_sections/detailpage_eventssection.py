@@ -21,6 +21,16 @@ class DetailPageEventsSection(BaseDetailSection):
     def __init__(self, kubernetes_client, parent=None):
         super().__init__("Events", kubernetes_client, parent)
         self.setup_events_ui()
+    
+    def set_raw_data(self, raw_data):
+        """Set raw data for special resources like charts and releases"""
+        self.current_data = raw_data
+        # For charts and releases, we don't have Kubernetes events
+        # Show a message indicating this
+        self.events_list.clear()
+        no_events_item = QListWidgetItem("No Kubernetes events available for this resource type")
+        no_events_item.setForeground(QColor("#888888"))
+        self.events_list.addItem(no_events_item)
 
     def setup_events_ui(self):
         """Setup events-specific UI"""

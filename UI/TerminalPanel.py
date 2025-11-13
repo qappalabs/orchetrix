@@ -9,6 +9,7 @@ import os
 import platform  
 import shutil
 import logging
+import sys
 from datetime import datetime
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QFileDialog, QLabel, QPushButton
@@ -231,6 +232,13 @@ class TerminalPanel(QWidget):
         content_widget.setVisible(False)
 
         process = QProcess(self)
+        
+        # Windows configuration to prevent terminal window
+        if sys.platform == 'win32':
+            process.setCreateProcessArgumentsModifier(
+                lambda args: args.setFlags(0x08000000)  # CREATE_NO_WINDOW
+            )
+            
         process.readyReadStandardOutput.connect(lambda: self.handle_stdout(tab_index))
         process.readyReadStandardError.connect(lambda: self.handle_stderr(tab_index))
         process.finished.connect(lambda exit_code, exit_status: self.safe_handle_process_finished(tab_index, exit_code, exit_status))

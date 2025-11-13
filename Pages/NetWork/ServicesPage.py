@@ -11,10 +11,10 @@ from PyQt6.QtGui import QColor
 from Base_Components.base_components import SortableTableWidgetItem, StatusLabel
 from Base_Components.base_resource_page import BaseResourcePage
 from UI.Styles import AppColors, AppStyles
-from kubernetes import client
-from kubernetes.client.rest import ApiException
 from Utils.port_forward_manager import get_port_forward_manager, PortForwardConfig
 from Utils.port_forward_dialog import PortForwardDialog, ActivePortForwardsDialog
+from kubernetes import client
+from kubernetes.client.rest import ApiException
 from UI.Icons import resource_path
 
 
@@ -26,6 +26,7 @@ class ServicesPage(BaseResourcePage):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.resource_type = "services"
+        self.port_manager = get_port_forward_manager()
         # Use managed kubernetes client instead of direct client instantiation
         from Utils.kubernetes_client import get_kubernetes_client
         managed_client = get_kubernetes_client()
@@ -127,30 +128,47 @@ class ServicesPage(BaseResourcePage):
         checkbox_container.setStyleSheet(AppStyles.CHECKBOX_STYLE)
         self.table.setCellWidget(row, 0, checkbox_container)
         
-        spec = resource.get("raw_data", {}).get("spec", {})
-        service_type = spec.get("type", "ClusterIP")
-        cluster_ip = spec.get("clusterIP", "<none>")
+        # Use processed data from unified resource loader when available
+        service_type = resource.get("type", "")
+        cluster_ip = resource.get("cluster_ip", "")
         
+        # Parse port information dynamically from raw data
+        spec = resource.get("raw_data", {}).get("spec", {})
         ports = spec.get("ports", [])
         port_strs = []
-        for port in ports:
-            port_str = f"{port.get('port')}/{port.get('protocol', 'TCP')}"
-            if 'targetPort' in port:
-                port_str += f"→{port.get('targetPort')}"
-            port_strs.append(port_str)
-        port_text = ", ".join(port_strs) if port_strs else "<none>"
         
-        external_ips = spec.get("externalIPs", [])
-        lb_status = resource.get("raw_data", {}).get("status", {}).get("loadBalancer", {}).get("ingress", [])
-        for lb in lb_status:
-            if "ip" in lb:
-                external_ips.append(lb["ip"])
-            elif "hostname" in lb:
-                external_ips.append(lb["hostname"])
-        external_ip_text = ", ".join(external_ips) if external_ips else "<none>"
+        for port in ports:
+            # Only show actual port data, no hardcoded defaults
+            port_num = port.get('port')
+            protocol = port.get('protocol')  # Don't default to TCP
+            target_port = port.get('targetPort')
+            node_port = port.get('nodePort')
+            
+            if port_num is not None:
+                # Build port string with only available data
+                port_str = str(port_num)
+                
+                # Add protocol only if specified
+                if protocol:
+                    port_str += f"/{protocol}"
+                
+                # Add target port only if different from port and specified
+                if target_port is not None and str(target_port) != str(port_num):
+                    port_str += f"→{target_port}"
+                
+                # Add NodePort only if service type is NodePort and nodePort is specified
+                if node_port is not None and service_type == "NodePort":
+                    port_str += f":{node_port}"
+                
+                port_strs.append(port_str)
+        
+        port_text = ", ".join(port_strs) if port_strs else ""
+        
+        # Use the pre-processed external IP from unified resource loader
+        external_ip_text = resource.get("external_ip", "")
         
         selector = spec.get("selector", {})
-        selector_text = ", ".join([f"{k}={v}" for k, v in selector.items()]) if selector else "<none>"
+        selector_text = ", ".join([f"{k}={v}" for k, v in selector.items()]) if selector else ""
         
         status = self.determine_service_status(resource)
         
@@ -219,16 +237,23 @@ class ServicesPage(BaseResourcePage):
         service_ports = []
         raw_data = service_resource["raw_data"]
         
-        # Get ports from service spec
+        # Get ports from service spec - only actual data, no defaults
         ports = raw_data.get("spec", {}).get("ports", [])
         for port in ports:
             if port.get("port"):
-                service_ports.append({
-                    'port': port["port"],
-                    'target_port': port.get("targetPort", port["port"]),
-                    'protocol': port.get("protocol", "TCP"),
-                    'name': port.get("name", f"port-{port['port']}")
-                })
+                port_info = {
+                    'port': port["port"]
+                }
+                
+                # Only add fields that actually exist
+                if "targetPort" in port:
+                    port_info['target_port'] = port["targetPort"]
+                if "protocol" in port:
+                    port_info['protocol'] = port["protocol"]
+                if "name" in port:
+                    port_info['name'] = port["name"]
+                
+                service_ports.append(port_info)
         
         return service_ports
     
@@ -238,8 +263,8 @@ class ServicesPage(BaseResourcePage):
             raw_data = resource.get("raw_data", {})
             spec = raw_data.get("spec", {})
             status = raw_data.get("status", {})
-            service_type = spec.get("type", "ClusterIP")
-            namespace = resource.get("namespace", "default")
+            service_type = spec.get("type", "")
+            namespace = resource.get("namespace", "")
             service_name = resource.get("name", "")
             
             # Determine endpoint status without blocking API calls

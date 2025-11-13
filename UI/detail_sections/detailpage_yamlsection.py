@@ -663,6 +663,11 @@ class DetailPageYAMLSection(BaseDetailSection):
         self.yaml_edited = False
         self.is_helm_resource = False
         self.setup_yaml_ui()
+    
+    def set_raw_data(self, raw_data):
+        """Set raw data for special resources like charts and releases"""
+        self.current_data = raw_data
+        self.update_ui_with_data(raw_data)
 
     def setup_yaml_ui(self):
         """Setup YAML-specific UI"""

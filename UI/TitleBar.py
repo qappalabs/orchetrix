@@ -10,7 +10,7 @@ from PyQt6.QtGui import QFont, QLinearGradient, QPainter, QColor, QPixmap, QIcon
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QLabel, QToolButton, QPushButton, QFrame, QLineEdit, QMenu, QSpacerItem, QWidgetAction
 
 from UI.Styles import AppColors, AppStyles
-from UI.Icons import Icons
+from UI.Icons import Icons, resource_path
 
 class TitleBar(QWidget):
     def __init__(self, parent=None, update_pinned_items_signal=None):
@@ -65,7 +65,6 @@ class TitleBar(QWidget):
         self.logo_label.setFixedSize(self.logo_icon_size)
 
         try:
-            from UI.Icons import resource_path  # Import the resource_path function
             logo_path = resource_path("Icons/logoIcon.png")
             pixmap = QPixmap(logo_path)
             if not pixmap.isNull():

@@ -97,6 +97,9 @@ class KubernetesAPIService:
         self._api_clients: Dict[str, ThreadSafeAPIClient] = {}
         self._cached_clients = False
         self._cached_context = None
+        self._api_timeout_detected = False
+        self._consecutive_timeouts = 0
+        self._max_consecutive_timeouts = 3
         self._setup_lazy_clients()
     
     def _setup_lazy_clients(self):
@@ -190,6 +193,11 @@ class KubernetesAPIService:
     
     def is_connected(self) -> bool:
         """Check if API clients are properly initialized with improved error handling"""
+        # Skip check if we've had too many consecutive timeouts
+        if self._consecutive_timeouts >= self._max_consecutive_timeouts:
+            logging.debug("API Service: Skipping connectivity check due to consecutive timeout limit")
+            return False
+            
         logging.debug("API Service: Checking Kubernetes API connectivity for node operations")
         try:
             # Try to access the version API as a connectivity test with timeout
@@ -197,12 +205,24 @@ class KubernetesAPIService:
             version_info = self.version_api.get_code(_request_timeout=10)
             logging.debug(f"API Service: Kubernetes API connectivity test successful: {version_info}")
             logging.info("API Service: Successfully connected to Kubernetes API - nodes API ready")
+            
+            # Reset timeout counters on successful connection
+            self._consecutive_timeouts = 0
+            self._api_timeout_detected = False
+            
             return version_info is not None
         except Exception as e:
             # Classify error types for better handling
             error_type = type(e).__name__
             if "timeout" in str(e).lower() or "timed out" in str(e).lower():
-                logging.warning(f"API Service: Kubernetes API connectivity timeout - node operations unavailable: {e}")
+                self._consecutive_timeouts += 1
+                self._api_timeout_detected = True
+                logging.warning(f"API Service: Kubernetes API connectivity timeout #{self._consecutive_timeouts} - node operations unavailable: {e}")
+                
+                # Stop trying after max consecutive timeouts to prevent resource exhaustion
+                if self._consecutive_timeouts >= self._max_consecutive_timeouts:
+                    logging.error(f"API Service: Maximum consecutive timeouts ({self._max_consecutive_timeouts}) reached. Stopping connection attempts to prevent resource exhaustion.")
+                    return False
             elif "connection" in str(e).lower() or "refused" in str(e).lower():
                 logging.warning(f"API Service: Kubernetes API connection refused - cluster may be down: {e}")
             elif "unauthorized" in str(e).lower() or "forbidden" in str(e).lower():
@@ -210,6 +230,16 @@ class KubernetesAPIService:
             else:
                 logging.error(f"API Service: Kubernetes API connectivity check failed: {error_type}: {e}")
             return False
+    
+    def reset_timeout_detection(self):
+        """Reset timeout detection flags - call this when cluster becomes available"""
+        self._consecutive_timeouts = 0
+        self._api_timeout_detected = False
+        logging.info("API Service: Timeout detection reset - connectivity checks resumed")
+    
+    def should_skip_api_calls(self) -> bool:
+        """Check if API calls should be skipped due to consecutive timeouts"""
+        return self._consecutive_timeouts >= self._max_consecutive_timeouts
     
     def get_cluster_version(self) -> Optional[str]:
         """Get Kubernetes cluster version"""

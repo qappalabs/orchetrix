@@ -12,6 +12,7 @@ from PyQt6.QtGui import QAction, QColor, QTextCursor, QFont, QTextCharFormat, QK
 from PyQt6.QtCore import Qt, pyqtSignal
 
 from UI.Styles import AppStyles
+from Utils.kubernetes_client import get_kubernetes_client
 from .terminal_constants import StyleConstants, CommandConstants
 
 
@@ -421,7 +422,6 @@ class UnifiedTerminalWidget(QTextEdit):
                 return logs_info['logs_viewer'].header.containers
 
             # Fallback: Get containers directly from Kubernetes API
-            from Utils.kubernetes_client import get_kubernetes_client
             kube_client = get_kubernetes_client()
 
             if kube_client and kube_client.v1:

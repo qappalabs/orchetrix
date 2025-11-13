@@ -4,9 +4,11 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QToolButton, QLa
 from PyQt6.QtCore import Qt, QSize, QPropertyAnimation, QEasingCurve, QEvent, QTimer, QPoint, QRect
 from PyQt6.QtGui import QIcon, QFont, QColor, QAction, QPixmap
 
-from UI.Styles import AppColors, AppStyles
-from UI.Icons import Icons
 import logging
+import platform
+
+from UI.Styles import AppColors, AppStyles
+from UI.Icons import Icons, resource_path
 
 class NavMenuDropdown(QMenu):
     def __init__(self, parent=None):
@@ -22,7 +24,6 @@ class NavMenuDropdown(QMenu):
         # Only add shadow effect on non-Windows platforms or disable it entirely
         # to avoid UpdateLayeredWindowIndirect errors
         try:
-            import platform
             if platform.system() != "Windows":
                 shadow = QGraphicsDropShadowEffect(self)
                 shadow.setColor(QColor(0, 0, 0, 100))
@@ -43,7 +44,6 @@ class SidebarToggleButton(QToolButton):
         self.expanded = True
 
         try:
-            from UI.Icons import resource_path  # Import the resource_path function
             back_icon_path = resource_path("Icons/back.svg")
             forward_icon_path = resource_path("Icons/forward.svg")
 
@@ -369,13 +369,46 @@ class NavIconButton(QToolButton):
                               "Cluster Role Bindings", "Role Bindings"]
             elif self.item_text == "Custom Resources":
                 menu_items = ["Definitions"]
+                # Add dynamic CRD entries
+                if hasattr(self.parent_window, 'get_available_crds'):
+                    try:
+                        crds = self.parent_window.get_available_crds()
+                        logging.info(f"Sidebar: Got {len(crds) if crds else 0} CRDs for dropdown")
+                        if crds:
+                            menu_items.append("---")  # Separator
+                            for crd in crds:
+                                # Use the kind name for display
+                                kind = crd.get("kind", crd.get("name", "Unknown"))
+                                logging.info(f"Adding CRD to dropdown: {kind}")
+                                menu_items.append(kind)
+                        else:
+                            # If no CRDs available now, try to load the Definitions page first
+                            if (hasattr(self.parent_window, '_ensure_page_loaded') and 
+                                hasattr(self.parent_window, 'stacked_widget')):
+                                try:
+                                    self.parent_window._ensure_page_loaded("Definitions")
+                                    # Try again after loading
+                                    crds = self.parent_window.get_available_crds()
+                                    if crds:
+                                        menu_items.append("---")  # Separator
+                                        for crd in crds:
+                                            kind = crd.get("kind", crd.get("name", "Unknown"))
+                                            menu_items.append(kind)
+                                except Exception as load_e:
+                                    logging.debug(f"Could not load Definitions page for CRDs: {load_e}")
+                    except Exception as e:
+                        logging.warning(f"Failed to load CRDs for sidebar: {e}")
             else:
                 menu_items = []
 
             for item in menu_items:
-                action = self.dropdown_menu.addAction(item)
-                action.triggered.connect(lambda checked=False, item_name=item:
-                                         self.parent_window.handle_dropdown_selection(item_name))
+                if item == "---":
+                    # Add separator
+                    self.dropdown_menu.addSeparator()
+                else:
+                    action = self.dropdown_menu.addAction(item)
+                    action.triggered.connect(lambda checked=False, item_name=item:
+                                             self.parent_window.handle_dropdown_selection(item_name))
 
         except Exception as e:
             logging.error(f"Error setting up dropdown for {self.item_text}: {e}")
@@ -385,8 +418,9 @@ class NavIconButton(QToolButton):
         """Clear all dropdown signal connections"""
         for connection in self._dropdown_connections:
             try:
-                connection.disconnect()
-            except (TypeError, RuntimeError):
+                if hasattr(connection, 'disconnect'):
+                    connection.disconnect()
+            except (TypeError, RuntimeError, AttributeError):
                 pass  # Connection already broken or doesn't exist
         self._dropdown_connections.clear()
 
@@ -396,6 +430,11 @@ class NavIconButton(QToolButton):
             return
 
         try:
+            # For Custom Resources, refresh the dropdown content to include latest CRDs
+            if self.item_text == "Custom Resources":
+                logging.info("Refreshing Custom Resources dropdown before showing...")
+                self.setup_dropdown()
+
             self.dropdown_open = True
             self.update_style()
 
@@ -498,6 +537,16 @@ class NavIconButton(QToolButton):
                 self.dropdown_menu.deleteLater()
         except Exception:
             pass  # Ignore errors during cleanup
+    
+    def refresh_dropdown(self):
+        """Refresh the dropdown menu (useful for dynamic content like CRDs)"""
+        if self.has_dropdown and self.item_text == "Custom Resources":
+            logging.info(f"Refreshing dropdown for {self.item_text}")
+            # Force cleanup and recreation of dropdown
+            if self.dropdown_menu:
+                self.dropdown_menu.deleteLater()
+                self.dropdown_menu = None
+            self.setup_dropdown()
 
 
 class Sidebar(QWidget):
@@ -591,7 +640,7 @@ class Sidebar(QWidget):
             ("config", "Config", False, True),
             ("network", "Network", False, True),
             ("storage", "Storage", False, True),
-            ("helm", "Helm", False, True, True),
+            ("helm", "Helm", False, True, False),
             ("access_control", "Access Control", False, True),
             ("custom_resources", "Custom Resources", False, True),
             ("namespaces", "Namespaces", False),
@@ -611,6 +660,24 @@ class Sidebar(QWidget):
             )
             self.nav_buttons.append(nav_btn)
             self.sidebar_layout.addWidget(nav_btn)
+
+    def refresh_custom_resources_dropdown(self):
+        """Refresh the Custom Resources dropdown menu when CRDs are loaded"""
+        try:
+            # Find the Custom Resources button
+            custom_resources_button = None
+            for button in self.nav_buttons:
+                if hasattr(button, 'item_text') and button.item_text == "Custom Resources":
+                    custom_resources_button = button
+                    break
+            
+            if custom_resources_button and hasattr(custom_resources_button, 'setup_dropdown'):
+                logging.info("Refreshing Custom Resources dropdown...")
+                # Force recreation of the dropdown
+                custom_resources_button.setup_dropdown()
+                logging.info("Custom Resources dropdown refreshed")
+        except Exception as e:
+            logging.error(f"Error refreshing Custom Resources dropdown: {e}")
 
     def toggle_complete_event(self):
         """Fire an event when sidebar toggle animation completes"""
@@ -718,7 +785,10 @@ class Sidebar(QWidget):
             controls_layout.setContentsMargins(5, 5, 5, 5)
 
         self.sidebar_animation.start()
-
-        # Update all nav buttons
-        for btn in self.nav_buttons:
-            btn.set_expanded(self.sidebar_expanded)
+    
+    def refresh_custom_resources_dropdown(self):
+        """Refresh the Custom Resources dropdown to include newly loaded CRDs"""
+        for button in self.nav_buttons:
+            if button.item_text == "Custom Resources" and button.has_dropdown:
+                button.refresh_dropdown()
+                break
