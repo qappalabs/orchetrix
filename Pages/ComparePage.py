@@ -1013,6 +1013,9 @@ class ComparePage(QWidget):
                     path_parts.append(component)
             return '.'.join(path_parts)
         
+        in_quoted_string = False
+        last_key_indent = -1
+        
         for i, line in enumerate(lines, 1):  # 1-indexed
             stripped = line.strip()
             
@@ -1070,6 +1073,16 @@ class ComparePage(QWidget):
                 while path_stack and path_stack[-1][1] >= indent:
                     path_stack.pop()
             
+            # If we're inside a quoted string, this is a continuation line
+            if in_quoted_string:
+                if path_stack:
+                    line_to_path[i] = build_path_from_stack()
+                # Check if string ends on this line (unescaped quote at end)
+                # Line must end with " (not \" which is escaped)
+                if stripped.endswith('"') and not stripped.endswith('\\"'):
+                    in_quoted_string = False
+                continue
+            
             # Handle key:value pairs
             if ':' in stripped and not stripped.startswith('{'):
                 key = stripped.split(':', 1)[0].strip()
@@ -1082,11 +1095,17 @@ class ComparePage(QWidget):
                     line_to_path[i] = full_path
                     path_to_line[full_path] = i
                     path_stack.append((key, indent))
+                    last_key_indent = indent
                     
                     # Reset nested array counters when entering new section
                     keys_to_remove = [k for k in array_indices.keys() if k.startswith(full_path + '.') or k.startswith(full_path + '[')]
                     for k in keys_to_remove:
                         del array_indices[k]
+                    
+                    # Check if this line starts a multi-line quoted string
+                    value_part = stripped.split(':', 1)[1].strip() if ':' in stripped else ''
+                    if value_part.startswith('"') and not (value_part.count('"') >= 2 and value_part.endswith('"')):
+                        in_quoted_string = True
                 continue
             
             # Continuation lines
