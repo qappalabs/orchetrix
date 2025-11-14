@@ -235,9 +235,15 @@ class TerminalPanel(QWidget):
         
         # Windows configuration to prevent terminal window
         if sys.platform == 'win32':
-            process.setCreateProcessArgumentsModifier(
-                lambda args: args.setFlags(0x08000000)  # CREATE_NO_WINDOW
-            )
+            try:
+                # Try to use setCreateProcessArgumentsModifier if available (PyQt6.5+)
+                if hasattr(process, 'setCreateProcessArgumentsModifier'):
+                    process.setCreateProcessArgumentsModifier(
+                        lambda args: args.setFlags(0x08000000)  # CREATE_NO_WINDOW
+                    )
+            except Exception as e:
+                # Fallback: method not available in this PyQt6 version
+                print(f"Note: setCreateProcessArgumentsModifier not available: {e}")
             
         process.readyReadStandardOutput.connect(lambda: self.handle_stdout(tab_index))
         process.readyReadStandardError.connect(lambda: self.handle_stderr(tab_index))

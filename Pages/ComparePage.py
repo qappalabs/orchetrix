@@ -51,6 +51,296 @@ class YAMLCompareHighlighter(QSyntaxHighlighter):
             self.setFormat(0, len(text), self.fmt_green)
 
 
+class FieldLevelMatcher:
+    """Matches nested YAML/JSON paths across dictionaries with array-awareness."""
+
+    _IDENTITY_KEY_PATHS = (
+        ("name",),
+        ("metadata", "name"),
+        ("metadata", "uid"),
+        ("configMap", "name"),
+        ("configMap", "key"),
+        ("secret", "secretName"),
+        ("secretName",),
+        ("persistentVolumeClaim", "claimName"),
+        ("fieldRef", "fieldPath"),
+        ("resourceFieldRef", "resource"),
+        ("serviceAccountToken", "path"),
+        ("downwardAPI", "path"),
+        ("mountPath",),
+        ("path",),
+        ("key",),
+        ("port",),
+        ("type",),
+    )
+
+    def __init__(self) -> None:
+        # Map[(source_array_path, target_array_path)] -> {"source_to_target": {}, "target_consumed": set()}
+        self._match_state = {}
+
+    def reset(self) -> None:
+        self._match_state.clear()
+
+    def resolve(self, source_dict, target_dict, path):
+        """Return tuple of (source_value, target_value) with recursive array matching."""
+        if not path:
+            return None, None
+
+        tokens = self._split_path_segments(path)
+        return self._traverse(source_dict, target_dict, tokens, "", "")
+
+    @staticmethod
+    def _split_path_segments(path: str):
+        if not path:
+            return []
+        return [seg for seg in re.findall(r"\[\d+\]|[^.\[\]]+", path) if seg]
+
+    @staticmethod
+    def _append_path_segment(base: str, segment: str):
+        if not base:
+            return segment
+        if segment.startswith("["):
+            return f"{base}{segment}"
+        return f"{base}.{segment}"
+
+    @staticmethod
+    def _is_array_segment(segment: str) -> bool:
+        return segment.startswith("[") and segment.endswith("]")
+
+    def _traverse(self, source_node, target_node, tokens, source_path, target_path):
+        if not tokens:
+            return source_node, target_node
+
+        segment = tokens[0]
+        remaining = tokens[1:]
+
+        if self._is_array_segment(segment):
+            return self._handle_array_segment(
+                source_node, target_node, segment, remaining, source_path, target_path
+            )
+
+        next_source = source_node.get(segment) if isinstance(source_node, dict) else None
+        next_target = target_node.get(segment) if isinstance(target_node, dict) else None
+
+        next_source_path = self._append_path_segment(source_path, segment)
+        next_target_path = self._append_path_segment(target_path, segment)
+
+        return self._traverse(
+            next_source,
+            next_target,
+            remaining,
+            next_source_path,
+            next_target_path,
+        )
+
+    def _handle_array_segment(
+        self,
+        source_node,
+        target_node,
+        segment,
+        remaining_tokens,
+        source_path,
+        target_path,
+    ):
+        source_array = source_node if isinstance(source_node, list) else None
+        target_array = target_node if isinstance(target_node, list) else None
+
+        try:
+            index = int(segment[1:-1])
+        except ValueError:
+            index = -1
+
+        if source_array is None or index < 0 or index >= len(source_array):
+            return None, None
+
+        array_key = (source_path, target_path)
+        state = self._match_state.setdefault(
+            array_key,
+            {
+                "source_to_target": {},
+                "target_consumed": set(),
+            },
+        )
+
+        mapping = state["source_to_target"]
+        consumed = state["target_consumed"]
+
+        if index in mapping:
+            target_index = mapping[index]
+        else:
+            target_index, persist = self._match_array_index(
+                source_array,
+                target_array,
+                index,
+                consumed,
+                remaining_tokens,
+            )
+            if persist and target_index is not None:
+                mapping[index] = target_index
+                consumed.add(target_index)
+
+        next_source = source_array[index]
+        next_target = (
+            target_array[target_index]
+            if isinstance(target_array, list)
+            and target_index is not None
+            and 0 <= target_index < len(target_array)
+            else None
+        )
+
+        next_source_path = self._append_path_segment(source_path, f"[{index}]")
+        target_segment = f"[{target_index}]" if target_index is not None else f"[{index}]"
+        next_target_path = self._append_path_segment(target_path, target_segment)
+
+        return self._traverse(
+            next_source,
+            next_target,
+            remaining_tokens,
+            next_source_path,
+            next_target_path,
+        )
+
+    def _match_array_index(
+        self,
+        source_array,
+        target_array,
+        source_index,
+        consumed,
+        remaining_tokens,
+    ):
+        if target_array is None or not isinstance(target_array, list) or not target_array:
+            return None, False
+
+        source_elem = source_array[source_index]
+        source_identity = self._get_array_element_identity(source_elem)
+
+        def candidate_indices():
+            return [i for i in range(len(target_array)) if i not in consumed]
+
+        # Prefer same index when viable
+        if (
+            source_index < len(target_array)
+            and source_index not in consumed
+            and self._elements_compatible(
+                source_identity,
+                source_elem,
+                target_array[source_index],
+            )
+        ):
+            return source_index, True
+
+        # Try to match by identity
+        if source_identity is not None:
+            for idx in candidate_indices():
+                if self._identities_equal(
+                    source_identity,
+                    self._get_array_element_identity(target_array[idx]),
+                ):
+                    return idx, True
+
+        # Attempt to match by previewing remaining tokens
+        for idx in candidate_indices():
+            if self._preview_values_match(
+                source_elem,
+                target_array[idx],
+                remaining_tokens,
+            ):
+                return idx, True
+
+        # Fallback to structural equality (entire element)
+        for idx in candidate_indices():
+            if self._structures_equal(source_elem, target_array[idx]):
+                return idx, True
+
+        # Last resort: first available candidate
+        for idx in candidate_indices():
+            return idx, False
+
+        return None, False
+
+    def _elements_compatible(
+        self,
+        source_identity,
+        source_elem,
+        target_elem,
+    ):
+        if source_identity is not None:
+            return self._identities_equal(
+                source_identity, self._get_array_element_identity(target_elem)
+            )
+        return self._structures_equal(source_elem, target_elem)
+
+    @staticmethod
+    def _identities_equal(left, right):
+        return left is not None and right is not None and left == right
+
+    @staticmethod
+    def _structures_equal(left, right):
+        if left is None or right is None:
+            return left is None and right is None
+        if isinstance(left, (dict, list)) or isinstance(right, (dict, list)):
+            diff = DeepDiff(left, right, ignore_order=True)
+            return not diff
+        return left == right
+
+    def _get_array_element_identity(self, element):
+        if isinstance(element, dict):
+            for path in self._IDENTITY_KEY_PATHS:
+                value = self._extract_key_path(element, path)
+                if value not in (None, "", {}, []):
+                    return (".".join(path), value)
+
+            if len(element) == 1:
+                single_key = next(iter(element))
+                nested = element[single_key]
+                if isinstance(nested, dict):
+                    nested_value = (
+                        nested.get("name")
+                        or nested.get("key")
+                        or nested.get("path")
+                        or nested.get("type")
+                    )
+                    if nested_value:
+                        return (f"{single_key}.nested", nested_value)
+                return ("single_key", single_key)
+
+            return ("keys", tuple(sorted(element.keys())))
+
+        if isinstance(element, list):
+            return ("list_len", len(element))
+
+        return ("value", element)
+
+    @staticmethod
+    def _extract_key_path(data, path):
+        current = data
+        for key in path:
+            if not isinstance(current, dict) or key not in current:
+                return None
+            current = current[key]
+        return current
+
+    @staticmethod
+    def _preview_values_match(
+        source_elem,
+        target_elem,
+        remaining_tokens,
+    ):
+        if not remaining_tokens:
+            return FieldLevelMatcher._structures_equal(source_elem, target_elem)
+
+        preview_matcher = FieldLevelMatcher()
+        source_preview, target_preview = preview_matcher._traverse(
+            source_elem,
+            target_elem,
+            remaining_tokens,
+            "",
+            "",
+        )
+        diff = DeepDiff(source_preview, target_preview, ignore_order=True)
+        return not diff
+
+
 class ComparePage(QWidget):
     """
     ComparePage with defensive handling of unified loader results:
@@ -1215,8 +1505,6 @@ class ComparePage(QWidget):
             
             return path
         
-        converted_changed_paths = {convert_deepdiff_path(cp) for cp in changed_paths}
-        
         matching_lines1 = set()
         different_lines1 = set()
         matching_lines2 = set()
@@ -1225,12 +1513,13 @@ class ComparePage(QWidget):
         lines1 = yaml1.splitlines()
         lines2 = yaml2.splitlines()
         
+        left_matcher = FieldLevelMatcher()
+        
         for i in range(len(lines1)):
             path = line_to_path1.get(i + 1)  # Use 1-indexed line numbers
             if path:
-                # Compare actual values at each path
-                val1 = self._get_value_at_path(dict1, path)
-                val2 = self._get_value_at_path(dict2, path)
+                # Compare actual values at each path with recursive array matching
+                val1, val2 = left_matcher.resolve(dict1, dict2, path)
                 
                 # Check if this is a parent key (dict or list)
                 is_parent_key = isinstance(val1, (dict, list)) or isinstance(val2, (dict, list))
@@ -1251,12 +1540,13 @@ class ComparePage(QWidget):
                 else:
                     matching_lines1.add(i)
         
+        right_matcher = FieldLevelMatcher()
+        
         for i in range(len(lines2)):
             path = line_to_path2.get(i + 1)  # Use 1-indexed line numbers
             if path:
-                # Compare actual values at each path
-                val1 = self._get_value_at_path(dict1, path)
-                val2 = self._get_value_at_path(dict2, path)
+                # Compare actual values at each path with recursive array matching
+                val2, val1 = right_matcher.resolve(dict2, dict1, path)
                 
                 # Check if this is a parent key (dict or list)
                 is_parent_key = isinstance(val1, (dict, list)) or isinstance(val2, (dict, list))
