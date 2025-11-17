@@ -1435,106 +1435,14 @@ class ComparePage(QWidget):
         
         return path_to_line, line_to_path
 
-    def _get_value_at_path(self, data, path):
-        """Extract value from dictionary using dot notation path with array indices and multi-segment join"""
-        if not path or not isinstance(data, dict):
-            return None
-        
-        current = data
-        parts = path.split('.')
-        i = 0
-        
-        while i < len(parts):
-            found = False
-            # Try longest possible key first (multi-segment join)
-            for j in range(len(parts), i, -1):
-                key_to_try = ".".join(parts[i:j])
-                
-                # Check for list indices
-                list_match = re.match(r'^(.*?)\[(\d+)\]$', key_to_try)
-                
-                if list_match:
-                    key_part = list_match.group(1)
-                    index = int(list_match.group(2))
-                    
-                    temp_data = current
-                    if key_part:
-                        if isinstance(temp_data, dict) and key_part in temp_data:
-                            temp_data = temp_data[key_part]
-                        else:
-                            continue
-                    
-                    if isinstance(temp_data, list) and index < len(temp_data):
-                        current = temp_data[index]
-                        i = j
-                        found = True
-                        break
-                        
-                elif isinstance(current, dict) and key_to_try in current:
-                    current = current[key_to_try]
-                    i = j
-                    found = True
-                    break
-            
-            if not found:
-                return None
-        
-        return current
-
     def compare_yaml_semantically(self, yaml1, yaml2):
         """Compare YAML semantically using DeepDiff (handles field reordering)"""
         dict1 = self.parse_yaml_string(yaml1)
         dict2 = self.parse_yaml_string(yaml2)
         
-        # Use DeepDiff to find structural differences (ignore order)
-        diff = DeepDiff(dict1, dict2, ignore_order=True, view='tree')
-        
-        # Extract changed paths from DeepDiff
-        changed_paths = set()
-        
-        if 'values_changed' in diff:
-            for item in diff['values_changed']:
-                changed_paths.add(str(item.path()))
-        
-        if 'dictionary_item_added' in diff:
-            for item in diff['dictionary_item_added']:
-                changed_paths.add(str(item.path()))
-        
-        if 'dictionary_item_removed' in diff:
-            for item in diff['dictionary_item_removed']:
-                changed_paths.add(str(item.path()))
-        
-        if 'iterable_item_added' in diff:
-            for item in diff['iterable_item_added']:
-                changed_paths.add(str(item.path()))
-        
-        if 'iterable_item_removed' in diff:
-            for item in diff['iterable_item_removed']:
-                changed_paths.add(str(item.path()))
-        
-        if 'type_changes' in diff:
-            for item in diff['type_changes']:
-                changed_paths.add(str(item.path()))
-        
         # Build line mappings with new parser
         paths1, line_to_path1 = self.build_yaml_line_maps(yaml1)
         paths2, line_to_path2 = self.build_yaml_line_maps(yaml2)
-        
-        # Convert DeepDiff paths to our path format (preserves array indices)
-        def convert_deepdiff_path(dd_path):
-            # Convert root['spec']['containers'][0]['image'] to spec.containers[0].image
-            if dd_path.startswith("root"):
-                path = dd_path[4:]
-            else:
-                path = dd_path
-            
-            # Convert dict access ['key'] to .key (preserves [0], [1] array indices)
-            path = re.sub(r"\['(.*?)'\]", r'.\1', path)
-            
-            if path.startswith('.'):
-                path = path[1:]
-            
-            return path
         
         matching_lines1 = set()
         different_lines1 = set()
