@@ -119,11 +119,41 @@ class FieldLevelMatcher:
                 source_node, target_node, segment, remaining, source_path, target_path
             )
 
-        next_source = source_node.get(segment) if isinstance(source_node, dict) else None
-        next_target = target_node.get(segment) if isinstance(target_node, dict) else None
+        # Key-aware greedy matching: try progressively longer key combinations (shortest-first)
+        next_source = None
+        next_target = None
+        matched_key = None
+        
+        if isinstance(source_node, dict) or isinstance(target_node, dict):
+            # Try shortest-first: single segment, then 2 segments, etc.
+            for i in range(1, len(remaining) + 2):  # +2 because we include segment + up to all remaining
+                if i > len(remaining) + 1:
+                    break
+                # Build candidate key from segment + next (i-1) tokens
+                key_parts = [segment] + remaining[:i-1]
+                candidate_key = '.'.join(key_parts)
+                
+                # Check if this key exists in either dict
+                source_match = isinstance(source_node, dict) and candidate_key in source_node
+                target_match = isinstance(target_node, dict) and candidate_key in target_node
+                
+                if source_match or target_match:
+                    # Found a match - use this key
+                    matched_key = candidate_key
+                    next_source = source_node.get(candidate_key) if isinstance(source_node, dict) else None
+                    next_target = target_node.get(candidate_key) if isinstance(target_node, dict) else None
+                    # Update remaining tokens to skip the ones we consumed
+                    remaining = remaining[i-1:]
+                    break
+        
+        # Fallback: if no match found, use original single-segment behavior
+        if matched_key is None:
+            matched_key = segment
+            next_source = source_node.get(segment) if isinstance(source_node, dict) else None
+            next_target = target_node.get(segment) if isinstance(target_node, dict) else None
 
-        next_source_path = self._append_path_segment(source_path, segment)
-        next_target_path = self._append_path_segment(target_path, segment)
+        next_source_path = self._append_path_segment(source_path, matched_key)
+        next_target_path = self._append_path_segment(target_path, matched_key)
 
         return self._traverse(
             next_source,
@@ -1368,8 +1398,8 @@ class ComparePage(QWidget):
                 if path_stack:
                     line_to_path[i] = build_path_from_stack()
                 # Check if string ends on this line (unescaped quote at end)
-                # Line must end with " (not \" which is escaped)
-                if stripped.endswith('"') and not stripped.endswith('\\"'):
+                # Line must end with " or ' (not \" which is escaped)
+                if (stripped.endswith('"') and not stripped.endswith('\\"')) or stripped.endswith("'"):
                     in_quoted_string = False
                 continue
             
@@ -1394,7 +1424,8 @@ class ComparePage(QWidget):
                     
                     # Check if this line starts a multi-line quoted string
                     value_part = stripped.split(':', 1)[1].strip() if ':' in stripped else ''
-                    if value_part.startswith('"') and not (value_part.count('"') >= 2 and value_part.endswith('"')):
+                    if (value_part.startswith('"') and not (value_part.count('"') >= 2 and value_part.endswith('"'))) or \
+                       (value_part.startswith("'") and not (value_part.count("'") >= 2 and value_part.endswith("'"))):
                         in_quoted_string = True
                 continue
             
