@@ -54,32 +54,11 @@ class YAMLCompareHighlighter(QSyntaxHighlighter):
 class FieldLevelMatcher:
     """Matches nested YAML/JSON paths across dictionaries with array-awareness."""
 
-    _IDENTITY_KEY_PATHS = (
-        ("name",),
-        ("metadata", "name"),
-        ("metadata", "uid"),
-        ("configMap", "name"),
-        ("configMap", "key"),
-        ("secret", "secretName"),
-        ("secretName",),
-        ("persistentVolumeClaim", "claimName"),
-        ("fieldRef", "fieldPath"),
-        ("resourceFieldRef", "resource"),
-        ("serviceAccountToken", "path"),
-        ("downwardAPI", "path"),
-        ("mountPath",),
-        ("path",),
-        ("key",),
-        ("port",),
-        ("type",),
-    )
-
     def __init__(self) -> None:
         # Map[(source_array_path, target_array_path)] -> {"source_to_target": {}, "target_consumed": set()}
         self._match_state = {}
 
-    def reset(self) -> None:
-        self._match_state.clear()
+
 
     def resolve(self, source_dict, target_dict, path):
         """Return tuple of (source_value, target_value) with recursive array matching."""
@@ -315,11 +294,6 @@ class FieldLevelMatcher:
 
     def _get_array_element_identity(self, element):
         if isinstance(element, dict):
-            for path in self._IDENTITY_KEY_PATHS:
-                value = self._extract_key_path(element, path)
-                if value not in (None, "", {}, []):
-                    return (".".join(path), value)
-
             if len(element) == 1:
                 single_key = next(iter(element))
                 nested = element[single_key]
@@ -340,15 +314,6 @@ class FieldLevelMatcher:
             return ("list_len", len(element))
 
         return ("value", element)
-
-    @staticmethod
-    def _extract_key_path(data, path):
-        current = data
-        for key in path:
-            if not isinstance(current, dict) or key not in current:
-                return None
-            current = current[key]
-        return current
 
     @staticmethod
     def _preview_values_match(
