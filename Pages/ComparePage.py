@@ -1460,6 +1460,11 @@ class ComparePage(QWidget):
                 # Compare actual values at each path with recursive array matching
                 val1, val2 = left_matcher.resolve(dict1, dict2, path)
                 
+                # Fix: Mark as different if both are None (path resolution failed)
+                if val1 is None and val2 is None:
+                    different_lines1.add(i)
+                    continue
+                
                 # Check if this is a parent key (dict or list)
                 is_parent_key = isinstance(val1, (dict, list)) or isinstance(val2, (dict, list))
                 
@@ -1486,6 +1491,11 @@ class ComparePage(QWidget):
             if path:
                 # Compare actual values at each path with recursive array matching
                 val2, val1 = right_matcher.resolve(dict2, dict1, path)
+                
+                # Fix: Mark as different if both are None (path resolution failed)
+                if val1 is None and val2 is None:
+                    different_lines2.add(i)
+                    continue
                 
                 # Check if this is a parent key (dict or list)
                 is_parent_key = isinstance(val1, (dict, list)) or isinstance(val2, (dict, list))
