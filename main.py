@@ -590,6 +590,10 @@ class MainWindow(QMainWindow):
                 # FIXED: Set active cluster without triggering another connection
                 self.cluster_view.set_active_cluster(cluster_name)
                 
+                # Trigger CRD fetching for the successfully connected cluster
+                if hasattr(self.cluster_view, '_fetch_crds_for_cluster'):
+                    QTimer.singleShot(300, lambda: self.cluster_view._fetch_crds_for_cluster(cluster_name))
+                
                 # FIXED: Update title bar ONLY after successful connection
                 if hasattr(self, 'title_bar'):
                     self.title_bar.update_current_cluster(cluster_name)
