@@ -89,6 +89,33 @@ class DetailManager(QObject):
             'resourcequotas': 'resourcequota',
             'limitranges': 'limitrange',
             'replicationcontrollers': 'replicationcontroller',
+            # Additional resource type mappings
+            'daemonsets': 'daemonset',
+            'statefulsets': 'statefulset',
+            'cronjobs': 'cronjob',
+            'jobs': 'job',
+            'networkpolicies': 'networkpolicy',
+            'ingressclasses': 'ingressclass',
+            'storageclasses': 'storageclass',
+            'endpoints': 'endpoint',
+            'events': 'event',
+            'persistentvolumes': 'persistentvolume',
+            'persistentvolumeclaims': 'persistentvolumeclaim',
+            'configmaps': 'configmap',
+            'secrets': 'secret',
+            'ingresses': 'ingress',
+            'services': 'service',
+            'pods': 'pod',
+            'nodes': 'node',
+            'namespaces': 'namespace',
+            'deployments': 'deployment',
+            'replicasets': 'replicaset',
+            'serviceaccounts': 'serviceaccount',
+            'roles': 'role',
+            'rolebindings': 'rolebinding',
+            'clusterroles': 'clusterrole',
+            'clusterrolebindings': 'clusterrolebinding',
+            'leases': 'lease',
         }
         
         resource_type_singular = plural_to_singular_mapping.get(resource_type.lower(), 
@@ -109,7 +136,18 @@ class DetailManager(QObject):
             'namespace': namespace
         })
 
-        # Handle special data for different resource types
+        # Handle special data for different resource types - CLEAR ALL FIRST
+        # Clear all raw data attributes to prevent interference between resources
+        if hasattr(detail_page, 'event_raw_data'):
+            detail_page.event_raw_data = None
+        if hasattr(detail_page, 'chart_raw_data'):
+            detail_page.chart_raw_data = None
+        if hasattr(detail_page, 'release_raw_data'):
+            detail_page.release_raw_data = None
+        if hasattr(detail_page, 'resource_raw_data'):
+            detail_page.resource_raw_data = None
+            
+        # Now set the appropriate raw data if provided
         if raw_data:
             if resource_type.lower() == "event":
                 detail_page.event_raw_data = raw_data

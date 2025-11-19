@@ -235,8 +235,18 @@ class CustomResourceInstancePage(BaseResourcePage):
                     parent = parent.parent()
                 
                 if parent and hasattr(parent, 'detail_manager'):
-                    # Use the plural name as resource type for detail view
-                    parent.detail_manager.show_detail(self.plural, resource_name, namespace)
+                    # Create custom resource metadata for the detail view
+                    cr_metadata = {
+                        '_custom_resource_type': 'instance',
+                        'api_group': self.api_group,
+                        'api_version': self.api_version,
+                        'plural': self.plural,
+                        'scope': self.scope,
+                        'crd_name': self.crd_name
+                    }
+                    
+                    # Use the plural name as resource type for detail view with metadata
+                    parent.detail_manager.show_detail(self.plural, resource_name, namespace, raw_data=cr_metadata)
     
     def _perform_global_search(self, search_text):
         """Override to use local search only for CRD instances"""

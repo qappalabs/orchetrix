@@ -677,6 +677,125 @@ class DetailPageOverviewSection(BaseDetailSection):
             status_text = f"IngressClass available (controller: {controller})"
             status_type = "success"
 
+        # ResourceQuota status
+        elif resource_type_lower in ["resourcequota", "resourcequotas", "quota"]:
+            used = status.get("used", {})
+            hard = status.get("hard", {})
+            if used and hard:
+                status_value = "Active"
+                status_text = f"ResourceQuota active ({len(used)}/{len(hard)} resources tracked)"
+                status_type = "success"
+            else:
+                status_value = "Unknown"
+                status_text = "ResourceQuota status unknown"
+                status_type = "default"
+
+        # LimitRange status
+        elif resource_type_lower in ["limitrange", "limitranges", "limits"]:
+            spec = data.get("spec", {})
+            limits = spec.get("limits", [])
+            status_value = "Active"
+            status_text = f"LimitRange active ({len(limits)} limit rules)"
+            status_type = "success"
+
+        # HorizontalPodAutoscaler status
+        elif resource_type_lower in ["horizontalpodautoscaler", "horizontalpodautoscalers", "hpa"]:
+            conditions = status.get("conditions", [])
+            scaling_condition = next((c for c in conditions if c.get("type") == "AbleToScale"), None)
+            if scaling_condition and scaling_condition.get("status") == "True":
+                current_replicas = status.get("currentReplicas", 0)
+                desired_replicas = status.get("desiredReplicas", 0)
+                status_value = "Ready"
+                status_text = f"HPA ready ({current_replicas}/{desired_replicas} replicas)"
+                status_type = "success"
+            else:
+                status_value = "Not Ready"
+                status_text = "HPA not ready for scaling"
+                status_type = "warning"
+
+        # PodDisruptionBudget status
+        elif resource_type_lower in ["poddisruptionbudget", "poddisruptionbudgets", "pdb"]:
+            allowed_disruptions = status.get("disruptionsAllowed", 0)
+            current_healthy = status.get("currentHealthy", 0)
+            status_value = "Active"
+            status_text = f"PDB active ({allowed_disruptions} disruptions allowed, {current_healthy} healthy)"
+            status_type = "success"
+
+        # StorageClass status
+        elif resource_type_lower in ["storageclass", "storageclasses", "sc"]:
+            provisioner = data.get("provisioner", "Unknown")
+            volume_binding_mode = data.get("volumeBindingMode", "Immediate")
+            status_value = "Available"
+            status_text = f"StorageClass available (provisioner: {provisioner}, binding: {volume_binding_mode})"
+            status_type = "success"
+
+        # Endpoints status
+        elif resource_type_lower in ["endpoints", "endpoint", "ep"]:
+            subsets = data.get("subsets", [])
+            endpoint_count = sum(len(subset.get("addresses", [])) for subset in subsets)
+            if endpoint_count > 0:
+                status_value = "Ready"
+                status_text = f"Endpoints ready ({endpoint_count} endpoints)"
+                status_type = "success"
+            else:
+                status_value = "No Endpoints"
+                status_text = "No endpoints available"
+                status_type = "warning"
+
+        # Event status
+        elif resource_type_lower in ["event", "events"]:
+            event_type = data.get("type", "Unknown")
+            reason = data.get("reason", "Unknown")
+            status_value = event_type
+            status_text = f"Event: {reason}"
+            status_type = "warning" if event_type == "Warning" else "default"
+
+        # ServiceAccount status
+        elif resource_type_lower in ["serviceaccount", "serviceaccounts", "sa"]:
+            secrets = data.get("secrets", [])
+            status_value = "Active"
+            status_text = f"ServiceAccount active ({len(secrets)} secrets)"
+            status_type = "success"
+
+        # Role status
+        elif resource_type_lower in ["role", "roles"]:
+            rules = data.get("rules", [])
+            status_value = "Active"
+            status_text = f"Role active ({len(rules)} rules)"
+            status_type = "success"
+
+        # ClusterRole status
+        elif resource_type_lower in ["clusterrole", "clusterroles"]:
+            rules = data.get("rules", [])
+            status_value = "Active"
+            status_text = f"ClusterRole active ({len(rules)} rules)"
+            status_type = "success"
+
+        # RoleBinding status
+        elif resource_type_lower in ["rolebinding", "rolebindings", "rb"]:
+            subjects = data.get("subjects", [])
+            role_ref = data.get("roleRef", {})
+            role_name = role_ref.get("name", "Unknown")
+            status_value = "Active"
+            status_text = f"RoleBinding active ({len(subjects)} subjects bound to {role_name})"
+            status_type = "success"
+
+        # ClusterRoleBinding status
+        elif resource_type_lower in ["clusterrolebinding", "clusterrolebindings", "crb"]:
+            subjects = data.get("subjects", [])
+            role_ref = data.get("roleRef", {})
+            role_name = role_ref.get("name", "Unknown")
+            status_value = "Active"
+            status_text = f"ClusterRoleBinding active ({len(subjects)} subjects bound to {role_name})"
+            status_type = "success"
+
+        # RuntimeClass status
+        elif resource_type_lower in ["runtimeclass", "runtimeclasses", "rc"]:
+            handler = data.get("handler", "Unknown")
+            status_value = "Available"
+            status_text = f"RuntimeClass available (handler: {handler})"
+            status_type = "success"
+
         # Generic custom resource status
         else:
             # Try to detect status from common fields

@@ -792,9 +792,6 @@ class KubernetesClient(QObject):
             elif resource_type.lower() == "serviceaccount":
                 if namespace:
                     resource_detail = self.v1.read_namespaced_service_account(name=resource_name, namespace=namespace)
-            elif resource_type.lower() == "endpoint":
-                if namespace:
-                    resource_detail = self.v1.read_namespaced_endpoints(name=resource_name, namespace=namespace)
             elif resource_type.lower() == "lease":
                 if namespace:
                     resource_detail = self.coordination_v1.read_namespaced_lease(name=resource_name, namespace=namespace)
@@ -822,8 +819,45 @@ class KubernetesClient(QObject):
                     resource_detail = self.rbac_v1.read_namespaced_role_binding(name=resource_name, namespace=namespace)
             elif resource_type.lower() == "clusterrolebinding":
                 resource_detail = self.rbac_v1.read_cluster_role_binding(name=resource_name)
-            elif resource_type.lower() == "customresourcedefinition":
+            elif resource_type.lower() in ["customresourcedefinition", "customresourcedefinitions", "crd"]:
                 resource_detail = self.apiextensions_v1.read_custom_resource_definition(name=resource_name)
+            # Additional missing resource types
+            elif resource_type.lower() in ["daemonset", "daemonsets"]:
+                if namespace:
+                    resource_detail = self.apps_v1.read_namespaced_daemon_set(name=resource_name, namespace=namespace)
+            elif resource_type.lower() in ["statefulset", "statefulsets"]:
+                if namespace:
+                    resource_detail = self.apps_v1.read_namespaced_stateful_set(name=resource_name, namespace=namespace)
+            elif resource_type.lower() in ["job", "jobs"]:
+                if namespace:
+                    resource_detail = self.batch_v1.read_namespaced_job(name=resource_name, namespace=namespace)
+            elif resource_type.lower() in ["cronjob", "cronjobs"]:
+                if namespace:
+                    resource_detail = self.batch_v1.read_namespaced_cron_job(name=resource_name, namespace=namespace)
+            elif resource_type.lower() in ["networkpolicy", "networkpolicies"]:
+                if namespace:
+                    resource_detail = self.networking_v1.read_namespaced_network_policy(name=resource_name, namespace=namespace)
+            elif resource_type.lower() in ["ingressclass", "ingressclasses"]:
+                resource_detail = self.networking_v1.read_ingress_class(name=resource_name)
+            elif resource_type.lower() in ["storageclass", "storageclasses"]:
+                resource_detail = self.storage_v1.read_storage_class(name=resource_name)
+            elif resource_type.lower() in ["endpoints", "endpoint"]:
+                if namespace:
+                    resource_detail = self.v1.read_namespaced_endpoints(name=resource_name, namespace=namespace)
+            elif resource_type.lower() in ["event", "events"]:
+                if namespace:
+                    resource_detail = self.v1.read_namespaced_event(name=resource_name, namespace=namespace)
+                else:
+                    # Try to find event in common namespaces
+                    common_namespaces = ["default", "kube-system", "kube-public"]
+                    for ns in common_namespaces:
+                        try:
+                            resource_detail = self.v1.read_namespaced_event(name=resource_name, namespace=ns)
+                            break
+                        except Exception as ns_error:
+                            if "404" not in str(ns_error) and "not found" not in str(ns_error).lower():
+                                logging.debug(f"Error searching for event {resource_name} in namespace {ns}: {ns_error}")
+                            continue
             
             if resource_detail:
                 # Convert to dictionary format for compatibility

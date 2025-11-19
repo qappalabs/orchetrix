@@ -362,7 +362,7 @@ class DetailPageComponent(QWidget):
         QTimer.singleShot(300, self.load_current_tab_data)
     
     def _handle_special_resource_data(self, resource_type: str):
-        """Handle special resource data for charts and releases"""
+        """Handle special resource data for charts, releases, and custom resource instances"""
         raw_data = None
         
         # Get the appropriate raw data based on resource type
@@ -372,9 +372,20 @@ class DetailPageComponent(QWidget):
         elif resource_type.lower() in ["helmrelease", "release"] and hasattr(self, 'release_raw_data'):
             raw_data = self.release_raw_data
             logging.info(f"DetailPageComponent: Using release raw data for {resource_type}")
+        elif resource_type.lower() in ["event", "events"] and hasattr(self, 'event_raw_data'):
+            raw_data = self.event_raw_data
+            logging.info(f"DetailPageComponent: Using event raw data for {resource_type}")
         elif hasattr(self, 'resource_raw_data'):
             raw_data = self.resource_raw_data
             logging.info(f"DetailPageComponent: Using generic raw data for {resource_type}")
+            
+            # Check if this is a custom resource instance - only if it has the specific marker
+            if (raw_data and isinstance(raw_data, dict) and 
+                raw_data.get('_custom_resource_type') == 'instance' and
+                'api_group' in raw_data and 'plural' in raw_data):
+                logging.info(f"DetailPageComponent: Detected custom resource instance for {resource_type}")
+                self._handle_custom_resource_instance(raw_data)
+                return
         
         if raw_data:
             logging.info(f"DetailPageComponent: Processing raw data for {resource_type}, data keys: {list(raw_data.keys())}")
@@ -387,7 +398,71 @@ class DetailPageComponent(QWidget):
                 # Store data directly on the section for immediate access
                 section.current_data = raw_data
         else:
-            logging.warning(f"DetailPageComponent: No raw data found for {resource_type}")
+            # Only warn if this is a resource type that should have raw data
+            if resource_type.lower() in ["chart", "helmchart", "helmrelease", "release", "event", "events"]:
+                logging.warning(f"DetailPageComponent: Expected raw data for {resource_type} but none found")
+            else:
+                logging.debug(f"DetailPageComponent: No special raw data handling needed for {resource_type}")
+            
+    def _handle_custom_resource_instance(self, cr_metadata: dict):
+        """Handle custom resource instance data fetching"""
+        try:
+            # Extract CRD metadata
+            api_group = cr_metadata.get('api_group', '')
+            api_version = cr_metadata.get('api_version', '')
+            plural = cr_metadata.get('plural', '')
+            scope = cr_metadata.get('scope', 'Namespaced')
+            
+            logging.info(f"DetailPageComponent: Fetching custom resource instance - group: {api_group}, version: {api_version}, plural: {plural}")
+            
+            # Use CustomObjectsApi to fetch the custom resource instance
+            custom_objects_api = self.kubernetes_client.custom_objects_api
+            
+            try:
+                if scope == "Namespaced" and self.resource_namespace:
+                    # Namespaced custom resource
+                    cr_data = custom_objects_api.get_namespaced_custom_object(
+                        group=api_group,
+                        version=api_version,
+                        namespace=self.resource_namespace,
+                        plural=plural,
+                        name=self.resource_name
+                    )
+                else:
+                    # Cluster-scoped custom resource
+                    cr_data = custom_objects_api.get_cluster_custom_object(
+                        group=api_group,
+                        version=api_version,
+                        plural=plural,
+                        name=self.resource_name
+                    )
+                
+                logging.info(f"DetailPageComponent: Successfully fetched custom resource instance data")
+                
+                # Pass the actual custom resource data to all sections
+                sections = [self.overview_section, self.details_section, self.yaml_section, self.events_section]
+                for section in sections:
+                    if hasattr(section, 'set_raw_data'):
+                        logging.info(f"DetailPageComponent: Setting custom resource data for {section.section_name}")
+                        section.set_raw_data(cr_data)
+                    # Store data directly on the section for immediate access
+                    section.current_data = cr_data
+                    
+            except Exception as api_error:
+                logging.error(f"DetailPageComponent: Failed to fetch custom resource instance: {api_error}")
+                # Show error in sections
+                sections = [self.overview_section, self.details_section, self.yaml_section, self.events_section]
+                for section in sections:
+                    if hasattr(section, 'show_error'):
+                        section.show_error(f"Failed to load custom resource: {str(api_error)}")
+                        
+        except Exception as e:
+            logging.error(f"DetailPageComponent: Error handling custom resource instance: {e}")
+            # Show error in sections
+            sections = [self.overview_section, self.details_section, self.yaml_section, self.events_section]
+            for section in sections:
+                if hasattr(section, 'show_error'):
+                    section.show_error(f"Failed to process custom resource metadata: {str(e)}")
 
     def _post_show_setup(self):
         """Single post-show setup to avoid flickering"""

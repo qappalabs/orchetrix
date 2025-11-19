@@ -158,9 +158,8 @@ class ClusterRoleBindingsPage(BaseResourcePage):
             if self.table.item(row, 1) is not None:
                 resource_name = self.table.item(row, 1).text()
             
-            # Get namespace if applicable
-            if self.table.item(row, 2) is not None:
-                namespace = self.table.item(row, 2).text()
+            # ClusterRoleBindings are cluster-scoped resources, no namespace needed
+            namespace = None
             
             # Show detail view
             if resource_name:

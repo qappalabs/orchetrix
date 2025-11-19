@@ -321,8 +321,8 @@ class NamespacesPage(BaseResourcePage):
 
             if self.table.item(row, 1) is not None:
                 resource_name = self.table.item(row, 1).text()
-            if self.table.item(row, 2) is not None:
-                namespace = self.table.item(row, 2).text()
+            # Namespaces are cluster-scoped resources, no namespace needed
+            namespace = None
 
             if resource_name:
                 parent = self.parent()
