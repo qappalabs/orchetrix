@@ -197,6 +197,7 @@ class JobsPage(BaseResourcePage):
             # Get resource details
             resource_name = None
             namespace = None
+            raw_data = None
             
             # Get the resource name
             if self.table.item(row, 1) is not None:
@@ -205,6 +206,11 @@ class JobsPage(BaseResourcePage):
             # Get namespace if applicable
             if self.table.item(row, 2) is not None:
                 namespace = self.table.item(row, 2).text()
+            
+            # Get raw data from resources if available
+            if row < len(getattr(self, 'resources', [])):
+                resource = self.resources[row]
+                raw_data = resource.get("raw_data")
             
             # Show detail view
             if resource_name:
@@ -219,4 +225,4 @@ class JobsPage(BaseResourcePage):
                     if resource_type.endswith('s'):
                         resource_type = resource_type[:-1]
                     
-                    parent.detail_manager.show_detail(resource_type, resource_name, namespace)
+                    parent.detail_manager.show_detail(resource_type, resource_name, namespace, raw_data=raw_data)

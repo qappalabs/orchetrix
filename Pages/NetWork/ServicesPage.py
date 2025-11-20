@@ -380,6 +380,12 @@ class ServicesPage(BaseResourcePage):
             self.table.selectRow(row)
             resource_name = self.table.item(row, 1).text() if self.table.item(row, 1) else None
             namespace = self.table.item(row, 2).text() if self.table.item(row, 2) else None
+            raw_data = None
+            
+            # Get raw data from resources if available
+            if row < len(getattr(self, 'resources', [])):
+                resource = self.resources[row]
+                raw_data = resource.get("raw_data")
             
             if resource_name:
                 parent = self.parent()
@@ -388,4 +394,4 @@ class ServicesPage(BaseResourcePage):
                 
                 if parent and hasattr(parent, 'detail_manager'):
                     resource_type = self.resource_type[:-1] if self.resource_type.endswith('s') else self.resource_type
-                    parent.detail_manager.show_detail(resource_type, resource_name, namespace)
+                    parent.detail_manager.show_detail(resource_type, resource_name, namespace, raw_data=raw_data)

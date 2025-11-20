@@ -606,7 +606,9 @@ class ClusterView(QWidget):
 
         # Connect sidebar toggle (sidebar should exist by now)
         if hasattr(self, 'sidebar') and hasattr(self.sidebar, 'toggle_btn'):
+            # Don't override the main toggle connection, just add this as additional connection
             self.sidebar.toggle_btn.clicked.connect(self._update_terminal_on_sidebar_toggle)
+            logging.info("ClusterView: Connected additional sidebar toggle handler for terminal")
 
     def _connect_terminal_button(self) -> None:
         """Connect terminal button in sidebar"""

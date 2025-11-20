@@ -83,6 +83,7 @@ class SidebarToggleButton(QToolButton):
             else:
                 # Text-based fallback for expand
                 self.setText("▶")
+    
 
 
 class NavIconButton(QToolButton):
@@ -608,6 +609,15 @@ class Sidebar(QWidget):
 
         # Create utility buttons at the bottom
         self.create_utility_buttons()
+        
+        # Ensure the entire sidebar is visible
+        self.show()
+    
+    def showEvent(self, event):
+        """Handle show event to ensure toggle button visibility"""
+        super().showEvent(event)
+        if hasattr(self, 'toggle_btn'):
+            self.toggle_btn.show()
 
     def create_toggle_controls(self):
         sidebar_controls = QWidget()
@@ -626,8 +636,12 @@ class Sidebar(QWidget):
         self.toggle_btn = SidebarToggleButton()
         self.toggle_btn.clicked.connect(self.toggle_sidebar)
         controls_layout.addWidget(self.toggle_btn)
-
+        
         self.sidebar_layout.addWidget(sidebar_controls)
+        
+        # Ensure visibility
+        sidebar_controls.show()
+        self.toggle_btn.show()
 
     def create_nav_buttons(self):
         self.nav_buttons = []
@@ -679,11 +693,6 @@ class Sidebar(QWidget):
         except Exception as e:
             logging.error(f"Error refreshing Custom Resources dropdown: {e}")
 
-    def toggle_complete_event(self):
-        """Fire an event when sidebar toggle animation completes"""
-        # This is a placeholder that will be connected to by the parent window
-        pass
-
     def toggle_sidebar(self):
         """Toggle sidebar expansion state and adjust any dependent components"""
         self.sidebar_expanded = not self.sidebar_expanded
@@ -708,9 +717,6 @@ class Sidebar(QWidget):
 
         # Now update the sidebar state with animation
         self.update_sidebar_state()
-
-        # Emit event when animation completes for any other components that need notification
-        QTimer.singleShot(250, lambda: self.toggle_complete_event())
 
         # Notify terminal directly if possible
         if parent_cluster_view and hasattr(parent_cluster_view, 'terminal_panel'):
@@ -766,29 +772,71 @@ class Sidebar(QWidget):
         self.sidebar_layout.addWidget(ai_assis_btn)
 
     def update_sidebar_state(self):
-        # Create animation for smooth transition
-        self.sidebar_animation = QPropertyAnimation(self.content_widget, b"minimumWidth")
-        self.sidebar_animation.setDuration(200)
-        self.sidebar_animation.setEasingCurve(QEasingCurve.Type.InOutQuad)
-
+        # Stop any existing animation
+        if hasattr(self, 'sidebar_animation') and self.sidebar_animation.state() != QPropertyAnimation.State.Stopped:
+            self.sidebar_animation.stop()
+            
+        # Remove fixed width constraints to allow animation
+        self.content_widget.setMinimumWidth(0)
+        self.content_widget.setMaximumWidth(16777215)  # QWIDGETSIZE_MAX
+        
+        # Create single smooth animation for ultra-smooth performance
+        self.sidebar_animation = QPropertyAnimation(self.content_widget, b"maximumWidth")
+        self.sidebar_animation.setDuration(200)  # Shorter for snappier feel
+        self.sidebar_animation.setEasingCurve(QEasingCurve.Type.OutCirc)  # Ultra smooth easing
+        
+        # Set animation values based on direction
+        current_width = self.content_widget.width()
         if self.sidebar_expanded:
-            self.sidebar_animation.setStartValue(self.sidebar_width_collapsed)
+            # Expanding animation
+            self.content_widget.setMinimumWidth(self.sidebar_width_expanded)  # Set immediately
+            self.sidebar_animation.setStartValue(current_width)
             self.sidebar_animation.setEndValue(self.sidebar_width_expanded)
+            
             # Update toggle button position for expanded state
             controls_layout = self.content_widget.findChild(QWidget, "sidebar_controls").layout()
-            controls_layout.setContentsMargins(self.sidebar_width_expanded - 35, 5, 5, 5)
+            if controls_layout:
+                controls_layout.setContentsMargins(self.sidebar_width_expanded - 35, 5, 5, 5)
         else:
-            self.sidebar_animation.setStartValue(self.sidebar_width_expanded)
+            # Collapsing animation
+            self.content_widget.setMinimumWidth(self.sidebar_width_collapsed)  # Set immediately
+            self.sidebar_animation.setStartValue(current_width)
             self.sidebar_animation.setEndValue(self.sidebar_width_collapsed)
+            
             # Update toggle button position for collapsed state
             controls_layout = self.content_widget.findChild(QWidget, "sidebar_controls").layout()
-            controls_layout.setContentsMargins(5, 5, 5, 5)
+            if controls_layout:
+                controls_layout.setContentsMargins(5, 5, 5, 5)
 
+        # Connect signals for smooth performance
+        self.sidebar_animation.finished.connect(self._on_animation_finished)
+        self.sidebar_animation.valueChanged.connect(self._on_animation_value_changed)
+        
+        # Start the smooth animation
         self.sidebar_animation.start()
     
-    def refresh_custom_resources_dropdown(self):
-        """Refresh the Custom Resources dropdown to include newly loaded CRDs"""
-        for button in self.nav_buttons:
-            if button.item_text == "Custom Resources" and button.has_dropdown:
-                button.refresh_dropdown()
-                break
+    def _on_animation_value_changed(self, value):
+        """Optimized animation value handler for ultra-smooth performance"""
+        try:
+            # Minimal updates during animation for maximum smoothness
+            self.content_widget.updateGeometry()
+        except Exception as e:
+            logging.debug(f"Animation update error: {e}")
+    
+    def _on_animation_finished(self):
+        """Optimized animation finished handler"""
+        try:
+            # Set final width state
+            final_width = self.sidebar_width_expanded if self.sidebar_expanded else self.sidebar_width_collapsed
+            self.content_widget.setFixedWidth(final_width)
+            
+            # Update nav buttons state once at the end
+            for btn in self.nav_buttons:
+                if hasattr(btn, 'set_expanded'):
+                    btn.set_expanded(self.sidebar_expanded)
+                    
+            # Single final layout update
+            self.content_widget.updateGeometry()
+                
+        except Exception as e:
+            logging.error(f"Animation finished error: {e}")

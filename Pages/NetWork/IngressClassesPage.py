@@ -170,10 +170,16 @@ class IngressClassesPage(BaseResourcePage):
             
             # Get resource details
             resource_name = None
+            raw_data = None
             
             # Get the resource name
             if self.table.item(row, 1) is not None:
                 resource_name = self.table.item(row, 1).text()
+            
+            # Get raw data from resources if available
+            if row < len(getattr(self, 'resources', [])):
+                resource = self.resources[row]
+                raw_data = resource.get("raw_data")
             
             # Show detail view
             if resource_name:
@@ -184,4 +190,4 @@ class IngressClassesPage(BaseResourcePage):
                 
                 if parent and hasattr(parent, 'detail_manager'):
                     # IngressClasses are cluster-scoped, so no namespace
-                    parent.detail_manager.show_detail("ingressclass", resource_name, None)
+                    parent.detail_manager.show_detail("ingressclass", resource_name, None, raw_data=raw_data)
