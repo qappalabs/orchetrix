@@ -235,9 +235,20 @@ class TerminalPanel(QWidget):
         
         # Windows configuration to prevent terminal window
         if sys.platform == 'win32':
-            process.setCreateProcessArgumentsModifier(
-                lambda args: args.setFlags(0x08000000)  # CREATE_NO_WINDOW
-            )
+            try:
+                # Try to use setCreateProcessArgumentsModifier if available
+                if hasattr(process, 'setCreateProcessArgumentsModifier'):
+                    process.setCreateProcessArgumentsModifier(
+                        lambda args: args.setFlags(0x08000000)  # CREATE_NO_WINDOW
+                    )
+                else:
+                    # Fallback: Set process creation flags directly (PyQt6.5+)
+                    if hasattr(process, 'setProcessChannelMode'):
+                        process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
+            except (AttributeError, RuntimeError) as e:
+                # Log the warning but continue - terminal will still work
+                logging.warning(f"Could not configure Windows process flags: {e}")
+                print(f"Warning: Could not set Windows process flags: {e}")
             
         process.readyReadStandardOutput.connect(lambda: self.handle_stdout(tab_index))
         process.readyReadStandardError.connect(lambda: self.handle_stderr(tab_index))
