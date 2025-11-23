@@ -3,9 +3,12 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QTreeWidgetItem, QFrame, QMenu, QHeaderView,QApplication,
                              QMessageBox, QToolButton)
 from PyQt6.QtCore import Qt, QObject, pyqtSignal, QPoint, QSize, QTimer
-from PyQt6.QtGui import QColor, QPainter, QIcon, QMouseEvent, QFont, QPixmap # Added QPixmap
+from PyQt6.QtGui import QColor, QPainter, QIcon, QMouseEvent, QFont, QPixmap
 
-from UI.Styles import AppColors, AppStyles, AppConstants
+from UI.Styles import AppConstants
+import Styles.HomePageStyles as HomePageStyles
+from UI.ThemeAwarePage import ThemeAwareMainWindow
+from UI.ThemeManager import get_theme_manager
 from Utils.kubernetes_client import get_kubernetes_client
 from Utils.cluster_connector import get_cluster_connector
 from Utils.pin_storage import get_pin_storage_manager
@@ -15,7 +18,7 @@ from log_handler import method_logger, class_logger
 import webbrowser  # Added for opening URLs
 
 from math import sin, cos
-from UI.Icons import resource_path  # Add this import at the top of the file
+from UI.Icons import resource_path
 
 # Global icon cache to prevent redundant operations
 ICON_CACHE = {}
@@ -77,7 +80,7 @@ class LoadingIndicator(QWidget):
             x = center.x() + radius * cos(angle * 3.14159 / 180)
             y = center.y() + radius * sin(angle * 3.14159 / 180)
 
-            color = QColor(AppColors.ACCENT_GREEN)
+            color = QColor(get_theme_manager().get_current_theme().colors.ACCENT_GREEN)
             color.setAlphaF(opacity)
             painter.setBrush(color)
 
@@ -123,7 +126,7 @@ class SmallLoadingIndicator(QWidget):
             x = center.x() + radius * cos(angle_rad)
             y = center.y() + radius * sin(angle_rad)
 
-            color = QColor(AppColors.ACCENT_GREEN)
+            color = QColor(get_theme_manager().get_current_theme().colors.ACCENT_GREEN)
             color.setAlphaF(opacity)
             painter.setBrush(color)
 
@@ -151,10 +154,10 @@ class SidebarButton(QPushButton):
         self.setCheckable(True)
         self.setFlat(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setStyleSheet(AppStyles.SIDEBAR_BUTTON_STYLE)
+        self.setStyleSheet(HomePageStyles.get_sidebar_button_style())
 
 @class_logger(log_level=logging.INFO, exclude_methods=['__init__', 'set_cluster_icon', 'context_menu_requested', 'open_cluster_signal', 'open_preferences_signal', 'update_pinned_items_signal'])
-class OrchestrixGUI(QMainWindow):
+class OrchestrixGUI(ThemeAwareMainWindow):
     def __init__(self):
         super().__init__()
         self.signals = HomePageSignals()
@@ -185,7 +188,6 @@ class OrchestrixGUI(QMainWindow):
         self.setWindowTitle("Kubernetes Manager")
         self.setGeometry(100, 100, 1300, 700)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
-        self.setStyleSheet(AppStyles.MAIN_STYLE)
 
         self.current_view = "Browse All"
         self.search_filter = ""
@@ -234,6 +236,32 @@ class OrchestrixGUI(QMainWindow):
         self.cluster_refresh_timer.start(300000)  # 5 minutes - much less aggressive
         logging.info("HomePage: Set up periodic cluster status refresh (5min interval)")
 
+    def _on_theme_changed(self, theme_name):
+        """Refresh widgets when theme changes"""
+        logging.info(f"HomePage: Theme changed to {theme_name}, refreshing widgets")
+        # Refresh container backgrounds
+        if hasattr(self, 'sidebar'):
+            self.sidebar.setStyleSheet(HomePageStyles.get_sidebar_container_style())
+        if hasattr(self, 'top_bar'):
+            self.top_bar.setStyleSheet(HomePageStyles.get_top_bar_style())
+        if hasattr(self, 'table_container'):
+            self.table_container.setStyleSheet(HomePageStyles.get_content_area_style())
+        if hasattr(self, 'tree_widget'):
+            self.tree_widget.setStyleSheet(HomePageStyles.get_tree_widget_style())
+        if hasattr(self, 'search'):
+            self.search.setStyleSheet(HomePageStyles.get_search_style())
+        # Refresh sidebar buttons
+        if hasattr(self, 'sidebar_buttons'):
+            for button in self.sidebar_buttons:
+                button.setStyleSheet(HomePageStyles.get_sidebar_button_style())
+        # Refresh labels
+        if self.browser_label:
+            self.browser_label.setStyleSheet(HomePageStyles.get_browser_label_style())
+        if self.items_label:
+            self.items_label.setStyleSheet(HomePageStyles.get_items_label_style())
+        # Refresh the table to apply new theme colors
+        self.filter_content(self.search_filter)
+    
     def _connect_signals(self):
         """Connect signals with error handling"""
         try:
@@ -712,7 +740,7 @@ class OrchestrixGUI(QMainWindow):
 
         # --- Modified Name column widget to include cluster icon ---
         name_widget = QWidget()
-        name_widget.setStyleSheet("background: transparent; padding: 0px; margin: 0px;")
+        name_widget.setStyleSheet(HomePageStyles.TRANSPARENT_WIDGET)
         name_widget.setCursor(Qt.CursorShape.PointingHandCursor)
         name_layout = QHBoxLayout(name_widget)
         name_layout.setContentsMargins(0, 0, 0, 0)
@@ -741,10 +769,8 @@ class OrchestrixGUI(QMainWindow):
                 print(f"Error processing cluster icon for {name}: {e}")
 
         name_label = QLabel(name if not badge_color else item_text)
-        font = QFont("Segoe UI", 10)
-        font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
-        name_label.setFont(font)
-        name_label.setStyleSheet("color: #FFFFFF; background: transparent; padding: 0px; margin: 0px;")
+        name_label.setFont(HomePageStyles.get_cell_font())
+        name_label.setStyleSheet(HomePageStyles.get_cell_label_style())
         name_layout.addWidget(name_label)
 
         if original_data and 'cluster_data' in original_data:
@@ -753,10 +779,7 @@ class OrchestrixGUI(QMainWindow):
             pin_icon_path = resource_path("Icons/pin.svg") if name not in self.pinned_items else resource_path("Icons/unpin.svg")
             pin_btn.setIcon(QIcon(pin_icon_path))
             pin_btn.setIconSize(QSize(16, 16))
-            pin_btn.setStyleSheet("""
-                QPushButton { background: transparent; border: none; padding: 0px; margin: 0px; }
-                QPushButton:hover { background: #3e3e3e; }
-            """)
+            pin_btn.setStyleSheet(HomePageStyles.get_pin_button_style())
             pin_btn.clicked.connect(lambda checked=False, n=name: self.toggle_pin_item(n))
             name_layout.addWidget(pin_btn)
 
@@ -766,66 +789,54 @@ class OrchestrixGUI(QMainWindow):
 
         # Kind column (column 1)
         kind_widget = QWidget()
-        kind_widget.setStyleSheet("background: transparent; padding: 0px; margin: 0px;")
+        kind_widget.setStyleSheet(HomePageStyles.TRANSPARENT_WIDGET)
         kind_widget.setCursor(Qt.CursorShape.PointingHandCursor)
         kind_layout = QHBoxLayout(kind_widget)
         kind_layout.setContentsMargins(8, 0, 8, 0)  # Add some padding
         kind_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
         kind_label = QLabel(kind)
-        font = QFont("Segoe UI", 10)
-        font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
-        kind_label.setFont(font)
-        kind_label.setStyleSheet("color: #FFFFFF; background: transparent; padding: 0px; margin: 0px;")
+        kind_label.setFont(HomePageStyles.get_cell_font())
+        kind_label.setStyleSheet(HomePageStyles.get_cell_label_style())
         kind_layout.addWidget(kind_label)
         self.tree_widget.setItemWidget(item, 1, kind_widget)
 
         # Source column (column 2)
         source_widget = QWidget()
-        source_widget.setStyleSheet("background: transparent; padding: 0px; margin: 0px;")
+        source_widget.setStyleSheet(HomePageStyles.TRANSPARENT_WIDGET)
         source_widget.setCursor(Qt.CursorShape.PointingHandCursor)
         source_layout = QHBoxLayout(source_widget)
         source_layout.setContentsMargins(8, 0, 8, 0)  # Add some padding
         source_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
         source_label = QLabel(source)
-        font = QFont("Segoe UI", 10)
-        font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
-        source_label.setFont(font)
-        source_label.setStyleSheet("color: #FFFFFF; background: transparent; padding: 0px; margin: 0px;")
+        source_label.setFont(HomePageStyles.get_cell_font())
+        source_label.setStyleSheet(HomePageStyles.get_cell_label_style())
         source_layout.addWidget(source_label)
         self.tree_widget.setItemWidget(item, 2, source_widget)
 
         # Label column (column 3)
         label_widget = QWidget()
-        label_widget.setStyleSheet("background: transparent; padding: 0px; margin: 0px;")
+        label_widget.setStyleSheet(HomePageStyles.TRANSPARENT_WIDGET)
         label_widget.setCursor(Qt.CursorShape.PointingHandCursor)
         label_layout = QHBoxLayout(label_widget)
         label_layout.setContentsMargins(8, 0, 8, 0)  # Add some padding
         label_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
         label_label = QLabel(label)
-        font = QFont("Segoe UI", 10)
-        font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
-        label_label.setFont(font)
-        label_label.setStyleSheet("color: #FFFFFF; background: transparent; padding: 0px; margin: 0px;")
+        label_label.setFont(HomePageStyles.get_cell_font())
+        label_label.setStyleSheet(HomePageStyles.get_cell_label_style())
         label_layout.addWidget(label_label)
         self.tree_widget.setItemWidget(item, 3, label_widget)
 
         # --- END of new custom widgets for Kind, Source, and Label ---
 
-        status_colors = {
-            "available": AppColors.STATUS_AVAILABLE,
-            "active": AppColors.STATUS_ACTIVE,
-            "connected": AppColors.STATUS_AVAILABLE,
-            "disconnect": AppColors.STATUS_DISCONNECTED,
-            "connecting": AppColors.STATUS_WARNING,
-            "loading": AppColors.STATUS_WARNING
-        }
+        # Status colors now use theme-aware ACCENT colors
+        # Removed hardcoded status_colors dict - using HomePageStyles.get_status_color() instead
 
         status_widget = QWidget()
         status_widget.setObjectName("statusCell")
-        status_widget.setStyleSheet("QWidget#statusCell { background: transparent; }")
+        status_widget.setStyleSheet(HomePageStyles.STATUS_CELL)
         status_widget.setCursor(Qt.CursorShape.PointingHandCursor)
         status_layout = QHBoxLayout(status_widget)
         status_layout.setContentsMargins(5, 0, 0, 0)
@@ -838,7 +849,8 @@ class OrchestrixGUI(QMainWindow):
                 status_layout.addWidget(loading_indicator)
                 status_text = "Connecting..." if status == "connecting" else "Loading data..."
                 status_label = QLabel(status_text)
-                status_label.setStyleSheet(f"color: {status_colors.get(status, AppColors.STATUS_DISCONNECTED)}; background: transparent;")
+                status_color = HomePageStyles.get_status_color(status)
+                status_label.setStyleSheet(HomePageStyles.get_status_label_style(status_color))
                 status_layout.addWidget(status_label)
             else:
                 if status == "available": status_text = "Available"
@@ -846,18 +858,20 @@ class OrchestrixGUI(QMainWindow):
                 elif status == "disconnect": status_text = "Disconnected"
                 else: status_text = status.capitalize()
                 status_label = QLabel(status_text)
-                status_label.setStyleSheet(f"color: {status_colors.get(status, AppColors.STATUS_DISCONNECTED)}; background: transparent;")
+                status_color = HomePageStyles.get_status_color(status)
+                status_label.setStyleSheet(HomePageStyles.get_status_label_style(status_color))
                 status_layout.addWidget(status_label)
         else:
             status_text = status
             status_label = QLabel(status_text)
-            status_label.setStyleSheet(f"color: {status_colors.get(status, AppColors.STATUS_DISCONNECTED)}; background: transparent;")
+            status_color = HomePageStyles.get_status_color(status)
+            status_label.setStyleSheet(HomePageStyles.get_status_label_style(status_color))
             status_layout.addWidget(status_label)
         self.tree_widget.setItemWidget(item, 4, status_widget)
 
         action_widget = QWidget()
         action_widget.setFixedWidth(AppConstants.SIZES["ACTION_WIDTH"])
-        action_widget.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
+        action_widget.setStyleSheet(HomePageStyles.get_action_container_style())
         action_layout = QHBoxLayout(action_widget)
         action_layout.setContentsMargins(0, 0, 0, 0)
         action_layout.setSpacing(0)
@@ -870,15 +884,15 @@ class OrchestrixGUI(QMainWindow):
         menu_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         menu_btn.setFixedWidth(AppConstants.SIZES["ACTION_WIDTH"])
         menu_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        menu_btn.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE)
+        menu_btn.setStyleSheet(HomePageStyles.get_home_action_button_style())
         menu_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
 
         if status in ["connecting", "loading"] and (name in self.connecting_clusters or self.waiting_for_cluster_load == name):
             menu_btn.setEnabled(False)
-            menu_btn.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE + " QToolButton:disabled { opacity: 0.5; background-color: transparent; }")
+            menu_btn.setStyleSheet(HomePageStyles.get_home_action_button_disabled_style())
         else:
             menu = QMenu(action_widget)
-            menu.setStyleSheet(AppStyles.MENU_STYLE)
+            menu.setStyleSheet(HomePageStyles.get_menu_style())
             if status == "available" and is_cluster:
                 open_action = menu.addAction("Open")
                 connect_action = menu.addAction("Connect")
@@ -1012,7 +1026,7 @@ class OrchestrixGUI(QMainWindow):
         font = QFont("Segoe UI", 13)
         font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
         tree_widget.setFont(font)
-        tree_widget.setStyleSheet(AppStyles.TREE_WIDGET_STYLE)
+        tree_widget.setStyleSheet(HomePageStyles.get_tree_widget_style())
         tree_widget.setIconSize(QSize(20, 20))
         tree_widget.setIndentation(0)
         tree_widget.setAlternatingRowColors(False)
@@ -1209,7 +1223,7 @@ class OrchestrixGUI(QMainWindow):
     def create_sidebar(self):
         self.sidebar = QWidget()
         self.sidebar.setFixedWidth(AppConstants.SIZES["SIDEBAR_WIDTH"])
-        self.sidebar.setStyleSheet(AppStyles.SIDEBAR_CONTAINER_STYLE)
+        self.sidebar.setStyleSheet(HomePageStyles.get_sidebar_container_style())
         self.sidebar_layout = QVBoxLayout(self.sidebar)
         self.sidebar_layout.setContentsMargins(0, 0, 0, 0)
         self.sidebar_layout.setSpacing(2)
@@ -1240,17 +1254,17 @@ class OrchestrixGUI(QMainWindow):
     def create_top_bar(self):
         self.top_bar = QWidget()
         self.top_bar.setFixedHeight(AppConstants.SIZES["TOPBAR_HEIGHT"])
-        self.top_bar.setStyleSheet(AppStyles.TOP_BAR_STYLE)
+        self.top_bar.setStyleSheet(HomePageStyles.get_top_bar_style())
         self.top_bar_layout = QHBoxLayout(self.top_bar)
         self.top_bar_layout.setContentsMargins(10, 0, 10, 0)
         self.browser_label = QLabel("Browse All")
-        self.browser_label.setStyleSheet(AppStyles.BROWSER_LABEL_STYLE)
+        self.browser_label.setStyleSheet(HomePageStyles.get_browser_label_style())
         self.items_label = QLabel("9 items")
-        self.items_label.setStyleSheet(AppStyles.ITEMS_LABEL_STYLE)
+        self.items_label.setStyleSheet(HomePageStyles.get_items_label_style())
         self.search = QLineEdit()
         self.search.setPlaceholderText("Search...")
         self.search.setFixedWidth(300)
-        self.search.setStyleSheet(AppStyles.SEARCH_STYLE)
+        self.search.setStyleSheet(HomePageStyles.get_search_style())
         self.search.textChanged.connect(self.filter_content)
         self.top_bar_layout.addWidget(self.browser_label)
         self.top_bar_layout.addWidget(self.items_label)
@@ -1265,7 +1279,7 @@ class OrchestrixGUI(QMainWindow):
         self.main_content_layout.setSpacing(0)
         self.table_container = QFrame()
         self.table_container.setFrameShape(QFrame.Shape.NoFrame)
-        self.table_container.setStyleSheet(AppStyles.CONTENT_AREA_STYLE)
+        self.table_container.setStyleSheet(HomePageStyles.get_content_area_style())
         self.table_container_layout = QVBoxLayout(self.table_container)
         self.table_container_layout.setContentsMargins(0, 0, 0, 0)
         self.table_container_layout.setSpacing(0)

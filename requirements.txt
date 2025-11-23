@@ -2,6 +2,7 @@ altgraph==0.17.4
 cachetools==5.5.2
 certifi==2025.6.15
 charset-normalizer==3.4.2
+deepdi ff==8.0.1
 durationpy==0.10
 google-auth==2.40.3
 idna==3.10

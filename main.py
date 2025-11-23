@@ -49,6 +49,7 @@ try:
     from UI.DetailPageComponent import DetailPageComponent
     from UI.detail_sections.detailpage_yamlsection import DetailPageYAMLSection
 
+
     from Utils.cluster_state_manager import get_cluster_state_manager, ClusterState
     from Utils.thread_manager import get_thread_manager, shutdown_thread_manager
     from Utils.error_handler import get_error_handler, ResourceCleaner, error_handler
@@ -147,7 +148,6 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Orchestrix")
         self.setMinimumSize(1300, 700)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
-        self.setStyleSheet(AppStyles.MAIN_STYLE)
 
         try:
             self._setup_cluster_state_manager()
@@ -904,8 +904,28 @@ def main():
     # Force consistent font rendering
     app.setFont(QFont("Segoe UI", 9))
     
-    # Apply global stylesheet with platform overrides
-    app.setStyleSheet(AppStyles.GLOBAL_PLATFORM_OVERRIDE_STYLE)
+    # Apply theme from ThemeManager with saved preference
+    from PyQt6.QtCore import QSettings
+    from UI.ThemeManager import get_theme_manager
+    
+    settings = QSettings("Orchetrix", "OX")
+    saved_theme = settings.value("theme", "Dark")
+    
+    # Use singleton instance instead of creating new one
+    theme_manager = get_theme_manager()
+    theme_manager.set_theme(saved_theme)
+    theme = theme_manager.get_current_theme()
+    app.setStyleSheet(theme.get_main_style())
+    
+    # Connect theme_changed signal to update app stylesheet
+    def on_theme_changed(theme_name):
+        theme = theme_manager.get_current_theme()
+        app.setStyleSheet(theme.get_main_style())
+        logging.info(f"Theme changed to {theme_name}")
+    
+    theme_manager.theme_changed.connect(on_theme_changed)
+    
+    logging.info(f"Applied {saved_theme} theme at startup")
     
     # Set application icon
     icon_path_ico = resource_path("Icons/logoIcon.ico")
