@@ -1,5 +1,6 @@
 from UI.ThemeManager import get_theme_manager
 from PyQt6.QtGui import QFont
+from UI.Styles import AppConstants
 
 
 def _get_theme():
@@ -7,27 +8,175 @@ def _get_theme():
     return get_theme_manager().get_current_theme()
 
 
-# Theme-aware style functions
+# Theme-aware style functions using direct pattern
 def get_sidebar_button_style():
-    return _get_theme().get_sidebar_button_style()
+    theme = _get_theme()
+    return f"""
+        QPushButton {{
+            background-color: transparent;
+            color: {theme.colors.TEXT_SUBTLE};
+            text-align: left;
+            padding: 10px 20px;
+            border: none;
+            font-size: 14px;
+        }}
+        QPushButton:hover {{
+            background-color: {theme.colors.HOVER_BG};
+            color: {theme.colors.TEXT_LIGHT};
+        }}
+        QPushButton:checked {{
+            background-color: {theme.colors.HOVER_BG};
+            color: {theme.colors.TEXT_LIGHT};
+            padding-left: 17px;
+        }}
+    """
 
 def get_sidebar_container_style():
-    return _get_theme().get_sidebar_style()
+    theme = _get_theme()
+    return f"""
+        QWidget {{
+            background-color: {theme.colors.BG_SIDEBAR};
+            border-right: 2px solid {theme.colors.BORDER_COLOR};
+        }}
+    """
 
 def get_top_bar_style():
-    return _get_theme().get_top_bar_style()
+    theme = _get_theme()
+    return f"""
+        QWidget {{
+            background-color: {theme.colors.BG_DARK};
+            border-bottom: 1px solid {theme.colors.BORDER_COLOR};
+        }}
+    """
 
 def get_tree_widget_style():
-    return _get_theme().get_tree_widget_style()
+    theme = _get_theme()
+    return f"""
+        QTreeWidget {{
+            background-color: {theme.colors.BG_DARK};
+            border: none;
+            outline: none;
+            font-size: 13px;
+            gridline-color: {theme.colors.BORDER_DARK};
+            margin: 0;
+            padding: 0;
+            selection-background-color: rgba(53, 132, 228, 0.15);
+            alternate-background-color: transparent;
+        }}
+        
+        QTreeWidget::item {{
+            padding: 6px 4px;
+            background-color: transparent;
+            border: none;
+            outline: none;
+        }}
+        
+        QTreeWidget::item:hover {{
+            background-color: rgba(53, 132, 228, 0.10);
+        }}
+        
+        QTreeWidget::item:selected {{
+            background-color: rgba(53, 132, 228, 0.15);
+            color: {theme.colors.TEXT_LIGHT};
+        }}
+        
+        QTreeWidget::item:selected:hover {{
+            background-color: rgba(53, 132, 228, 0.20);
+        }}
+        
+        QHeaderView::section {{
+            background-color: {theme.colors.TABLE_HEADER};
+            color: {theme.colors.TEXT_LIGHT};
+            padding: 8px 8px;
+            border-right: 1px solid {theme.colors.BORDER_DARK};
+            border-bottom: 1px solid {theme.colors.BORDER_DARK};
+            border-top: none;
+            border-left: 1px solid {theme.colors.BORDER_DARK};
+            text-align: left;
+            font-weight: bold;
+        }}
+        
+        QHeaderView::section:first {{
+            border-left: 1px solid {theme.colors.BORDER_DARK};
+        }}
+        
+        QHeaderView::section:last {{
+            padding: 0;
+            text-align: center;
+            width: {AppConstants.SIZES["ACTION_WIDTH"]}px;
+            max-width: {AppConstants.SIZES["ACTION_WIDTH"]}px;
+            min-width: {AppConstants.SIZES["ACTION_WIDTH"]}px;
+        }}
+        
+        QHeaderView::section:hover {{
+            background-color: {theme.colors.BG_MEDIUM};
+        }}
+        
+        QHeaderView::down-arrow, QHeaderView::up-arrow {{
+            image: none;
+            width: 0px;
+            height: 0px;
+            border: none;
+            subcontrol-origin: content;
+            subcontrol-position: right;
+        }}
+        
+        QTreeWidget::branch {{
+            border: none;
+            border-image: none;
+            outline: none;
+        }}
+    """
 
 def get_menu_style():
-    return _get_theme().get_menu_style()
+    theme = _get_theme()
+    return f"""
+        QMenu {{
+            background-color: {theme.colors.BG_DARKER};
+            border: 1px solid {theme.colors.BORDER_COLOR};
+            border-radius: 6px;
+            padding: 6px;
+        }}
+        QMenu::item {{
+            color: {theme.colors.TEXT_LIGHT};
+            padding: 10px 24px 10px 36px;
+            border-radius: 4px;
+            font-size: 13px;
+            margin: 2px 0px;
+        }}
+        QMenu::item:selected {{
+            background-color: {theme.colors.SELECTED_BG};
+            color: {theme.colors.TEXT_LIGHT};
+        }}
+        QMenu::separator {{
+            height: 1px;
+            background-color: {theme.colors.BORDER_COLOR};
+            margin: 6px 10px;
+        }}
+    """
 
 def get_search_style():
-    return _get_theme().get_search_bar_style()
+    theme = _get_theme()
+    return f"""
+        QLineEdit {{
+            padding: 5px;
+            background-color: {theme.colors.BG_MEDIUM};
+            border: 1px solid {theme.colors.BORDER_COLOR};
+            border-radius: 2px;
+            color: {theme.colors.TEXT_LIGHT};
+        }}
+    """
 
 def get_content_area_style():
-    return _get_theme().get_content_area_style()
+    theme = _get_theme()
+    return f"""
+        QFrame {{
+            background-color: {theme.colors.BG_DARK};
+            border: none;
+            padding: 0;
+            margin: 0;
+        }}
+    """
 
 def get_action_container_style():
     return """
@@ -38,7 +187,25 @@ def get_action_container_style():
     """
 
 def get_home_action_button_style():
-    return _get_theme().get_action_button_style()
+    theme = _get_theme()
+    return f"""
+        QToolButton {{
+            background: transparent;
+            padding: 2px;
+            margin: 0;
+            border: none;
+        }}
+        QToolButton:hover {{
+            background-color: {theme.colors.HOVER_BG};
+            border-radius: 3px;
+        }}
+        QToolButton:pressed {{
+            background-color: {theme.colors.HOVER_BG_DARKER};
+        }}
+        QToolButton::menu-indicator {{
+            image: none;
+        }}
+    """
 
 def get_home_action_button_disabled_style():
     """Get disabled state style for action button"""

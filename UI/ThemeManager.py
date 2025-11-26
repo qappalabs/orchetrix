@@ -652,15 +652,6 @@ class BaseTheme:
         """
     
     @staticmethod
-    def _title_bar_style_template(bg_color, text_color):
-        return f"""
-            QWidget {{
-                background-color: {bg_color};
-                color: {text_color};
-            }}
-        """
-    
-    @staticmethod
     def _events_table_template(bg_color, text_color, header_bg, hover_bg, selected_bg):
         return f"""
             QTableWidget {{
@@ -822,9 +813,6 @@ class DarkTheme(BaseTheme):
     def get_default_style(self):
         return self.styles.MAIN_STYLE
     
-    def get_sidebar_style(self):
-        return self.styles.SIDEBAR_CONTAINER_STYLE
-    
     def get_menu_style(self):
         return self.styles.MENU_STYLE
     
@@ -843,14 +831,8 @@ class DarkTheme(BaseTheme):
     def get_button_secondary_style(self):
         return self.styles.BUTTON_SECONDARY_STYLE
     
-    def get_sidebar_button_style(self):
-        return self.styles.SIDEBAR_BUTTON_STYLE
-    
     def get_action_button_style(self):
         return self.styles.ACTION_BUTTON_STYLE
-    
-    def get_panel_style(self):
-        return self.styles.PANEL_STYLE
     
     def get_header_style(self):
         return self.styles.HEADER_STYLE
@@ -863,12 +845,6 @@ class DarkTheme(BaseTheme):
     
     def get_search_bar_style(self):
         return self.styles.SEARCH_BAR_STYLE
-    
-    def get_tree_widget_style(self):
-        return self.styles.TREE_WIDGET_STYLE
-    
-    def get_status_box_style(self):
-        return self.styles.STATUS_BOX_STYLE
     
     def get_title_style(self):
         return self.styles.TITLE_STYLE
@@ -938,9 +914,6 @@ class DarkTheme(BaseTheme):
     
     def get_nav_menu_dropdown_style(self):
         return self.styles.NAV_MENU_DROPDOWN_STYLE
-    
-    def get_title_bar_style(self):
-        return self.styles.TITLE_BAR_STYLE
     
     def get_events_table_style(self):
         return self.styles.EVENTS_TABLE_STYLE
@@ -1072,13 +1045,6 @@ class LightTheme(BaseTheme):
             text_color=self.colors.TEXT_DARK
         )
     
-    def get_sidebar_style(self):
-        # VS Code Light sidebar
-        return self._sidebar_template(
-            bg_color=self.colors.BG_SIDEBAR,
-            border_color=self.colors.BORDER_COLOR
-        )
-    
     def get_menu_style(self):
         # GitHub Light + Modern Light UI
         return self._menu_template(
@@ -1131,28 +1097,12 @@ class LightTheme(BaseTheme):
             hover_bg=self.colors.BG_LIGHT
         )
     
-    def get_sidebar_button_style(self):
-        # VS Code Light sidebar button
-        return self._sidebar_button_template(
-            bg_color="transparent",
-            text_color=self.colors.TEXT_SECONDARY,
-            hover_bg="rgba(0, 0, 0, 0.05)",
-            active_bg="rgba(0, 0, 0, 0.05)"
-        )
-    
     def get_action_button_style(self):
         # Light theme action button
         return self._action_button_template(
             bg_color="transparent",
             hover_bg="rgba(0, 0, 0, 0.05)",
             pressed_bg="rgba(0, 0, 0, 0.1)"
-        )
-    
-    def get_panel_style(self):
-        # VS Code Light panel
-        return self._panel_template(
-            bg_color=self.colors.CARD_BG,
-            border_color=self.colors.BORDER_COLOR
         )
     
     def get_header_style(self):
@@ -1184,26 +1134,6 @@ class LightTheme(BaseTheme):
             text_color=self.colors.TEXT_DARK,
             border_color=self.colors.BORDER_COLOR,
             focus_border=self.colors.BG_DARKER
-        )
-    
-    def get_tree_widget_style(self):
-        # VS Code Light tree widget
-        return self._tree_widget_template(
-            bg_color=self.colors.BG_MEDIUM,
-            text_color=self.colors.TEXT_DARK,
-            border_color=self.colors.BORDER_COLOR,
-            header_bg=self.colors.BG_LIGHT,
-            hover_bg="rgba(0, 0, 0, 0.05)",
-            selected_bg="rgba(53, 132, 228, 0.15)"
-        )
-    
-    def get_status_box_style(self):
-        # VS Code Light status box
-        return self._status_box_template(
-            bg_color=self.colors.CARD_BG,
-            border_color=self.colors.BORDER_COLOR,
-            hover_bg=self.colors.BG_DARK,
-            hover_border=self.colors.BORDER_DARK
         )
     
     def get_title_style(self):
@@ -1373,13 +1303,6 @@ class LightTheme(BaseTheme):
             selected_bg="rgba(53, 132, 228, 0.15)"
         )
     
-    def get_title_bar_style(self):
-        # VS Code Light title bar
-        return self._title_bar_style_template(
-            bg_color=self.colors.BG_MEDIUM,
-            text_color=self.colors.TEXT_DARK
-        )
-    
     def get_events_table_style(self):
         # VS Code Light events table
         return self._events_table_template(
@@ -1458,7 +1381,7 @@ class LightTheme(BaseTheme):
     def get_main_style(self):
         return f"""
             QMainWindow, QWidget {{
-                background-color: {self.colors.BG_MEDIUM};
+                background-color: {self.colors.BG_DARK};
                 color: {self.colors.TEXT_DARK};
                 font-family: 'Segoe UI', sans-serif;
             }}

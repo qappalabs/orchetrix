@@ -9,13 +9,14 @@ from PyQt6.QtCore import Qt, QPoint, QEvent, QSize
 from PyQt6.QtGui import QFont, QLinearGradient, QPainter, QColor, QPixmap, QIcon, QPainterPath, QCursor, QAction
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QLabel, QToolButton, QPushButton, QFrame, QLineEdit, QMenu, QSpacerItem, QWidgetAction
 
-from UI.Styles import AppColors, AppStyles
+from Styles import TitleBarStyles
 from UI.Icons import Icons, resource_path
+from UI.ThemeAwarePage import ThemeAwareMixin
 
-class TitleBar(QWidget):
+class TitleBar(ThemeAwareMixin, QWidget):
     def __init__(self, parent=None, update_pinned_items_signal=None):
-        super().__init__(parent)
         self.parent = parent
+        super().__init__(parent)
         self.setFixedHeight(40)
 
         # Define consistent icon sizes
@@ -46,7 +47,7 @@ class TitleBar(QWidget):
 
     def setup_ui(self):
         # Apply title bar style from Styles.py
-        self.setStyleSheet(AppStyles.TITLE_BAR_STYLE)
+        self.setStyleSheet(TitleBarStyles.get_title_bar_style())
 
         # Create a container widget with vertical layout
         container = QWidget(self)
@@ -91,29 +92,13 @@ class TitleBar(QWidget):
         # Icon label for cluster icon
         self.pinned_clusters_icon = QLabel()
         self.pinned_clusters_icon.setFixedSize(16, 16)
-        self.pinned_clusters_icon.setStyleSheet("""
-            QLabel {
-                background-color: #2A2A2A;
-                border: none;
-                margin: 0px;
-            }
-        """)
+        self.pinned_clusters_icon.setStyleSheet(TitleBarStyles.get_pinned_cluster_icon_style())
         self.pinned_clusters_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.pinned_clusters_icon.hide()  # Hidden by default
 
         # Label for "Pinned Clusters" text or current cluster name
         self.pinned_clusters_label = QLabel("Pinned Clusters")
-        self.pinned_clusters_label.setStyleSheet("""
-            QLabel {
-                background-color: #2A2A2A;
-                color: #FFFFFF;
-                padding: 0px 4px;
-                font-size: 14px;
-                font-family: 'Segoe UI', sans-serif;
-                border: none;
-                margin: 0px;
-            }
-        """)
+        self.pinned_clusters_label.setStyleSheet(TitleBarStyles.get_pinned_cluster_label_style())
         self.pinned_clusters_label.setFixedHeight(30)
 
         # Button for the ▼ arrow
@@ -121,28 +106,12 @@ class TitleBar(QWidget):
         self.pinned_clusters_arrow_btn.setFixedSize(30, 30)
         self.pinned_clusters_arrow_btn.setIcon(self.create_down_arrow_icon())
         self.pinned_clusters_arrow_btn.setIconSize(QSize(10, 10))
-        self.pinned_clusters_arrow_btn.setStyleSheet("""
-            QToolButton {
-                background-color: #2A2A2A;
-                border: none;
-                border-left: 1px solid #4A4A4A;
-                border-radius: 0 4px 4px 0;
-                margin: 0px;
-            }
-            QToolButton:hover {
-                background-color: #3e3e3e;
-            }
-        """)
+        self.pinned_clusters_arrow_btn.setStyleSheet(TitleBarStyles.get_pinned_cluster_arrow_style())
         self.pinned_clusters_arrow_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.pinned_clusters_arrow_btn.clicked.connect(self.toggle_pinned_clusters_dropdown)
 
         # Container widget styling
-        self.pinned_clusters_container.setStyleSheet("""
-            QWidget {
-                background-color: #2A2A2A;
-                border-radius: 4px;
-            }
-        """)
+        self.pinned_clusters_container.setStyleSheet(TitleBarStyles.get_pinned_cluster_container_style())
 
         # Add widgets to layout in correct order
         pinned_layout.addWidget(self.pinned_clusters_icon)
@@ -162,7 +131,7 @@ class TitleBar(QWidget):
 
         self.close_btn = self.create_window_control_button("close", "Close")
         self.close_btn.clicked.connect(self.parent.close)
-        self.close_btn.setStyleSheet(AppStyles.TITLE_BAR_CLOSE_BUTTON_STYLE)
+        self.close_btn.setStyleSheet(TitleBarStyles.get_close_button_style())
 
         # Add widgets to layout (removed troubleshoot_btn, notifications_btn, and profile_btn)
         layout.addWidget(self.logo_label)
@@ -179,10 +148,10 @@ class TitleBar(QWidget):
         container_layout.addWidget(content)
 
         # Create a frame for the bottom border
-        bottom_frame = QFrame()
-        bottom_frame.setFixedHeight(2)
-        bottom_frame.setStyleSheet(f"background-color: {AppColors.BORDER_COLOR};")
-        container_layout.addWidget(bottom_frame)
+        self.bottom_frame = QFrame()
+        self.bottom_frame.setFixedHeight(2)
+        self.bottom_frame.setStyleSheet(TitleBarStyles.get_title_bar_bottom_frame_style())
+        container_layout.addWidget(self.bottom_frame)
 
         # Set up the main layout for this widget
         main_layout = QVBoxLayout(self)
@@ -206,6 +175,25 @@ class TitleBar(QWidget):
                 self.open_cluster_signal,
                 self.update_current_cluster
             )
+    
+    def _on_theme_changed(self, theme_name):
+        """Re-apply all styles when theme changes"""
+        self.setStyleSheet(TitleBarStyles.get_title_bar_style())
+        self.pinned_clusters_icon.setStyleSheet(TitleBarStyles.get_pinned_cluster_icon_style())
+        self.pinned_clusters_label.setStyleSheet(TitleBarStyles.get_pinned_cluster_label_style())
+        self.pinned_clusters_arrow_btn.setStyleSheet(TitleBarStyles.get_pinned_cluster_arrow_style())
+        self.pinned_clusters_container.setStyleSheet(TitleBarStyles.get_pinned_cluster_container_style())
+        self.close_btn.setStyleSheet(TitleBarStyles.get_close_button_style())
+        self.home_btn.setStyleSheet(TitleBarStyles.get_icon_button_style())
+        self.settings_btn.setStyleSheet(TitleBarStyles.get_icon_button_style())
+        self.minimize_btn.setStyleSheet(TitleBarStyles.get_window_control_style())
+        self.maximize_btn.setStyleSheet(TitleBarStyles.get_window_control_style())
+        if hasattr(self, 'bottom_frame'):
+            self.bottom_frame.setStyleSheet(TitleBarStyles.get_title_bar_bottom_frame_style())
+        if self.dropdown_menu:
+            self.dropdown_menu.setStyleSheet(TitleBarStyles.get_dropdown_menu_style())
+        if self.search_input:
+            self.search_input.setStyleSheet(TitleBarStyles.get_search_input_style())
 
     def update_current_cluster(self, cluster_name):
         """Update the pinned clusters label with the selected cluster name and icon"""
@@ -293,39 +281,14 @@ class TitleBar(QWidget):
         """Create or update the dropdown menu with search input and pinned items"""
         if not self.dropdown_menu:
             self.dropdown_menu = QMenu(self)
-            self.dropdown_menu.setStyleSheet("""
-                QMenu {
-                    background-color: #2A2A2A;
-                    color: #FFFFFF;
-                    border: 1px solid #4A4A4A;
-                    padding: 5px;
-                }
-                QMenu::item {
-                    padding: 5px 20px;
-                }
-                QMenu::item:selected {
-                    background-color: #4A9EFF;
-                }
-            """)
+            self.dropdown_menu.setStyleSheet(TitleBarStyles.get_dropdown_menu_style())
 
         # Initialize or reuse the search input and action
         if not self.search_input:
             self.search_input = QLineEdit(self)  # Set parent to self to prevent deletion
             self.search_input.setPlaceholderText("Search...")
             self.search_input.setFixedWidth(287)  # Match the width of pinned_clusters_container
-            self.search_input.setStyleSheet("""
-                QLineEdit {
-                    background-color: #2A2A2A;
-                    color: #FFFFFF;
-                    border: 1px solid #4A4A4A;
-                    border-radius: 4px;
-                    padding: 5px;
-                    margin-bottom: 5px;
-                }
-                QLineEdit[placeholderText="Search..."] {
-                    color: #999999;
-                }
-            """)
+            self.search_input.setStyleSheet(TitleBarStyles.get_search_input_style())
             self.search_input.textChanged.connect(self.filter_pinned_items)
             self.search_action = QWidgetAction(self)  # Set parent to self to prevent deletion
             self.search_action.setDefaultWidget(self.search_input)
@@ -424,7 +387,7 @@ class TitleBar(QWidget):
             fallback_text = getattr(Icons, icon_id.upper(), "⚙️") if isinstance(icon_id, str) else "⚙️"
             btn.setText(fallback_text)
 
-        btn.setStyleSheet(AppStyles.TITLE_BAR_ICON_BUTTON_STYLE)
+        btn.setStyleSheet(TitleBarStyles.get_icon_button_style())
         return btn
 
     def create_window_control_button(self, icon_id, tooltip):
@@ -456,9 +419,9 @@ class TitleBar(QWidget):
             btn.setFont(QFont("Segoe UI", font_size))
 
         if icon_id == "close":
-            btn.setStyleSheet(AppStyles.TITLE_BAR_CLOSE_BUTTON_STYLE)
+            btn.setStyleSheet(TitleBarStyles.get_close_button_style())
         else:
-            btn.setStyleSheet(AppStyles.TITLE_BAR_WINDOW_BUTTON_STYLE)
+            btn.setStyleSheet(TitleBarStyles.get_window_control_style())
 
         return btn
 
@@ -493,7 +456,7 @@ class TitleBar(QWidget):
             btn.setText(fallback_text)
             btn.setFont(QFont("Segoe UI", font_size))
 
-        btn.setStyleSheet(AppStyles.TITLE_BAR_WINDOW_BUTTON_STYLE)
+        btn.setStyleSheet(TitleBarStyles.get_window_control_style())
         return btn
 
     def create_back_icon(self):
@@ -594,7 +557,7 @@ class TitleBar(QWidget):
             else:
                 self.maximize_btn.setText("□")
                 self.maximize_btn.setFont(QFont("Segoe UI", 9))
-            self.maximize_btn.setStyleSheet(AppStyles.TITLE_BAR_WINDOW_BUTTON_STYLE)
+            self.maximize_btn.setStyleSheet(TitleBarStyles.get_window_control_style())
         else:
             self.parent.showMaximized()
             icon = Icons.get_icon("maximize_active")
@@ -605,7 +568,7 @@ class TitleBar(QWidget):
             else:
                 self.maximize_btn.setText("⧉")
                 self.maximize_btn.setFont(QFont("Segoe UI", 9))
-            self.maximize_btn.setStyleSheet(AppStyles.TITLE_BAR_WINDOW_BUTTON_STYLE)
+            self.maximize_btn.setStyleSheet(TitleBarStyles.get_window_control_style())
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -653,7 +616,7 @@ class TitleBar(QWidget):
         else:
             self.maximize_btn.setText("⧉" if is_maximized else "□")
             self.maximize_btn.setFont(QFont("Segoe UI", 9))
-        self.maximize_btn.setStyleSheet(AppStyles.TITLE_BAR_WINDOW_BUTTON_STYLE)
+        self.maximize_btn.setStyleSheet(TitleBarStyles.get_window_control_style())
 
     def update_pinned_dropdown(self, pinned_items):
         """Update the pinned items list from HomePage"""
