@@ -54,13 +54,13 @@ class CronJobsPage(BaseResourcePage):
         # Column specifications with optimized default widths
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
-            (1, 140, "interactive"), # Name
-            (2, 90, "interactive"),  # Namespace
+            (1, 200, "interactive"), # Name
+            (2, 100, "interactive"),  # Namespace
             (3, 80, "interactive"),  # Schedule
-            (4, 70, "interactive"),  # Suspend
-            (5, 70, "interactive"),  # Active
-            (6, 70, "interactive"),  # Last Schedule
-            (7, 80, "stretch"),      # Age - stretch to fill remaining space
+            (4, 60, "interactive"),  # Suspend
+            (5, 60, "interactive"),  # Active
+            (6, 60, "interactive"),  # Last Schedule
+            (7, 50, "stretch"),      # Age - stretch to fill remaining space
             (8, 40, "fixed")        # Actions
         ]
         

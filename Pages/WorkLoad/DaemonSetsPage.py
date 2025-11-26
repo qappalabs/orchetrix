@@ -54,11 +54,11 @@ class DaemonSetsPage(BaseResourcePage):
         # Column specifications with optimized default widths
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
-            (1, 140, "interactive"), # Name
+            (1, 200, "interactive"), # Name
             (2, 100, "interactive"),  # Namespace
             (3, 90, "interactive"),  # Pods
             (4, 180, "interactive"),  # Node Selector
-            (5, 80, "stretch"), # Age
+            (5, 50, "stretch"), # Age
             (6, 40, "fixed"), # Actions
 
         ]

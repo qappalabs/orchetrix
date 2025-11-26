@@ -54,11 +54,11 @@ class JobsPage(BaseResourcePage):
         # Column specifications with optimized default widths
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
-            (1, 140, "interactive"), # Name
-            (2, 90, "interactive"),  # Namespace
-            (3, 80, "interactive"),  # Completions
-            (4, 70, "interactive"),  # Age
-            (5, 80, "stretch"),      # Conditions - stretch to fill remaining space
+            (1, 200, "interactive"), # Name
+            (2, 100, "interactive"),  # Namespace
+            (3, 90, "interactive"),  # Completions
+            (4, 50, "interactive"),  # Age
+            (5, 70, "stretch"),      # Conditions - stretch to fill remaining space
             (6, 40, "fixed")        # Actions
         ]
         

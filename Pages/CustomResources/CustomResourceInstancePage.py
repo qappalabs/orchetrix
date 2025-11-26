@@ -71,12 +71,18 @@ class CustomResourceInstancePage(BaseResourcePage):
     def setup_page_ui(self):
         """Set up the main UI elements for the Custom Resource Instance page"""
         config = self._get_column_config()
-        
+
+        # FIXED: For cluster-scoped CRDs, hide namespace dropdown
+        if self.scope == "Cluster":
+            self.show_namespace_dropdown = False
+        else:
+            self.show_namespace_dropdown = True
+
         # Set up the base UI components with dynamic title
         crd_display_name = self.crd_spec.get("names", {}).get("kind", self.crd_name)
         page_title = f"{crd_display_name} Instances"
         super().setup_ui(page_title, config['headers'], config['sortable_columns'])
-        
+
         # Apply styling and configure columns
         self._apply_table_styling()
         self.configure_columns()
@@ -380,13 +386,36 @@ class CustomResourceInstancePage(BaseResourcePage):
         try:
             scope_text = "namespaced" if self.scope == "Namespaced" else "cluster-scoped"
             logging.info(f"Loading {scope_text} {self.plural} instances...")
-            
-            # Both namespaced and cluster-scoped use the same API call
-            return kubernetes_client.custom_objects_api.list_cluster_custom_object(
-                group=self.api_group,
-                version=self.api_version,
-                plural=self.plural
-            )
+
+            # FIXED: Handle namespace filtering for namespaced CRDs
+            if self.scope == "Namespaced":
+                # Check if we should filter by namespace
+                namespace_filter = getattr(self, 'namespace_filter', 'All Namespaces')
+
+                if namespace_filter and namespace_filter != "All Namespaces":
+                    # Load instances from specific namespace
+                    logging.info(f"Loading {self.plural} instances from namespace: {namespace_filter}")
+                    return kubernetes_client.custom_objects_api.list_namespaced_custom_object(
+                        group=self.api_group,
+                        version=self.api_version,
+                        namespace=namespace_filter,
+                        plural=self.plural
+                    )
+                else:
+                    # Load from all namespaces
+                    logging.info(f"Loading {self.plural} instances from all namespaces")
+                    return kubernetes_client.custom_objects_api.list_cluster_custom_object(
+                        group=self.api_group,
+                        version=self.api_version,
+                        plural=self.plural
+                    )
+            else:
+                # Cluster-scoped resources
+                return kubernetes_client.custom_objects_api.list_cluster_custom_object(
+                    group=self.api_group,
+                    version=self.api_version,
+                    plural=self.plural
+                )
         except Exception as api_error:
             logging.warning(f"Failed to load {self.plural} instances: {api_error}")
             return None

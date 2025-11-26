@@ -106,8 +106,8 @@ class DeploymentsPage(BaseResourcePage):
             (2, 120, "interactive"),  # Namespace
             (3, 80, "interactive"),  # pod
             (4, 100, "interactive"),  # Replicas
-            (5, 90, "interactive"), # Age
-            (6, 100, "stretch"), # Conditions
+            (5, 50, "interactive"), # Age
+            (6, 90, "stretch"), # Conditions
             (7, 40, "fixed"),  # Action
         ]
         

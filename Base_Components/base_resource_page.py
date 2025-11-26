@@ -76,6 +76,7 @@ class BaseResourcePage(BaseTablePage):
         self._large_dataset_mode = False
         self._total_item_count = 0
         self._loaded_item_count = 0
+        self._remaining_count = 0  # FIXED: Track remaining items count
         self._enable_virtual_scrolling = False  # FIXED: Add virtual scrolling control
         self._progressive_loading = True  # FIXED: Enable progressive loading
         self._last_load_time = 0  # FIXED: Track last load time
@@ -206,13 +207,18 @@ class BaseResourcePage(BaseTablePage):
 
     def _auto_load_data(self):
         """Auto-load data when page is shown - FIXED for large data performance"""
-        if hasattr(self, 'resource_type') and self.resource_type and not self.is_loading_initial:
+        if hasattr(self, 'resource_type') and self.resource_type and not self.is_loading_initial and not self.is_loading_more:
             # FIXED: Check if we have recent data to avoid redundant loads
-            if (hasattr(self, '_last_load_time') and self._last_load_time > 0 and 
+            if (hasattr(self, '_last_load_time') and self._last_load_time > 0 and
                 time.time() - self._last_load_time < 5.0):  # 5 second throttle
                 logging.debug(f"Recent data available for {self.__class__.__name__}, skipping auto-load")
                 return
-                
+
+            # FIXED: Check if we already have data loaded to avoid redundant API calls
+            if self.resources and self._initial_load_done:
+                logging.debug(f"Data already loaded for {self.__class__.__name__}, skipping auto-load")
+                return
+
             logging.debug(f"Auto-loading data for {self.__class__.__name__}")  # Reduced to debug
             self._initial_load_done = True  # Mark as done to prevent repeated attempts
             self._last_load_time = time.time()  # FIXED: Track load time
@@ -1069,14 +1075,23 @@ class BaseResourcePage(BaseTablePage):
                 self.resources = resources[:MAX_ITEMS_IN_MEMORY]
                 self._loaded_item_count = len(self.resources)
                 self.all_data_loaded = False
-                # Store remaining items for lazy loading
-                self._remaining_resources = resources[MAX_ITEMS_IN_MEMORY:]
+                # FIXED: Don't store all remaining items in memory, just track count
+                # This prevents memory bloat for very large datasets
+                self._remaining_resources = []
+                self._remaining_count = self._total_item_count - len(self.resources)
+                logging.info(f"Loaded {len(self.resources)} items, {self._remaining_count} more available")
+
+                # FIXED: Clear the large resources list to free memory immediately
+                del resources
+                import gc
+                gc.collect()
             else:
                 # Small dataset - load everything
                 self.resources = resources
                 self._loaded_item_count = len(self.resources)
                 self.all_data_loaded = True
                 self._remaining_resources = []
+                self._remaining_count = 0
             
             # Always display resources, even if empty
             self._display_resources(self.resources)
@@ -1196,39 +1211,39 @@ class BaseResourcePage(BaseTablePage):
         total_rows = start_row + len(resources)
         self.table.setRowCount(total_rows)
         
-        # Handle large datasets efficiently
+        # FIXED: Handle large datasets efficiently with better batching
         if len(resources) > 500:
-            # For large datasets, render only visible items
-            batch_size = 100  # Larger batches for better performance with large data
-            for i in range(0, min(200, len(resources)), batch_size):  # Limit initial render to 200 items
+            # For large datasets, render all items but with optimized batching
+            batch_size = 200  # FIXED: Larger batches for better performance
+            for i in range(0, len(resources), batch_size):
                 batch = resources[i:i + batch_size]
-                
+
                 for j, resource in enumerate(batch):
                     row = start_row + i + j
                     if hasattr(self, 'populate_resource_row'):
                         self.populate_resource_row(row, resource)
                     else:
                         self._populate_resource_row(row, resource)
-                
-                # Process events every other batch for large datasets
-                if i % (batch_size * 2) == 0:
+
+                # FIXED: Process events less frequently for better performance
+                if i % (batch_size * 5) == 0 and i > 0:  # Every 1000 rows
                     QApplication.processEvents()
         else:
             # For smaller datasets, render normally in batches
-            batch_size = 50
+            batch_size = 100  # FIXED: Increased batch size
             for i in range(0, len(resources), batch_size):
                 batch = resources[i:i + batch_size]
-                
+
                 for j, resource in enumerate(batch):
                     row = start_row + i + j
                     if hasattr(self, 'populate_resource_row'):
                         self.populate_resource_row(row, resource)
                     else:
                         self._populate_resource_row(row, resource)
-                
-                # Process events less frequently to reduce overhead
-            if i % (batch_size * 2) == 0:
-                QApplication.processEvents()
+
+                # FIXED: Process events less frequently to reduce overhead
+                if i % (batch_size * 3) == 0 and i > 0:  # Every 300 rows
+                    QApplication.processEvents()
         
         # Re-enable sorting after all rows are added
         self.table.setSortingEnabled(True)
@@ -1334,6 +1349,11 @@ class BaseResourcePage(BaseTablePage):
 
     def force_load_data(self):
         """Force reload of data"""
+        # FIXED: Prevent redundant loading if already loading
+        if self.is_loading_initial or self.is_loading_more:
+            logging.debug(f"Already loading {self.resource_type}, skipping redundant force_load_data call")
+            return
+
         # Show loading indicator
         self.show_loading_indicator("Refreshing data...")
 
@@ -1353,6 +1373,7 @@ class BaseResourcePage(BaseTablePage):
         self._large_dataset_mode = False
         self._total_item_count = 0
         self._loaded_item_count = 0
+        self._remaining_count = 0  # FIXED: Reset remaining count
         logging.debug("Resources data array cleared for refresh")
         
     def clear_for_cluster_change(self):

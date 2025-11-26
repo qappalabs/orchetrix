@@ -54,11 +54,11 @@ class ReplicaControllersPage(BaseResourcePage):
         # Column specifications with optimized default widths
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
-            (1, 140, "interactive"), # Name
-            (2, 90, "interactive"),  # Namespace
-            (3, 80, "interactive"),  # Replica
+            (1, 200, "interactive"), # Name
+            (2, 100, "interactive"),  # Namespace
+            (3, 90, "interactive"),  # Replica
             (4, 70, "interactive"),  # Desired Replicas
-            (5, 80, "stretch"),      # Selector - stretch to fill remaining space
+            (5, 70, "stretch"),      # Selector - stretch to fill remaining space
             (6, 40, "fixed")        # Actions
         ]
         

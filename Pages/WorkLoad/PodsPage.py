@@ -93,15 +93,15 @@ class PodsPage(BaseResourcePage):
         # Column specifications with optimized default widths
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
-            (1, 190, "interactive"), # Name
+            (1, 210, "interactive"), # Name
             (2, 100, "interactive"),  # Namespace
             (3, 80, "interactive"),  # Containers
             (4, 80, "interactive"),  # Restarts
             (5, 130, "interactive"), # Controlled By
             (6, 110, "interactive"), # Node
-            (7, 60, "interactive"),  # QoS
-            (8, 60, "stretch"),  # Age
-            (9, 80, "fixed"),      # Status - stretch to fill remaining space
+            (7, 80, "interactive"),  # QoS
+            (8, 50, "stretch"),  # Age
+            (9, 70, "fixed"),      # Status - stretch to fill remaining space
             (10, 40, "fixed")        # Actions
         ]
         
