@@ -242,11 +242,9 @@ def get_cell_label_style():
 def get_pin_button_style():
     """Get theme-aware pin button style"""
     theme = _get_theme()
-    # Use theme-aware hover color
-    hover_bg = "rgba(255, 255, 255, 0.1)" if hasattr(theme.colors, 'BG_DARK') else "rgba(0, 0, 0, 0.1)"
     return f"""
         QPushButton {{ background: transparent; border: none; padding: 0px; margin: 0px; }}
-        QPushButton:hover {{ background: {hover_bg}; }}
+        QPushButton:hover {{ background: {theme.colors.HOVER_BG}; }}
     """
 
 
