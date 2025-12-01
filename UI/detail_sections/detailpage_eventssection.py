@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 import logging
 
 from .base_detail_section import BaseDetailSection
-from UI.Styles import AppStyles, AppColors
+import Styles.EventsSectionStyles as EventsSectionStyles
 
 
 class DetailPageEventsSection(BaseDetailSection):
@@ -21,6 +21,16 @@ class DetailPageEventsSection(BaseDetailSection):
     def __init__(self, kubernetes_client, parent=None):
         super().__init__("Events", kubernetes_client, parent)
         self.setup_events_ui()
+        # Note: Theme signals connected via ThemeAwareMixin in BaseDetailSection
+
+    def _on_theme_changed(self, theme_name):
+        """Refresh styles when theme changes"""
+        # Refresh events list style
+        if hasattr(self, 'events_list'):
+            self.events_list.setStyleSheet(EventsSectionStyles.get_events_list_style())
+        # Re-render dynamic content with new theme
+        if self.current_data:
+            self.update_ui_with_data(self.current_data)
     
     def set_raw_data(self, raw_data):
         """Set raw data for special resources like charts and releases"""
@@ -29,14 +39,14 @@ class DetailPageEventsSection(BaseDetailSection):
         # Show a message indicating this
         self.events_list.clear()
         no_events_item = QListWidgetItem("No Kubernetes events available for this resource type")
-        no_events_item.setForeground(QColor("#888888"))
+        no_events_item.setForeground(QColor(EventsSectionStyles.get_no_events_color()))
         self.events_list.addItem(no_events_item)
 
     def setup_events_ui(self):
         """Setup events-specific UI"""
         # Create events list
         self.events_list = QListWidget()
-        self.events_list.setStyleSheet(AppStyles.DETAIL_PAGE_EVENTS_LIST_STYLE)
+        self.events_list.setStyleSheet(EventsSectionStyles.get_events_list_style())
         self.events_list.setFrameShape(QListWidget.Shape.NoFrame)
         self.events_list.setSelectionMode(QListWidget.SelectionMode.NoSelection)
 
@@ -76,7 +86,7 @@ class DetailPageEventsSection(BaseDetailSection):
 
             if not events:
                 no_events_item = QListWidgetItem("No events found for this resource")
-                no_events_item.setForeground(QColor(AppColors.TEXT_SUBTLE))
+                no_events_item.setForeground(QColor(EventsSectionStyles.get_no_events_foreground_color()))
                 self.events_list.addItem(no_events_item)
                 return
 
@@ -93,7 +103,7 @@ class DetailPageEventsSection(BaseDetailSection):
         """Add an event to the events list"""
         try:
             event_widget = QWidget()
-            event_widget.setStyleSheet("background-color: transparent;")
+            event_widget.setStyleSheet(EventsSectionStyles.get_event_widget_style())
 
             layout = QVBoxLayout(event_widget)
             layout.setContentsMargins(12, 8, 12, 8)
@@ -108,37 +118,19 @@ class DetailPageEventsSection(BaseDetailSection):
             event_type = event.get("type", "Normal")
             type_label = QLabel(event_type)
             if event_type == "Warning":
-                type_label.setStyleSheet(f"""
-                    color: {AppColors.TEXT_WARNING};
-                    font-weight: bold;
-                    padding: 2px 6px;
-                    background-color: rgba(255, 152, 0, 0.1);
-                    border-radius: 3px;
-                """)
+                type_label.setStyleSheet(EventsSectionStyles.get_event_type_warning_style())
             else:
-                type_label.setStyleSheet(f"""
-                    color: {AppColors.TEXT_SUCCESS};
-                    font-weight: bold;
-                    padding: 2px 6px;
-                    background-color: rgba(76, 175, 80, 0.1);
-                    border-radius: 3px;
-                """)
+                type_label.setStyleSheet(EventsSectionStyles.get_event_type_normal_style())
 
             # Event reason
             reason = event.get("reason", "")
             reason_label = QLabel(reason)
-            reason_label.setStyleSheet(f"""
-                color: {AppColors.TEXT_LIGHT};
-                font-weight: bold;
-            """)
+            reason_label.setStyleSheet(EventsSectionStyles.get_event_reason_style())
 
             # Event age
             age = event.get("age", "Unknown")
             age_label = QLabel(age)
-            age_label.setStyleSheet(f"""
-                color: {AppColors.TEXT_SUBTLE};
-                font-size: 11px;
-            """)
+            age_label.setStyleSheet(EventsSectionStyles.get_event_age_style())
 
             header_layout.addWidget(type_label)
             header_layout.addWidget(reason_label)
@@ -148,11 +140,7 @@ class DetailPageEventsSection(BaseDetailSection):
             # Event message
             message = event.get("message", "")
             message_label = QLabel(message)
-            message_label.setStyleSheet(f"""
-                color: {AppColors.TEXT_SECONDARY};
-                font-size: 12px;
-                line-height: 1.4;
-            """)
+            message_label.setStyleSheet(EventsSectionStyles.get_event_message_style())
             message_label.setWordWrap(True)
 
             layout.addLayout(header_layout)

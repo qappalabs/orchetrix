@@ -10,7 +10,8 @@ from typing import Dict, Any
 import logging
 
 from .base_detail_section import BaseDetailSection
-from UI.Styles import AppStyles, AppColors, EnhancedStyles
+from UI.Styles import EnhancedStyles
+import Styles.DetailSectionStyles as DetailSectionStyles
 
 
 class DetailPageDetailsSection(BaseDetailSection):
@@ -19,6 +20,15 @@ class DetailPageDetailsSection(BaseDetailSection):
     def __init__(self, kubernetes_client, parent=None):
         super().__init__("Details", kubernetes_client, parent)
         self.setup_details_ui()
+
+    def _on_theme_changed(self, theme_name):
+        """Refresh styles when theme changes"""
+        # Refresh static widgets
+        if hasattr(self, 'details_content'):
+            self.details_content.setStyleSheet(DetailSectionStyles.get_content_style())
+        # Re-render dynamic content with new theme
+        if self.current_data:
+            self.update_ui_with_data(self.current_data)
     
     def set_raw_data(self, raw_data):
         """Set raw data for special resources like charts and releases"""
@@ -28,26 +38,22 @@ class DetailPageDetailsSection(BaseDetailSection):
     def setup_details_ui(self):
         """Setup details-specific UI"""
         # Create scroll area for details content
-        scroll_area = QScrollArea()
-        scroll_area.setStyleSheet(AppStyles.DETAIL_PAGE_DETAILS_STYLE)
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setFrameShape(QScrollArea.Shape.NoFrame)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setStyleSheet(DetailSectionStyles.get_scroll_area_style())
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QScrollArea.Shape.NoFrame)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         # Details content widget
         self.details_content = QWidget()
-        self.details_content.setStyleSheet(f"background-color: {AppColors.BG_SIDEBAR}; border: none;")
+        self.details_content.setStyleSheet(DetailSectionStyles.get_content_style())
         self.details_layout = QVBoxLayout(self.details_content)
-        self.details_layout.setContentsMargins(
-            EnhancedStyles.CONTENT_PADDING,
-            EnhancedStyles.CONTENT_PADDING,
-            EnhancedStyles.CONTENT_PADDING,
-            EnhancedStyles.CONTENT_PADDING
-        )
+        padding = EnhancedStyles.CONTENT_PADDING
+        self.details_layout.setContentsMargins(padding, padding, padding, padding)
         self.details_layout.setSpacing(EnhancedStyles.SECTION_GAP)
 
-        scroll_area.setWidget(self.details_content)
-        self.content_layout.addWidget(scroll_area)
+        self.scroll_area.setWidget(self.details_content)
+        self.content_layout.addWidget(self.scroll_area)
 
     def _load_data_async(self):
         """Load overview data using Kubernetes API"""
@@ -169,7 +175,7 @@ class DetailPageDetailsSection(BaseDetailSection):
         """Recursively add object fields with better limits"""
         if depth > 2 or len(str(obj)) > 10000:  # Stricter limits
             truncated_label = QLabel("... (data truncated for performance)")
-            truncated_label.setStyleSheet(f"color: {AppColors.TEXT_SUBTLE}; font-style: italic;")
+            truncated_label.setStyleSheet(DetailSectionStyles.get_truncated_label_style())
             parent_layout.addWidget(truncated_label)
             return
 
@@ -179,12 +185,7 @@ class DetailPageDetailsSection(BaseDetailSection):
             if isinstance(value, dict) and value:
                 # Add section header for nested objects
                 field_title = QLabel(field_name.upper())
-                field_title.setStyleSheet(f"""
-                    font-weight: bold;
-                    color: {AppColors.TEXT_SECONDARY};
-                    margin-left: {depth * 10}px;
-                    margin-top: 10px;
-                """)
+                field_title.setStyleSheet(DetailSectionStyles.get_nested_field_title_style(depth))
                 parent_layout.addWidget(field_title)
 
                 # Recursively add nested fields
@@ -194,32 +195,20 @@ class DetailPageDetailsSection(BaseDetailSection):
                 if all(isinstance(item, dict) for item in value):
                     # List of objects
                     field_title = QLabel(field_name.upper())
-                    field_title.setStyleSheet(f"""
-                        font-weight: bold;
-                        color: {AppColors.TEXT_SECONDARY};
-                        margin-left: {depth * 10}px;
-                        margin-top: 10px;
-                    """)
+                    field_title.setStyleSheet(DetailSectionStyles.get_nested_field_title_style(depth))
                     parent_layout.addWidget(field_title)
 
                     # Show first few items
                     for i, item in enumerate(value[:3]):
                         item_title = QLabel(f"{field_name}[{i}]")
-                        item_title.setStyleSheet(f"""
-                            font-weight: normal;
-                            color: {AppColors.TEXT_SUBTLE};
-                            margin-left: {(depth + 1) * 10}px;
-                        """)
+                        item_title.setStyleSheet(DetailSectionStyles.get_item_title_style(depth))
                         parent_layout.addWidget(item_title)
 
                         self.add_object_fields(item, parent_layout, "", depth + 2)
 
                     if len(value) > 3:
                         more_items = QLabel(f"... and {len(value) - 3} more items")
-                        more_items.setStyleSheet(f"""
-                            color: {AppColors.TEXT_SUBTLE};
-                            margin-left: {(depth + 1) * 10}px;
-                        """)
+                        more_items.setStyleSheet(DetailSectionStyles.get_more_items_label_style(depth))
                         parent_layout.addWidget(more_items)
                 else:
                     # List of simple values

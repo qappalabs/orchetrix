@@ -11,7 +11,8 @@ from typing import Dict, Any, Optional
 import logging
 
 from .base_detail_section import BaseDetailSection
-from UI.Styles import AppStyles, AppColors, EnhancedStyles
+from UI.Styles import EnhancedStyles
+import Styles.OverviewSectionStyles as OverviewSectionStyles
 from PyQt6.QtWidgets import QFrame, QLabel
 
 
@@ -21,6 +22,21 @@ class DetailPageOverviewSection(BaseDetailSection):
     def __init__(self, kubernetes_client, parent=None):
         super().__init__("Overview", kubernetes_client, parent)
         self.setup_overview_ui()
+        # Note: Theme signals connected via ThemeAwareMixin in BaseDetailSection
+
+    def _on_theme_changed(self, theme_name):
+        """Refresh styles when theme changes"""
+        # Refresh overview content style
+        if hasattr(self, 'overview_content'):
+            self.overview_content.setStyleSheet(OverviewSectionStyles.get_overview_content_style())
+        # Refresh tables if they exist
+        if hasattr(self, 'history_table'):
+            self.history_table.setStyleSheet(OverviewSectionStyles.get_history_table_style())
+        if hasattr(self, 'pods_table'):
+            self.pods_table.setStyleSheet(OverviewSectionStyles.get_pods_table_style())
+        # Re-render dynamic content with new theme
+        if self.current_data:
+            self.update_ui_with_data(self.current_data)
     
     def set_raw_data(self, raw_data):
         """Set raw data for special resources like charts and releases"""
@@ -32,15 +48,15 @@ class DetailPageOverviewSection(BaseDetailSection):
         """Setup overview-specific UI"""
         # Create scroll area for overview content
         scroll_area = QScrollArea()
-        scroll_area.setStyleSheet(AppStyles.DETAIL_PAGE_OVERVIEW_STYLE)
+        scroll_area.setStyleSheet(OverviewSectionStyles.get_scroll_area_style())
         scroll_area.setWidgetResizable(True)
         scroll_area.setFrameShape(QScrollArea.Shape.NoFrame)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         # Overview content widget
-        overview_content = QWidget()
-        overview_content.setStyleSheet(f"background-color: {AppColors.BG_SIDEBAR}; border: none;")
-        overview_layout = QVBoxLayout(overview_content)
+        self.overview_content = QWidget()
+        self.overview_content.setStyleSheet(OverviewSectionStyles.get_overview_content_style())
+        overview_layout = QVBoxLayout(self.overview_content)
         overview_layout.setContentsMargins(
             EnhancedStyles.CONTENT_PADDING,
             EnhancedStyles.CONTENT_PADDING,
@@ -51,7 +67,7 @@ class DetailPageOverviewSection(BaseDetailSection):
 
         self.create_overview_sections(overview_layout)
 
-        scroll_area.setWidget(overview_content)
+        scroll_area.setWidget(self.overview_content)
         self.content_layout.addWidget(scroll_area)
 
     def create_overview_sections(self, layout):
@@ -697,13 +713,13 @@ class DetailPageOverviewSection(BaseDetailSection):
         # Apply styling
         self.status_badge.setText(status_value)
         if status_type == "success":
-            self.status_badge.setStyleSheet(f"color: {AppColors.STATUS_ACTIVE}; font-weight: bold;")
+            self.status_badge.setStyleSheet(OverviewSectionStyles.get_status_badge_success_style())
         elif status_type == "warning":
-            self.status_badge.setStyleSheet(f"color: {AppColors.STATUS_WARNING}; font-weight: bold;")
+            self.status_badge.setStyleSheet(OverviewSectionStyles.get_status_badge_warning_style())
         elif status_type == "error":
-            self.status_badge.setStyleSheet(f"color: {AppColors.TEXT_DANGER}; font-weight: bold;")
+            self.status_badge.setStyleSheet(OverviewSectionStyles.get_status_badge_error_style())
         else:
-            self.status_badge.setStyleSheet(f"color: {AppColors.TEXT_SECONDARY}; font-weight: bold;")
+            self.status_badge.setStyleSheet(OverviewSectionStyles.get_status_badge_default_style())
 
         self.status_text_label.setText(status_text)
 
@@ -1018,30 +1034,7 @@ class DetailPageOverviewSection(BaseDetailSection):
         self.history_table.setHorizontalHeaderLabels(["Revision", "Age", "Status", "Change Cause", "Action"])
         
         # Style the table
-        self.history_table.setStyleSheet(f"""
-            QTableWidget {{
-                background-color: {AppColors.BG_SIDEBAR};
-                color: {AppColors.TEXT_LIGHT};
-                border: 1px solid {AppColors.BORDER_COLOR};
-                border-radius: 6px;
-                gridline-color: {AppColors.BORDER_COLOR};
-                selection-background-color: {AppColors.SELECTED_BG};
-            }}
-            QTableWidget::item {{
-                padding: 8px;
-                border-bottom: 1px solid {AppColors.BORDER_COLOR};
-            }}
-            QTableWidget::item:selected {{
-                background-color: {AppColors.SELECTED_BG};
-            }}
-            QHeaderView::section {{
-                background-color: {AppColors.BG_MEDIUM};
-                color: {AppColors.TEXT_LIGHT};
-                padding: 8px;
-                border: 1px solid {AppColors.BORDER_COLOR};
-                font-weight: bold;
-            }}
-        """)
+        self.history_table.setStyleSheet(OverviewSectionStyles.get_history_table_style())
         
         # Configure table properties
         self.history_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -1144,7 +1137,7 @@ class DetailPageOverviewSection(BaseDetailSection):
                 revision_item = QTableWidgetItem(revision_text)
                 revision_item.setFlags(revision_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 if current:
-                    revision_item.setForeground(QColor(AppColors.STATUS_ACTIVE))
+                    revision_item.setForeground(QColor(OverviewSectionStyles.get_status_active_color()))
                     revision_item.setFont(QFont("", -1, QFont.Weight.Bold))
                 self.history_table.setItem(row, 0, revision_item)
                 
@@ -1157,12 +1150,12 @@ class DetailPageOverviewSection(BaseDetailSection):
                 status_item = QTableWidgetItem(status)
                 status_item.setFlags(status_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 if current:
-                    status_item.setForeground(QColor(AppColors.STATUS_ACTIVE))
+                    status_item.setForeground(QColor(OverviewSectionStyles.get_status_active_color()))
                     status_item.setFont(QFont("", -1, QFont.Weight.Bold))
                 elif status == "Available":
                     status_item.setForeground(QColor("#4CAF50"))
                 elif status == "Inactive":
-                    status_item.setForeground(QColor(AppColors.TEXT_SECONDARY))
+                    status_item.setForeground(QColor(OverviewSectionStyles.get_text_secondary_color()))
                 self.history_table.setItem(row, 2, status_item)
                 
                 # Add change cause cell with enhanced tooltip
@@ -1234,7 +1227,7 @@ class DetailPageOverviewSection(BaseDetailSection):
         except Exception as e:
             logging.error(f"Error handling deployment history: {str(e)}")
             error_label = QLabel("Error loading rollback history")
-            error_label.setStyleSheet(f"color: {AppColors.TEXT_DANGER};")
+            error_label.setStyleSheet(OverviewSectionStyles.get_error_label_style())
             self.specific_layout.addWidget(error_label)
 
     def _calculate_age_from_timestamp(self, timestamp_str):
@@ -1299,24 +1292,8 @@ class DetailPageOverviewSection(BaseDetailSection):
         msg_box.setDefaultButton(QMessageBox.StandardButton.No)
         msg_box.setIcon(QMessageBox.Icon.Question)
         
-        # Apply dark theme styling
-        msg_box.setStyleSheet(f"""
-            QMessageBox {{
-                background-color: {AppColors.BG_SIDEBAR};
-                color: {AppColors.TEXT_LIGHT};
-            }}
-            QMessageBox QPushButton {{
-                background-color: {AppColors.BG_MEDIUM};
-                color: {AppColors.TEXT_LIGHT};
-                border: 1px solid {AppColors.BORDER_COLOR};
-                padding: 8px 16px;
-                border-radius: 4px;
-                min-width: 80px;
-            }}
-            QMessageBox QPushButton:hover {{
-                background-color: {AppColors.ACCENT_BLUE};
-            }}
-        """)
+        # Apply theme styling
+        msg_box.setStyleSheet(OverviewSectionStyles.get_message_box_style())
         
         result = msg_box.exec()
         
@@ -1372,24 +1349,8 @@ class DetailPageOverviewSection(BaseDetailSection):
                 msg_box.setInformativeText(result.get("message", "Unknown error"))
                 msg_box.setIcon(QMessageBox.Icon.Critical)
             
-            # Apply dark theme styling
-            msg_box.setStyleSheet(f"""
-                QMessageBox {{
-                    background-color: {AppColors.BG_SIDEBAR};
-                    color: {AppColors.TEXT_LIGHT};
-                }}
-                QMessageBox QPushButton {{
-                    background-color: {AppColors.BG_MEDIUM};
-                    color: {AppColors.TEXT_LIGHT};
-                    border: 1px solid {AppColors.BORDER_COLOR};
-                    padding: 8px 16px;
-                    border-radius: 4px;
-                    min-width: 80px;
-                }}
-                QMessageBox QPushButton:hover {{
-                    background-color: {AppColors.ACCENT_BLUE};
-                }}
-            """)
+            # Apply theme styling
+            msg_box.setStyleSheet(OverviewSectionStyles.get_message_box_style())
             
             msg_box.exec()
             
@@ -1954,30 +1915,7 @@ class DetailPageOverviewSection(BaseDetailSection):
         self.pods_table.setHorizontalHeaderLabels(["Pod Name", "Namespace", "Status", "CPU", "Memory"])
 
         # Style the table
-        self.pods_table.setStyleSheet(f"""
-            QTableWidget {{
-                background-color: {AppColors.BG_SIDEBAR};
-                color: {AppColors.TEXT_LIGHT};
-                border: 1px solid {AppColors.BORDER_COLOR};
-                border-radius: 6px;
-                gridline-color: {AppColors.BORDER_COLOR};
-                selection-background-color: {AppColors.SELECTED_BG};
-            }}
-            QTableWidget::item {{
-                padding: 8px;
-                border-bottom: 1px solid {AppColors.BORDER_COLOR};
-            }}
-            QTableWidget::item:selected {{
-                background-color: {AppColors.SELECTED_BG};
-            }}
-            QHeaderView::section {{
-                background-color: {AppColors.BG_MEDIUM};
-                color: {AppColors.TEXT_LIGHT};
-                padding: 8px;
-                border: 1px solid {AppColors.BORDER_COLOR};
-                font-weight: bold;
-            }}
-        """)
+        self.pods_table.setStyleSheet(OverviewSectionStyles.get_pods_table_style())
 
         # Configure table properties
         self.pods_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -2099,13 +2037,13 @@ class DetailPageOverviewSection(BaseDetailSection):
                 
                 # Color code status
                 if status.lower() == "running":
-                    status_item.setForeground(QColor(AppColors.STATUS_ACTIVE))
+                    status_item.setForeground(QColor(OverviewSectionStyles.get_status_active_color()))
                 elif status.lower() in ["pending", "containercreating"]:
-                    status_item.setForeground(QColor(AppColors.STATUS_WARNING))
+                    status_item.setForeground(QColor(OverviewSectionStyles.get_status_warning_color()))
                 elif status.lower() in ["failed", "crashloopbackoff", "error"]:
-                    status_item.setForeground(QColor(AppColors.TEXT_DANGER))
+                    status_item.setForeground(QColor(OverviewSectionStyles.get_text_danger_color()))
                 else:
-                    status_item.setForeground(QColor(AppColors.TEXT_SECONDARY))
+                    status_item.setForeground(QColor(OverviewSectionStyles.get_text_secondary_color()))
                     
                 self.pods_table.setItem(row, 2, status_item)
 
@@ -2152,7 +2090,7 @@ class DetailPageOverviewSection(BaseDetailSection):
         error_item = QTableWidgetItem(f"Error loading pods: {error_message}")
         error_item.setFlags(error_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
         error_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        error_item.setForeground(QColor(AppColors.TEXT_DANGER))
+        error_item.setForeground(QColor(OverviewSectionStyles.get_text_danger_color()))
         self.pods_table.setItem(0, 0, error_item)
         
         # Span across all columns

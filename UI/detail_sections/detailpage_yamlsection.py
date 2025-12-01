@@ -17,7 +17,7 @@ import logging
 import re
 
 from .base_detail_section import BaseDetailSection
-from UI.Styles import AppStyles, AppColors
+import Styles.YamlSectionStyles as YamlSectionStyles
 from UI.Icons import resource_path
 
 class YamlHighlighter(QSyntaxHighlighter):
@@ -165,42 +165,7 @@ class SearchWidget(QFrame):
     def setup_ui(self):
         """Setup search widget UI"""
         self.setFixedHeight(40)
-        self.setStyleSheet(f"""
-            QFrame {{
-                background-color: {AppColors.BG_HEADER};
-                border: 1px solid {AppColors.BORDER_COLOR};
-                border-radius: 4px;
-            }}
-            QLineEdit {{
-                background-color: {AppColors.BG_DARK};
-                color: {AppColors.TEXT_LIGHT};
-                border: 1px solid {AppColors.BORDER_COLOR};
-                border-radius: 3px;
-                padding: 5px;
-                font-size: 12px;
-            }}
-            QLineEdit:focus {{
-                border: 1px solid {AppColors.ACCENT_BLUE};
-            }}
-            QPushButton {{
-                background-color: {AppColors.BG_DARK};
-                color: {AppColors.TEXT_LIGHT};
-                border: 1px solid {AppColors.BORDER_COLOR};
-                border-radius: 3px;
-                padding: 4px 8px;
-                font-size: 11px;
-            }}
-            QPushButton:hover {{
-                background-color: {AppColors.HOVER_BG_DARKER};
-            }}
-            QPushButton:pressed {{
-                background-color: {AppColors.BG_MEDIUM};
-            }}
-            QLabel {{
-                color: {AppColors.TEXT_SECONDARY};
-                font-size: 11px;
-            }}
-        """)
+        self.setStyleSheet(YamlSectionStyles.get_search_widget_style())
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(6, 3, 6, 3)
@@ -663,6 +628,15 @@ class DetailPageYAMLSection(BaseDetailSection):
         self.yaml_edited = False
         self.is_helm_resource = False
         self.setup_yaml_ui()
+        # Note: Theme signals connected via ThemeAwareMixin in BaseDetailSection
+
+    def _on_theme_changed(self, theme_name):
+        """Refresh styles when theme changes"""
+        # Refresh toolbar style
+        if hasattr(self, 'yaml_toolbar'):
+            self.yaml_toolbar.setStyleSheet(YamlSectionStyles.get_yaml_toolbar_style())
+        # Note: YAML editor styles are intentionally hardcoded for VS Code consistency
+        # Search widget will be refreshed when shown
     
     def set_raw_data(self, raw_data):
         """Set raw data for special resources like charts and releases"""
@@ -672,92 +646,33 @@ class DetailPageYAMLSection(BaseDetailSection):
     def setup_yaml_ui(self):
         """Setup YAML-specific UI"""
         # Create toolbar
-        yaml_toolbar = QWidget()
-        yaml_toolbar.setFixedHeight(40)
-        yaml_toolbar.setStyleSheet(f"""
-            background-color: {AppColors.BG_DARK};
-            border-bottom: 1px solid {AppColors.BORDER_COLOR};
-        """)
+        self.yaml_toolbar = QWidget()
+        self.yaml_toolbar.setFixedHeight(40)
+        self.yaml_toolbar.setStyleSheet(YamlSectionStyles.get_yaml_toolbar_style())
 
-        toolbar_layout = QHBoxLayout(yaml_toolbar)
+        toolbar_layout = QHBoxLayout(self.yaml_toolbar)
         toolbar_layout.setContentsMargins(10, 0, 10, 0)
 
         # Edit button
         self.yaml_edit_button = QPushButton("Edit")
-        self.yaml_edit_button.setStyleSheet("""
-            QPushButton {
-                background-color: #2d2d2d;
-                color: #ffffff;
-                border: 1px solid #3d3d3d;
-                border-radius: 4px;
-                padding: 5px 15px;
-            }
-            QPushButton:hover {
-                background-color: #3d3d3d;
-            }
-            QPushButton:pressed {
-                background-color: #1e1e1e;
-            }
-            QPushButton:disabled {
-                background-color: #555555;
-                color: #888888;
-            }
-        """)
+        self.yaml_edit_button.setStyleSheet(YamlSectionStyles.get_yaml_edit_button_style())
         self.yaml_edit_button.clicked.connect(self.toggle_yaml_edit_mode)
 
         # Save button
         self.yaml_save_button = QPushButton("Deploy")
-        self.yaml_save_button.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: #ffffff;
-                border: none;
-                border-radius: 4px;
-                padding: 5px 15px;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-            QPushButton:pressed {
-                background-color: #3d8b40;
-            }
-            QPushButton:disabled {
-                background-color: #555555;
-                color: #888888;
-            }
-        """)
+        self.yaml_save_button.setStyleSheet(YamlSectionStyles.get_yaml_save_button_style())
         self.yaml_save_button.clicked.connect(self.save_yaml_changes)
         self.yaml_save_button.hide()
 
         # Cancel button
         self.yaml_cancel_button = QPushButton("Cancel")
-        self.yaml_cancel_button.setStyleSheet("""
-            QPushButton {
-                background-color: #f44336;
-                color: #ffffff;
-                border: none;
-                border-radius: 4px;
-                padding: 5px 15px;
-            }
-            QPushButton:hover {
-                background-color: #d32f2f;
-            }
-            QPushButton:pressed {
-                background-color: #b71c1c;
-            }
-        """)
+        self.yaml_cancel_button.setStyleSheet(YamlSectionStyles.get_yaml_cancel_button_style())
         self.yaml_cancel_button.clicked.connect(self.cancel_yaml_edit)
         self.yaml_cancel_button.hide()
 
         # Status label for helm resources
         self.helm_status_label = QLabel("⚠️ Helm resources cannot be edited via YAML")
-        self.helm_status_label.setStyleSheet(f"""
-            QLabel {{
-                color: #ff9800;
-                font-style: italic;
-                padding: 5px;
-            }}
-        """)
+        self.helm_status_label.setStyleSheet(YamlSectionStyles.get_helm_status_label_style())
         self.helm_status_label.hide()
 
         toolbar_layout.addWidget(self.yaml_edit_button)
@@ -779,21 +694,10 @@ class DetailPageYAMLSection(BaseDetailSection):
         self.yaml_editor.yaml_highlighter = self.yaml_highlighter
 
         # Basic stylesheet
-        base_yaml_style = f"""
-            QTextEdit {{
-                background-color: #1E1E1E;
-                color: #D4D4D4;
-                border: none;
-                selection-background-color: #264F78;
-                selection-color: #D4D4D4;
-                padding: 20px;
-            }}
-            {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
-        """
-        self.yaml_editor.setStyleSheet(base_yaml_style)
+        self.yaml_editor.setStyleSheet(YamlSectionStyles.get_yaml_editor_readonly_style())
 
         # Add to main layout
-        self.content_layout.addWidget(yaml_toolbar)
+        self.content_layout.addWidget(self.yaml_toolbar)
         self.content_layout.addWidget(self.yaml_editor)
 
         # Connect kubernetes client signals for updates using queued connection for thread safety
@@ -1010,17 +914,7 @@ class DetailPageYAMLSection(BaseDetailSection):
             self.yaml_save_button.show()
             self.yaml_cancel_button.show()
 
-            self.yaml_editor.setStyleSheet(f"""
-                QTextEdit {{
-                    background-color: #1E1E1E;
-                    color: #D4D4D4;
-                    border: 1px solid #0078d7;
-                    selection-background-color: #264F78;
-                    selection-color: #D4D4D4;
-                    padding: 20px;
-                }}
-                {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
-            """)
+            self.yaml_editor.setStyleSheet(YamlSectionStyles.get_yaml_editor_edit_style())
 
             self.original_yaml = self.yaml_editor.toPlainText()
         else:
@@ -1030,17 +924,7 @@ class DetailPageYAMLSection(BaseDetailSection):
             self.yaml_save_button.hide()
             self.yaml_cancel_button.hide()
 
-            self.yaml_editor.setStyleSheet(f"""
-                QTextEdit {{
-                    background-color: #1E1E1E;
-                    color: #D4D4D4;
-                    border: none;
-                    selection-background-color: #264F78;
-                    selection-color: #D4D4D4;
-                    padding: 20px;
-                }}
-                {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
-            """)
+            self.yaml_editor.setStyleSheet(YamlSectionStyles.get_yaml_editor_readonly_style())
 
     def save_yaml_changes(self):
         """Save YAML changes using Kubernetes API"""

@@ -9,7 +9,11 @@ from abc import ABCMeta, abstractmethod
 from typing import Optional, Dict, Any
 import logging
 
-from UI.Styles import AppStyles, AppColors
+from Styles.BaseDetailSectionStyles import (
+    get_error_widget_error_style,
+    get_error_widget_info_style
+)
+from UI.ThemeAwarePage import ThemeAwareMixin
 
 
 class QWidgetMeta(type(QWidget), ABCMeta):
@@ -17,7 +21,7 @@ class QWidgetMeta(type(QWidget), ABCMeta):
     pass
 
 
-class BaseDetailSection(QWidget, metaclass=QWidgetMeta):
+class BaseDetailSection(ThemeAwareMixin, QWidget, metaclass=QWidgetMeta):
     """Base class for all detail page sections"""
 
     # Signals for communication with main DetailPage
@@ -51,15 +55,7 @@ class BaseDetailSection(QWidget, metaclass=QWidgetMeta):
 
         # Error display
         self.error_widget = QLabel()
-        self.error_widget.setStyleSheet(f"""
-            QLabel {{
-                color: #ff4444;
-                background-color: rgba(255, 68, 68, 0.1);
-                padding: 10px;
-                border-radius: 4px;
-                border: 1px solid rgba(255, 68, 68, 0.3);
-            }}
-        """)
+        self.error_widget.setStyleSheet(get_error_widget_error_style())
         self.error_widget.setWordWrap(True)
         self.error_widget.hide()
 
@@ -89,27 +85,11 @@ class BaseDetailSection(QWidget, metaclass=QWidgetMeta):
             "not available in this cluster" in error_message.lower()):
             # Just show that resource is not available
             self.error_widget.setText(f"{self.section_name}: Resource not available in this cluster")
-            self.error_widget.setStyleSheet(f"""
-                QLabel {{
-                    color: #888888;
-                    background-color: rgba(136, 136, 136, 0.1);
-                    padding: 10px;
-                    border-radius: 4px;
-                    border: 1px solid rgba(136, 136, 136, 0.3);
-                }}
-            """)
+            self.error_widget.setStyleSheet(get_error_widget_info_style())
         else:
             # Show actual errors in red
             self.error_widget.setText(f"Error in {self.section_name}: {error_message}")
-            self.error_widget.setStyleSheet(f"""
-                QLabel {{
-                    color: #ff4444;
-                    background-color: rgba(255, 68, 68, 0.1);
-                    padding: 10px;
-                    border-radius: 4px;
-                    border: 1px solid rgba(255, 68, 68, 0.3);
-                }}
-            """)
+            self.error_widget.setStyleSheet(get_error_widget_error_style())
         
         self.error_widget.show()
         self.error_occurred.emit(self.section_name, error_message)

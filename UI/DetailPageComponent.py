@@ -25,11 +25,12 @@ from .detail_sections.detailpage_detailsection import DetailPageDetailsSection
 from .detail_sections.detailpage_yamlsection import DetailPageYAMLSection
 from .detail_sections.detailpage_eventssection import DetailPageEventsSection
 
-from UI.Styles import AppStyles, AppColors
+from UI.ThemeAwarePage import ThemeAwareMixin
+import Styles.DetailPageComponentStyles as DetailPageComponentStyles
 from PyQt6.QtWidgets import QPushButton, QFrame
 
 
-class DetailPageComponent(QWidget):
+class DetailPageComponent(ThemeAwareMixin, QWidget):
     """Main DetailPage component that manages all detail sections"""
 
     detail_closed_signal = pyqtSignal()
@@ -57,20 +58,40 @@ class DetailPageComponent(QWidget):
         self.setup_ui()
         self.setup_sections()
         self.setup_animations()
+        # Note: Theme signals connected via ThemeAwareMixin
         self.hide()
+
+    def _on_theme_changed(self, theme_name):
+        """Refresh styles when theme changes"""
+        # Refresh main widget style
+        self.setStyleSheet(DetailPageComponentStyles.get_main_widget_style())
+        # Refresh header
+        if hasattr(self, 'header'):
+            self.header.setStyleSheet(DetailPageComponentStyles.get_header_style())
+        # Refresh back button
+        if hasattr(self, 'back_button'):
+            self.back_button.setStyleSheet(DetailPageComponentStyles.get_back_button_style())
+        # Refresh title label
+        if hasattr(self, 'title_label'):
+            self.title_label.setStyleSheet(DetailPageComponentStyles.get_title_label_style())
+        # Refresh resize handle
+        if hasattr(self, 'resize_handle'):
+            self.resize_handle.setStyleSheet(DetailPageComponentStyles.get_resize_handle_style())
+        # Refresh content area
+        if hasattr(self, 'content_area'):
+            self.content_area.setStyleSheet(DetailPageComponentStyles.get_content_area_style())
+        # Refresh tab widget
+        if hasattr(self, 'tab_widget'):
+            self.tab_widget.setStyleSheet(DetailPageComponentStyles.get_tab_widget_style())
 
     def setup_ui(self):
         """Setup main UI structure"""
-        self.setFixedWidth(AppStyles.DETAIL_PAGE_WIDTH)
-        self.setMinimumWidth(AppStyles.DETAIL_PAGE_MIN_WIDTH)
-        self.setMaximumWidth(AppStyles.DETAIL_PAGE_MAX_WIDTH)
+        self.setFixedWidth(DetailPageComponentStyles.get_detail_page_width())
+        self.setMinimumWidth(DetailPageComponentStyles.get_detail_page_min_width())
+        self.setMaximumWidth(DetailPageComponentStyles.get_detail_page_max_width())
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
 
-        self.setStyleSheet(f"""
-            background-color: {AppColors.BG_SIDEBAR};
-            border: none;
-            border-radius: 8px;
-        """)
+        self.setStyleSheet(DetailPageComponentStyles.get_main_widget_style())
 
         self.apply_shadow_effect()
 
@@ -96,12 +117,7 @@ class DetailPageComponent(QWidget):
         """Create header with title and close button"""
         self.header = QWidget()
         self.header.setFixedHeight(60)
-        self.header.setStyleSheet(f"""
-            background-color: {AppColors.BG_HEADER};
-            border: none;
-            border-top-left-radius: 8px;
-            border-top-right-radius: 8px;
-        """)
+        self.header.setStyleSheet(DetailPageComponentStyles.get_header_style())
 
         header_layout = QHBoxLayout(self.header)
         header_layout.setContentsMargins(15, 10, 15, 10)
@@ -112,51 +128,18 @@ class DetailPageComponent(QWidget):
         self.back_button.setIconSize(QSize(20, 20))
         self.back_button.setFixedSize(40, 40)
         self.back_button.setCursor(Qt.CursorShape.PointingHandCursor)  # Hand cursor on hover
-        self.back_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: transparent;
-                border: 1px solid {AppColors.BORDER_LIGHT};
-                border-radius: 20px;
-            }}
-            QPushButton:hover {{
-                background-color: {AppColors.BG_LIGHT};
-            }}
-            QPushButton:pressed {{
-                background-color: {AppColors.BG_MEDIUM};
-            }}
-        """)
+        self.back_button.setStyleSheet(DetailPageComponentStyles.get_back_button_style())
         self.back_button.clicked.connect(self.close_detail)
 
         # Title
         self.title_label = QLabel("Resource Details")
-        self.title_label.setStyleSheet(f"""
-            color: {AppColors.TEXT_LIGHT};
-            font-size: 16px;
-            font-weight: bold;
-            margin-left: 10px;
-        """)
+        self.title_label.setStyleSheet(DetailPageComponentStyles.get_title_label_style())
         self.title_label.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
         # Action button (for Helm operations)
         self.action_button = QPushButton("Install")
         self.action_button.setCursor(Qt.CursorShape.PointingHandCursor)  # Hand cursor on hover
-        self.action_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {AppColors.ACCENT_GREEN};
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 10px 20px;
-                font-weight: bold;
-                font-size: 13px;
-            }}
-            QPushButton:hover {{
-                background-color: #45a049;
-            }}
-            QPushButton:pressed {{
-                background-color: #3d8b40;
-            }}
-        """)
+        self.action_button.setStyleSheet(DetailPageComponentStyles.get_action_button_install_style())
         self.action_button.clicked.connect(self.handle_action_button)
         self.action_button.hide()
 
@@ -171,15 +154,7 @@ class DetailPageComponent(QWidget):
         """Create resize handle for panel resizing"""
         self.resize_handle = QFrame(self)
         self.resize_handle.setFixedWidth(5)
-        self.resize_handle.setStyleSheet(f"""
-            QFrame {{
-                background-color: transparent;
-                border: none;
-            }}
-            QFrame:hover {{
-                background-color: {AppColors.ACCENT_BLUE};
-            }}
-        """)
+        self.resize_handle.setStyleSheet(DetailPageComponentStyles.get_resize_handle_style())
         self.resize_handle.setCursor(Qt.CursorShape.SizeHorCursor)
         self.resize_handle.show()
 
@@ -194,7 +169,7 @@ class DetailPageComponent(QWidget):
     def create_content_area(self):
         """Create main content area with tabs"""
         self.content_area = QWidget()
-        self.content_area.setStyleSheet(f"background-color: {AppColors.BG_SIDEBAR}; border: none;")
+        self.content_area.setStyleSheet(DetailPageComponentStyles.get_content_area_style())
 
         content_layout = QVBoxLayout(self.content_area)
         content_layout.setContentsMargins(0, 0, 0, 0)
@@ -214,64 +189,7 @@ class DetailPageComponent(QWidget):
         # Install event filter on tab bar to block wheel events
         self.tab_widget.tabBar().installEventFilter(self)
 
-        self.tab_widget.setStyleSheet(f"""
-            QTabWidget {{
-                border: none;
-                background-color: {AppColors.BG_SIDEBAR};
-            }}
-            QTabWidget::pane {{
-                border: none;
-                background-color: {AppColors.BG_SIDEBAR};
-                margin: 0px;
-                padding: 0px;
-                top: 0px;
-            }}
-            QTabBar {{
-                qproperty-drawBase: 0;
-                border: none;
-                background-color: {AppColors.BG_SIDEBAR};
-                outline: none;
-                margin: 0px;
-                padding: 0px;
-            }}
-            QTabBar::tab {{
-                background-color: {AppColors.BG_SIDEBAR};
-                color: {AppColors.TEXT_SECONDARY};
-                padding: 12px 20px;
-                border: none;
-                border-top: none;
-                border-left: none;
-                border-right: none;
-                border-bottom: 2px solid transparent;
-                margin: 0px;
-                margin-right: 2px;
-                font-size: 13px;
-                font-weight: 500;
-                min-width: 70px;
-                max-width: 120px;
-            }}
-            QTabBar::tab:selected {{
-                color: {AppColors.TEXT_LIGHT};
-                border-bottom: 2px solid {AppColors.ACCENT_BLUE};
-                background-color: {AppColors.BG_SIDEBAR};
-                font-weight: 600;
-                border-top: none;
-                border-left: none;
-                border-right: none;
-            }}
-            QTabBar::tab:hover:!selected {{
-                color: {AppColors.TEXT_LIGHT};
-                background-color: {AppColors.HOVER_BG_DARKER};
-                border-bottom: 2px solid transparent;
-                border-top: none;
-                border-left: none;
-                border-right: none;
-            }}
-            QTabBar::scroller {{
-                width: 0px;
-                height: 0px;
-            }}
-        """)
+        self.tab_widget.setStyleSheet(DetailPageComponentStyles.get_tab_widget_style())
 
         # Set hand cursor for tabs when hovering
         self.tab_widget.tabBar().setCursor(Qt.CursorShape.PointingHandCursor)
@@ -401,41 +319,11 @@ class DetailPageComponent(QWidget):
         """Setup action button based on resource type"""
         if resource_type == "chart":
             self.action_button.setText("Install")
-            self.action_button.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: {AppColors.ACCENT_GREEN};
-                    color: white;
-                    border: none;
-                    border-radius: 4px;
-                    padding: 8px 20px;
-                    font-weight: bold;
-                }}
-                QPushButton:hover {{
-                    background-color: #45a049;
-                }}
-                QPushButton:pressed {{
-                    background-color: #3d8b40;
-                }}
-            """)
+            self.action_button.setStyleSheet(DetailPageComponentStyles.get_action_button_install_style())
             self.action_button.show()
         elif resource_type == "helmrelease":
             self.action_button.setText("Upgrade")
-            self.action_button.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: {AppColors.ACCENT_BLUE};
-                    color: white;
-                    border: none;
-                    border-radius: 4px;
-                    padding: 8px 20px;
-                    font-weight: bold;
-                }}
-                QPushButton:hover {{
-                    background-color: #0078e7;
-                }}
-                QPushButton:pressed {{
-                    background-color: #0063b1;
-                }}
-            """)
+            self.action_button.setStyleSheet(DetailPageComponentStyles.get_action_button_upgrade_style())
             self.action_button.show()
         else:
             self.action_button.hide()
@@ -679,7 +567,7 @@ class DetailPageComponent(QWidget):
             delta = self.resize_start_x - event.globalPosition().x()
             new_width = int(self.resize_start_width + delta)
 
-            if new_width >= AppStyles.DETAIL_PAGE_MIN_WIDTH and new_width <= AppStyles.DETAIL_PAGE_MAX_WIDTH:
+            if new_width >= DetailPageComponentStyles.get_detail_page_min_width() and new_width <= DetailPageComponentStyles.get_detail_page_max_width():
                 self.setFixedWidth(new_width)
                 if self.parent():
                     self.move(self.parent().width() - self.width(), 0)
