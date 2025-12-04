@@ -21,8 +21,10 @@ from .resource_deleters import ResourceDeleterThread, BatchResourceDeleterThread
 from .virtual_scroll_table import VirtualScrollTable
 
 from Base_Components.base_components import BaseTablePage
-from UI.Styles import AppStyles, AppColors
+from UI.Styles import get_table_style, get_menu_style, get_action_button_style
 from UI.Icons import resource_path
+from UI.ThemeAwarePage import ThemeAwareMixin
+import Styles.BaseResourcePageStyles as BaseResourcePageStyles
 from UI.LoadingSpinner import LoadingOverlay, create_loading_overlay, create_compact_spinner
 from Utils.unified_resource_loader import get_unified_resource_loader, LoadResult
 from Utils.data_formatters import format_age, parse_memory_value, format_percentage, truncate_string
@@ -45,8 +47,8 @@ MAX_TABLE_ROWS_BEFORE_VIRTUAL = 100  # FIXED: New constant for virtual scrolling
 # Cache system removed
 
 @class_logger(log_level=logging.INFO, exclude_methods=['__init__', 'clear_table', 'update_table_row', 'load_more_complete', 'all_items_loaded_signal', 'force_load_data'])
-class BaseResourcePage(BaseTablePage):
-    """Base class for Kubernetes resource pages with optimized performance"""
+class BaseResourcePage(ThemeAwareMixin, BaseTablePage):
+    """Base class for Kubernetes resource pages with optimized performance and theme awareness"""
     
     load_more_complete = pyqtSignal()
     all_items_loaded_signal = pyqtSignal()
@@ -115,6 +117,45 @@ class BaseResourcePage(BaseTablePage):
 
         # Track if data has been loaded at least once
         self._initial_load_done = False
+
+    def _on_theme_changed(self, theme_name):
+        """Refresh styles when theme changes - can be overridden by child classes"""
+        logging.debug(f"BaseResourcePage: Theme changed to {theme_name}, refreshing styles")
+        self._apply_base_theme_styles()
+    
+    def _apply_base_theme_styles(self):
+        """Apply theme-aware styles to base components"""
+        # Update title label style
+        if hasattr(self, 'title_label') and self.title_label:
+            self.title_label.setStyleSheet(BaseResourcePageStyles.get_title_label_style())
+        
+        # Update items count style
+        if hasattr(self, 'items_count') and self.items_count:
+            self.items_count.setStyleSheet(BaseResourcePageStyles.get_items_count_style())
+        
+        # Update search label style
+        if hasattr(self, 'search_label') and self.search_label:
+            self.search_label.setStyleSheet(BaseResourcePageStyles.get_search_label_style())
+        
+        # Update search bar style
+        if hasattr(self, 'search_bar') and self.search_bar:
+            self.search_bar.setStyleSheet(BaseResourcePageStyles.get_search_input_style())
+        
+        # Update namespace label style
+        if hasattr(self, 'namespace_label') and self.namespace_label:
+            self.namespace_label.setStyleSheet(BaseResourcePageStyles.get_namespace_label_style())
+        
+        # Update namespace combo style
+        if hasattr(self, 'namespace_combo') and self.namespace_combo:
+            self.namespace_combo.setStyleSheet(BaseResourcePageStyles.get_namespace_combo_style())
+        
+        # Update refresh button style
+        if hasattr(self, 'refresh_btn') and self.refresh_btn:
+            self.refresh_btn.setStyleSheet(BaseResourcePageStyles.get_refresh_button_style())
+        
+        # Update table style (theme-aware shared style)
+        if hasattr(self, 'table') and self.table:
+            self.table.setStyleSheet(get_table_style())
 
     def showEvent(self, event):
         """Override showEvent to automatically load data when page becomes visible"""
@@ -400,16 +441,14 @@ class BaseResourcePage(BaseTablePage):
 
     def _create_title_and_count(self, layout, title_text):
         """Create title and count labels"""
-        title_label = QLabel(title_text)
-        title_label_style = getattr(AppStyles, "TITLE_STYLE", "font-size: 20px; font-weight: bold; color: #ffffff;")
-        title_label.setStyleSheet(title_label_style)
+        self.title_label = QLabel(title_text)
+        self.title_label.setStyleSheet(BaseResourcePageStyles.get_title_label_style())
 
         self.items_count = QLabel("0 items")
-        items_count_style = getattr(AppStyles, "COUNT_STYLE", "color: #9ca3af; font-size: 12px; margin-left: 8px;")
-        self.items_count.setStyleSheet(items_count_style)
+        self.items_count.setStyleSheet(BaseResourcePageStyles.get_items_count_style())
         self.items_count.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
-        layout.addWidget(title_label)
+        layout.addWidget(self.title_label)
         layout.addWidget(self.items_count)
 
     def _add_controls_to_header(self, header_layout):
@@ -421,16 +460,10 @@ class BaseResourcePage(BaseTablePage):
         delete_btn = self._create_delete_selected_button()
         header_layout.addWidget(delete_btn)
 
-        refresh_btn = QPushButton("Refresh")
-        refresh_style = getattr(AppStyles, "SECONDARY_BUTTON_STYLE",
-                                """QPushButton { background-color: #2d2d2d; color: #ffffff; border: 1px solid #3d3d3d;
-                                               border-radius: 4px; padding: 5px 10px; }
-                                   QPushButton:hover { background-color: #3d3d3d; }
-                                   QPushButton:pressed { background-color: #1e1e1e; }"""
-                                )
-        refresh_btn.setStyleSheet(refresh_style)
-        refresh_btn.clicked.connect(lambda: self.force_load_data())
-        header_layout.addWidget(refresh_btn)
+        self.refresh_btn = QPushButton("Refresh")
+        self.refresh_btn.setStyleSheet(BaseResourcePageStyles.get_refresh_button_style())
+        self.refresh_btn.clicked.connect(lambda: self.force_load_data())
+        header_layout.addWidget(self.refresh_btn)
     
     def _create_delete_selected_button(self):
         """Create centralized delete selected button with consistent styling"""
@@ -445,27 +478,7 @@ class BaseResourcePage(BaseTablePage):
     
     def _get_delete_button_style(self):
         """Centralized delete button styling"""
-        return """
-            QPushButton#deleteSelectedBtn {
-                background-color: #d32f2f;
-                color: #ffffff;
-                border: none;
-                border-radius: 4px;
-                padding: 5px 16px;
-                font-size: 13px;
-                margin-right: 8px;
-            }
-            QPushButton#deleteSelectedBtn:hover {
-                background-color: #b71c1c;
-            }
-            QPushButton#deleteSelectedBtn:pressed {
-                background-color: #8d1e1e;
-            }
-            QPushButton#deleteSelectedBtn:disabled {
-                background-color: #cccccc;
-                color: #666666;
-            }
-        """
+        return BaseResourcePageStyles.get_delete_button_style()
     
     def _handle_delete_selected(self):
         """Base implementation for delete selected functionality"""
@@ -534,16 +547,15 @@ class BaseResourcePage(BaseTablePage):
     def _add_filter_controls(self, header_layout):
         """Add search and namespace filter controls with proper layout"""
         from PyQt6.QtWidgets import QLineEdit, QComboBox, QLabel
-        from UI.Styles import AppStyles
         
         # Create a separate layout for filters with proper spacing
         filters_layout = QHBoxLayout()
         filters_layout.setSpacing(12)  # Add space between elements
         
         # Search bar with label
-        search_label = QLabel("Search:")
-        search_label.setStyleSheet("color: #ffffff; font-size: 12px; font-weight: normal;")
-        search_label.setMinimumWidth(50)
+        self.search_label = QLabel("Search:")
+        self.search_label.setStyleSheet(BaseResourcePageStyles.get_search_label_style())
+        self.search_label.setMinimumWidth(50)
         
         self.search_bar = QLineEdit()
         self.search_bar.setPlaceholderText("Search resources...")
@@ -552,27 +564,14 @@ class BaseResourcePage(BaseTablePage):
         self.search_bar.setFixedHeight(32)
         
         # Apply consistent styling
-        search_style = getattr(AppStyles, 'SEARCH_INPUT', 
-            """QLineEdit {
-                background-color: #2d2d2d;
-                color: #ffffff;
-                border: 1px solid #3d3d3d;
-                border-radius: 4px;
-                padding: 6px 12px;
-                font-size: 12px;
-            }
-            QLineEdit:focus {
-                border-color: #0078d4;
-                background-color: #353535;
-            }""")
-        self.search_bar.setStyleSheet(search_style)
+        self.search_bar.setStyleSheet(BaseResourcePageStyles.get_search_input_style())
         
         # Namespace combo with label - only show for namespaced resources
-        namespace_label = None
+        self.namespace_label = None
         if getattr(self, 'show_namespace_dropdown', True):
-            namespace_label = QLabel("Namespace:")
-            namespace_label.setStyleSheet("color: #ffffff; font-size: 12px; font-weight: normal;")
-            namespace_label.setMinimumWidth(70)
+            self.namespace_label = QLabel("Namespace:")
+            self.namespace_label.setStyleSheet(BaseResourcePageStyles.get_namespace_label_style())
+            self.namespace_label.setMinimumWidth(70)
             
             self.namespace_combo = QComboBox()
             # Start with loading indicator, will be populated dynamically
@@ -584,49 +583,17 @@ class BaseResourcePage(BaseTablePage):
             self.namespace_combo = None
         
         # Apply consistent styling with proper icon
-        import os
-
-        down_arrow_icon = resource_path("Icons/down_btn.svg")
-        
-        combo_style = getattr(AppStyles, 'NAMESPACE_DROPDOWN',
-            f"""QComboBox {{
-                background-color: #2d2d2d;
-                color: #ffffff;
-                border: 1px solid #3d3d3d;
-                border-radius: 4px;
-                padding: 6px 12px;
-                font-size: 12px;
-            }}
-            QComboBox:hover {{
-                border-color: #4d4d4d;
-                background-color: #353535;
-            }}
-            QComboBox::drop-down {{
-                border: none;
-                width: 20px;
-                subcontrol-origin: padding;
-                subcontrol-position: top right;
-            }}
-            QComboBox::down-arrow {{
-                image: url({down_arrow_icon.replace(os.sep, '/')});
-                width: 12px;
-                height: 12px;
-                margin-right: 4px;
-            }}
-            QComboBox::down-arrow:hover {{
-                opacity: 0.8;
-            }}""")
         if self.namespace_combo:
-            self.namespace_combo.setStyleSheet(combo_style)
+            self.namespace_combo.setStyleSheet(BaseResourcePageStyles.get_namespace_combo_style())
         
         # Add widgets to layout with proper spacing
-        filters_layout.addWidget(search_label)
+        filters_layout.addWidget(self.search_label)
         filters_layout.addWidget(self.search_bar)
         
         # Only add namespace dropdown if it exists
-        if self.namespace_combo and namespace_label:
+        if self.namespace_combo and self.namespace_label:
             filters_layout.addSpacing(16)  # Add space between search and namespace
-            filters_layout.addWidget(namespace_label)
+            filters_layout.addWidget(self.namespace_label)
             filters_layout.addWidget(self.namespace_combo)
         
         # Add the filters layout directly to header layout
@@ -1297,10 +1264,10 @@ class BaseResourcePage(BaseTablePage):
         
         # Apply styling to both title and subtitle
         empty_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        empty_title.setStyleSheet("color: #ffffff; font-size: 20px; font-weight: bold; background-color: transparent; margin: 8px;")
+        empty_title.setStyleSheet(BaseResourcePageStyles.get_empty_title_style())
         
         empty_subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)  
-        empty_subtitle.setStyleSheet("color: #9ca3af; font-size: 14px; background-color: transparent; margin: 4px;")
+        empty_subtitle.setStyleSheet(BaseResourcePageStyles.get_empty_subtitle_style())
         
         # Add widgets to message container
         self._message_widget_container.layout().addWidget(empty_title)
@@ -1318,7 +1285,7 @@ class BaseResourcePage(BaseTablePage):
         
         error_label = QLabel(f"Error: {message}")
         error_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        error_label.setStyleSheet("color: #ef4444; font-size: 16px;")
+        error_label.setStyleSheet(BaseResourcePageStyles.get_error_label_style())
         error_label.setWordWrap(True)
         
         self._message_widget_container.layout().addWidget(error_label)
@@ -1704,8 +1671,8 @@ class BaseResourcePage(BaseTablePage):
         table.setHorizontalHeader(custom_header)
         table.setSortingEnabled(True)
 
-        # Apply enhanced styling with platform overrides
-        table.setStyleSheet(AppStyles.TABLE_STYLE)
+        # Apply enhanced styling with platform overrides (theme-aware)
+        table.setStyleSheet(get_table_style())
         table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -1761,29 +1728,7 @@ class BaseResourcePage(BaseTablePage):
         unchecked_path = resource_path("Icons/check_box_unchecked.svg")
         checked_path = resource_path("Icons/check_box_checked.svg")
         
-        select_all_checkbox.setStyleSheet(f"""
-            QCheckBox {{
-                margin: 0px;
-                padding: 0px;
-                background-color: transparent;
-            }}
-            QCheckBox::indicator {{
-                width: 14px;
-                height: 14px;
-                margin: 1px;
-                background-color: transparent;
-                border: none;
-                image: url({unchecked_path.replace(os.sep, '/')});
-            }}
-            QCheckBox::indicator:checked {{
-                background-color: transparent;
-                border: none;
-                image: url({checked_path.replace(os.sep, '/')});
-            }}
-            QCheckBox::indicator:hover {{
-                border-color: #0078d4;
-            }}
-        """)
+        select_all_checkbox.setStyleSheet(BaseResourcePageStyles.get_checkbox_style(unchecked_path, checked_path))
         select_all_checkbox.stateChanged.connect(self._on_select_all_changed)
         return select_all_checkbox
 
@@ -2017,48 +1962,14 @@ class BaseResourcePage(BaseTablePage):
         button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
 
         button.setFixedWidth(30)
-        try:
-            from UI.Styles import AppStyles
-            button.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE)
-        except (ImportError, AttributeError) as e:
-            logging.debug(f"Could not load AppStyles for button: {e}")
-            # Fallback styling
-            button.setStyleSheet("""
-                QToolButton {
-                    background-color: transparent;
-                    border: none;
-                    padding: 2px;
-                }
-                QToolButton:hover {
-                    background-color: #3d3d3d;
-                    border-radius: 2px;
-                }
-            """)
+        button.setStyleSheet(get_action_button_style())
         
         button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         button.setCursor(Qt.CursorShape.PointingHandCursor)
 
         # Create menu
         menu = QMenu(button)
-        try:
-            from UI.Styles import AppStyles
-            menu.setStyleSheet(AppStyles.MENU_STYLE)
-        except (ImportError, AttributeError) as e:
-            logging.debug(f"Could not load AppStyles for menu: {e}")
-            # Fallback menu styling
-            menu.setStyleSheet("""
-                QMenu {
-                    background-color: #2d2d2d;
-                    border: 1px solid #3d3d3d;
-                    color: white;
-                }
-                QMenu::item {
-                    padding: 5px 20px;
-                }
-                QMenu::item:selected {
-                    background-color: #0078d4;
-                }
-            """)
+        menu.setStyleSheet(get_menu_style())
 
         # Connect signals to change row appearance when menu opens/closes
         try:
@@ -2181,9 +2092,9 @@ class BaseResourcePage(BaseTablePage):
                     item = self.table.item(row, col)
                     if item:
                         if highlight:
-                            item.setBackground(QColor(AppColors.HOVER_BG))
+                            item.setBackground(QColor(BaseResourcePageStyles.get_hover_bg_color()))
                         else:
-                            item.setBackground(QColor("transparent"))
+                            item.setBackground(QColor(BaseResourcePageStyles.get_transparent_color()))
         except Exception as e:
             logging.debug(f"Error highlighting row {row}: {e}")
 
@@ -2367,29 +2278,7 @@ class BaseResourcePage(BaseTablePage):
         unchecked_path = resource_path("Icons/check_box_unchecked.svg")
         checked_path = resource_path("Icons/check_box_checked.svg")
         
-        checkbox.setStyleSheet(f"""
-            QCheckBox {{
-                margin: 0px;
-                padding: 0px;
-                background-color: transparent;
-            }}
-            QCheckBox::indicator {{
-                width: 14px;
-                height: 14px;
-                margin: 1px;
-                background-color: transparent;
-                border: none;
-                image: url({unchecked_path.replace(os.sep, '/')});
-            }}
-            QCheckBox::indicator:checked {{
-                background-color: transparent;
-                border: none;
-                image: url({checked_path.replace(os.sep, '/')});
-            }}
-            QCheckBox::indicator:hover {{
-                border-color: #0078d4;
-            }}
-        """)
+        checkbox.setStyleSheet(BaseResourcePageStyles.get_checkbox_style(unchecked_path, checked_path))
         
         layout.addWidget(checkbox)
         return container

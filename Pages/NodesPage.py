@@ -11,9 +11,10 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer, QRect, QRectF, pyqtSignal, QSize
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QLinearGradient, QPainterPath, QBrush, QCursor
 
-from UI.Styles import AppStyles, AppColors, AppConstants
+from UI.Styles import AppConstants, get_table_style, get_menu_style, get_action_button_style, get_checkbox_style, get_action_container_style, get_custom_header_style, get_graph_frame_style, get_graph_title_style, get_graph_value_style
 from Base_Components.base_components import SortableTableWidgetItem, StatusLabel
 from Base_Components.base_resource_page import BaseResourcePage
+import Styles.NodesPageStyles as NodesPageStyles
 from Utils.cluster_connector import get_cluster_connector
 from UI.Icons import resource_path
 import random
@@ -22,9 +23,7 @@ import re
 import logging
 import time
 
-#------------------------------------------------------------------
 # Custom Style to hide checkbox in header
-#------------------------------------------------------------------
 class CustomHeaderStyle(QProxyStyle):
     """A proxy style that hides checkbox in header"""
     def __init__(self, style=None):
@@ -39,10 +38,7 @@ class CustomHeaderStyle(QProxyStyle):
                 return
         super().drawControl(element, option, painter, widget)
 
-
-#------------------------------------------------------------------
 # Optimized GraphWidget
-#------------------------------------------------------------------
 class GraphWidget(QFrame):
     """Optimized widget for displaying resource utilization graphs"""
     def __init__(self, title, unit, color, parent=None):
@@ -63,7 +59,7 @@ class GraphWidget(QFrame):
         self.setMaximumHeight(120)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
-        self.setStyleSheet(AppStyles.GRAPH_FRAME_STYLE)
+        self.setStyleSheet(get_graph_frame_style())
 
         # Reduced shadow effect for performance
         shadow = QGraphicsDropShadowEffect(self)
@@ -77,9 +73,9 @@ class GraphWidget(QFrame):
 
         header_layout = QHBoxLayout()
         self.title_label = QLabel(f"{title} (No node selected)")
-        self.title_label.setStyleSheet(AppStyles.GRAPH_TITLE_STYLE)
+        self.title_label.setStyleSheet(get_graph_title_style())
         self.value_label = QLabel(f"0{unit}")
-        self.value_label.setStyleSheet(AppStyles.graph_value_style(self.color))
+        self.value_label.setStyleSheet(get_graph_value_style(self.color))
         header_layout.addWidget(self.title_label)
         header_layout.addStretch()
         header_layout.addWidget(self.value_label)
@@ -289,7 +285,7 @@ class GraphWidget(QFrame):
         painter.drawText(QRectF(16 + width - 15, self.height() - 16, 30, 12), Qt.AlignmentFlag.AlignCenter, now.strftime("%H:%M"))
         
         if not self.selected_node:
-            painter.setPen(QPen(QColor(AppColors.TEXT_SUBTLE)))
+            painter.setPen(QPen(QColor(NodesPageStyles.get_text_subtle_color())))
             text_rect = QRectF(0, self.rect().top(), self.rect().width(), self.rect().height() - 20)
             painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, "Select a node to view metrics")
 
@@ -317,9 +313,7 @@ class NoDataWidget(QWidget):
         layout.addWidget(icon_label)
         layout.addWidget(message_label)
 
-#------------------------------------------------------------------
 # NodesPage - Now extending BaseResourcePage for consistency
-#------------------------------------------------------------------
 class NodesPage(BaseResourcePage):
     """
     Displays Kubernetes Nodes with live data and resource operations.
@@ -344,6 +338,31 @@ class NodesPage(BaseResourcePage):
         
         # Set up UI
         self.setup_page_ui()
+    
+    def _on_theme_changed(self, theme_name):
+        """Refresh styles when theme changes"""
+        super()._on_theme_changed(theme_name)
+        
+        # Update graph styles
+        if hasattr(self, 'cpu_graph') and self.cpu_graph:
+            self.cpu_graph.setStyleSheet(get_graph_frame_style())
+            self.cpu_graph.title_label.setStyleSheet(get_graph_title_style())
+            self.cpu_graph.value_label.setStyleSheet(get_graph_value_style(self.cpu_graph.color))
+        
+        if hasattr(self, 'mem_graph') and self.mem_graph:
+            self.mem_graph.setStyleSheet(get_graph_frame_style())
+            self.mem_graph.title_label.setStyleSheet(get_graph_title_style())
+            self.mem_graph.value_label.setStyleSheet(get_graph_value_style(self.mem_graph.color))
+        
+        if hasattr(self, 'disk_graph') and self.disk_graph:
+            self.disk_graph.setStyleSheet(get_graph_frame_style())
+            self.disk_graph.title_label.setStyleSheet(get_graph_title_style())
+            self.disk_graph.value_label.setStyleSheet(get_graph_value_style(self.disk_graph.color))
+        
+        # Update table styles
+        if hasattr(self, 'table') and self.table:
+            self.table.setStyleSheet(get_table_style())
+            self.table.horizontalHeader().setStyleSheet(get_custom_header_style())
         
     def setup_page_ui(self):
         """Set up the main UI elements for the Nodes page"""
@@ -359,9 +378,9 @@ class NodesPage(BaseResourcePage):
         
         # Add graphs at the top
         graphs_layout = QHBoxLayout()
-        self.cpu_graph = GraphWidget("CPU Usage", "%", AppColors.ACCENT_ORANGE)
-        self.mem_graph = GraphWidget("Memory Usage", "%", AppColors.ACCENT_BLUE)
-        self.disk_graph = GraphWidget("Disk Usage", "%", AppColors.ACCENT_PURPLE)
+        self.cpu_graph = GraphWidget("CPU Usage", "%", NodesPageStyles.get_cpu_graph_color())
+        self.mem_graph = GraphWidget("Memory Usage", "%", NodesPageStyles.get_memory_graph_color())
+        self.disk_graph = GraphWidget("Disk Usage", "%", NodesPageStyles.get_disk_graph_color())
         graphs_layout.addWidget(self.cpu_graph)
         graphs_layout.addWidget(self.mem_graph)
         graphs_layout.addWidget(self.disk_graph)
@@ -371,9 +390,8 @@ class NodesPage(BaseResourcePage):
             graphs_widget.setLayout(graphs_layout)
             self.layout().insertWidget(0, graphs_widget)
         
-        # Apply table style
-        self.table.setStyleSheet(AppStyles.TABLE_STYLE)
-        self.table.horizontalHeader().setStyleSheet(AppStyles.CUSTOM_HEADER_STYLE)
+        self.table.setStyleSheet(get_table_style())
+        self.table.horizontalHeader().setStyleSheet(get_custom_header_style())
 
         # Configure column widths
         self.configure_columns()
@@ -573,7 +591,7 @@ class NodesPage(BaseResourcePage):
             
             # Create checkbox container (visible)
             checkbox_container = self._create_checkbox_container(row, node_name)
-            checkbox_container.setStyleSheet(AppStyles.CHECKBOX_STYLE)
+            checkbox_container.setStyleSheet(NodesPageStyles.get_checkbox_style())
             self.table.setCellWidget(row, 0, checkbox_container)
             
             # Get utilization data from graphs (already loaded in background)
@@ -685,9 +703,9 @@ class NodesPage(BaseResourcePage):
             status_col = len(columns) + 1
             
             if status.lower() == "ready":
-                color = AppColors.STATUS_ACTIVE
+                color = NodesPageStyles.get_status_active_color()
             else:
-                color = AppColors.STATUS_DISCONNECTED
+                color = NodesPageStyles.get_status_disconnected_color()
                 
             status_widget = StatusLabel(status, color)
             status_widget.clicked.connect(lambda: self.table.selectRow(row))
@@ -695,15 +713,12 @@ class NodesPage(BaseResourcePage):
             
             # Create and add action button with proper styling
             action_button = self._create_node_action_button(row, node_name)
-            action_button.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE +
-        """
-        QToolButton::menu-indicator { image: none; width: 0px; }
-        """)
+            action_button.setStyleSheet(NodesPageStyles.get_action_button_style())
             
             # Create action container with proper styling
             action_container = QWidget()
             action_container.setFixedWidth(AppConstants.SIZES["ACTION_WIDTH"])
-            action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
+            action_container.setStyleSheet(NodesPageStyles.get_action_container_style())
             action_layout = QHBoxLayout(action_container)
             action_layout.setContentsMargins(0, 0, 0, 0)
             action_layout.setSpacing(0)
@@ -733,7 +748,7 @@ class NodesPage(BaseResourcePage):
             item = self.table.item(row, col)
             if item:
                 if is_active:
-                    item.setBackground(QColor(AppColors.ACCENT_BLUE + "22"))  # 13% opacity
+                    item.setBackground(QColor(NodesPageStyles.get_row_highlight_color() + "22"))  # 13% opacity
                 else:
                     item.setBackground(QColor("transparent"))
 
@@ -752,13 +767,13 @@ class NodesPage(BaseResourcePage):
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
 
             button.setFixedWidth(30)
-            button.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE)
+            button.setStyleSheet(NodesPageStyles.get_action_button_style())
             button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
 
             # Create menu
             menu = QMenu(button)
-            menu.setStyleSheet(AppStyles.MENU_STYLE)
+            menu.setStyleSheet(NodesPageStyles.get_menu_style())
 
             # Connect signals to change row appearance when menu opens/closes
             menu.aboutToShow.connect(lambda: self._highlight_active_row(row, True))

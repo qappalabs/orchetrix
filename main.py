@@ -909,7 +909,7 @@ def main():
     from UI.ThemeManager import get_theme_manager
     
     settings = QSettings("Orchetrix", "OX")
-    saved_theme = settings.value("theme", "Dark")
+    saved_theme = settings.value("theme", "Light")
     
     # Use singleton instance instead of creating new one
     theme_manager = get_theme_manager()

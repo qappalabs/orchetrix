@@ -6,7 +6,7 @@ class ThemeManager(QObject):
     
     def __init__(self):
         super().__init__()
-        self._current_theme = "Dark"  # Match preferences dropdown values
+        self._current_theme = "Light"  # Match preferences dropdown values
         self._themes = {
             "Dark": self._get_dark_theme(),
             "Light": self._get_light_theme()

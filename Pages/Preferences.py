@@ -315,7 +315,7 @@ class PreferencesWidget(ThemeAwareMixin, QWidget):
         self.theme_combo.setCursor(Qt.CursorShape.PointingHandCursor)
         
         # Set current theme from settings
-        current_theme = self.settings.value("theme", "Dark")
+        current_theme = self.settings.value("theme", "Light")
         self.theme_combo.setCurrentText(current_theme)
         
         # Connect signal

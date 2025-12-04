@@ -8,6 +8,8 @@ import logging
 from .DetailManager import DetailManager
 from UI.Sidebar import Sidebar
 from UI.Styles import AppColors
+from UI.ThemeAwarePage import ThemeAwareMixin
+from UI.ThemeManager import get_theme_manager
 from UI.TerminalPanel import TerminalPanel
 from Utils.cluster_connector import get_cluster_connector
 from UI.DetailPageComponent import DetailPageComponent as DetailPage
@@ -266,7 +268,7 @@ class LoadingOverlay(QWidget):
         self.hide()
 
 
-class ClusterView(QWidget):
+class ClusterView(ThemeAwareMixin, QWidget):
     """
     Optimized ClusterView with lazy loading and improved performance.
     The ClusterView contains the cluster-specific sidebar and pages.
@@ -318,8 +320,8 @@ class ClusterView(QWidget):
         """Setup the main UI components"""
         self.setStyleSheet(f"""
             QWidget {{
-                background-color: {AppColors.BG_DARK};
-                color: {AppColors.TEXT_LIGHT};
+                background-color: {get_theme_manager().get_current_theme().colors.BG_DARK};
+                color: {get_theme_manager().get_current_theme().colors.TEXT_LIGHT};
             }}
         """)
 
@@ -342,26 +344,46 @@ class ClusterView(QWidget):
 
     def _create_right_container(self) -> QWidget:
         """Create the right side container with stacked widget"""
-        right_container = QWidget()
-        right_container.setStyleSheet(f"background-color: {AppColors.BG_DARK};")
+        self.right_container = QWidget()
+        self.right_container.setStyleSheet(f"background-color: {get_theme_manager().get_current_theme().colors.BG_DARK};")
 
-        right_layout = QVBoxLayout(right_container)
+        right_layout = QVBoxLayout(self.right_container)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(0)
 
         # Create stacked widget
         self.stacked_widget = QStackedWidget()
-        self.stacked_widget.setStyleSheet(f"background-color: {AppColors.BG_DARK};")
+        self.stacked_widget.setStyleSheet(f"background-color: {get_theme_manager().get_current_theme().colors.BG_DARK};")
         self.stacked_widget.currentChanged.connect(
             lambda index: self.handle_page_change(self.stacked_widget.widget(index))
         )
 
         right_layout.addWidget(self.stacked_widget)
-        return right_container
+        return self.right_container
 
     def _setup_loading_overlay(self) -> None:
         """Setup loading overlay"""
         self.loading_overlay = LoadingOverlay(self)
+
+    def _on_theme_changed(self, theme_name: str) -> None:
+        """Handle theme changes by updating container styles"""
+        theme = get_theme_manager().get_current_theme()
+        
+        # Update main widget style
+        self.setStyleSheet(f"""
+            QWidget {{
+                background-color: {theme.colors.BG_DARK};
+                color: {theme.colors.TEXT_LIGHT};
+            }}
+        """)
+        
+        # Update right container
+        if hasattr(self, 'right_container'):
+            self.right_container.setStyleSheet(f"background-color: {theme.colors.BG_DARK};")
+        
+        # Update stacked widget
+        if hasattr(self, 'stacked_widget'):
+            self.stacked_widget.setStyleSheet(f"background-color: {theme.colors.BG_DARK};")
 
     def _initialize_detail_manager(self) -> None:
         """Initialize the detail page manager"""

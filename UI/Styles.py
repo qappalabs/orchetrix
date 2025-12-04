@@ -1,5 +1,6 @@
 from PyQt6.QtCore import QSize
 import os
+from UI.ThemeManager import get_theme_manager
 
 class AppColors:
     # Base colors
@@ -2035,3 +2036,111 @@ def get_dropdown_style_with_icon():
 
 # Set the BASE_CHECKBOX_STYLE after class definition
 AppStyles.BASE_CHECKBOX_STYLE = AppStyles.get_base_checkbox_style()
+
+# THEME-AWARE STYLE FUNCTIONS
+# These functions return theme-aware styles by delegating to ThemeManager.
+# Use these instead of the hardcoded AppStyles constants for theme support.
+# The hardcoded constants above are kept for backward compatibility.
+
+def get_table_style():
+    """Get theme-aware table style"""
+    return get_theme_manager().get_current_theme().get_table_style()
+
+
+def get_menu_style():
+    """Get theme-aware menu style"""
+    return get_theme_manager().get_current_theme().get_menu_style()
+
+
+def get_action_button_style():
+    """Get theme-aware action button style (HOME_ACTION_BUTTON_STYLE equivalent)"""
+    return get_theme_manager().get_current_theme().get_action_button_style()
+
+
+def get_custom_header_style():
+    """Get theme-aware custom header style (CUSTOM_HEADER_STYLE equivalent)"""
+    theme = get_theme_manager().get_current_theme()
+    return f"""
+        QHeaderView::section {{
+            background-color: {theme.colors.HEADER_BG};
+            color: {theme.colors.TEXT_SECONDARY};
+            padding: 8px;
+            border: none;
+            border-bottom: 1px solid {theme.colors.BORDER_COLOR};
+            font-size: 12px;
+            text-align: center;
+        }}
+        QHeaderView::section:hover {{
+            background-color: {theme.colors.BG_MEDIUM};
+        }}
+    """
+
+
+def get_checkbox_style():
+    """Get theme-aware checkbox style (CHECKBOX_STYLE equivalent)"""
+    theme = get_theme_manager().get_current_theme()
+    return f"""
+        QCheckBox {{
+            spacing: 3px;
+            background: transparent;
+        }}
+        QCheckBox::indicator {{
+            width: 14px;
+            height: 14px;
+            border: 1px solid {theme.colors.TEXT_SECONDARY};
+            border-radius: 3px;
+            background: transparent;
+        }}
+        QCheckBox::indicator:checked {{
+            background-color: {theme.colors.ACCENT_BLUE};
+            border-color: {theme.colors.ACCENT_BLUE};
+        }}
+        QCheckBox::indicator:hover {{
+            border-color: {theme.colors.TEXT_LIGHT};
+        }}
+    """
+
+
+def get_action_container_style():
+    """Get theme-aware action container style (ACTION_CONTAINER_STYLE equivalent)"""
+    return """
+        background-color: transparent;
+        border: none;
+        margin: 0;
+        padding: 0;
+    """
+
+
+def get_graph_frame_style():
+    """Get theme-aware graph frame style"""
+    theme = get_theme_manager().get_current_theme()
+    return f"""
+        QFrame {{
+            background-color: {theme.colors.CARD_BG};
+            border-radius: 4px;
+            border: 1px solid {theme.colors.BORDER_COLOR};
+        }}
+    """
+
+
+def get_graph_title_style():
+    """Get theme-aware graph title style"""
+    theme = get_theme_manager().get_current_theme()
+    return f"""
+        QLabel {{
+            color: {theme.colors.TEXT_LIGHT};
+            font-size: 14px;
+            font-weight: bold;
+        }}
+    """
+
+
+def get_graph_value_style(color):
+    """Get theme-aware graph value style"""
+    return f"""
+        QLabel {{
+            color: {color};
+            font-size: 16px;
+            font-weight: bold;
+        }}
+    """
