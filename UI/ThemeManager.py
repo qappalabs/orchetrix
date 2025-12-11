@@ -15,6 +15,10 @@ class ThemeManager(QObject):
     def get_current_theme(self):
         return self._themes[self._current_theme]
     
+    def get_current_theme_name(self) -> str:
+        """Return the symbolic name of the active theme (e.g. "Light" or "Dark")."""
+        return self._current_theme
+    
     def set_theme(self, theme_name: str):
         if theme_name in self._themes and self._current_theme != theme_name:
             self._current_theme = theme_name
@@ -59,7 +63,7 @@ class BaseTheme:
         """
     
     @staticmethod
-    def _table_template(bg_color, text_color, border_color, border_light, header_bg, header_text):
+    def _table_template(bg_color, text_color, border_color, border_light, header_bg, header_text, header_hover_bg):
         return f"""
             QTableWidget {{
                 background-color: {bg_color};
@@ -67,10 +71,16 @@ class BaseTheme:
                 border: 1px solid {border_color};
                 gridline-color: {border_light};
             }}
+            QTableWidget::item:hover {{
+                background-color: rgba(53, 132, 228, 0.10);
+            }}
             QHeaderView::section {{
                 background-color: {header_bg};
                 color: {header_text};
                 border: 1px solid {border_color};
+            }}
+            QHeaderView::section:hover {{
+                background-color: {header_hover_bg};
             }}
         """
     
@@ -1028,14 +1038,14 @@ class LightTheme(BaseTheme):
         )
     
     def get_table_style(self):
-        # Use shared template, inject light theme colors
         return self._table_template(
             bg_color=self.colors.CARD_BG,
             text_color=self.colors.TEXT_LIGHT,
             border_color=self.colors.BORDER_COLOR,
             border_light=self.colors.BORDER_LIGHT,
-            header_bg=self.colors.BG_MEDIUM,
-            header_text=self.colors.TEXT_SECONDARY
+            header_bg=self.colors.TABLE_HEADER,
+            header_text=self.colors.TEXT_SECONDARY,
+            header_hover_bg=self.colors.BG_MEDIUM
         )
     
     def get_default_style(self):

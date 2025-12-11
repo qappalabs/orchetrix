@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QLabel, QToolButt
 from Styles import TitleBarStyles
 from UI.Icons import Icons, resource_path
 from UI.ThemeAwarePage import ThemeAwareMixin
+from UI.ThemeManager import get_theme_manager
 
 class TitleBar(ThemeAwareMixin, QWidget):
     def __init__(self, parent=None, update_pinned_items_signal=None):
@@ -195,6 +196,50 @@ class TitleBar(ThemeAwareMixin, QWidget):
         if self.search_input:
             self.search_input.setStyleSheet(TitleBarStyles.get_search_input_style())
 
+        # Update icons based on the active theme using theme-specific assets
+        theme_folder = theme_name.lower() if isinstance(theme_name, str) else "dark"
+
+        # Home and Settings buttons use 18x18 icons
+        if hasattr(self, 'home_btn'):
+            home_icon = Icons.get_theme_icon("home.svg", theme_folder)
+            if not home_icon.isNull():
+                self.home_btn.setIcon(home_icon)
+                self.home_btn.setIconSize(self.normal_icon_size)
+
+        if hasattr(self, 'settings_btn'):
+            prefs_icon = Icons.get_theme_icon("preferences.svg", theme_folder)
+            if not prefs_icon.isNull():
+                self.settings_btn.setIcon(prefs_icon)
+                self.settings_btn.setIconSize(self.normal_icon_size)
+
+        # Window control buttons use 10x10 icons
+        if hasattr(self, 'minimize_btn'):
+            min_icon = Icons.get_theme_icon("minimize.svg", theme_folder)
+            if not min_icon.isNull():
+                self.minimize_btn.setIcon(min_icon)
+                self.minimize_btn.setIconSize(QSize(10, 10))
+
+        if hasattr(self, 'close_btn'):
+            close_icon = Icons.get_theme_icon("close.svg", theme_folder)
+            if not close_icon.isNull():
+                self.close_btn.setIcon(close_icon)
+                self.close_btn.setIconSize(QSize(10, 10))
+
+        # Maximize button needs smart sizing based on state
+        if hasattr(self, 'maximize_btn'):
+            is_maximized = bool(self.parent and self.parent.isMaximized())
+            max_filename = "maximize_active.svg" if is_maximized else "maximize.svg"
+            max_icon = Icons.get_theme_icon(max_filename, theme_folder)
+            
+            # Determine correct size (Preserve original logic: 10x10 for restore, window_ctrl_size for maximized)
+            # Note: The logic in toggle_maximize uses 10x10 for 'maximize' (restore window) 
+            # and window_ctrl_size for 'maximize_active' (mazimized window)
+            current_size = self.window_ctrl_size if is_maximized else QSize(10, 10)
+            
+            if not max_icon.isNull():
+                self.maximize_btn.setIcon(max_icon)
+                self.maximize_btn.setIconSize(current_size)
+
     def update_current_cluster(self, cluster_name):
         """Update the pinned clusters label with the selected cluster name and icon"""
         self.current_cluster = cluster_name
@@ -367,36 +412,56 @@ class TitleBar(ThemeAwareMixin, QWidget):
         self.dropdown_menu.hide()
 
     def create_icon_button(self, icon_id, tooltip, fallback_icon=None):
-        """Create a tool button with the specified icon and tooltip"""
+        """Create a tool button with the specified icon and tooltip.
+
+        For TitleBar icons, we make them theme-aware by asking ThemeManager for the
+        current theme name and loading Icons/<theme>/<icon_id>.svg when available.
+        """
         btn = QToolButton()
         btn.setFixedSize(30, 30)
         btn.setToolTip(tooltip)
         btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
 
-        icon = Icons.get_icon(icon_id)
+        # Determine current theme name ("Light" / "Dark") and map to folder name
+        theme_name = get_theme_manager().get_current_theme_name()
+        theme_folder = theme_name.lower() if isinstance(theme_name, str) else "dark"
 
-        if not icon.isNull():
-            btn.setIcon(icon)
-            btn.setIconSize(self.normal_icon_size)
-            btn.setText("")
-        elif fallback_icon is not None:
-            btn.setIcon(fallback_icon)
+        # Try theme-specific icon first: Icons/<theme>/<icon_id>.svg
+        themed_icon = Icons.get_theme_icon(f"{icon_id}.svg", theme_folder)
+
+        if not themed_icon.isNull():
+            btn.setIcon(themed_icon)
             btn.setIconSize(self.normal_icon_size)
             btn.setText("")
         else:
-            fallback_text = getattr(Icons, icon_id.upper(), "⚙️") if isinstance(icon_id, str) else "⚙️"
-            btn.setText(fallback_text)
+            # Fallback to existing, non-themed icon lookup behaviour
+            icon = Icons.get_icon(icon_id)
+
+            if not icon.isNull():
+                btn.setIcon(icon)
+                btn.setIconSize(self.normal_icon_size)
+                btn.setText("")
+            elif fallback_icon is not None:
+                btn.setIcon(fallback_icon)
+                btn.setIconSize(self.normal_icon_size)
+                btn.setText("")
+            else:
+                fallback_text = getattr(Icons, icon_id.upper(), "⚙️") if isinstance(icon_id, str) else "⚙️"
+                btn.setText(fallback_text)
 
         btn.setStyleSheet(TitleBarStyles.get_icon_button_style())
         return btn
 
     def create_window_control_button(self, icon_id, tooltip):
-        """Create a window control button with minimal style"""
+        """Create a window control button with minimal style, using theme-aware icons."""
         btn = QToolButton()
         btn.setFixedSize(46, 30)
         btn.setToolTip(tooltip)
 
-        icon = Icons.get_icon(icon_id)
+        # Determine current theme and try theme-specific icon first
+        theme_name = get_theme_manager().get_current_theme_name()
+        theme_folder = theme_name.lower() if isinstance(theme_name, str) else "dark"
+        icon = Icons.get_theme_icon(f"{icon_id}.svg", theme_folder)
 
         if not icon.isNull():
             btn.setIcon(icon)
@@ -547,9 +612,12 @@ class TitleBar(ThemeAwareMixin, QWidget):
         return super().eventFilter(obj, event)
 
     def toggle_maximize(self):
+        theme_name = get_theme_manager().get_current_theme_name()
+        theme_folder = theme_name.lower() if isinstance(theme_name, str) else "dark"
+
         if self.parent.isMaximized():
             self.parent.showNormal()
-            icon = Icons.get_icon("maximize")
+            icon = Icons.get_theme_icon("maximize.svg", theme_folder)
             if not icon.isNull():
                 self.maximize_btn.setIcon(icon)
                 self.maximize_btn.setIconSize(QSize(10, 10))
@@ -560,13 +628,13 @@ class TitleBar(ThemeAwareMixin, QWidget):
             self.maximize_btn.setStyleSheet(TitleBarStyles.get_window_control_style())
         else:
             self.parent.showMaximized()
-            icon = Icons.get_icon("maximize_active")
+            icon = Icons.get_theme_icon("maximize_active.svg", theme_folder)
             if not icon.isNull():
                 self.maximize_btn.setIcon(icon)
                 self.maximize_btn.setIconSize(self.window_ctrl_size)
                 self.maximize_btn.setText("")
             else:
-                self.maximize_btn.setText("⧉")
+                self.maximize_btn.setText("⯩")
                 self.maximize_btn.setFont(QFont("Segoe UI", 9))
             self.maximize_btn.setStyleSheet(TitleBarStyles.get_window_control_style())
 
@@ -607,14 +675,20 @@ class TitleBar(ThemeAwareMixin, QWidget):
             self.double_click_in_progress = False
 
     def update_maximize_button_icon(self, is_maximized):
-        icon_id = "maximize_active" if is_maximized else "maximize"
-        icon = Icons.get_icon(icon_id)
+        theme_name = get_theme_manager().get_current_theme_name()
+        theme_folder = theme_name.lower() if isinstance(theme_name, str) else "dark"
+
+        icon_filename = "maximize_active.svg" if is_maximized else "maximize.svg"
+        icon = Icons.get_theme_icon(icon_filename, theme_folder)
+        
         if not icon.isNull():
             self.maximize_btn.setIcon(icon)
-            self.maximize_btn.setIconSize(QSize(10, 10))
+            # Use correct size based on state (10x10 vs 18x18)
+            current_size = self.window_ctrl_size if is_maximized else QSize(10, 10)
+            self.maximize_btn.setIconSize(current_size)
             self.maximize_btn.setText("")
         else:
-            self.maximize_btn.setText("⧉" if is_maximized else "□")
+            self.maximize_btn.setText("⯩" if is_maximized else "□")
             self.maximize_btn.setFont(QFont("Segoe UI", 9))
         self.maximize_btn.setStyleSheet(TitleBarStyles.get_window_control_style())
 

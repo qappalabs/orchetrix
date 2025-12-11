@@ -21,7 +21,7 @@ from .resource_deleters import ResourceDeleterThread, BatchResourceDeleterThread
 from .virtual_scroll_table import VirtualScrollTable
 
 from Base_Components.base_components import BaseTablePage
-from UI.Styles import get_table_style, get_menu_style, get_action_button_style
+from UI.Styles import get_table_style, get_menu_style, get_action_button_style, get_custom_header_style
 from UI.Icons import resource_path
 from UI.ThemeAwarePage import ThemeAwareMixin
 import Styles.BaseResourcePageStyles as BaseResourcePageStyles
@@ -156,6 +156,9 @@ class BaseResourcePage(ThemeAwareMixin, BaseTablePage):
         # Update table style (theme-aware shared style)
         if hasattr(self, 'table') and self.table:
             self.table.setStyleSheet(get_table_style())
+            header = getattr(self.table, 'horizontalHeader', None)
+            if callable(header):
+                self.table.horizontalHeader().setStyleSheet(get_custom_header_style())
 
     def showEvent(self, event):
         """Override showEvent to automatically load data when page becomes visible"""
@@ -2073,6 +2076,12 @@ class BaseResourcePage(ThemeAwareMixin, BaseTablePage):
     def _create_action_container(self, row, action_button):
         """Create container widget for action button"""
         container = QWidget()
+        # Match table background to avoid leak through transparent container
+        try:
+            container.setStyleSheet(BaseResourcePageStyles.get_checkbox_container_style())
+        except Exception:
+            # Fallback to transparent if style resolution fails
+            container.setStyleSheet("background-color: transparent;")
         layout = QHBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)

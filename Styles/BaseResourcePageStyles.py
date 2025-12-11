@@ -52,6 +52,9 @@ def get_checkbox_style(unchecked_path, checked_path):
     """
     theme = _get_theme()
     return f"""
+        QWidget {{
+            background-color: {theme.colors.CARD_BG};
+        }}
         QCheckBox {{
             margin: 0px;
             padding: 0px;
@@ -74,6 +77,11 @@ def get_checkbox_style(unchecked_path, checked_path):
             border-color: {theme.colors.ACCENT_BLUE};
         }}
     """
+
+def get_checkbox_container_style():
+    """Style for checkbox container QWidget to match table background"""
+    theme = _get_theme()
+    return f"background-color: {theme.colors.CARD_BG}; border: none; margin: 0; padding: 0;"
 
 
 

@@ -635,6 +635,15 @@ class DetailPageYAMLSection(BaseDetailSection):
         # Refresh toolbar style
         if hasattr(self, 'yaml_toolbar'):
             self.yaml_toolbar.setStyleSheet(YamlSectionStyles.get_yaml_toolbar_style())
+        # Refresh toolbar buttons styles
+        if hasattr(self, 'yaml_edit_button') and self.yaml_edit_button:
+            self.yaml_edit_button.setStyleSheet(YamlSectionStyles.get_yaml_edit_button_style())
+        if hasattr(self, 'yaml_save_button') and self.yaml_save_button:
+            self.yaml_save_button.setStyleSheet(YamlSectionStyles.get_yaml_save_button_style())
+        if hasattr(self, 'yaml_cancel_button') and self.yaml_cancel_button:
+            self.yaml_cancel_button.setStyleSheet(YamlSectionStyles.get_yaml_cancel_button_style())
+        if hasattr(self, 'helm_status_label') and self.helm_status_label:
+            self.helm_status_label.setStyleSheet(YamlSectionStyles.get_helm_status_label_style())
         # Note: YAML editor styles are intentionally hardcoded for VS Code consistency
         # Search widget will be refreshed when shown
     

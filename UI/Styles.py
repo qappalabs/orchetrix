@@ -2062,7 +2062,7 @@ def get_custom_header_style():
     theme = get_theme_manager().get_current_theme()
     return f"""
         QHeaderView::section {{
-            background-color: {theme.colors.HEADER_BG};
+            background-color: {theme.colors.TABLE_HEADER};
             color: {theme.colors.TEXT_SECONDARY};
             padding: 8px;
             border: none;
@@ -2080,6 +2080,9 @@ def get_checkbox_style():
     """Get theme-aware checkbox style (CHECKBOX_STYLE equivalent)"""
     theme = get_theme_manager().get_current_theme()
     return f"""
+        QWidget {{
+            background-color: {theme.colors.CARD_BG};
+        }}
         QCheckBox {{
             spacing: 3px;
             background: transparent;
@@ -2096,7 +2099,7 @@ def get_checkbox_style():
             border-color: {theme.colors.ACCENT_BLUE};
         }}
         QCheckBox::indicator:hover {{
-            border-color: {theme.colors.TEXT_LIGHT};
+            border-color: {theme.colors.ACCENT_BLUE};
         }}
     """
 

@@ -195,6 +195,26 @@ class Icons:
         return Icons.create_text_icon(fallback_text)
     
     @staticmethod
+    def get_theme_icon(icon_filename, theme_name):
+        """Get a theme-specific icon from Icons/<theme>/ using existing path logic.
+
+        icon_filename should include the extension, e.g. "minimize.svg".
+        theme_name comes from ThemeManager ("Light" / "Dark"); we map it
+        to folder names by lowercasing.
+        """
+        if not isinstance(icon_filename, str) or not isinstance(theme_name, str):
+            return QIcon()
+
+        # Derive fallback text from the icon name (before extension),
+        # matching how get_icon() uses the class-level constants.
+        base_name, _ = os.path.splitext(icon_filename)
+        fallback_attr = base_name.upper()
+        fallback_text = getattr(Icons, fallback_attr, "⚙️")
+
+        themed_path = os.path.join(Icons.ICONS_BASE_PATH, theme_name.lower(), icon_filename)
+        return Icons.get_icon_from_path(themed_path, fallback_text=fallback_text)
+    
+    @staticmethod
     def create_text_icon(text, size=AppStyles.TEXT_ICON_SIZE):
         """Create a simple text-based icon"""
         pixmap = QPixmap(size)

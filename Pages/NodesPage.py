@@ -591,7 +591,7 @@ class NodesPage(BaseResourcePage):
             
             # Create checkbox container (visible)
             checkbox_container = self._create_checkbox_container(row, node_name)
-            checkbox_container.setStyleSheet(NodesPageStyles.get_checkbox_style())
+            checkbox_container.setStyleSheet(get_checkbox_style())
             self.table.setCellWidget(row, 0, checkbox_container)
             
             # Get utilization data from graphs (already loaded in background)
@@ -713,12 +713,12 @@ class NodesPage(BaseResourcePage):
             
             # Create and add action button with proper styling
             action_button = self._create_node_action_button(row, node_name)
-            action_button.setStyleSheet(NodesPageStyles.get_action_button_style())
+            action_button.setStyleSheet(get_action_button_style())
             
             # Create action container with proper styling
             action_container = QWidget()
             action_container.setFixedWidth(AppConstants.SIZES["ACTION_WIDTH"])
-            action_container.setStyleSheet(NodesPageStyles.get_action_container_style())
+            action_container.setStyleSheet(get_action_container_style())
             action_layout = QHBoxLayout(action_container)
             action_layout.setContentsMargins(0, 0, 0, 0)
             action_layout.setSpacing(0)
@@ -767,13 +767,13 @@ class NodesPage(BaseResourcePage):
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
 
             button.setFixedWidth(30)
-            button.setStyleSheet(NodesPageStyles.get_action_button_style())
+            button.setStyleSheet(get_action_button_style())
             button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
 
             # Create menu
             menu = QMenu(button)
-            menu.setStyleSheet(NodesPageStyles.get_menu_style())
+            menu.setStyleSheet(get_menu_style())
 
             # Connect signals to change row appearance when menu opens/closes
             menu.aboutToShow.connect(lambda: self._highlight_active_row(row, True))
