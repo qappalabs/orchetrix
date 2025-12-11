@@ -15,14 +15,16 @@ def _get_theme():
 
 
 
-# NoDataWidget styles - hardcoded decorative colors (stays as-is per instructions)
+# NoDataWidget styles - INTENTIONALLY NOT THEME-AWARE
+# Reason: icon_label uses emoji (ignores CSS color), message_label is a simple
+# gray placeholder text that works on both light/dark backgrounds.
 def get_no_data_icon_style():
-    """Style for no data widget icon - hardcoded decorative color"""
+    """Style for no data widget icon - static color (emoji ignores this)"""
     return "font-size: 48px; color: #666;"
 
 
 def get_no_data_message_style():
-    """Style for no data widget message - hardcoded decorative color"""
+    """Style for no data widget message - static gray works on both themes"""
     return "font-size: 18px; color: #666;"
 
 

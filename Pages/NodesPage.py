@@ -303,11 +303,11 @@ class NoDataWidget(QWidget):
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         icon_label = QLabel("📊")
-        icon_label.setStyleSheet("font-size: 48px; color: #666;")
+        icon_label.setStyleSheet(NodesPageStyles.get_no_data_icon_style())
         icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         message_label = QLabel(message)
-        message_label.setStyleSheet("font-size: 18px; color: #666;")
+        message_label.setStyleSheet(NodesPageStyles.get_no_data_message_style())
         message_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         layout.addWidget(icon_label)
