@@ -13,7 +13,7 @@ from PyQt6.QtGui import QFont, QIcon, QColor, QPalette, QPainter
 from PyQt6.QtCore import Qt, QSize, QPropertyAnimation, QEasingCurve, pyqtSignal, QTimer
 
 import Styles.PreferencesStyles as PreferencesStyles
-from UI.Icons import resource_path
+from UI.Icons import resource_path, Icons
 from UI.ThemeManager import get_theme_manager
 from UI.ThemeAwarePage import ThemeAwareMixin
 
@@ -242,6 +242,14 @@ class PreferencesWidget(ThemeAwareMixin, QWidget):
         if hasattr(self, 'terminal_btn'):
             self.terminal_btn.setStyleSheet(PreferencesStyles.get_sidebar_button_style())
         
+        # Update Back Button Icon
+        if hasattr(self, 'back_btn'):
+            from UI.Icons import Icons
+            theme_name = self.theme_manager.get_current_theme_name() or "Dark"
+            icon = Icons.get_theme_icon("back_arrow.png", theme_name)
+            self.back_btn.setIcon(icon)
+            self.back_btn.setStyleSheet(PreferencesStyles.get_back_button_style())
+
         # Refresh current section to update its components
         self.show_section(self.current_section)
 
@@ -249,15 +257,19 @@ class PreferencesWidget(ThemeAwareMixin, QWidget):
         self.back_signal.emit()
 
     def create_back_button(self):
-        back_btn = QPushButton()
-        icon = resource_path("Icons/back_arrow.png")
-        back_btn.setIcon(QIcon(icon))
-        back_btn.setIconSize(QSize(24, 24))
-        back_btn.setFixedSize(30, 30)
-        back_btn.setStyleSheet(PreferencesStyles.get_back_button_style())
-        back_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        back_btn.clicked.connect(self.go_back)
-        return back_btn
+        self.back_btn = QPushButton()
+        
+        # Use theme-aware icon
+        theme_name = get_theme_manager().get_current_theme_name() or "Dark"
+        icon = Icons.get_theme_icon("back_arrow.png", theme_name)
+        
+        self.back_btn.setIcon(icon)
+        self.back_btn.setIconSize(QSize(24, 24))
+        self.back_btn.setFixedSize(30, 30)
+        self.back_btn.setStyleSheet(PreferencesStyles.get_back_button_style())
+        self.back_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.back_btn.clicked.connect(self.go_back)
+        return self.back_btn
 
     def show_section(self, section):
         # Stop timezone timer when leaving app section

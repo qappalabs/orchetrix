@@ -16,9 +16,10 @@ import logging
 from collections import defaultdict
 from log_handler import method_logger, class_logger
 import webbrowser  # Added for opening URLs
+import os # Added for os.path.basename
 
 from math import sin, cos
-from UI.Icons import resource_path
+from UI.Icons import Icons, resource_path
 
 # Global icon cache to prevent redundant operations
 ICON_CACHE = {}
@@ -144,10 +145,11 @@ class SidebarButton(QPushButton):
     """Customized button for sidebar navigation"""
     def __init__(self, text, icon_text, icon_path=None, parent=None):
         super().__init__(text, parent)
+        self.icon_name = None
         if icon_path:
-            resolved_path = resource_path(icon_path)
-            self.setIcon(QIcon(resolved_path))
-            self.setIconSize(QSize(AppConstants.SIZES["ICON_SIZE"], AppConstants.SIZES["ICON_SIZE"]))
+            # Store the basename (e.g. "browse.svg") for theme lookups
+            self.icon_name = os.path.basename(icon_path)
+            self.update_theme_icon()
             self.setText(f" {text}")
         else:
             self.setText(f"{icon_text}  {text}")
@@ -155,6 +157,15 @@ class SidebarButton(QPushButton):
         self.setFlat(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setStyleSheet(HomePageStyles.get_sidebar_button_style())
+
+    def update_theme_icon(self):
+        """Update icon based on current theme"""
+        if self.icon_name:
+            theme_name = get_theme_manager().get_current_theme_name() or "Dark"
+            icon = Icons.get_theme_icon(self.icon_name, theme_name)
+            if not icon.isNull():
+                self.setIcon(icon)
+                self.setIconSize(QSize(AppConstants.SIZES["ICON_SIZE"], AppConstants.SIZES["ICON_SIZE"]))
 
 @class_logger(log_level=logging.INFO, exclude_methods=['__init__', 'set_cluster_icon', 'context_menu_requested', 'open_cluster_signal', 'open_preferences_signal', 'update_pinned_items_signal'])
 class OrchestrixGUI(ThemeAwareMainWindow):
@@ -222,6 +233,7 @@ class OrchestrixGUI(ThemeAwareMainWindow):
         self._update_timer.timeout.connect(self._process_pending_updates)
         self._update_timer.setSingleShot(True)
 
+        self.setup_theme_connections()
         self.init_data_model()
         self.setup_ui()
         self.update_content_view("Browse All")
@@ -236,31 +248,45 @@ class OrchestrixGUI(ThemeAwareMainWindow):
         self.cluster_refresh_timer.start(300000)  # 5 minutes - much less aggressive
         logging.info("HomePage: Set up periodic cluster status refresh (5min interval)")
 
+    def setup_theme_connections(self):
+        """Setup connections for theme changes"""
+        # Connect using the ThemeManager's singleton instance
+        get_theme_manager().theme_changed.connect(self._on_theme_changed)
+
     def _on_theme_changed(self, theme_name):
-        """Refresh widgets when theme changes"""
-        logging.info(f"HomePage: Theme changed to {theme_name}, refreshing widgets")
-        # Refresh container backgrounds
-        if hasattr(self, 'sidebar'):
-            self.sidebar.setStyleSheet(HomePageStyles.get_sidebar_container_style())
-        if hasattr(self, 'top_bar'):
-            self.top_bar.setStyleSheet(HomePageStyles.get_top_bar_style())
-        if hasattr(self, 'table_container'):
-            self.table_container.setStyleSheet(HomePageStyles.get_content_area_style())
-        if hasattr(self, 'tree_widget'):
-            self.tree_widget.setStyleSheet(HomePageStyles.get_tree_widget_style())
-        if hasattr(self, 'search'):
-            self.search.setStyleSheet(HomePageStyles.get_search_style())
-        # Refresh sidebar buttons
-        if hasattr(self, 'sidebar_buttons'):
-            for button in self.sidebar_buttons:
-                button.setStyleSheet(HomePageStyles.get_sidebar_button_style())
-        # Refresh labels
-        if self.browser_label:
-            self.browser_label.setStyleSheet(HomePageStyles.get_browser_label_style())
-        if self.items_label:
-            self.items_label.setStyleSheet(HomePageStyles.get_items_label_style())
-        # Refresh the table to apply new theme colors
-        self.filter_content(self.search_filter)
+        """Handle theme change event"""
+        try:
+            logging.info(f"HomePage handling theme change to: {theme_name}")
+
+            # 1. Update Sidebar Icons
+            if hasattr(self, 'sidebar_buttons'):
+                for btn in self.sidebar_buttons:
+                    if hasattr(btn, 'update_theme_icon'):
+                        btn.update_theme_icon()
+                    btn.setStyleSheet(HomePageStyles.get_sidebar_button_style())
+            
+            # 2. Update Styles for Main Components
+            if hasattr(self, 'sidebar'):
+                self.sidebar.setStyleSheet(HomePageStyles.get_sidebar_container_style())
+            if hasattr(self, 'top_bar'):
+                self.top_bar.setStyleSheet(HomePageStyles.get_top_bar_style())
+            if hasattr(self, 'browser_label'):
+                self.browser_label.setStyleSheet(HomePageStyles.get_browser_label_style())
+            if hasattr(self, 'items_label'):
+                self.items_label.setStyleSheet(HomePageStyles.get_items_label_style())
+            if hasattr(self, 'search'):
+                self.search.setStyleSheet(HomePageStyles.get_search_style())
+            if hasattr(self, 'table_container'):
+                self.table_container.setStyleSheet(HomePageStyles.get_content_area_style())
+            if hasattr(self, 'tree_widget') and self.tree_widget:
+                self.tree_widget.setStyleSheet(HomePageStyles.get_tree_widget_style())
+                self.tree_widget.setHeaderHidden(False) # Force refresh header
+                
+            # 3. Refresh Content (Status colors etc)
+            self.update_content_view(self.current_view)
+            
+        except Exception as e:
+            logging.error(f"Error handling theme change in HomePage: {e}")
     
     def _connect_signals(self):
         """Connect signals with error handling"""
@@ -877,7 +903,11 @@ class OrchestrixGUI(ThemeAwareMainWindow):
         action_layout.setSpacing(0)
         action_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         menu_btn = QToolButton()
-        icon = QIcon(resource_path("Icons/Moreaction_Button.svg"))
+        
+        # Use theme-aware icon
+        theme_name = get_theme_manager().get_current_theme_name() or "Dark"
+        icon = Icons.get_theme_icon("Moreaction_Button.svg", theme_name)
+        
         menu_btn.setIcon(icon)
         menu_btn.setIconSize(QSize(AppConstants.SIZES["ICON_SIZE"], AppConstants.SIZES["ICON_SIZE"]))
         menu_btn.setText("")
@@ -939,40 +969,7 @@ class OrchestrixGUI(ThemeAwareMainWindow):
         item.setSizeHint(4, QSize(0, AppConstants.SIZES["ROW_HEIGHT"]))
 
 
-    def create_colored_icon_alternative(self, icon_path: str, color: QColor, size: int) -> QPixmap:
-        """
-        Alternative method using QIcon for better SVG handling.
-        """
-        try:
-            # Create QIcon from the SVG file
-            icon = QIcon(resource_path(icon_path))
-            if icon.isNull():
-                return QPixmap()
 
-            # Get pixmap from icon
-            original_pixmap = icon.pixmap(QSize(size, size))
-
-            # Create colored version
-            colored_pixmap = QPixmap(original_pixmap.size())
-            colored_pixmap.fill(Qt.GlobalColor.transparent)
-
-            painter = QPainter(colored_pixmap)
-            try:
-                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-                # Draw the icon
-                painter.drawPixmap(0, 0, original_pixmap)
-
-                # Apply color tint
-                painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
-                painter.fillRect(colored_pixmap.rect(), color)
-            finally:
-                painter.end()
-            
-            return colored_pixmap
-        except Exception as e:
-            print(f"Error creating colored icon alternative for {icon_path}: {e}")
-            return QPixmap()
 
     def init_data_model(self):
         self.all_data = {

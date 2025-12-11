@@ -199,20 +199,30 @@ class Icons:
         """Get a theme-specific icon from Icons/<theme>/ using existing path logic.
 
         icon_filename should include the extension, e.g. "minimize.svg".
-        theme_name comes from ThemeManager ("Light" / "Dark"); we map it
-        to folder names by lowercasing.
+        theme_name ("Light" / "Dark") is used to select the folder.
         """
         if not isinstance(icon_filename, str) or not isinstance(theme_name, str):
             return QIcon()
 
-        # Derive fallback text from the icon name (before extension),
-        # matching how get_icon() uses the class-level constants.
+        # Derive fallback text
         base_name, _ = os.path.splitext(icon_filename)
         fallback_attr = base_name.upper()
-        fallback_text = getattr(Icons, fallback_attr, "⚙️")
+        
+        # Determine theme folder (default to dark if unknown)
+        theme_folder = theme_name.lower()
+        if theme_folder not in ["light", "dark"]:
+            theme_folder = "dark"
 
-        themed_path = os.path.join(Icons.ICONS_BASE_PATH, theme_name.lower(), icon_filename)
-        return Icons.get_icon_from_path(themed_path, fallback_text=fallback_text)
+        # Try to load from theme folder first
+        themed_path = os.path.join(Icons.ICONS_BASE_PATH, theme_folder, icon_filename)
+        resolved_themed_path = resource_path(themed_path)
+        
+        if os.path.exists(resolved_themed_path):
+             return Icons.get_icon_from_path(themed_path)
+
+        # Fallback to base folder (backward compatibility)
+        original_path = os.path.join(Icons.ICONS_BASE_PATH, icon_filename)
+        return Icons.get_icon_from_path(original_path, fallback_text=getattr(Icons, fallback_attr, "⚙️"))
     
     @staticmethod
     def create_text_icon(text, size=AppStyles.TEXT_ICON_SIZE):

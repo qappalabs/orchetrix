@@ -490,39 +490,7 @@ class TitleBar(ThemeAwareMixin, QWidget):
 
         return btn
 
-    def create_window_button(self, icon_id, tooltip, size=14, icon_size=None):
-        """Create a small window control button with light color"""
-        btn = QPushButton()
-        btn.setFixedSize(size, size)
-        btn.setToolTip(tooltip)
 
-        if icon_size is None:
-            icon_size = self.window_ctrl_size
-
-        icon = Icons.get_icon(icon_id)
-
-        if not icon.isNull():
-            btn.setIcon(icon)
-            btn.setIconSize(icon_size)
-            btn.setText("")
-        else:
-            fallback_text = ""
-            font_size = 9
-
-            if icon_id == "minimize":
-                fallback_text = "─"
-            elif icon_id == "maximize":
-                fallback_text = "□" if not self.parent or not self.parent.isMaximized() else "❐"
-            elif icon_id == "close":
-                fallback_text = "✕"
-            else:
-                fallback_text = getattr(Icons, icon_id.upper(), "⚙️") if isinstance(icon_id, str) else "⚙️"
-
-            btn.setText(fallback_text)
-            btn.setFont(QFont("Segoe UI", font_size))
-
-        btn.setStyleSheet(TitleBarStyles.get_window_control_style())
-        return btn
 
     def create_back_icon(self):
         """Create a back arrow icon"""
