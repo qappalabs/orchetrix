@@ -225,6 +225,32 @@ class Icons:
         return Icons.get_icon_from_path(original_path, fallback_text=getattr(Icons, fallback_attr, "⚙️"))
     
     @staticmethod
+    def get_theme_icon_path(icon_filename, theme_name):
+        """Get the resolved file path for a theme-specific icon.
+        
+        icon_filename should include the extension, e.g. "check_box_unchecked.svg".
+        theme_name ("Light" / "Dark") is used to select the folder.
+        Returns the full resolved path string for use in stylesheets.
+        """
+        if not isinstance(icon_filename, str) or not isinstance(theme_name, str):
+            return resource_path(os.path.join(Icons.ICONS_BASE_PATH, icon_filename))
+        
+        # Determine theme folder (default to dark if unknown)
+        theme_folder = theme_name.lower()
+        if theme_folder not in ["light", "dark"]:
+            theme_folder = "dark"
+        
+        # Try theme-specific path first
+        themed_path = os.path.join(Icons.ICONS_BASE_PATH, theme_folder, icon_filename)
+        resolved_themed_path = resource_path(themed_path)
+        
+        if os.path.exists(resolved_themed_path):
+            return resolved_themed_path
+        
+        # Fallback to base folder
+        return resource_path(os.path.join(Icons.ICONS_BASE_PATH, icon_filename))
+    
+    @staticmethod
     def create_text_icon(text, size=AppStyles.TEXT_ICON_SIZE):
         """Create a simple text-based icon"""
         pixmap = QPixmap(size)

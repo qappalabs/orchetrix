@@ -11,12 +11,13 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer, QRect, QRectF, pyqtSignal, QSize
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QLinearGradient, QPainterPath, QBrush, QCursor
 
-from UI.Styles import AppConstants, get_table_style, get_menu_style, get_action_button_style, get_checkbox_style, get_action_container_style, get_custom_header_style, get_graph_frame_style, get_graph_title_style, get_graph_value_style
+from UI.Styles import AppConstants, get_table_style, get_menu_style, get_action_button_style, get_action_container_style, get_custom_header_style
 from Base_Components.base_components import SortableTableWidgetItem, StatusLabel
 from Base_Components.base_resource_page import BaseResourcePage
 import Styles.NodesPageStyles as NodesPageStyles
 from Utils.cluster_connector import get_cluster_connector
-from UI.Icons import resource_path
+from UI.Icons import resource_path, Icons
+from UI.ThemeManager import get_theme_manager
 import random
 import datetime
 import re
@@ -59,7 +60,7 @@ class GraphWidget(QFrame):
         self.setMaximumHeight(120)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
-        self.setStyleSheet(get_graph_frame_style())
+        self.setStyleSheet(NodesPageStyles.get_graph_frame_style())
 
         # Reduced shadow effect for performance
         shadow = QGraphicsDropShadowEffect(self)
@@ -73,9 +74,9 @@ class GraphWidget(QFrame):
 
         header_layout = QHBoxLayout()
         self.title_label = QLabel(f"{title} (No node selected)")
-        self.title_label.setStyleSheet(get_graph_title_style())
+        self.title_label.setStyleSheet(NodesPageStyles.get_graph_title_style())
         self.value_label = QLabel(f"0{unit}")
-        self.value_label.setStyleSheet(get_graph_value_style(self.color))
+        self.value_label.setStyleSheet(NodesPageStyles.get_graph_value_style(self.color))
         header_layout.addWidget(self.title_label)
         header_layout.addStretch()
         header_layout.addWidget(self.value_label)
@@ -273,7 +274,7 @@ class GraphWidget(QFrame):
             painter.drawPath(path)
         
         # Simple time labels
-        painter.setPen(QPen(QColor("#FFFFFF"), 1))
+        painter.setPen(QPen(QColor(NodesPageStyles.get_graph_time_label_color()), 1))
         font = painter.font()
         font.setPointSize(9)
         painter.setFont(font)
@@ -345,25 +346,88 @@ class NodesPage(BaseResourcePage):
         
         # Update graph styles
         if hasattr(self, 'cpu_graph') and self.cpu_graph:
-            self.cpu_graph.setStyleSheet(get_graph_frame_style())
-            self.cpu_graph.title_label.setStyleSheet(get_graph_title_style())
-            self.cpu_graph.value_label.setStyleSheet(get_graph_value_style(self.cpu_graph.color))
+            self.cpu_graph.setStyleSheet(NodesPageStyles.get_graph_frame_style())
+            self.cpu_graph.title_label.setStyleSheet(NodesPageStyles.get_graph_title_style())
+            self.cpu_graph.value_label.setStyleSheet(NodesPageStyles.get_graph_value_style(self.cpu_graph.color))
         
         if hasattr(self, 'mem_graph') and self.mem_graph:
-            self.mem_graph.setStyleSheet(get_graph_frame_style())
-            self.mem_graph.title_label.setStyleSheet(get_graph_title_style())
-            self.mem_graph.value_label.setStyleSheet(get_graph_value_style(self.mem_graph.color))
+            self.mem_graph.setStyleSheet(NodesPageStyles.get_graph_frame_style())
+            self.mem_graph.title_label.setStyleSheet(NodesPageStyles.get_graph_title_style())
+            self.mem_graph.value_label.setStyleSheet(NodesPageStyles.get_graph_value_style(self.mem_graph.color))
         
         if hasattr(self, 'disk_graph') and self.disk_graph:
-            self.disk_graph.setStyleSheet(get_graph_frame_style())
-            self.disk_graph.title_label.setStyleSheet(get_graph_title_style())
-            self.disk_graph.value_label.setStyleSheet(get_graph_value_style(self.disk_graph.color))
+            self.disk_graph.setStyleSheet(NodesPageStyles.get_graph_frame_style())
+            self.disk_graph.title_label.setStyleSheet(NodesPageStyles.get_graph_title_style())
+            self.disk_graph.value_label.setStyleSheet(NodesPageStyles.get_graph_value_style(self.disk_graph.color))
         
         # Update table styles
         if hasattr(self, 'table') and self.table:
             self.table.setStyleSheet(get_table_style())
             self.table.horizontalHeader().setStyleSheet(get_custom_header_style())
-        
+
+        # Refresh embedded row widgets (status + action) so they update immediately
+        self._refresh_table_widgets_on_theme_change()
+    def _refresh_table_widgets_on_theme_change(self):
+        """Refresh table cell widgets when theme changes.
+
+        ThemeAwareCheckBox handles its own theme updates automatically.
+        This method updates: container backgrounds, status labels, action buttons.
+        Uses batching to keep UI responsive.
+        """
+        if not hasattr(self, 'table') or not self.table:
+            return
+
+        # Column indices
+        checkbox_col = 0
+        status_col = self.table.columnCount() - 2
+        action_col = self.table.columnCount() - 1
+
+        # Pre-fetch theme-aware resources ONCE before the loop
+        theme_name = get_theme_manager().get_current_theme_name()
+        action_icon = Icons.get_theme_icon("Moreaction_Button.svg", theme_name)
+        # Use transparent background like original checkbox containers
+        container_style = "background-color: transparent;"
+
+        row_count = self.table.rowCount()
+        batch_size = 25
+
+        for i in range(0, row_count, batch_size):
+            batch_end = min(i + batch_size, row_count)
+            
+            for row in range(i, batch_end):
+                # Checkbox container (column 0) - only update container background
+                # ThemeAwareCheckBox inside handles its own icon updates automatically
+                checkbox_container = self.table.cellWidget(row, checkbox_col)
+                if checkbox_container:
+                    checkbox_container.setStyleSheet(container_style)
+                
+                # Status widget - update colors for theme
+                status_widget = self.table.cellWidget(row, status_col)
+                if isinstance(status_widget, StatusLabel) and hasattr(status_widget, 'label'):
+                    status_text = status_widget.label.text() if status_widget.label else ""
+                    if isinstance(status_text, str) and status_text.lower() == "ready":
+                        color = NodesPageStyles.get_status_active_color()
+                    else:
+                        color = NodesPageStyles.get_status_disconnected_color()
+                    status_widget.label.setStyleSheet(
+                        f"color: {QColor(color).name()}; background-color: transparent;"
+                    )
+                    status_widget.setStyleSheet("background-color: transparent;")
+
+                # Action widget - update container, button icon, and menu
+                action_container = self.table.cellWidget(row, action_col)
+                if action_container:
+                    action_container.setStyleSheet(container_style)
+                    action_button = action_container.findChild(QToolButton)
+                    if action_button:
+                        action_button.setStyleSheet(get_action_button_style())
+                        action_button.setIcon(action_icon)
+                        if action_button.menu():
+                            action_button.menu().setStyleSheet(get_menu_style())
+            
+            # Process UI events every batch to keep responsive
+            QApplication.processEvents()
+
     def setup_page_ui(self):
         """Set up the main UI elements for the Nodes page"""
         headers = ["", "Name", "CPU", "Memory", "Disk", "Taints", "Roles", "Version", "Age", "Conditions", ""]
@@ -589,9 +653,8 @@ class NodesPage(BaseResourcePage):
                 logging.warning(f"Row {row}: Node has no valid name")
                 return
             
-            # Create checkbox container (visible)
+            # Create checkbox container using ThemeAwareCheckBox (handles theme changes automatically)
             checkbox_container = self._create_checkbox_container(row, node_name)
-            checkbox_container.setStyleSheet(get_checkbox_style())
             self.table.setCellWidget(row, 0, checkbox_container)
             
             # Get utilization data from graphs (already loaded in background)
@@ -757,9 +820,9 @@ class NodesPage(BaseResourcePage):
         try:
             button = QToolButton()
 
-            # Use custom SVG icon instead of text
-            icon = resource_path("Icons/Moreaction_Button.svg")
-            button.setIcon(QIcon(icon))
+            # Use theme-specific SVG icon (Icons/<theme>/Moreaction_Button.svg)
+            theme_name = get_theme_manager().get_current_theme_name()
+            button.setIcon(Icons.get_theme_icon("Moreaction_Button.svg", theme_name))
             button.setIconSize(QSize(AppConstants.SIZES["ICON_SIZE"], AppConstants.SIZES["ICON_SIZE"]))
 
             # Remove text and change to icon-only style

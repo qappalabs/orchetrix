@@ -122,9 +122,14 @@ class BaseResourcePage(ThemeAwareMixin, BaseTablePage):
         """Refresh styles when theme changes - can be overridden by child classes"""
         logging.debug(f"BaseResourcePage: Theme changed to {theme_name}, refreshing styles")
         self._apply_base_theme_styles()
+        # Refresh table cell widgets (checkboxes, action buttons) for theme change
+        self._refresh_table_widgets_on_theme_change()
     
     def _apply_base_theme_styles(self):
         """Apply theme-aware styles to base components"""
+        from UI.Icons import Icons
+        from UI.ThemeManager import get_theme_manager
+        
         # Update title label style
         if hasattr(self, 'title_label') and self.title_label:
             self.title_label.setStyleSheet(BaseResourcePageStyles.get_title_label_style())
@@ -153,12 +158,59 @@ class BaseResourcePage(ThemeAwareMixin, BaseTablePage):
         if hasattr(self, 'refresh_btn') and self.refresh_btn:
             self.refresh_btn.setStyleSheet(BaseResourcePageStyles.get_refresh_button_style())
         
+        # Update select-all checkbox icons
+        if hasattr(self, 'select_all_checkbox') and self.select_all_checkbox:
+            self.select_all_checkbox._load_theme_icons()
+        
         # Update table style (theme-aware shared style)
         if hasattr(self, 'table') and self.table:
             self.table.setStyleSheet(get_table_style())
             header = getattr(self.table, 'horizontalHeader', None)
             if callable(header):
                 self.table.horizontalHeader().setStyleSheet(get_custom_header_style())
+
+    def _refresh_table_widgets_on_theme_change(self):
+        """Refresh table cell widgets when theme changes."""
+        if not hasattr(self, 'table') or not self.table:
+            return
+        
+        from UI.Icons import Icons
+        from UI.ThemeManager import get_theme_manager
+        from Base_Components.base_components import ThemeAwareCheckBox
+        
+        checkbox_col = 0
+        action_col = self.table.columnCount() - 1
+        
+        theme_name = get_theme_manager().get_current_theme_name()
+        action_icon = Icons.get_theme_icon("Moreaction_Button.svg", theme_name)
+        container_style = "background-color: transparent;"
+        
+        row_count = self.table.rowCount()
+        batch_size = 25
+        
+        for i in range(0, row_count, batch_size):
+            batch_end = min(i + batch_size, row_count)
+            
+            for row in range(i, batch_end):
+                checkbox_container = self.table.cellWidget(row, checkbox_col)
+                if checkbox_container:
+                    checkbox_container.setStyleSheet(container_style)
+                    checkbox = checkbox_container.findChild(ThemeAwareCheckBox)
+                    if checkbox:
+                        checkbox._load_theme_icons()
+                
+                action_container = self.table.cellWidget(row, action_col)
+                if action_container:
+                    from PyQt6.QtWidgets import QToolButton
+                    action_container.setStyleSheet(container_style)
+                    action_button = action_container.findChild(QToolButton)
+                    if action_button:
+                        action_button.setStyleSheet(get_action_button_style())
+                        action_button.setIcon(action_icon)
+                        if action_button.menu():
+                            action_button.menu().setStyleSheet(get_menu_style())
+            
+            QApplication.processEvents()
 
     def showEvent(self, event):
         """Override showEvent to automatically load data when page becomes visible"""
@@ -1382,6 +1434,8 @@ class BaseResourcePage(ThemeAwareMixin, BaseTablePage):
 
     def _handle_select_all(self, state):
         """Handle select-all checkbox state changes."""
+        from Base_Components.base_components import ThemeAwareCheckBox
+        
         # Clear current selections
         self.selected_items.clear()
 
@@ -1389,8 +1443,10 @@ class BaseResourcePage(ThemeAwareMixin, BaseTablePage):
         for row in range(self.table.rowCount()):
             checkbox_container = self.table.cellWidget(row, 0)
             if checkbox_container:
-                # Find checkbox in container
-                checkbox = checkbox_container.findChild(QCheckBox)
+                # Find checkbox in container - check for both ThemeAwareCheckBox and QCheckBox
+                checkbox = checkbox_container.findChild(ThemeAwareCheckBox)
+                if not checkbox:
+                    checkbox = checkbox_container.findChild(QCheckBox)
                 if checkbox:
                     # Block signals to prevent individual handler from firing
                     checkbox.blockSignals(True)
@@ -1723,15 +1779,10 @@ class BaseResourcePage(ThemeAwareMixin, BaseTablePage):
             header.setSectionResizeMode(stretch_col, QHeaderView.ResizeMode.Stretch)
 
     def _create_select_all_checkbox(self):
-        """Create select all checkbox for table header"""
-        from PyQt6.QtWidgets import QCheckBox
+        """Create select all checkbox for table header using ThemeAwareCheckBox."""
+        from Base_Components.base_components import ThemeAwareCheckBox
 
-        select_all_checkbox = QCheckBox()
-        # Generate dynamic checkbox style with proper resource path resolution
-        unchecked_path = resource_path("Icons/check_box_unchecked.svg")
-        checked_path = resource_path("Icons/check_box_checked.svg")
-        
-        select_all_checkbox.setStyleSheet(BaseResourcePageStyles.get_checkbox_style(unchecked_path, checked_path))
+        select_all_checkbox = ThemeAwareCheckBox()
         select_all_checkbox.stateChanged.connect(self._on_select_all_changed)
         return select_all_checkbox
 
@@ -1951,12 +2002,13 @@ class BaseResourcePage(ThemeAwareMixin, BaseTablePage):
         
         button = QToolButton()
 
-        # Use custom SVG icon
+        # Use theme-aware SVG icon
         try:
-            icon_path = resource_path("Icons/Moreaction_Button.svg")
-            if os.path.exists(icon_path):
-                button.setIcon(QIcon(icon_path))
-                button.setIconSize(QSize(16, 16))
+            from UI.Icons import Icons
+            from UI.ThemeManager import get_theme_manager
+            theme_name = get_theme_manager().get_current_theme_name()
+            button.setIcon(Icons.get_theme_icon("Moreaction_Button.svg", theme_name))
+            button.setIconSize(QSize(16, 16))
         except Exception as e:
             logging.warning(f"Could not load action button icon: {e}")
 
@@ -2270,26 +2322,14 @@ class BaseResourcePage(ThemeAwareMixin, BaseTablePage):
             )
 
     def _create_checkbox_container(self, row, resource_name):
-        """Create checkbox container for row selection"""
-        from PyQt6.QtWidgets import QCheckBox, QWidget, QHBoxLayout
+        """Create checkbox container for row selection using ThemeAwareCheckBox."""
+        from Base_Components.base_components import create_theme_aware_checkbox_container
         
-        container = QWidget()
-        layout = QHBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        checkbox = QCheckBox()
-        checkbox.setProperty("row", row)
-        checkbox.setProperty("resource_name", resource_name)
-        checkbox.stateChanged.connect(self._on_row_checkbox_changed)
-        
-        # Apply styling to use proper icons with dynamic resource path resolution
-        unchecked_path = resource_path("Icons/check_box_unchecked.svg")
-        checked_path = resource_path("Icons/check_box_checked.svg")
-        
-        checkbox.setStyleSheet(BaseResourcePageStyles.get_checkbox_style(unchecked_path, checked_path))
-        
-        layout.addWidget(checkbox)
+        container = create_theme_aware_checkbox_container(
+            row=row,
+            resource_name=resource_name,
+            state_changed_callback=self._on_row_checkbox_changed
+        )
         return container
 
     def _on_row_checkbox_changed(self, state):

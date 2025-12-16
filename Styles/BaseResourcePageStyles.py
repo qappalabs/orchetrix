@@ -49,12 +49,12 @@ def get_checkbox_style(unchecked_path, checked_path):
     Args:
         unchecked_path: Path to unchecked icon SVG
         checked_path: Path to checked icon SVG
+    
+    Note: This style is meant to be applied to the QCheckBox widget directly.
+    For the container widget, use get_checkbox_container_style() separately.
     """
     theme = _get_theme()
     return f"""
-        QWidget {{
-            background-color: {theme.colors.CARD_BG};
-        }}
         QCheckBox {{
             margin: 0px;
             padding: 0px;

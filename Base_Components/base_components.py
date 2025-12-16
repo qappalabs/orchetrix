@@ -653,3 +653,179 @@ class BaseTablePage(QWidget):
         empty_layout.addWidget(content_widget, 0, Qt.AlignmentFlag.AlignCenter)
 
         return empty_widget
+
+
+class ThemeAwareCheckBox(QWidget):
+    """
+    A theme-aware checkbox widget that uses QIcon for its indicator instead of
+    stylesheet image: url(). This allows the checkbox to update automatically
+    when the theme changes by simply swapping the icon.
+    
+    Works like action buttons - icon is set via setIcon(), not stylesheet.
+    Supports hover effects and integrates with table row selection.
+    
+    Size matches original QCheckBox indicator: 14x14 (matching original stylesheet).
+    """
+    stateChanged = pyqtSignal(int)
+    
+    # Icon size matches original QCheckBox::indicator { width: 14px; height: 14px; }
+    ICON_SIZE = 14
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        from UI.Icons import Icons
+        from UI.ThemeManager import get_theme_manager
+        
+        self._checked = False
+        self._hovered = False
+        self._row = -1
+        self._resource_name = ""
+        self._signals_blocked = False
+        
+        # Store references for theme updates
+        self._icons_class = Icons
+        self._theme_manager = get_theme_manager()
+        
+        self.setFixedSize(self.ICON_SIZE, self.ICON_SIZE)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setMouseTracking(True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setStyleSheet("background: transparent; border: none;")
+        
+        # Load initial icons
+        self._load_theme_icons()
+    
+    def sizeHint(self):
+        """Return the size hint matching the fixed size"""
+        return QSize(self.ICON_SIZE, self.ICON_SIZE)
+    
+    def minimumSizeHint(self):
+        """Return the minimum size hint matching the fixed size"""
+        return QSize(self.ICON_SIZE, self.ICON_SIZE)
+    
+    def _load_theme_icons(self):
+        """Load icons for current theme. Called externally by parent page on theme change."""
+        theme_name = self._theme_manager.get_current_theme_name()
+        self._unchecked_icon = self._icons_class.get_theme_icon("check_box_unchecked.svg", theme_name)
+        self._checked_icon = self._icons_class.get_theme_icon("check_box_checked.svg", theme_name)
+        self.update()
+    
+    def setProperty(self, name, value):
+        """Override to handle row and resource_name properties"""
+        if name == "row":
+            self._row = value
+        elif name == "resource_name":
+            self._resource_name = value
+        else:
+            super().setProperty(name, value)
+    
+    def property(self, name):
+        """Override to return row and resource_name properties"""
+        if name == "row":
+            return self._row
+        elif name == "resource_name":
+            return self._resource_name
+        return super().property(name)
+    
+    def isChecked(self):
+        """Return checked state"""
+        return self._checked
+    
+    def setChecked(self, checked):
+        """Set checked state"""
+        if self._checked != checked:
+            self._checked = checked
+            self.update()
+            self.stateChanged.emit(Qt.CheckState.Checked.value if checked else Qt.CheckState.Unchecked.value)
+    
+    def checkState(self):
+        """Return check state as Qt.CheckState"""
+        return Qt.CheckState.Checked if self._checked else Qt.CheckState.Unchecked
+    
+    def setCheckState(self, state):
+        """Set check state from Qt.CheckState"""
+        self.setChecked(state == Qt.CheckState.Checked)
+    
+    def paintEvent(self, event):
+        """Paint the checkbox using the theme-aware icon"""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        
+        # Get the appropriate icon
+        icon = self._checked_icon if self._checked else self._unchecked_icon
+        
+        # Draw the icon - fill entire widget (14x14 to match original indicator size)
+        if not icon.isNull():
+            icon.paint(painter, 0, 0, self.ICON_SIZE, self.ICON_SIZE)
+        
+        painter.end()
+    
+    def mousePressEvent(self, event):
+        """Handle mouse press - toggle checked state"""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.setChecked(not self._checked)
+        super().mousePressEvent(event)
+    
+    def enterEvent(self, event):
+        """Handle mouse enter - show hover effect"""
+        self._hovered = True
+        self.update()
+        super().enterEvent(event)
+    
+    def leaveEvent(self, event):
+        """Handle mouse leave - hide hover effect"""
+        self._hovered = False
+        self.update()
+        super().leaveEvent(event)
+    
+    def blockSignals(self, block):
+        """Block or unblock signals"""
+        # Store the block state for manual signal emission control
+        self._signals_blocked = block
+        return super().blockSignals(block)
+
+
+def create_theme_aware_checkbox_container(row, resource_name, state_changed_callback=None):
+    """
+    Factory function to create a theme-aware checkbox in a container widget.
+    This replaces the old _create_checkbox_container pattern.
+    
+    Matches original BaseResourcePage._create_checkbox_container exactly:
+    - Container: transparent background, no fixed size (layout handles sizing)
+    - Checkbox: 14x14 (matches original QCheckBox::indicator size)
+    - Layout: centered alignment with zero margins
+    
+    Args:
+        row: Row index for the checkbox
+        resource_name: Resource name associated with this checkbox
+        state_changed_callback: Optional callback for state changes
+    
+    Returns:
+        QWidget container with the ThemeAwareCheckBox inside
+    """
+    container = QWidget()
+    # Match original: transparent background, no fixed size
+    container.setStyleSheet("background-color: transparent;")
+    
+    layout = QHBoxLayout(container)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(0)
+    layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    
+    checkbox = ThemeAwareCheckBox()
+    checkbox.setProperty("row", row)
+    checkbox.setProperty("resource_name", resource_name)
+    
+    if state_changed_callback:
+        checkbox.stateChanged.connect(state_changed_callback)
+    
+    layout.addWidget(checkbox)
+    
+    # NO fixed size on container - let layout handle it like original
+    # The checkbox itself is 14x14, layout centers it in the cell
+    
+    # Store reference to checkbox for easy access
+    container.checkbox = checkbox
+    
+    return container

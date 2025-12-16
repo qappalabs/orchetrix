@@ -2114,36 +2114,3 @@ def get_action_container_style():
     """
 
 
-def get_graph_frame_style():
-    """Get theme-aware graph frame style"""
-    theme = get_theme_manager().get_current_theme()
-    return f"""
-        QFrame {{
-            background-color: {theme.colors.CARD_BG};
-            border-radius: 4px;
-            border: 1px solid {theme.colors.BORDER_COLOR};
-        }}
-    """
-
-
-def get_graph_title_style():
-    """Get theme-aware graph title style"""
-    theme = get_theme_manager().get_current_theme()
-    return f"""
-        QLabel {{
-            color: {theme.colors.TEXT_LIGHT};
-            font-size: 14px;
-            font-weight: bold;
-        }}
-    """
-
-
-def get_graph_value_style(color):
-    """Get theme-aware graph value style"""
-    return f"""
-        QLabel {{
-            color: {color};
-            font-size: 16px;
-            font-weight: bold;
-        }}
-    """

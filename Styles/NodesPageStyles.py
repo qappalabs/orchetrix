@@ -1,9 +1,10 @@
 """
-NodesPage-specific styles extracted from the original NodesPage.py
-These are UNIQUE styles for the Nodes page that are not shared with other components.
+NodesPage-specific styles extracted from NodesPage.
+These are styles that are currently unique to the Nodes page.
 
-Note: Shared styles (TABLE_STYLE, CHECKBOX_STYLE, MENU_STYLE, HOME_ACTION_BUTTON_STYLE, 
-      ACTION_CONTAINER_STYLE, CUSTOM_HEADER_STYLE, status colors) remain in UI/Styles.py
+Notes:
+- Shared styles (table/menu/action button/checkbox/header) remain in UI/Styles.py via theme-aware helpers.
+- Legacy AppStyles/AppColors constants in UI/Styles.py are kept as-is for backward compatibility.
 """
 
 from UI.ThemeManager import get_theme_manager
@@ -66,10 +67,45 @@ def get_disk_graph_color():
     return theme.colors.ACCENT_PURPLE
 
 
+# Graph widget QSS (currently NodesPage-only) - theme-aware
+def get_graph_frame_style():
+    """QFrame style for NodesPage graphs - theme-aware"""
+    theme = _get_theme()
+    return f"""
+        QFrame {{
+            background-color: {theme.colors.CARD_BG};
+            border-radius: 4px;
+            border: 1px solid {theme.colors.BORDER_COLOR};
+        }}
+    """
+
+
+def get_graph_title_style():
+    """QLabel style for NodesPage graph titles - theme-aware"""
+    theme = _get_theme()
+    return f"""
+        QLabel {{
+            color: {theme.colors.TEXT_LIGHT};
+            font-size: 14px;
+            font-weight: bold;
+        }}
+    """
+
+
+def get_graph_value_style(color: str):
+    """QLabel style for NodesPage graph values - color provided by caller"""
+    return f"""
+        QLabel {{
+            color: {color};
+            font-size: 16px;
+            font-weight: bold;
+        }}
+    """
+
+
 
 
 def get_status_active_color():
-    """Get theme-aware status active color"""
     theme = _get_theme()
     return theme.colors.STATUS_ACTIVE
 
