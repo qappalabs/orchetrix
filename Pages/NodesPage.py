@@ -11,7 +11,16 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer, QRect, QRectF, pyqtSignal, QSize
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QLinearGradient, QPainterPath, QBrush, QCursor
 
-from UI.Styles import AppConstants, get_table_style, get_menu_style, get_action_button_style, get_action_container_style, get_custom_header_style
+from UI.Styles import (
+    AppConstants,
+    get_table_style,
+    get_menu_style,
+    get_action_button_style,
+    get_action_container_style,
+    get_custom_header_style,
+    get_status_active_color,
+    get_status_disconnected_color
+)
 from Base_Components.base_components import SortableTableWidgetItem, StatusLabel
 from Base_Components.base_resource_page import BaseResourcePage
 import Styles.NodesPageStyles as NodesPageStyles
@@ -406,9 +415,9 @@ class NodesPage(BaseResourcePage):
                 if isinstance(status_widget, StatusLabel) and hasattr(status_widget, 'label'):
                     status_text = status_widget.label.text() if status_widget.label else ""
                     if isinstance(status_text, str) and status_text.lower() == "ready":
-                        color = NodesPageStyles.get_status_active_color()
+                        color = get_status_active_color()
                     else:
-                        color = NodesPageStyles.get_status_disconnected_color()
+                        color = get_status_disconnected_color()
                     status_widget.label.setStyleSheet(
                         f"color: {QColor(color).name()}; background-color: transparent;"
                     )
@@ -764,11 +773,11 @@ class NodesPage(BaseResourcePage):
             
             # Add Status column as a widget
             status_col = len(columns) + 1
-            
+
             if status.lower() == "ready":
-                color = NodesPageStyles.get_status_active_color()
+                color = get_status_active_color()
             else:
-                color = NodesPageStyles.get_status_disconnected_color()
+                color = get_status_disconnected_color()
                 
             status_widget = StatusLabel(status, color)
             status_widget.clicked.connect(lambda: self.table.selectRow(row))

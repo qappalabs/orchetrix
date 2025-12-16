@@ -14,9 +14,9 @@ def _get_theme():
 
 def get_add_namespace_button_style():
     """Style for Add Namespaces button
-    
+
     Extracted from NamespacesPage.py lines 124-136 (fallback in try/except block)
-    
+
     Original hardcoded colors:
         background-color: #3d3d3d -> theme.colors.BG_MEDIUM
         color: white -> theme.colors.TEXT_LIGHT

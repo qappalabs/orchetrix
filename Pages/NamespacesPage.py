@@ -10,7 +10,15 @@ from PyQt6.QtGui import QColor
 
 from Base_Components.base_components import SortableTableWidgetItem, StatusLabel
 from Base_Components.base_resource_page import BaseResourcePage
-from UI.Styles import AppStyles, AppColors, get_action_button_style, get_action_container_style, get_table_style, get_custom_header_style, get_checkbox_style
+from UI.Styles import (
+    get_action_button_style,
+    get_action_container_style,
+    get_table_style,
+    get_custom_header_style,
+    get_status_active_color,
+    get_status_warning_color,
+    get_status_error_color
+)
 from Styles.NamespacesPageStyles import get_add_namespace_button_style
 from Utils.kubernetes_client import get_kubernetes_client
 from kubernetes.client.rest import ApiException
@@ -176,12 +184,40 @@ class NamespacesPage(BaseResourcePage):
         super()._on_theme_changed(theme_name)
         if hasattr(self, 'add_namespace_button') and self.add_namespace_button:
             self.add_namespace_button.setStyleSheet(get_add_namespace_button_style())
+
+        # Refresh status colors in existing table rows
+        self._refresh_status_colors_on_theme_change()
+
+    def _refresh_status_colors_on_theme_change(self):
+        """Refresh status label colors when theme changes"""
+        if not hasattr(self, 'table') or not self.table:
+            return
+
+        status_col = 4  # Status column index
+
+        for row in range(self.table.rowCount()):
+            status_widget = self.table.cellWidget(row, status_col)
+            if isinstance(status_widget, StatusLabel) and hasattr(status_widget, 'label'):
+                status_text = status_widget.label.text() if status_widget.label else ""
+
+                # Re-evaluate color based on current theme
+                if status_text == "Active":
+                    color = get_status_active_color()
+                elif status_text == "Terminating":
+                    color = get_status_warning_color()
+                else:
+                    color = get_status_error_color()
+
+                # Update the status label color
+                status_widget.label.setStyleSheet(
+                    f"color: {QColor(color).name()}; background-color: transparent;"
+                )
+
     def populate_resource_row(self, row, resource):
         self.table.setRowHeight(row, 40)
         resource_name = resource["name"]
 
         checkbox_container = self._create_checkbox_container(row, resource_name)
-        checkbox_container.setStyleSheet(get_checkbox_style())
         self.table.setCellWidget(row, 0, checkbox_container)
 
         raw_data = resource.get("raw_data", {})
@@ -213,11 +249,11 @@ class NamespacesPage(BaseResourcePage):
 
         status_col = 4
         if status == "Active":
-            color = AppColors.STATUS_ACTIVE
+            color = get_status_active_color()
         elif status == "Terminating":
-            color = AppColors.STATUS_WARNING
+            color = get_status_warning_color()
         else:
-            color = AppColors.STATUS_ERROR
+            color = get_status_error_color()
 
         status_widget = StatusLabel(status, color)
         status_widget.clicked.connect(lambda: self.table.selectRow(row))

@@ -101,16 +101,3 @@ def get_graph_value_style(color: str):
             font-weight: bold;
         }}
     """
-
-
-
-
-def get_status_active_color():
-    theme = _get_theme()
-    return theme.colors.STATUS_ACTIVE
-
-
-def get_status_disconnected_color():
-    """Get theme-aware status disconnected color"""
-    theme = _get_theme()
-    return theme.colors.STATUS_DISCONNECTED

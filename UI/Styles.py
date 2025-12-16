@@ -2114,3 +2114,49 @@ def get_action_container_style():
     """
 
 
+# Status color functions - shared across all resource pages
+def get_status_active_color():
+    """Get theme-aware status active/success color (green)
+
+    Used for: Active namespaces, Ready nodes, Running pods, Healthy deployments
+    """
+    theme = get_theme_manager().get_current_theme()
+    return theme.colors.STATUS_ACTIVE
+
+
+def get_status_warning_color():
+    """Get theme-aware status warning color (orange)
+
+    Used for: Terminating namespaces, Pending pods, Updating deployments
+    """
+    theme = get_theme_manager().get_current_theme()
+    return theme.colors.STATUS_WARNING
+
+
+def get_status_error_color():
+    """Get theme-aware status error/failed color (red)
+
+    Used for: Failed namespaces, Not Ready nodes, Failed pods, Unhealthy deployments
+    """
+    theme = get_theme_manager().get_current_theme()
+    return theme.colors.STATUS_ERROR
+
+
+def get_status_info_color():
+    """Get theme-aware status info color (blue)
+
+    Used for: Informational status indicators
+    """
+    theme = get_theme_manager().get_current_theme()
+    return theme.colors.STATUS_INFO
+
+
+def get_status_disconnected_color():
+    """Get theme-aware status disconnected color (red)
+
+    Used for: Disconnected/unavailable resources
+    """
+    theme = get_theme_manager().get_current_theme()
+    return theme.colors.STATUS_DISCONNECTED
+
+
