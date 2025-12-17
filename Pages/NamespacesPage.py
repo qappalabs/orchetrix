@@ -10,16 +10,7 @@ from PyQt6.QtGui import QColor
 
 from Base_Components.base_components import SortableTableWidgetItem, StatusLabel
 from Base_Components.base_resource_page import BaseResourcePage
-from UI.Styles import (
-    get_action_button_style,
-    get_action_container_style,
-    get_table_style,
-    get_custom_header_style,
-    get_status_active_color,
-    get_status_warning_color,
-    get_status_error_color
-)
-from Styles.NamespacesPageStyles import get_add_namespace_button_style
+from UI.Styles import AppStyles, AppColors
 from Utils.kubernetes_client import get_kubernetes_client
 from kubernetes.client.rest import ApiException
 from kubernetes import client
@@ -124,8 +115,25 @@ class NamespacesPage(BaseResourcePage):
                     break
 
         if button_layout:
+            # Create the Add NewNameSpace button
             self.add_namespace_button = QPushButton("Add Namespaces")
-            self.add_namespace_button.setStyleSheet(get_add_namespace_button_style())
+            try:
+                self.add_namespace_button.setStyleSheet(AppStyles.BUTTON_STYLE)
+            except AttributeError:
+                self.add_namespace_button.setStyleSheet("""
+                    QPushButton {
+                        background-color: #3d3d3d;
+                        color: white;
+                        padding: 5px 15px;
+                        border-radius: 2px;
+                    }
+                    QPushButton:hover {
+                        background-color: #333333;
+                    }
+                    QPushButton:pressed {
+                        background-color: #388E3C;
+                    }
+                """)
             self.add_namespace_button.clicked.connect(self.add_new_namespace)
 
             # Insert before Refresh button
@@ -141,8 +149,8 @@ class NamespacesPage(BaseResourcePage):
             else:
                 button_layout.addWidget(self.add_namespace_button)
 
-        self.table.setStyleSheet(get_table_style())
-        self.table.horizontalHeader().setStyleSheet(get_custom_header_style())
+        self.table.setStyleSheet(AppStyles.TABLE_STYLE)
+        self.table.horizontalHeader().setStyleSheet(AppStyles.CUSTOM_HEADER_STYLE)
         self.configure_columns()
         
         # Add delete selected button
@@ -179,45 +187,12 @@ class NamespacesPage(BaseResourcePage):
         
         # Ensure full width utilization after configuration
         QTimer.singleShot(100, self._ensure_full_width_utilization)
-
-    def _on_theme_changed(self, theme_name):
-        super()._on_theme_changed(theme_name)
-        if hasattr(self, 'add_namespace_button') and self.add_namespace_button:
-            self.add_namespace_button.setStyleSheet(get_add_namespace_button_style())
-
-        # Refresh status colors in existing table rows
-        self._refresh_status_colors_on_theme_change()
-
-    def _refresh_status_colors_on_theme_change(self):
-        """Refresh status label colors when theme changes"""
-        if not hasattr(self, 'table') or not self.table:
-            return
-
-        status_col = 4  # Status column index
-
-        for row in range(self.table.rowCount()):
-            status_widget = self.table.cellWidget(row, status_col)
-            if isinstance(status_widget, StatusLabel) and hasattr(status_widget, 'label'):
-                status_text = status_widget.label.text() if status_widget.label else ""
-
-                # Re-evaluate color based on current theme
-                if status_text == "Active":
-                    color = get_status_active_color()
-                elif status_text == "Terminating":
-                    color = get_status_warning_color()
-                else:
-                    color = get_status_error_color()
-
-                # Update the status label color
-                status_widget.label.setStyleSheet(
-                    f"color: {QColor(color).name()}; background-color: transparent;"
-                )
-
     def populate_resource_row(self, row, resource):
         self.table.setRowHeight(row, 40)
         resource_name = resource["name"]
 
         checkbox_container = self._create_checkbox_container(row, resource_name)
+        checkbox_container.setStyleSheet(AppStyles.CHECKBOX_STYLE)
         self.table.setCellWidget(row, 0, checkbox_container)
 
         raw_data = resource.get("raw_data", {})
@@ -245,15 +220,16 @@ class NamespacesPage(BaseResourcePage):
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            item.setForeground(QColor(AppColors.TEXT_TABLE))
             self.table.setItem(row, cell_col, item)
 
         status_col = 4
         if status == "Active":
-            color = get_status_active_color()
+            color = AppColors.STATUS_ACTIVE
         elif status == "Terminating":
-            color = get_status_warning_color()
+            color = AppColors.STATUS_WARNING
         else:
-            color = get_status_error_color()
+            color = AppColors.STATUS_ERROR
 
         status_widget = StatusLabel(status, color)
         status_widget.clicked.connect(lambda: self.table.selectRow(row))
@@ -261,15 +237,14 @@ class NamespacesPage(BaseResourcePage):
 
         # Replace the action button creation section with this:
         action_button = self._create_action_button(row, resource["name"], "")
-        action_button.setStyleSheet(get_action_button_style())
+        action_button.setStyleSheet(AppStyles.ACTION_BUTTON_STYLE)
 
         # Connect the action button to handle the click properly
         action_button.clicked.connect(lambda checked, name=resource_name: self._handle_action_button_click(name))
 
         action_container = self._create_action_container(row, action_button)
-        action_container.setStyleSheet(get_action_container_style())
+        action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
         self.table.setCellWidget(row, len(columns) + 2, action_container)
-        
 
     def refresh_table(self):
         """Refresh the namespaces table using async resource loading"""

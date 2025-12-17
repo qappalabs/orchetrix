@@ -47,3 +47,5 @@ htmlcov/
 .coverage.*
 coverage.xml
 *.cover
+# Claude Code personal configuration
+.claude/

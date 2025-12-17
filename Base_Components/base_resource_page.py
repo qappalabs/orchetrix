@@ -21,10 +21,8 @@ from .resource_deleters import ResourceDeleterThread, BatchResourceDeleterThread
 from .virtual_scroll_table import VirtualScrollTable
 
 from Base_Components.base_components import BaseTablePage
-from UI.Styles import get_table_style, get_menu_style, get_action_button_style, get_custom_header_style
+from UI.Styles import AppStyles, AppColors
 from UI.Icons import resource_path
-from UI.ThemeAwarePage import ThemeAwareMixin
-import Styles.BaseResourcePageStyles as BaseResourcePageStyles
 from UI.LoadingSpinner import LoadingOverlay, create_loading_overlay, create_compact_spinner
 from Utils.unified_resource_loader import get_unified_resource_loader, LoadResult
 from Utils.data_formatters import format_age, parse_memory_value, format_percentage, truncate_string
@@ -47,8 +45,8 @@ MAX_TABLE_ROWS_BEFORE_VIRTUAL = 100  # FIXED: New constant for virtual scrolling
 # Cache system removed
 
 @class_logger(log_level=logging.INFO, exclude_methods=['__init__', 'clear_table', 'update_table_row', 'load_more_complete', 'all_items_loaded_signal', 'force_load_data'])
-class BaseResourcePage(ThemeAwareMixin, BaseTablePage):
-    """Base class for Kubernetes resource pages with optimized performance and theme awareness"""
+class BaseResourcePage(BaseTablePage):
+    """Base class for Kubernetes resource pages with optimized performance"""
     
     load_more_complete = pyqtSignal()
     all_items_loaded_signal = pyqtSignal()
@@ -117,100 +115,6 @@ class BaseResourcePage(ThemeAwareMixin, BaseTablePage):
 
         # Track if data has been loaded at least once
         self._initial_load_done = False
-
-    def _on_theme_changed(self, theme_name):
-        """Refresh styles when theme changes - can be overridden by child classes"""
-        logging.debug(f"BaseResourcePage: Theme changed to {theme_name}, refreshing styles")
-        self._apply_base_theme_styles()
-        # Refresh table cell widgets (checkboxes, action buttons) for theme change
-        self._refresh_table_widgets_on_theme_change()
-    
-    def _apply_base_theme_styles(self):
-        """Apply theme-aware styles to base components"""
-        from UI.Icons import Icons
-        from UI.ThemeManager import get_theme_manager
-        
-        # Update title label style
-        if hasattr(self, 'title_label') and self.title_label:
-            self.title_label.setStyleSheet(BaseResourcePageStyles.get_title_label_style())
-        
-        # Update items count style
-        if hasattr(self, 'items_count') and self.items_count:
-            self.items_count.setStyleSheet(BaseResourcePageStyles.get_items_count_style())
-        
-        # Update search label style
-        if hasattr(self, 'search_label') and self.search_label:
-            self.search_label.setStyleSheet(BaseResourcePageStyles.get_search_label_style())
-        
-        # Update search bar style
-        if hasattr(self, 'search_bar') and self.search_bar:
-            self.search_bar.setStyleSheet(BaseResourcePageStyles.get_search_input_style())
-        
-        # Update namespace label style
-        if hasattr(self, 'namespace_label') and self.namespace_label:
-            self.namespace_label.setStyleSheet(BaseResourcePageStyles.get_namespace_label_style())
-        
-        # Update namespace combo style
-        if hasattr(self, 'namespace_combo') and self.namespace_combo:
-            self.namespace_combo.setStyleSheet(BaseResourcePageStyles.get_namespace_combo_style())
-        
-        # Update refresh button style
-        if hasattr(self, 'refresh_btn') and self.refresh_btn:
-            self.refresh_btn.setStyleSheet(BaseResourcePageStyles.get_refresh_button_style())
-        
-        # Update select-all checkbox icons
-        if hasattr(self, 'select_all_checkbox') and self.select_all_checkbox:
-            self.select_all_checkbox._load_theme_icons()
-        
-        # Update table style (theme-aware shared style)
-        if hasattr(self, 'table') and self.table:
-            self.table.setStyleSheet(get_table_style())
-            header = getattr(self.table, 'horizontalHeader', None)
-            if callable(header):
-                self.table.horizontalHeader().setStyleSheet(get_custom_header_style())
-
-    def _refresh_table_widgets_on_theme_change(self):
-        """Refresh table cell widgets when theme changes."""
-        if not hasattr(self, 'table') or not self.table:
-            return
-        
-        from UI.Icons import Icons
-        from UI.ThemeManager import get_theme_manager
-        from Base_Components.base_components import ThemeAwareCheckBox
-        
-        checkbox_col = 0
-        action_col = self.table.columnCount() - 1
-        
-        theme_name = get_theme_manager().get_current_theme_name()
-        action_icon = Icons.get_theme_icon("Moreaction_Button.svg", theme_name)
-        container_style = "background-color: transparent;"
-        
-        row_count = self.table.rowCount()
-        batch_size = 25
-        
-        for i in range(0, row_count, batch_size):
-            batch_end = min(i + batch_size, row_count)
-            
-            for row in range(i, batch_end):
-                checkbox_container = self.table.cellWidget(row, checkbox_col)
-                if checkbox_container:
-                    checkbox_container.setStyleSheet(container_style)
-                    checkbox = checkbox_container.findChild(ThemeAwareCheckBox)
-                    if checkbox:
-                        checkbox._load_theme_icons()
-                
-                action_container = self.table.cellWidget(row, action_col)
-                if action_container:
-                    from PyQt6.QtWidgets import QToolButton
-                    action_container.setStyleSheet(container_style)
-                    action_button = action_container.findChild(QToolButton)
-                    if action_button:
-                        action_button.setStyleSheet(get_action_button_style())
-                        action_button.setIcon(action_icon)
-                        if action_button.menu():
-                            action_button.menu().setStyleSheet(get_menu_style())
-            
-            QApplication.processEvents()
 
     def showEvent(self, event):
         """Override showEvent to automatically load data when page becomes visible"""
@@ -496,14 +400,16 @@ class BaseResourcePage(ThemeAwareMixin, BaseTablePage):
 
     def _create_title_and_count(self, layout, title_text):
         """Create title and count labels"""
-        self.title_label = QLabel(title_text)
-        self.title_label.setStyleSheet(BaseResourcePageStyles.get_title_label_style())
+        title_label = QLabel(title_text)
+        title_label_style = getattr(AppStyles, "TITLE_STYLE", "font-size: 20px; font-weight: bold; color: #ffffff;")
+        title_label.setStyleSheet(title_label_style)
 
         self.items_count = QLabel("0 items")
-        self.items_count.setStyleSheet(BaseResourcePageStyles.get_items_count_style())
+        items_count_style = getattr(AppStyles, "COUNT_STYLE", "color: #9ca3af; font-size: 12px; margin-left: 8px;")
+        self.items_count.setStyleSheet(items_count_style)
         self.items_count.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
-        layout.addWidget(self.title_label)
+        layout.addWidget(title_label)
         layout.addWidget(self.items_count)
 
     def _add_controls_to_header(self, header_layout):
@@ -515,10 +421,16 @@ class BaseResourcePage(ThemeAwareMixin, BaseTablePage):
         delete_btn = self._create_delete_selected_button()
         header_layout.addWidget(delete_btn)
 
-        self.refresh_btn = QPushButton("Refresh")
-        self.refresh_btn.setStyleSheet(BaseResourcePageStyles.get_refresh_button_style())
-        self.refresh_btn.clicked.connect(lambda: self.force_load_data())
-        header_layout.addWidget(self.refresh_btn)
+        refresh_btn = QPushButton("Refresh")
+        refresh_style = getattr(AppStyles, "SECONDARY_BUTTON_STYLE",
+                                """QPushButton { background-color: #2d2d2d; color: #ffffff; border: 1px solid #3d3d3d;
+                                               border-radius: 4px; padding: 5px 10px; }
+                                   QPushButton:hover { background-color: #3d3d3d; }
+                                   QPushButton:pressed { background-color: #1e1e1e; }"""
+                                )
+        refresh_btn.setStyleSheet(refresh_style)
+        refresh_btn.clicked.connect(lambda: self.force_load_data())
+        header_layout.addWidget(refresh_btn)
     
     def _create_delete_selected_button(self):
         """Create centralized delete selected button with consistent styling"""
@@ -533,7 +445,27 @@ class BaseResourcePage(ThemeAwareMixin, BaseTablePage):
     
     def _get_delete_button_style(self):
         """Centralized delete button styling"""
-        return BaseResourcePageStyles.get_delete_button_style()
+        return """
+            QPushButton#deleteSelectedBtn {
+                background-color: #d32f2f;
+                color: #ffffff;
+                border: none;
+                border-radius: 4px;
+                padding: 5px 16px;
+                font-size: 13px;
+                margin-right: 8px;
+            }
+            QPushButton#deleteSelectedBtn:hover {
+                background-color: #b71c1c;
+            }
+            QPushButton#deleteSelectedBtn:pressed {
+                background-color: #8d1e1e;
+            }
+            QPushButton#deleteSelectedBtn:disabled {
+                background-color: #cccccc;
+                color: #666666;
+            }
+        """
     
     def _handle_delete_selected(self):
         """Base implementation for delete selected functionality"""
@@ -602,15 +534,16 @@ class BaseResourcePage(ThemeAwareMixin, BaseTablePage):
     def _add_filter_controls(self, header_layout):
         """Add search and namespace filter controls with proper layout"""
         from PyQt6.QtWidgets import QLineEdit, QComboBox, QLabel
+        from UI.Styles import AppStyles
         
         # Create a separate layout for filters with proper spacing
         filters_layout = QHBoxLayout()
         filters_layout.setSpacing(12)  # Add space between elements
         
         # Search bar with label
-        self.search_label = QLabel("Search:")
-        self.search_label.setStyleSheet(BaseResourcePageStyles.get_search_label_style())
-        self.search_label.setMinimumWidth(50)
+        search_label = QLabel("Search:")
+        search_label.setStyleSheet("color: #ffffff; font-size: 12px; font-weight: normal;")
+        search_label.setMinimumWidth(50)
         
         self.search_bar = QLineEdit()
         self.search_bar.setPlaceholderText("Search resources...")
@@ -619,14 +552,27 @@ class BaseResourcePage(ThemeAwareMixin, BaseTablePage):
         self.search_bar.setFixedHeight(32)
         
         # Apply consistent styling
-        self.search_bar.setStyleSheet(BaseResourcePageStyles.get_search_input_style())
+        search_style = getattr(AppStyles, 'SEARCH_INPUT', 
+            """QLineEdit {
+                background-color: #2d2d2d;
+                color: #ffffff;
+                border: 1px solid #3d3d3d;
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-size: 12px;
+            }
+            QLineEdit:focus {
+                border-color: #0078d4;
+                background-color: #353535;
+            }""")
+        self.search_bar.setStyleSheet(search_style)
         
         # Namespace combo with label - only show for namespaced resources
-        self.namespace_label = None
+        namespace_label = None
         if getattr(self, 'show_namespace_dropdown', True):
-            self.namespace_label = QLabel("Namespace:")
-            self.namespace_label.setStyleSheet(BaseResourcePageStyles.get_namespace_label_style())
-            self.namespace_label.setMinimumWidth(70)
+            namespace_label = QLabel("Namespace:")
+            namespace_label.setStyleSheet("color: #ffffff; font-size: 12px; font-weight: normal;")
+            namespace_label.setMinimumWidth(70)
             
             self.namespace_combo = QComboBox()
             # Start with loading indicator, will be populated dynamically
@@ -638,17 +584,49 @@ class BaseResourcePage(ThemeAwareMixin, BaseTablePage):
             self.namespace_combo = None
         
         # Apply consistent styling with proper icon
+        import os
+
+        down_arrow_icon = resource_path("Icons/down_btn.svg")
+        
+        combo_style = getattr(AppStyles, 'NAMESPACE_DROPDOWN',
+            f"""QComboBox {{
+                background-color: #2d2d2d;
+                color: #ffffff;
+                border: 1px solid #3d3d3d;
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-size: 12px;
+            }}
+            QComboBox:hover {{
+                border-color: #4d4d4d;
+                background-color: #353535;
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 20px;
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+            }}
+            QComboBox::down-arrow {{
+                image: url({down_arrow_icon.replace(os.sep, '/')});
+                width: 12px;
+                height: 12px;
+                margin-right: 4px;
+            }}
+            QComboBox::down-arrow:hover {{
+                opacity: 0.8;
+            }}""")
         if self.namespace_combo:
-            self.namespace_combo.setStyleSheet(BaseResourcePageStyles.get_namespace_combo_style())
+            self.namespace_combo.setStyleSheet(combo_style)
         
         # Add widgets to layout with proper spacing
-        filters_layout.addWidget(self.search_label)
+        filters_layout.addWidget(search_label)
         filters_layout.addWidget(self.search_bar)
         
         # Only add namespace dropdown if it exists
-        if self.namespace_combo and self.namespace_label:
+        if self.namespace_combo and namespace_label:
             filters_layout.addSpacing(16)  # Add space between search and namespace
-            filters_layout.addWidget(self.namespace_label)
+            filters_layout.addWidget(namespace_label)
             filters_layout.addWidget(self.namespace_combo)
         
         # Add the filters layout directly to header layout
@@ -1319,10 +1297,10 @@ class BaseResourcePage(ThemeAwareMixin, BaseTablePage):
         
         # Apply styling to both title and subtitle
         empty_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        empty_title.setStyleSheet(BaseResourcePageStyles.get_empty_title_style())
+        empty_title.setStyleSheet("color: #ffffff; font-size: 20px; font-weight: bold; background-color: transparent; margin: 8px;")
         
         empty_subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)  
-        empty_subtitle.setStyleSheet(BaseResourcePageStyles.get_empty_subtitle_style())
+        empty_subtitle.setStyleSheet("color: #9ca3af; font-size: 14px; background-color: transparent; margin: 4px;")
         
         # Add widgets to message container
         self._message_widget_container.layout().addWidget(empty_title)
@@ -1340,7 +1318,7 @@ class BaseResourcePage(ThemeAwareMixin, BaseTablePage):
         
         error_label = QLabel(f"Error: {message}")
         error_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        error_label.setStyleSheet(BaseResourcePageStyles.get_error_label_style())
+        error_label.setStyleSheet("color: #ef4444; font-size: 16px;")
         error_label.setWordWrap(True)
         
         self._message_widget_container.layout().addWidget(error_label)
@@ -1434,8 +1412,6 @@ class BaseResourcePage(ThemeAwareMixin, BaseTablePage):
 
     def _handle_select_all(self, state):
         """Handle select-all checkbox state changes."""
-        from Base_Components.base_components import ThemeAwareCheckBox
-        
         # Clear current selections
         self.selected_items.clear()
 
@@ -1443,10 +1419,8 @@ class BaseResourcePage(ThemeAwareMixin, BaseTablePage):
         for row in range(self.table.rowCount()):
             checkbox_container = self.table.cellWidget(row, 0)
             if checkbox_container:
-                # Find checkbox in container - check for both ThemeAwareCheckBox and QCheckBox
-                checkbox = checkbox_container.findChild(ThemeAwareCheckBox)
-                if not checkbox:
-                    checkbox = checkbox_container.findChild(QCheckBox)
+                # Find checkbox in container
+                checkbox = checkbox_container.findChild(QCheckBox)
                 if checkbox:
                     # Block signals to prevent individual handler from firing
                     checkbox.blockSignals(True)
@@ -1730,8 +1704,8 @@ class BaseResourcePage(ThemeAwareMixin, BaseTablePage):
         table.setHorizontalHeader(custom_header)
         table.setSortingEnabled(True)
 
-        # Apply enhanced styling with platform overrides (theme-aware)
-        table.setStyleSheet(get_table_style())
+        # Apply enhanced styling with platform overrides
+        table.setStyleSheet(AppStyles.TABLE_STYLE)
         table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -1779,10 +1753,37 @@ class BaseResourcePage(ThemeAwareMixin, BaseTablePage):
             header.setSectionResizeMode(stretch_col, QHeaderView.ResizeMode.Stretch)
 
     def _create_select_all_checkbox(self):
-        """Create select all checkbox for table header using ThemeAwareCheckBox."""
-        from Base_Components.base_components import ThemeAwareCheckBox
+        """Create select all checkbox for table header"""
+        from PyQt6.QtWidgets import QCheckBox
 
-        select_all_checkbox = ThemeAwareCheckBox()
+        select_all_checkbox = QCheckBox()
+        # Generate dynamic checkbox style with proper resource path resolution
+        unchecked_path = resource_path("Icons/check_box_unchecked.svg")
+        checked_path = resource_path("Icons/check_box_checked.svg")
+        
+        select_all_checkbox.setStyleSheet(f"""
+            QCheckBox {{
+                margin: 0px;
+                padding: 0px;
+                background-color: transparent;
+            }}
+            QCheckBox::indicator {{
+                width: 14px;
+                height: 14px;
+                margin: 1px;
+                background-color: transparent;
+                border: none;
+                image: url({unchecked_path.replace(os.sep, '/')});
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: transparent;
+                border: none;
+                image: url({checked_path.replace(os.sep, '/')});
+            }}
+            QCheckBox::indicator:hover {{
+                border-color: #0078d4;
+            }}
+        """)
         select_all_checkbox.stateChanged.connect(self._on_select_all_changed)
         return select_all_checkbox
 
@@ -2002,13 +2003,12 @@ class BaseResourcePage(ThemeAwareMixin, BaseTablePage):
         
         button = QToolButton()
 
-        # Use theme-aware SVG icon
+        # Use custom SVG icon
         try:
-            from UI.Icons import Icons
-            from UI.ThemeManager import get_theme_manager
-            theme_name = get_theme_manager().get_current_theme_name()
-            button.setIcon(Icons.get_theme_icon("Moreaction_Button.svg", theme_name))
-            button.setIconSize(QSize(16, 16))
+            icon_path = resource_path("Icons/Moreaction_Button.svg")
+            if os.path.exists(icon_path):
+                button.setIcon(QIcon(icon_path))
+                button.setIconSize(QSize(16, 16))
         except Exception as e:
             logging.warning(f"Could not load action button icon: {e}")
 
@@ -2017,14 +2017,48 @@ class BaseResourcePage(ThemeAwareMixin, BaseTablePage):
         button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
 
         button.setFixedWidth(30)
-        button.setStyleSheet(get_action_button_style())
+        try:
+            from UI.Styles import AppStyles
+            button.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE)
+        except (ImportError, AttributeError) as e:
+            logging.debug(f"Could not load AppStyles for button: {e}")
+            # Fallback styling
+            button.setStyleSheet("""
+                QToolButton {
+                    background-color: transparent;
+                    border: none;
+                    padding: 2px;
+                }
+                QToolButton:hover {
+                    background-color: #3d3d3d;
+                    border-radius: 2px;
+                }
+            """)
         
         button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         button.setCursor(Qt.CursorShape.PointingHandCursor)
 
         # Create menu
         menu = QMenu(button)
-        menu.setStyleSheet(get_menu_style())
+        try:
+            from UI.Styles import AppStyles
+            menu.setStyleSheet(AppStyles.MENU_STYLE)
+        except (ImportError, AttributeError) as e:
+            logging.debug(f"Could not load AppStyles for menu: {e}")
+            # Fallback menu styling
+            menu.setStyleSheet("""
+                QMenu {
+                    background-color: #2d2d2d;
+                    border: 1px solid #3d3d3d;
+                    color: white;
+                }
+                QMenu::item {
+                    padding: 5px 20px;
+                }
+                QMenu::item:selected {
+                    background-color: #0078d4;
+                }
+            """)
 
         # Connect signals to change row appearance when menu opens/closes
         try:
@@ -2128,12 +2162,6 @@ class BaseResourcePage(ThemeAwareMixin, BaseTablePage):
     def _create_action_container(self, row, action_button):
         """Create container widget for action button"""
         container = QWidget()
-        # Match table background to avoid leak through transparent container
-        try:
-            container.setStyleSheet(BaseResourcePageStyles.get_checkbox_container_style())
-        except Exception:
-            # Fallback to transparent if style resolution fails
-            container.setStyleSheet("background-color: transparent;")
         layout = QHBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -2153,9 +2181,9 @@ class BaseResourcePage(ThemeAwareMixin, BaseTablePage):
                     item = self.table.item(row, col)
                     if item:
                         if highlight:
-                            item.setBackground(QColor(BaseResourcePageStyles.get_hover_bg_color()))
+                            item.setBackground(QColor(AppColors.HOVER_BG))
                         else:
-                            item.setBackground(QColor(BaseResourcePageStyles.get_transparent_color()))
+                            item.setBackground(QColor("transparent"))
         except Exception as e:
             logging.debug(f"Error highlighting row {row}: {e}")
 
@@ -2322,14 +2350,48 @@ class BaseResourcePage(ThemeAwareMixin, BaseTablePage):
             )
 
     def _create_checkbox_container(self, row, resource_name):
-        """Create checkbox container for row selection using ThemeAwareCheckBox."""
-        from Base_Components.base_components import create_theme_aware_checkbox_container
+        """Create checkbox container for row selection"""
+        from PyQt6.QtWidgets import QCheckBox, QWidget, QHBoxLayout
         
-        container = create_theme_aware_checkbox_container(
-            row=row,
-            resource_name=resource_name,
-            state_changed_callback=self._on_row_checkbox_changed
-        )
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        checkbox = QCheckBox()
+        checkbox.setProperty("row", row)
+        checkbox.setProperty("resource_name", resource_name)
+        checkbox.stateChanged.connect(self._on_row_checkbox_changed)
+        
+        # Apply styling to use proper icons with dynamic resource path resolution
+        unchecked_path = resource_path("Icons/check_box_unchecked.svg")
+        checked_path = resource_path("Icons/check_box_checked.svg")
+        
+        checkbox.setStyleSheet(f"""
+            QCheckBox {{
+                margin: 0px;
+                padding: 0px;
+                background-color: transparent;
+            }}
+            QCheckBox::indicator {{
+                width: 14px;
+                height: 14px;
+                margin: 1px;
+                background-color: transparent;
+                border: none;
+                image: url({unchecked_path.replace(os.sep, '/')});
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: transparent;
+                border: none;
+                image: url({checked_path.replace(os.sep, '/')});
+            }}
+            QCheckBox::indicator:hover {{
+                border-color: #0078d4;
+            }}
+        """)
+        
+        layout.addWidget(checkbox)
         return container
 
     def _on_row_checkbox_changed(self, state):

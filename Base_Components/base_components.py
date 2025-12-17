@@ -362,6 +362,160 @@ class BaseTablePage(QWidget):
         self._item_widgets[f"checkbox_{row}_{item_name}"] = container
         return container
       
+    def _create_checkbox(self, row, item_name):
+        """Create a checkbox with proper icon loading and zero margins"""
+        checkbox = QCheckBox()
+        
+        # Get resolved icon paths using the resource_path function
+        unchecked_icon_path = resource_path("Icons/check_box_unchecked.svg")
+        checked_icon_path = resource_path("Icons/check_box_checked.svg")
+        
+        # Verify icons exist, use fallback if needed
+        if not os.path.exists(unchecked_icon_path):
+            logging.warning(f"Unchecked icon not found: {unchecked_icon_path}")
+            unchecked_icon_path = self._create_fallback_checkbox_icon(False)
+        
+        if not os.path.exists(checked_icon_path):
+            logging.warning(f"Checked icon not found: {checked_icon_path}")
+            checked_icon_path = self._create_fallback_checkbox_icon(True)
+        
+        # Create stylesheet with resolved paths
+        checkbox_style = f"""
+            QCheckBox {{
+                margin: 0px;
+                padding: 0px;
+                spacing: 0px;
+                background: transparent;
+                border: none;
+                outline: none;
+                width: 16px;
+                height: 16px;
+                max-width: 16px;
+                max-height: 16px;
+                min-width: 16px;
+                min-height: 16px;
+            }}
+            QCheckBox::indicator {{
+                width: 16px;
+                height: 16px;
+                border: none;
+                background: transparent;
+                margin: 0px;
+                padding: 0px;
+                spacing: 0px;
+                subcontrol-position: center;
+                subcontrol-origin: content;
+            }}
+            QCheckBox::indicator:unchecked {{
+                image: url({unchecked_icon_path.replace(os.sep, '/')});
+            }}
+            QCheckBox::indicator:checked {{
+                image: url({checked_icon_path.replace(os.sep, '/')});
+            }}
+            QCheckBox::indicator:hover {{
+                opacity: 0.8;
+            }}
+        """
+        
+        checkbox.setStyleSheet(checkbox_style)
+        checkbox.setFixedSize(16, 16)
+        checkbox.stateChanged.connect(partial(self._handle_checkbox_change, item_name=item_name))
+        return checkbox
+
+    def _create_fallback_checkbox_icon(self, is_checked):
+        """Create a fallback checkbox icon if SVG files are not available"""
+        # For fallback, just return the standard checkbox style paths
+        # This should rarely be needed if the SVG files are properly bundled
+        if is_checked:
+            return "Icons/check_box_checked.svg"
+        else:
+            return "Icons/check_box_unchecked.svg"
+
+    def _handle_checkbox_change(self, state, item_name):
+        """Handle checkbox state changes"""
+        if state == Qt.CheckState.Checked.value:
+            self.selected_items.add(item_name)
+        else:
+            self.selected_items.discard(item_name)
+
+            # If any checkbox is unchecked, uncheck the select-all checkbox
+            if self.select_all_checkbox is not None and self.select_all_checkbox.isChecked():
+                # Block signals to prevent infinite recursion
+                self.select_all_checkbox.blockSignals(True)
+                self.select_all_checkbox.setChecked(False)
+                self.select_all_checkbox.blockSignals(False)
+
+    # def _create_select_all_checkbox(self):
+    #     """Create the select-all checkbox for the header using the same SVG icon as row checkboxes"""
+    #     checkbox = QCheckBox()
+    #     checkbox.setStyleSheet(AppStyles.BASE_CHECKBOX_STYLE)
+    #     checkbox.stateChanged.connect(self._handle_select_all)
+    #     self.select_all_checkbox = checkbox
+    #     return checkbox
+
+    def _create_select_all_checkbox(self):
+        """Create the select-all checkbox for the header using resolved icon paths"""
+        checkbox = QCheckBox()
+        
+        # Get resolved icon paths
+        unchecked_icon_path = resource_path("Icons/check_box_unchecked.svg")
+        checked_icon_path = resource_path("Icons/check_box_checked.svg")
+        
+        # Verify icons exist, use fallback if needed
+        if not os.path.exists(unchecked_icon_path):
+            unchecked_icon_path = self._create_fallback_checkbox_icon(False)
+        
+        if not os.path.exists(checked_icon_path):
+            checked_icon_path = self._create_fallback_checkbox_icon(True)
+        
+        # Apply consistent styling with resolved paths
+        select_all_style = f"""
+            QCheckBox {{
+                margin: 0px;
+                padding: 0px;
+                spacing: 0px;
+                background: transparent;
+                border: none;
+                outline: none;
+                width: 16px;
+                height: 16px;
+            }}
+            QCheckBox::indicator {{
+                width: 16px;
+                height: 16px;
+                border: none;
+                background: transparent;
+                margin: 0px;
+                padding: 0px;
+                subcontrol-position: center;
+                subcontrol-origin: content;
+            }}
+            QCheckBox::indicator:unchecked {{
+                image: url({unchecked_icon_path.replace(os.sep, '/')});
+            }}
+            QCheckBox::indicator:checked {{
+                image: url({checked_icon_path.replace(os.sep, '/')});
+            }}
+            QCheckBox::indicator:hover {{
+                opacity: 0.8;
+            }}
+        """
+        
+        checkbox.setStyleSheet(select_all_style)
+        checkbox.stateChanged.connect(self._handle_select_all)
+        self.select_all_checkbox = checkbox
+        return checkbox
+
+    def _handle_select_all(self, state):
+        """Handle select-all checkbox state changes"""
+        for row in range(self.table.rowCount()):
+            checkbox_container = self.table.cellWidget(row, 0)
+            if checkbox_container:
+                for child in checkbox_container.children():
+                    if isinstance(child, QCheckBox):
+                        child.setChecked(state == Qt.CheckState.Checked.value)
+                        break
+
     def _set_header_widget(self, col, widget):
         """Place a widget in a table header cell"""
         header = self.table.horizontalHeader()
@@ -499,179 +653,3 @@ class BaseTablePage(QWidget):
         empty_layout.addWidget(content_widget, 0, Qt.AlignmentFlag.AlignCenter)
 
         return empty_widget
-
-
-class ThemeAwareCheckBox(QWidget):
-    """
-    A theme-aware checkbox widget that uses QIcon for its indicator instead of
-    stylesheet image: url(). This allows the checkbox to update automatically
-    when the theme changes by simply swapping the icon.
-    
-    Works like action buttons - icon is set via setIcon(), not stylesheet.
-    Supports hover effects and integrates with table row selection.
-    
-    Size matches original QCheckBox indicator: 14x14 (matching original stylesheet).
-    """
-    stateChanged = pyqtSignal(int)
-    
-    # Icon size matches original QCheckBox::indicator { width: 14px; height: 14px; }
-    ICON_SIZE = 14
-    
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        from UI.Icons import Icons
-        from UI.ThemeManager import get_theme_manager
-        
-        self._checked = False
-        self._hovered = False
-        self._row = -1
-        self._resource_name = ""
-        self._signals_blocked = False
-        
-        # Store references for theme updates
-        self._icons_class = Icons
-        self._theme_manager = get_theme_manager()
-        
-        self.setFixedSize(self.ICON_SIZE, self.ICON_SIZE)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setMouseTracking(True)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setStyleSheet("background: transparent; border: none;")
-        
-        # Load initial icons
-        self._load_theme_icons()
-    
-    def sizeHint(self):
-        """Return the size hint matching the fixed size"""
-        return QSize(self.ICON_SIZE, self.ICON_SIZE)
-    
-    def minimumSizeHint(self):
-        """Return the minimum size hint matching the fixed size"""
-        return QSize(self.ICON_SIZE, self.ICON_SIZE)
-    
-    def _load_theme_icons(self):
-        """Load icons for current theme. Called externally by parent page on theme change."""
-        theme_name = self._theme_manager.get_current_theme_name()
-        self._unchecked_icon = self._icons_class.get_theme_icon("check_box_unchecked.svg", theme_name)
-        self._checked_icon = self._icons_class.get_theme_icon("check_box_checked.svg", theme_name)
-        self.update()
-    
-    def setProperty(self, name, value):
-        """Override to handle row and resource_name properties"""
-        if name == "row":
-            self._row = value
-        elif name == "resource_name":
-            self._resource_name = value
-        else:
-            super().setProperty(name, value)
-    
-    def property(self, name):
-        """Override to return row and resource_name properties"""
-        if name == "row":
-            return self._row
-        elif name == "resource_name":
-            return self._resource_name
-        return super().property(name)
-    
-    def isChecked(self):
-        """Return checked state"""
-        return self._checked
-    
-    def setChecked(self, checked):
-        """Set checked state"""
-        if self._checked != checked:
-            self._checked = checked
-            self.update()
-            self.stateChanged.emit(Qt.CheckState.Checked.value if checked else Qt.CheckState.Unchecked.value)
-    
-    def checkState(self):
-        """Return check state as Qt.CheckState"""
-        return Qt.CheckState.Checked if self._checked else Qt.CheckState.Unchecked
-    
-    def setCheckState(self, state):
-        """Set check state from Qt.CheckState"""
-        self.setChecked(state == Qt.CheckState.Checked)
-    
-    def paintEvent(self, event):
-        """Paint the checkbox using the theme-aware icon"""
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-        
-        # Get the appropriate icon
-        icon = self._checked_icon if self._checked else self._unchecked_icon
-        
-        # Draw the icon - fill entire widget (14x14 to match original indicator size)
-        if not icon.isNull():
-            icon.paint(painter, 0, 0, self.ICON_SIZE, self.ICON_SIZE)
-        
-        painter.end()
-    
-    def mousePressEvent(self, event):
-        """Handle mouse press - toggle checked state"""
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.setChecked(not self._checked)
-        super().mousePressEvent(event)
-    
-    def enterEvent(self, event):
-        """Handle mouse enter - show hover effect"""
-        self._hovered = True
-        self.update()
-        super().enterEvent(event)
-    
-    def leaveEvent(self, event):
-        """Handle mouse leave - hide hover effect"""
-        self._hovered = False
-        self.update()
-        super().leaveEvent(event)
-    
-    def blockSignals(self, block):
-        """Block or unblock signals"""
-        # Store the block state for manual signal emission control
-        self._signals_blocked = block
-        return super().blockSignals(block)
-
-
-def create_theme_aware_checkbox_container(row, resource_name, state_changed_callback=None):
-    """
-    Factory function to create a theme-aware checkbox in a container widget.
-    This replaces the old _create_checkbox_container pattern.
-    
-    Matches original BaseResourcePage._create_checkbox_container exactly:
-    - Container: transparent background, no fixed size (layout handles sizing)
-    - Checkbox: 14x14 (matches original QCheckBox::indicator size)
-    - Layout: centered alignment with zero margins
-    
-    Args:
-        row: Row index for the checkbox
-        resource_name: Resource name associated with this checkbox
-        state_changed_callback: Optional callback for state changes
-    
-    Returns:
-        QWidget container with the ThemeAwareCheckBox inside
-    """
-    container = QWidget()
-    # Match original: transparent background, no fixed size
-    container.setStyleSheet("background-color: transparent;")
-    
-    layout = QHBoxLayout(container)
-    layout.setContentsMargins(0, 0, 0, 0)
-    layout.setSpacing(0)
-    layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    
-    checkbox = ThemeAwareCheckBox()
-    checkbox.setProperty("row", row)
-    checkbox.setProperty("resource_name", resource_name)
-    
-    if state_changed_callback:
-        checkbox.stateChanged.connect(state_changed_callback)
-    
-    layout.addWidget(checkbox)
-    
-    # NO fixed size on container - let layout handle it like original
-    # The checkbox itself is 14x14, layout centers it in the cell
-    
-    # Store reference to checkbox for easy access
-    container.checkbox = checkbox
-    
-    return container

@@ -11,29 +11,20 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer, QRect, QRectF, pyqtSignal, QSize
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QLinearGradient, QPainterPath, QBrush, QCursor
 
-from UI.Styles import (
-    AppConstants,
-    get_table_style,
-    get_menu_style,
-    get_action_button_style,
-    get_action_container_style,
-    get_custom_header_style,
-    get_status_active_color,
-    get_status_disconnected_color
-)
+from UI.Styles import AppStyles, AppColors, AppConstants
 from Base_Components.base_components import SortableTableWidgetItem, StatusLabel
 from Base_Components.base_resource_page import BaseResourcePage
-import Styles.NodesPageStyles as NodesPageStyles
 from Utils.cluster_connector import get_cluster_connector
-from UI.Icons import resource_path, Icons
-from UI.ThemeManager import get_theme_manager
+from UI.Icons import resource_path
 import random
 import datetime
 import re
 import logging
 import time
 
+#------------------------------------------------------------------
 # Custom Style to hide checkbox in header
+#------------------------------------------------------------------
 class CustomHeaderStyle(QProxyStyle):
     """A proxy style that hides checkbox in header"""
     def __init__(self, style=None):
@@ -48,7 +39,10 @@ class CustomHeaderStyle(QProxyStyle):
                 return
         super().drawControl(element, option, painter, widget)
 
+
+#------------------------------------------------------------------
 # Optimized GraphWidget
+#------------------------------------------------------------------
 class GraphWidget(QFrame):
     """Optimized widget for displaying resource utilization graphs"""
     def __init__(self, title, unit, color, parent=None):
@@ -69,7 +63,7 @@ class GraphWidget(QFrame):
         self.setMaximumHeight(120)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
-        self.setStyleSheet(NodesPageStyles.get_graph_frame_style())
+        self.setStyleSheet(AppStyles.GRAPH_FRAME_STYLE)
 
         # Reduced shadow effect for performance
         shadow = QGraphicsDropShadowEffect(self)
@@ -83,9 +77,9 @@ class GraphWidget(QFrame):
 
         header_layout = QHBoxLayout()
         self.title_label = QLabel(f"{title} (No node selected)")
-        self.title_label.setStyleSheet(NodesPageStyles.get_graph_title_style())
+        self.title_label.setStyleSheet(AppStyles.GRAPH_TITLE_STYLE)
         self.value_label = QLabel(f"0{unit}")
-        self.value_label.setStyleSheet(NodesPageStyles.get_graph_value_style(self.color))
+        self.value_label.setStyleSheet(AppStyles.graph_value_style(self.color))
         header_layout.addWidget(self.title_label)
         header_layout.addStretch()
         header_layout.addWidget(self.value_label)
@@ -283,7 +277,7 @@ class GraphWidget(QFrame):
             painter.drawPath(path)
         
         # Simple time labels
-        painter.setPen(QPen(QColor(NodesPageStyles.get_graph_time_label_color()), 1))
+        painter.setPen(QPen(QColor("#FFFFFF"), 1))
         font = painter.font()
         font.setPointSize(9)
         painter.setFont(font)
@@ -295,7 +289,7 @@ class GraphWidget(QFrame):
         painter.drawText(QRectF(16 + width - 15, self.height() - 16, 30, 12), Qt.AlignmentFlag.AlignCenter, now.strftime("%H:%M"))
         
         if not self.selected_node:
-            painter.setPen(QPen(QColor(NodesPageStyles.get_text_subtle_color())))
+            painter.setPen(QPen(QColor(AppColors.TEXT_SUBTLE)))
             text_rect = QRectF(0, self.rect().top(), self.rect().width(), self.rect().height() - 20)
             painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, "Select a node to view metrics")
 
@@ -313,17 +307,19 @@ class NoDataWidget(QWidget):
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         icon_label = QLabel("📊")
-        icon_label.setStyleSheet(NodesPageStyles.get_no_data_icon_style())
+        icon_label.setStyleSheet("font-size: 48px; color: #666;")
         icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         message_label = QLabel(message)
-        message_label.setStyleSheet(NodesPageStyles.get_no_data_message_style())
+        message_label.setStyleSheet("font-size: 18px; color: #666;")
         message_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         layout.addWidget(icon_label)
         layout.addWidget(message_label)
 
+#------------------------------------------------------------------
 # NodesPage - Now extending BaseResourcePage for consistency
+#------------------------------------------------------------------
 class NodesPage(BaseResourcePage):
     """
     Displays Kubernetes Nodes with live data and resource operations.
@@ -348,95 +344,7 @@ class NodesPage(BaseResourcePage):
         
         # Set up UI
         self.setup_page_ui()
-    
-    def _on_theme_changed(self, theme_name):
-        """Refresh styles when theme changes"""
-        super()._on_theme_changed(theme_name)
         
-        # Update graph styles
-        if hasattr(self, 'cpu_graph') and self.cpu_graph:
-            self.cpu_graph.setStyleSheet(NodesPageStyles.get_graph_frame_style())
-            self.cpu_graph.title_label.setStyleSheet(NodesPageStyles.get_graph_title_style())
-            self.cpu_graph.value_label.setStyleSheet(NodesPageStyles.get_graph_value_style(self.cpu_graph.color))
-        
-        if hasattr(self, 'mem_graph') and self.mem_graph:
-            self.mem_graph.setStyleSheet(NodesPageStyles.get_graph_frame_style())
-            self.mem_graph.title_label.setStyleSheet(NodesPageStyles.get_graph_title_style())
-            self.mem_graph.value_label.setStyleSheet(NodesPageStyles.get_graph_value_style(self.mem_graph.color))
-        
-        if hasattr(self, 'disk_graph') and self.disk_graph:
-            self.disk_graph.setStyleSheet(NodesPageStyles.get_graph_frame_style())
-            self.disk_graph.title_label.setStyleSheet(NodesPageStyles.get_graph_title_style())
-            self.disk_graph.value_label.setStyleSheet(NodesPageStyles.get_graph_value_style(self.disk_graph.color))
-        
-        # Update table styles
-        if hasattr(self, 'table') and self.table:
-            self.table.setStyleSheet(get_table_style())
-            self.table.horizontalHeader().setStyleSheet(get_custom_header_style())
-
-        # Refresh embedded row widgets (status + action) so they update immediately
-        self._refresh_table_widgets_on_theme_change()
-    def _refresh_table_widgets_on_theme_change(self):
-        """Refresh table cell widgets when theme changes.
-
-        ThemeAwareCheckBox handles its own theme updates automatically.
-        This method updates: container backgrounds, status labels, action buttons.
-        Uses batching to keep UI responsive.
-        """
-        if not hasattr(self, 'table') or not self.table:
-            return
-
-        # Column indices
-        checkbox_col = 0
-        status_col = self.table.columnCount() - 2
-        action_col = self.table.columnCount() - 1
-
-        # Pre-fetch theme-aware resources ONCE before the loop
-        theme_name = get_theme_manager().get_current_theme_name()
-        action_icon = Icons.get_theme_icon("Moreaction_Button.svg", theme_name)
-        # Use transparent background like original checkbox containers
-        container_style = "background-color: transparent;"
-
-        row_count = self.table.rowCount()
-        batch_size = 25
-
-        for i in range(0, row_count, batch_size):
-            batch_end = min(i + batch_size, row_count)
-            
-            for row in range(i, batch_end):
-                # Checkbox container (column 0) - only update container background
-                # ThemeAwareCheckBox inside handles its own icon updates automatically
-                checkbox_container = self.table.cellWidget(row, checkbox_col)
-                if checkbox_container:
-                    checkbox_container.setStyleSheet(container_style)
-                
-                # Status widget - update colors for theme
-                status_widget = self.table.cellWidget(row, status_col)
-                if isinstance(status_widget, StatusLabel) and hasattr(status_widget, 'label'):
-                    status_text = status_widget.label.text() if status_widget.label else ""
-                    if isinstance(status_text, str) and status_text.lower() == "ready":
-                        color = get_status_active_color()
-                    else:
-                        color = get_status_disconnected_color()
-                    status_widget.label.setStyleSheet(
-                        f"color: {QColor(color).name()}; background-color: transparent;"
-                    )
-                    status_widget.setStyleSheet("background-color: transparent;")
-
-                # Action widget - update container, button icon, and menu
-                action_container = self.table.cellWidget(row, action_col)
-                if action_container:
-                    action_container.setStyleSheet(container_style)
-                    action_button = action_container.findChild(QToolButton)
-                    if action_button:
-                        action_button.setStyleSheet(get_action_button_style())
-                        action_button.setIcon(action_icon)
-                        if action_button.menu():
-                            action_button.menu().setStyleSheet(get_menu_style())
-            
-            # Process UI events every batch to keep responsive
-            QApplication.processEvents()
-
     def setup_page_ui(self):
         """Set up the main UI elements for the Nodes page"""
         headers = ["", "Name", "CPU", "Memory", "Disk", "Taints", "Roles", "Version", "Age", "Conditions", ""]
@@ -451,9 +359,9 @@ class NodesPage(BaseResourcePage):
         
         # Add graphs at the top
         graphs_layout = QHBoxLayout()
-        self.cpu_graph = GraphWidget("CPU Usage", "%", NodesPageStyles.get_cpu_graph_color())
-        self.mem_graph = GraphWidget("Memory Usage", "%", NodesPageStyles.get_memory_graph_color())
-        self.disk_graph = GraphWidget("Disk Usage", "%", NodesPageStyles.get_disk_graph_color())
+        self.cpu_graph = GraphWidget("CPU Usage", "%", AppColors.ACCENT_ORANGE)
+        self.mem_graph = GraphWidget("Memory Usage", "%", AppColors.ACCENT_BLUE)
+        self.disk_graph = GraphWidget("Disk Usage", "%", AppColors.ACCENT_PURPLE)
         graphs_layout.addWidget(self.cpu_graph)
         graphs_layout.addWidget(self.mem_graph)
         graphs_layout.addWidget(self.disk_graph)
@@ -463,8 +371,9 @@ class NodesPage(BaseResourcePage):
             graphs_widget.setLayout(graphs_layout)
             self.layout().insertWidget(0, graphs_widget)
         
-        self.table.setStyleSheet(get_table_style())
-        self.table.horizontalHeader().setStyleSheet(get_custom_header_style())
+        # Apply table style
+        self.table.setStyleSheet(AppStyles.TABLE_STYLE)
+        self.table.horizontalHeader().setStyleSheet(AppStyles.CUSTOM_HEADER_STYLE)
 
         # Configure column widths
         self.configure_columns()
@@ -662,8 +571,9 @@ class NodesPage(BaseResourcePage):
                 logging.warning(f"Row {row}: Node has no valid name")
                 return
             
-            # Create checkbox container using ThemeAwareCheckBox (handles theme changes automatically)
+            # Create checkbox container (visible)
             checkbox_container = self._create_checkbox_container(row, node_name)
+            checkbox_container.setStyleSheet(AppStyles.CHECKBOX_STYLE)
             self.table.setCellWidget(row, 0, checkbox_container)
             
             # Get utilization data from graphs (already loaded in background)
@@ -773,11 +683,11 @@ class NodesPage(BaseResourcePage):
             
             # Add Status column as a widget
             status_col = len(columns) + 1
-
+            
             if status.lower() == "ready":
-                color = get_status_active_color()
+                color = AppColors.STATUS_ACTIVE
             else:
-                color = get_status_disconnected_color()
+                color = AppColors.STATUS_DISCONNECTED
                 
             status_widget = StatusLabel(status, color)
             status_widget.clicked.connect(lambda: self.table.selectRow(row))
@@ -785,12 +695,15 @@ class NodesPage(BaseResourcePage):
             
             # Create and add action button with proper styling
             action_button = self._create_node_action_button(row, node_name)
-            action_button.setStyleSheet(get_action_button_style())
+            action_button.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE +
+        """
+        QToolButton::menu-indicator { image: none; width: 0px; }
+        """)
             
             # Create action container with proper styling
             action_container = QWidget()
             action_container.setFixedWidth(AppConstants.SIZES["ACTION_WIDTH"])
-            action_container.setStyleSheet(get_action_container_style())
+            action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
             action_layout = QHBoxLayout(action_container)
             action_layout.setContentsMargins(0, 0, 0, 0)
             action_layout.setSpacing(0)
@@ -820,7 +733,7 @@ class NodesPage(BaseResourcePage):
             item = self.table.item(row, col)
             if item:
                 if is_active:
-                    item.setBackground(QColor(NodesPageStyles.get_row_highlight_color() + "22"))  # 13% opacity
+                    item.setBackground(QColor(AppColors.ACCENT_BLUE + "22"))  # 13% opacity
                 else:
                     item.setBackground(QColor("transparent"))
 
@@ -829,9 +742,9 @@ class NodesPage(BaseResourcePage):
         try:
             button = QToolButton()
 
-            # Use theme-specific SVG icon (Icons/<theme>/Moreaction_Button.svg)
-            theme_name = get_theme_manager().get_current_theme_name()
-            button.setIcon(Icons.get_theme_icon("Moreaction_Button.svg", theme_name))
+            # Use custom SVG icon instead of text
+            icon = resource_path("Icons/Moreaction_Button.svg")
+            button.setIcon(QIcon(icon))
             button.setIconSize(QSize(AppConstants.SIZES["ICON_SIZE"], AppConstants.SIZES["ICON_SIZE"]))
 
             # Remove text and change to icon-only style
@@ -839,13 +752,13 @@ class NodesPage(BaseResourcePage):
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
 
             button.setFixedWidth(30)
-            button.setStyleSheet(get_action_button_style())
+            button.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE)
             button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
 
             # Create menu
             menu = QMenu(button)
-            menu.setStyleSheet(get_menu_style())
+            menu.setStyleSheet(AppStyles.MENU_STYLE)
 
             # Connect signals to change row appearance when menu opens/closes
             menu.aboutToShow.connect(lambda: self._highlight_active_row(row, True))
