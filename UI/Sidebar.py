@@ -11,6 +11,7 @@ import platform
 import Styles.SidebarStyles as SidebarStyles
 from UI.Icons import Icons, resource_path
 from UI.ThemeAwarePage import ThemeAwareMixin
+from UI.ThemeManager import get_theme_manager
 
 class NavMenuDropdown(QMenu):
     def __init__(self, parent=None):
@@ -66,6 +67,10 @@ class SidebarToggleButton(QToolButton):
         # Set the initial icon
         self.update_icon()
         self.setIconSize(QSize(24, 24))
+
+        # Load theme-aware icons on startup
+        theme_name = get_theme_manager().get_current_theme_name() or "Dark"
+        self.update_theme_icons(theme_name)
 
     def update_theme_icons(self, theme_name):
         """Reload icons based on the current theme"""
@@ -123,8 +128,9 @@ class NavIconButton(QToolButton):
         # Store the fallback icon text (emoji)
         self.icon_text = getattr(Icons, icon_id.upper(), "⚙️") if isinstance(icon_id, str) else "⚙️"
 
-        # Try to load the icon
-        self.icon = Icons.get_icon(icon_id)
+        # Load theme-aware icon on startup
+        theme_name = get_theme_manager().get_current_theme_name() or "Dark"
+        self.icon = Icons.get_theme_icon_by_id(icon_id, theme_name)
         self.icon_loaded = not self.icon.isNull()
 
         self.setup_ui()
