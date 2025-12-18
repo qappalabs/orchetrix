@@ -1,4 +1,5 @@
 from UI.ThemeManager import get_theme_manager
+from UI.Styles import AppStyles
 
 def _get_theme():
     """Get current theme"""
@@ -196,6 +197,7 @@ def get_issues_table_style():
             background-color: {theme.colors.SELECTED_BG};
             border: none;
         }}
+        {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
     """
 
 # Phase 2 placeholders (returning hardcoded values for now)
