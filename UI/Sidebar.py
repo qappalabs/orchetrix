@@ -4,6 +4,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QToolButton, QLa
 from PyQt6.QtCore import Qt, QSize, QPropertyAnimation, QEasingCurve, QEvent, QTimer, QPoint, QRect
 from PyQt6.QtGui import QIcon, QFont, QColor, QAction, QPixmap
 
+import os
 import logging
 import platform
 
@@ -66,6 +67,22 @@ class SidebarToggleButton(QToolButton):
         self.update_icon()
         self.setIconSize(QSize(24, 24))
 
+    def update_theme_icons(self, theme_name):
+        """Reload icons based on the current theme"""
+        # Load both icons for the current theme
+        self.expanded_icon = Icons.get_theme_icon("back.svg", theme_name)
+        self.collapsed_icon = Icons.get_theme_icon("forward.svg", theme_name)
+        
+        # Verify if icons loaded successfully
+        if self.expanded_icon.isNull() or self.collapsed_icon.isNull():
+            logging.warning(f"Failed to load sidebar theme icons for {theme_name}")
+            # Fallback to text-based icons
+            self.expanded_icon = None
+            self.collapsed_icon = None
+            
+        # Refresh the button's current display
+        self.update_icon()
+
     def toggle_expanded(self):
         self.expanded = not self.expanded
         self.update_icon()
@@ -113,6 +130,18 @@ class NavIconButton(QToolButton):
         self.setup_ui()
         if self.has_dropdown:
             self.setup_dropdown()
+
+    def update_theme_icons(self, theme_name):
+        """Update the icon using the standardized Icons helper"""
+        # Get the correct icon from the central manager
+        new_icon = Icons.get_theme_icon_by_id(self.icon_id, theme_name)
+        
+        # Apply it
+        if new_icon and not new_icon.isNull():
+            self.icon = new_icon
+            self.icon_loaded = True
+            if hasattr(self, 'icon_label') and self.icon_label:
+                self.icon_label.setPixmap(self.icon.pixmap(QSize(20, 20)))
 
     def setup_ui(self):
         self.setFixedHeight(40)
@@ -585,6 +614,7 @@ class Sidebar(ThemeAwareMixin, QWidget):
         # Refresh toggle button
         if hasattr(self, 'toggle_btn'):
             self.toggle_btn.setStyleSheet(SidebarStyles.get_sidebar_toggle_button_style())
+            self.toggle_btn.update_theme_icons(theme_name)
         
         # Refresh sidebar controls (toggle area)
         if hasattr(self, 'sidebar_controls'):
@@ -594,6 +624,8 @@ class Sidebar(ThemeAwareMixin, QWidget):
         if hasattr(self, 'nav_buttons'):
             for button in self.nav_buttons:
                 button.update_style()
+                # Update theme-specific icons for nav buttons
+                button.update_theme_icons(theme_name)
                 # Also refresh dropdown menu if it exists
                 if hasattr(button, 'dropdown_menu') and button.dropdown_menu:
                     button.dropdown_menu.setStyleSheet(SidebarStyles.get_nav_menu_dropdown_style())

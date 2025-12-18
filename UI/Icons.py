@@ -251,6 +251,43 @@ class Icons:
         return resource_path(os.path.join(Icons.ICONS_BASE_PATH, icon_filename))
     
     @staticmethod
+    def get_theme_icon_by_id(icon_id, theme_name):
+        """
+        Get a theme-specific icon by ID, checking for both SVG and PNG.
+        
+        Args:
+            icon_id (str): The ID of the icon (e.g., "nodes", "cluster")
+            theme_name (str): The current theme name ("Light" or "Dark")
+            
+        Returns:
+            QIcon: The loaded theme icon, or the default fallback icon.
+        """
+        if not isinstance(icon_id, str):
+            return QIcon()
+            
+        # Determine theme folder
+        theme_folder = theme_name.lower() if isinstance(theme_name, str) else "dark"
+        if theme_folder not in ["light", "dark"]:
+            theme_folder = "dark"
+            
+        # 1. Try Theme SVG (Highest Priority)
+        svg_filename = f"{icon_id}.svg"
+        svg_path = os.path.join(Icons.ICONS_BASE_PATH, theme_folder, svg_filename)
+        # Use resource_path to check existence before trying to load
+        if os.path.exists(resource_path(svg_path)):
+            return Icons.get_icon_from_path(svg_path)
+            
+        # 2. Try Theme PNG (Secondary Priority)
+        png_filename = f"{icon_id}.png"
+        png_path = os.path.join(Icons.ICONS_BASE_PATH, theme_folder, png_filename)
+        if os.path.exists(resource_path(png_path)):
+            return Icons.get_icon_from_path(png_path)
+            
+        # 3. Fallback to Default (Root folder)
+        # This handles the case where we haven't created a theme asset yet
+        return Icons.get_icon(icon_id)
+    
+    @staticmethod
     def create_text_icon(text, size=AppStyles.TEXT_ICON_SIZE):
         """Create a simple text-based icon"""
         pixmap = QPixmap(size)
