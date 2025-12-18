@@ -971,12 +971,12 @@ class DarkTheme(BaseTheme):
 class LightColors:
     # Multi-platform light theme (semantically correct names)
     
-    # Base colors - lightest to darkest (CREAM for verification)
-    BG_LIGHTEST = "#FFF8E7"   # Cream white for verification
-    BG_LIGHT = "#FFF4D6"      # Light cream
-    BG_MEDIUM = "#FFF0C5"     # Medium cream (main background)
-    BG_DARK = "#FFE8A3"       # Darker cream
-    BG_DARKER = "#FFE082"     # Darkest cream
+    # Base colors - lightest to darkest
+    BG_LIGHTEST = "#ffffff"   # Pure white
+    BG_LIGHT = "#f8f8f8"      # Light gray
+    BG_MEDIUM = "#ffffff"     # Main background
+    BG_DARK = "#f1f1f1"       # Darker gray
+    BG_DARKER = "#e8e8e8"     # Darkest gray
     
     # Semantic backgrounds
     BG_SIDEBAR = "#F8F8F8"    # Sidebar background
