@@ -11,7 +11,7 @@ from typing import Dict, Any, Optional
 import logging
 
 from .base_detail_section import BaseDetailSection
-from UI.Styles import EnhancedStyles
+import Styles.BaseDetailSectionStyles as BaseDetailSectionStyles
 import Styles.OverviewSectionStyles as OverviewSectionStyles
 from PyQt6.QtWidgets import QFrame, QLabel
 
@@ -29,6 +29,19 @@ class DetailPageOverviewSection(BaseDetailSection):
         # Refresh overview content style
         if hasattr(self, 'overview_content'):
             self.overview_content.setStyleSheet(OverviewSectionStyles.get_overview_content_style())
+
+        # Refresh resource header widgets
+        if hasattr(self, 'resource_name_label'):
+            self.resource_name_label.setStyleSheet(BaseDetailSectionStyles.get_primary_text_style())
+
+        # Refresh section headers
+        if hasattr(self, 'status_header'):
+            self.status_header.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
+        if hasattr(self, 'conditions_header'):
+            self.conditions_header.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
+        if hasattr(self, 'labels_header'):
+            self.labels_header.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
+
         # Refresh tables if they exist
         if hasattr(self, 'history_table'):
             self.history_table.setStyleSheet(OverviewSectionStyles.get_history_table_style())
@@ -58,12 +71,12 @@ class DetailPageOverviewSection(BaseDetailSection):
         self.overview_content.setStyleSheet(OverviewSectionStyles.get_overview_content_style())
         overview_layout = QVBoxLayout(self.overview_content)
         overview_layout.setContentsMargins(
-            EnhancedStyles.CONTENT_PADDING,
-            EnhancedStyles.CONTENT_PADDING,
-            EnhancedStyles.CONTENT_PADDING,
-            EnhancedStyles.CONTENT_PADDING
+            BaseDetailSectionStyles.CONTENT_PADDING,
+            BaseDetailSectionStyles.CONTENT_PADDING,
+            BaseDetailSectionStyles.CONTENT_PADDING,
+            BaseDetailSectionStyles.CONTENT_PADDING
         )
-        overview_layout.setSpacing(EnhancedStyles.SECTION_GAP)
+        overview_layout.setSpacing(BaseDetailSectionStyles.SECTION_GAP)
 
         self.create_overview_sections(overview_layout)
 
@@ -102,13 +115,13 @@ class DetailPageOverviewSection(BaseDetailSection):
         left_layout.setSpacing(4)
 
         self.resource_name_label = QLabel("Resource Name")
-        self.resource_name_label.setStyleSheet(EnhancedStyles.get_primary_text_style())
+        self.resource_name_label.setStyleSheet(BaseDetailSectionStyles.get_primary_text_style())
 
         self.resource_info_label = QLabel("Type / Namespace")
-        self.resource_info_label.setStyleSheet(EnhancedStyles.get_secondary_text_style())
+        self.resource_info_label.setStyleSheet(BaseDetailSectionStyles.get_secondary_text_style())
 
         self.creation_time_label = QLabel("Created: unknown")
-        self.creation_time_label.setStyleSheet(EnhancedStyles.get_secondary_text_style())
+        self.creation_time_label.setStyleSheet(BaseDetailSectionStyles.get_secondary_text_style())
 
         left_layout.addWidget(self.resource_name_label)
         left_layout.addWidget(self.resource_info_label)
@@ -120,9 +133,9 @@ class DetailPageOverviewSection(BaseDetailSection):
 
     def create_status_section(self, layout):
         """Create status section"""
-        status_header = QLabel("STATUS")
-        status_header.setStyleSheet(EnhancedStyles.get_section_header_style())
-        layout.addWidget(status_header)
+        self.status_header = QLabel("STATUS")
+        self.status_header.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
+        layout.addWidget(self.status_header)
 
         self.status_card = QFrame()
         status_card_layout = QVBoxLayout(self.status_card)
@@ -132,7 +145,7 @@ class DetailPageOverviewSection(BaseDetailSection):
 
         self.status_badge = QLabel("Unknown")
         self.status_text_label = QLabel("Status not available")
-        self.status_text_label.setStyleSheet(EnhancedStyles.get_field_value_style())
+        self.status_text_label.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
 
         status_layout.addWidget(self.status_badge)
         status_layout.addWidget(self.status_text_label, 1)
@@ -141,17 +154,17 @@ class DetailPageOverviewSection(BaseDetailSection):
 
     def create_conditions_section(self, layout):
         """Create conditions section"""
-        conditions_header = QLabel("CONDITIONS")
-        conditions_header.setStyleSheet(EnhancedStyles.get_section_header_style())
-        layout.addWidget(conditions_header)
+        self.conditions_header = QLabel("CONDITIONS")
+        self.conditions_header.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
+        layout.addWidget(self.conditions_header)
 
         self.conditions_card = QFrame()
         conditions_card_layout = QVBoxLayout(self.conditions_card)  # ✅ ADDED THIS LINE
         self.conditions_container_layout = QVBoxLayout()
-        self.conditions_container_layout.setSpacing(EnhancedStyles.FIELD_GAP)
+        self.conditions_container_layout.setSpacing(BaseDetailSectionStyles.FIELD_GAP)
 
         self.no_conditions_label = QLabel("No conditions available")
-        self.no_conditions_label.setStyleSheet(EnhancedStyles.get_secondary_text_style() + """
+        self.no_conditions_label.setStyleSheet(BaseDetailSectionStyles.get_secondary_text_style() + """
             font-style: italic;
             padding: 8px;
         """)
@@ -162,14 +175,14 @@ class DetailPageOverviewSection(BaseDetailSection):
 
     def create_labels_section(self, layout):
         """Create labels section"""
-        labels_header = QLabel("LABELS")
-        labels_header.setStyleSheet(EnhancedStyles.get_section_header_style())
-        layout.addWidget(labels_header)
+        self.labels_header = QLabel("LABELS")
+        self.labels_header.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
+        layout.addWidget(self.labels_header)
 
         self.labels_card = QFrame()
         labels_card_layout = QVBoxLayout(self.labels_card)  # ✅ ADDED THIS LINE
         self.labels_content = QLabel("No labels")
-        self.labels_content.setStyleSheet(EnhancedStyles.get_field_value_style() + """
+        self.labels_content.setStyleSheet(BaseDetailSectionStyles.get_field_value_style() + """
             font-family: 'Consolas', 'Courier New', monospace;
             background-color: rgba(255, 255, 255, 0.05);
             padding: 8px;
@@ -184,7 +197,7 @@ class DetailPageOverviewSection(BaseDetailSection):
         self.specific_section = QFrame()
         self.specific_layout = QVBoxLayout(self.specific_section)
         self.specific_layout.setContentsMargins(0, 0, 0, 0)
-        self.specific_layout.setSpacing(EnhancedStyles.FIELD_GAP)
+        self.specific_layout.setSpacing(BaseDetailSectionStyles.FIELD_GAP)
         self.specific_section.hide()
         layout.addWidget(self.specific_section)
 
@@ -738,7 +751,7 @@ class DetailPageOverviewSection(BaseDetailSection):
 
         if not conditions:
             self.no_conditions_label = QLabel("No conditions available")
-            self.no_conditions_label.setStyleSheet(EnhancedStyles.get_secondary_text_style() + """
+            self.no_conditions_label.setStyleSheet(BaseDetailSectionStyles.get_secondary_text_style() + """
                 font-style: italic;
                 padding: 8px;
             """)
@@ -842,7 +855,7 @@ class DetailPageOverviewSection(BaseDetailSection):
         spec = data.get("spec", {})
 
         section_header = QLabel("NETWORK POLICY DETAILS")
-        section_header.setStyleSheet(EnhancedStyles.get_section_header_style())
+        section_header.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
         self.specific_layout.addWidget(section_header)
 
         # Pod selector
@@ -857,7 +870,7 @@ class DetailPageOverviewSection(BaseDetailSection):
         else:
             selector_info = QLabel("Pod Selector: All pods")
 
-        selector_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        selector_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         selector_info.setWordWrap(True)
         self.specific_layout.addWidget(selector_info)
 
@@ -865,19 +878,19 @@ class DetailPageOverviewSection(BaseDetailSection):
         policy_types = spec.get("policyTypes", [])
         if policy_types:
             types_info = QLabel(f"Policy Types: {', '.join(policy_types)}")
-            types_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+            types_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
             self.specific_layout.addWidget(types_info)
 
         # Ingress rules
         ingress_rules = spec.get("ingress", [])
         ingress_info = QLabel(f"Ingress Rules: {len(ingress_rules)}")
-        ingress_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        ingress_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(ingress_info)
 
         # Egress rules
         egress_rules = spec.get("egress", [])
         egress_info = QLabel(f"Egress Rules: {len(egress_rules)}")
-        egress_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        egress_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(egress_info)
 
     def _add_customresourcedefinition_specific_fields(self, data):
@@ -886,20 +899,20 @@ class DetailPageOverviewSection(BaseDetailSection):
         status = data.get("status", {})
 
         section_header = QLabel("CUSTOM RESOURCE DEFINITION DETAILS")
-        section_header.setStyleSheet(EnhancedStyles.get_section_header_style())
+        section_header.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
         self.specific_layout.addWidget(section_header)
 
         # Group and versions
         group = spec.get("group", "Unknown")
         group_info = QLabel(f"Group: {group}")
-        group_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        group_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(group_info)
 
         versions = spec.get("versions", [])
         if versions:
             version_names = [v.get("name", "unknown") for v in versions]
             versions_info = QLabel(f"Versions: {', '.join(version_names)}")
-            versions_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+            versions_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
             self.specific_layout.addWidget(versions_info)
 
         # Names
@@ -907,23 +920,23 @@ class DetailPageOverviewSection(BaseDetailSection):
         if names:
             kind = names.get("kind", "Unknown")
             kind_info = QLabel(f"Kind: {kind}")
-            kind_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+            kind_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
             self.specific_layout.addWidget(kind_info)
 
             plural = names.get("plural", "Unknown")
             plural_info = QLabel(f"Plural: {plural}")
-            plural_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+            plural_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
             self.specific_layout.addWidget(plural_info)
 
             singular = names.get("singular", "Unknown")
             singular_info = QLabel(f"Singular: {singular}")
-            singular_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+            singular_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
             self.specific_layout.addWidget(singular_info)
 
         # Scope
         scope = spec.get("scope", "Unknown")
         scope_info = QLabel(f"Scope: {scope}")
-        scope_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        scope_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(scope_info)
 
         # Status
@@ -933,7 +946,7 @@ class DetailPageOverviewSection(BaseDetailSection):
             if established_condition:
                 established_status = established_condition.get("status", "Unknown")
                 established_info = QLabel(f"Established: {established_status}")
-                established_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+                established_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
                 self.specific_layout.addWidget(established_info)
 
     def _add_pod_specific_fields(self, data):
@@ -942,24 +955,24 @@ class DetailPageOverviewSection(BaseDetailSection):
         status = data.get("status", {})
 
         section_header = QLabel("POD DETAILS")
-        section_header.setStyleSheet(EnhancedStyles.get_section_header_style())
+        section_header.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
         self.specific_layout.addWidget(section_header)
 
         containers = spec.get("containers", [])
         container_info = QLabel(f"Containers: {len(containers)}")
-        container_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        container_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(container_info)
 
         node_name = spec.get("nodeName", "")
         if node_name:
             node_info = QLabel(f"Node: {node_name}")
-            node_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+            node_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
             self.specific_layout.addWidget(node_info)
 
         pod_ip = status.get("podIP", "")
         if pod_ip:
             ip_info = QLabel(f"Pod IP: {pod_ip}")
-            ip_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+            ip_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
             self.specific_layout.addWidget(ip_info)
 
     def _add_service_specific_fields(self, data):
@@ -967,18 +980,18 @@ class DetailPageOverviewSection(BaseDetailSection):
         spec = data.get("spec", {})
 
         section_header = QLabel("SERVICE DETAILS")
-        section_header.setStyleSheet(EnhancedStyles.get_section_header_style())
+        section_header.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
         self.specific_layout.addWidget(section_header)
 
         service_type = spec.get("type", "ClusterIP")
         type_info = QLabel(f"Type: {service_type}")
-        type_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        type_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(type_info)
 
         cluster_ip = spec.get("clusterIP", "")
         if cluster_ip:
             ip_info = QLabel(f"Cluster IP: {cluster_ip}")
-            ip_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+            ip_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
             self.specific_layout.addWidget(ip_info)
 
     def _add_deployment_specific_fields(self, data):
@@ -987,17 +1000,17 @@ class DetailPageOverviewSection(BaseDetailSection):
         status = data.get("status", {})
 
         section_header = QLabel("DEPLOYMENT DETAILS")
-        section_header.setStyleSheet(EnhancedStyles.get_section_header_style())
+        section_header.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
         self.specific_layout.addWidget(section_header)
 
         replicas = spec.get("replicas", 0)
         replicas_info = QLabel(f"Desired Replicas: {replicas}")
-        replicas_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        replicas_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(replicas_info)
 
         ready_replicas = status.get("readyReplicas", 0)
         ready_info = QLabel(f"Ready Replicas: {ready_replicas}")
-        ready_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        ready_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(ready_info)
 
         # Add rollback section
@@ -1014,12 +1027,12 @@ class DetailPageOverviewSection(BaseDetailSection):
         
         # Create rollback section header
         rollback_header = QLabel("ROLLBACK HISTORY")
-        rollback_header.setStyleSheet(EnhancedStyles.get_section_header_style())
+        rollback_header.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
         self.specific_layout.addWidget(rollback_header)
         
         # Create loading label for history
         self.history_loading_label = QLabel("Loading rollback history...")
-        self.history_loading_label.setStyleSheet(EnhancedStyles.get_field_value_style())
+        self.history_loading_label.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(self.history_loading_label)
         
         # Create container for history table
@@ -1038,7 +1051,6 @@ class DetailPageOverviewSection(BaseDetailSection):
         
         # Configure table properties
         self.history_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.history_table.setAlternatingRowColors(True)
         self.history_table.verticalHeader().setVisible(False)
         
         # Set consistent row height to accommodate widgets
@@ -1112,7 +1124,7 @@ class DetailPageOverviewSection(BaseDetailSection):
             
             if not history_data:
                 no_history_label = QLabel("No rollback history available")
-                no_history_label.setStyleSheet(EnhancedStyles.get_secondary_text_style())
+                no_history_label.setStyleSheet(BaseDetailSectionStyles.get_secondary_text_style())
                 self.specific_layout.addWidget(no_history_label)
                 return
             
@@ -1373,13 +1385,13 @@ class DetailPageOverviewSection(BaseDetailSection):
         spec = data.get("spec", {})
 
         section_header = QLabel("CONFIGMAP DETAILS")
-        section_header.setStyleSheet(EnhancedStyles.get_section_header_style())
+        section_header.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
         self.specific_layout.addWidget(section_header)
 
         data_section = data.get("data", {})
         data_count = len(data_section)
         data_info = QLabel(f"Data entries: {data_count}")
-        data_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        data_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(data_info)
 
         if data_section:
@@ -1389,25 +1401,25 @@ class DetailPageOverviewSection(BaseDetailSection):
                 keys_text += f"... and {len(data_section) - 5} more"
 
             keys_info = QLabel(f"Keys: {keys_text}")
-            keys_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+            keys_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
             keys_info.setWordWrap(True)
             self.specific_layout.addWidget(keys_info)
 
     def _add_secret_specific_fields(self, data):
         """Add Secret-specific fields"""
         section_header = QLabel("SECRET DETAILS")
-        section_header.setStyleSheet(EnhancedStyles.get_section_header_style())
+        section_header.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
         self.specific_layout.addWidget(section_header)
 
         secret_type = data.get("type", "Opaque")
         type_info = QLabel(f"Type: {secret_type}")
-        type_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        type_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(type_info)
 
         data_section = data.get("data", {})
         data_count = len(data_section)
         data_info = QLabel(f"Data entries: {data_count}")
-        data_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        data_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(data_info)
 
     def _add_ingress_specific_fields(self, data):
@@ -1415,17 +1427,17 @@ class DetailPageOverviewSection(BaseDetailSection):
         spec = data.get("spec", {})
 
         section_header = QLabel("INGRESS DETAILS")
-        section_header.setStyleSheet(EnhancedStyles.get_section_header_style())
+        section_header.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
         self.specific_layout.addWidget(section_header)
 
         ingress_class = spec.get("ingressClassName", "default")
         class_info = QLabel(f"Ingress Class: {ingress_class}")
-        class_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        class_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(class_info)
 
         rules = spec.get("rules", [])
         rules_info = QLabel(f"Rules: {len(rules)}")
-        rules_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        rules_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(rules_info)
 
         if rules:
@@ -1435,7 +1447,7 @@ class DetailPageOverviewSection(BaseDetailSection):
                 hosts_text += f"... and {len(rules) - 3} more"
 
             hosts_info = QLabel(f"Hosts: {hosts_text}")
-            hosts_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+            hosts_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
             hosts_info.setWordWrap(True)
             self.specific_layout.addWidget(hosts_info)
 
@@ -1445,27 +1457,27 @@ class DetailPageOverviewSection(BaseDetailSection):
         status = data.get("status", {})
 
         section_header = QLabel("PERSISTENT VOLUME DETAILS")
-        section_header.setStyleSheet(EnhancedStyles.get_section_header_style())
+        section_header.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
         self.specific_layout.addWidget(section_header)
 
         capacity = spec.get("capacity", {}).get("storage", "Unknown")
         capacity_info = QLabel(f"Capacity: {capacity}")
-        capacity_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        capacity_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(capacity_info)
 
         access_modes = spec.get("accessModes", [])
         access_info = QLabel(f"Access Modes: {', '.join(access_modes)}")
-        access_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        access_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(access_info)
 
         reclaim_policy = spec.get("persistentVolumeReclaimPolicy", "Unknown")
         reclaim_info = QLabel(f"Reclaim Policy: {reclaim_policy}")
-        reclaim_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        reclaim_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(reclaim_info)
 
         phase = status.get("phase", "Unknown")
         phase_info = QLabel(f"Phase: {phase}")
-        phase_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        phase_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(phase_info)
 
     def _add_persistentvolumeclaim_specific_fields(self, data):
@@ -1474,27 +1486,27 @@ class DetailPageOverviewSection(BaseDetailSection):
         status = data.get("status", {})
 
         section_header = QLabel("PERSISTENT VOLUME CLAIM DETAILS")
-        section_header.setStyleSheet(EnhancedStyles.get_section_header_style())
+        section_header.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
         self.specific_layout.addWidget(section_header)
 
         access_modes = spec.get("accessModes", [])
         access_info = QLabel(f"Access Modes: {', '.join(access_modes)}")
-        access_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        access_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(access_info)
 
         requests = spec.get("resources", {}).get("requests", {}).get("storage", "Unknown")
         requests_info = QLabel(f"Requested Storage: {requests}")
-        requests_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        requests_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(requests_info)
 
         storage_class = spec.get("storageClassName", "default")
         storage_info = QLabel(f"Storage Class: {storage_class}")
-        storage_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        storage_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(storage_info)
 
         phase = status.get("phase", "Unknown")
         phase_info = QLabel(f"Phase: {phase}")
-        phase_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        phase_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(phase_info)
 
     def _add_replicaset_specific_fields(self, data):
@@ -1503,22 +1515,22 @@ class DetailPageOverviewSection(BaseDetailSection):
         status = data.get("status", {})
 
         section_header = QLabel("REPLICASET DETAILS")
-        section_header.setStyleSheet(EnhancedStyles.get_section_header_style())
+        section_header.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
         self.specific_layout.addWidget(section_header)
 
         replicas = spec.get("replicas", 0)
         replicas_info = QLabel(f"Desired Replicas: {replicas}")
-        replicas_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        replicas_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(replicas_info)
 
         ready_replicas = status.get("readyReplicas", 0)
         ready_info = QLabel(f"Ready Replicas: {ready_replicas}")
-        ready_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        ready_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(ready_info)
 
         available_replicas = status.get("availableReplicas", 0)
         available_info = QLabel(f"Available Replicas: {available_replicas}")
-        available_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        available_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(available_info)
 
     def _add_daemonset_specific_fields(self, data):
@@ -1526,22 +1538,22 @@ class DetailPageOverviewSection(BaseDetailSection):
         status = data.get("status", {})
 
         section_header = QLabel("DAEMONSET DETAILS")
-        section_header.setStyleSheet(EnhancedStyles.get_section_header_style())
+        section_header.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
         self.specific_layout.addWidget(section_header)
 
         desired = status.get("desiredNumberScheduled", 0)
         desired_info = QLabel(f"Desired: {desired}")
-        desired_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        desired_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(desired_info)
 
         current = status.get("currentNumberScheduled", 0)
         current_info = QLabel(f"Current: {current}")
-        current_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        current_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(current_info)
 
         ready = status.get("numberReady", 0)
         ready_info = QLabel(f"Ready: {ready}")
-        ready_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        ready_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(ready_info)
 
     def _add_statefulset_specific_fields(self, data):
@@ -1550,22 +1562,22 @@ class DetailPageOverviewSection(BaseDetailSection):
         status = data.get("status", {})
 
         section_header = QLabel("STATEFULSET DETAILS")
-        section_header.setStyleSheet(EnhancedStyles.get_section_header_style())
+        section_header.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
         self.specific_layout.addWidget(section_header)
 
         replicas = spec.get("replicas", 0)
         replicas_info = QLabel(f"Desired Replicas: {replicas}")
-        replicas_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        replicas_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(replicas_info)
 
         ready_replicas = status.get("readyReplicas", 0)
         ready_info = QLabel(f"Ready Replicas: {ready_replicas}")
-        ready_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        ready_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(ready_info)
 
         service_name = spec.get("serviceName", "Unknown")
         service_info = QLabel(f"Service Name: {service_name}")
-        service_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        service_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(service_info)
 
     def _add_job_specific_fields(self, data):
@@ -1574,22 +1586,22 @@ class DetailPageOverviewSection(BaseDetailSection):
         status = data.get("status", {})
 
         section_header = QLabel("JOB DETAILS")
-        section_header.setStyleSheet(EnhancedStyles.get_section_header_style())
+        section_header.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
         self.specific_layout.addWidget(section_header)
 
         parallelism = spec.get("parallelism", 1)
         parallelism_info = QLabel(f"Parallelism: {parallelism}")
-        parallelism_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        parallelism_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(parallelism_info)
 
         completions = spec.get("completions", 1)
         completions_info = QLabel(f"Completions: {completions}")
-        completions_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        completions_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(completions_info)
 
         succeeded = status.get("succeeded", 0)
         succeeded_info = QLabel(f"Succeeded: {succeeded}")
-        succeeded_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        succeeded_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(succeeded_info)
 
     def _add_cronjob_specific_fields(self, data):
@@ -1598,22 +1610,22 @@ class DetailPageOverviewSection(BaseDetailSection):
         status = data.get("status", {})
 
         section_header = QLabel("CRONJOB DETAILS")
-        section_header.setStyleSheet(EnhancedStyles.get_section_header_style())
+        section_header.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
         self.specific_layout.addWidget(section_header)
 
         schedule = spec.get("schedule", "Unknown")
         schedule_info = QLabel(f"Schedule: {schedule}")
-        schedule_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        schedule_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(schedule_info)
 
         suspend = spec.get("suspend", False)
         suspend_info = QLabel(f"Suspended: {'Yes' if suspend else 'No'}")
-        suspend_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        suspend_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(suspend_info)
 
         last_schedule = status.get("lastScheduleTime", "Never")
         last_info = QLabel(f"Last Schedule: {last_schedule}")
-        last_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        last_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(last_info)
 
     def _add_node_specific_fields(self, data):
@@ -1622,24 +1634,24 @@ class DetailPageOverviewSection(BaseDetailSection):
         status = data.get("status", {})
 
         section_header = QLabel("NODE DETAILS")
-        section_header.setStyleSheet(EnhancedStyles.get_section_header_style())
+        section_header.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
         self.specific_layout.addWidget(section_header)
 
         # Node info
         node_info = status.get("nodeInfo", {})
         os_image = node_info.get("osImage", "Unknown")
         os_info = QLabel(f"OS Image: {os_image}")
-        os_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        os_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(os_info)
 
         kernel_version = node_info.get("kernelVersion", "Unknown")
         kernel_info = QLabel(f"Kernel Version: {kernel_version}")
-        kernel_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        kernel_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(kernel_info)
 
         container_runtime = node_info.get("containerRuntimeVersion", "Unknown")
         runtime_info = QLabel(f"Container Runtime: {container_runtime}")
-        runtime_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        runtime_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(runtime_info)
 
         # Add pods section for this node
@@ -1650,12 +1662,12 @@ class DetailPageOverviewSection(BaseDetailSection):
         status = data.get("status", {})
 
         section_header = QLabel("NAMESPACE DETAILS")
-        section_header.setStyleSheet(EnhancedStyles.get_section_header_style())
+        section_header.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
         self.specific_layout.addWidget(section_header)
 
         phase = status.get("phase", "Unknown")
         phase_info = QLabel(f"Phase: {phase}")
-        phase_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        phase_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(phase_info)
 
     def _add_helmrelease_specific_fields(self, data):
@@ -1664,18 +1676,18 @@ class DetailPageOverviewSection(BaseDetailSection):
         status = data.get("status", {})
 
         section_header = QLabel("HELM RELEASE DETAILS")
-        section_header.setStyleSheet(EnhancedStyles.get_section_header_style())
+        section_header.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
         self.specific_layout.addWidget(section_header)
 
         chart = spec.get("chart", {})
         chart_name = chart.get("spec", {}).get("chart", "Unknown")
         chart_info = QLabel(f"Chart: {chart_name}")
-        chart_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        chart_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(chart_info)
 
         version = chart.get("spec", {}).get("version", "Unknown")
         version_info = QLabel(f"Version: {version}")
-        version_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        version_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(version_info)
 
         release_status = status.get("conditions", [])
@@ -1684,7 +1696,7 @@ class DetailPageOverviewSection(BaseDetailSection):
             condition_type = last_condition.get("type", "Unknown")
             condition_status = last_condition.get("status", "Unknown")
             status_info = QLabel(f"Status: {condition_type} = {condition_status}")
-            status_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+            status_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
             self.specific_layout.addWidget(status_info)
 
     def _add_generic_custom_resource_fields(self, data):
@@ -1693,17 +1705,17 @@ class DetailPageOverviewSection(BaseDetailSection):
         status = data.get("status", {})
 
         section_header = QLabel("CUSTOM RESOURCE DETAILS")
-        section_header.setStyleSheet(EnhancedStyles.get_section_header_style())
+        section_header.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
         self.specific_layout.addWidget(section_header)
 
         api_version = data.get("apiVersion", "Unknown")
         api_info = QLabel(f"API Version: {api_version}")
-        api_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        api_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(api_info)
 
         kind = data.get("kind", "Unknown")
         kind_info = QLabel(f"Kind: {kind}")
-        kind_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        kind_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(kind_info)
 
         # Show some basic spec fields if available
@@ -1714,29 +1726,29 @@ class DetailPageOverviewSection(BaseDetailSection):
                 spec_text += f"... and {len(spec) - 3} more"
 
             spec_info = QLabel(f"Spec fields: {spec_text}")
-            spec_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+            spec_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
             self.specific_layout.addWidget(spec_info)
 
     def _add_priorityclass_specific_fields(self, data):
         """Add PriorityClass-specific fields"""
         section_header = QLabel("PRIORITY CLASS DETAILS")
-        section_header.setStyleSheet(EnhancedStyles.get_section_header_style())
+        section_header.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
         self.specific_layout.addWidget(section_header)
 
         value = data.get("value", 0)
         value_info = QLabel(f"Priority Value: {value}")
-        value_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        value_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(value_info)
 
         global_default = data.get("globalDefault", False)
         default_info = QLabel(f"Global Default: {'Yes' if global_default else 'No'}")
-        default_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        default_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(default_info)
 
         description = data.get("description", "")
         if description:
             desc_info = QLabel(f"Description: {description}")
-            desc_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+            desc_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
             desc_info.setWordWrap(True)
             self.specific_layout.addWidget(desc_info)
 
@@ -1745,23 +1757,23 @@ class DetailPageOverviewSection(BaseDetailSection):
         spec = data.get("spec", {})
 
         section_header = QLabel("LEASE DETAILS")
-        section_header.setStyleSheet(EnhancedStyles.get_section_header_style())
+        section_header.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
         self.specific_layout.addWidget(section_header)
 
         holder_identity = spec.get("holderIdentity", "Unknown")
         holder_info = QLabel(f"Holder Identity: {holder_identity}")
-        holder_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        holder_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(holder_info)
 
         lease_duration = spec.get("leaseDurationSeconds", "Unknown")
         duration_info = QLabel(f"Lease Duration: {lease_duration}s")
-        duration_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        duration_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(duration_info)
 
         acquire_time = spec.get("acquireTime", "")
         if acquire_time:
             acquire_info = QLabel(f"Acquire Time: {acquire_time}")
-            acquire_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+            acquire_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
             self.specific_layout.addWidget(acquire_info)
 
     def clear_content(self):
@@ -1822,30 +1834,30 @@ class DetailPageOverviewSection(BaseDetailSection):
     def _add_validating_webhook_specific_fields(self, data):
         """Add ValidatingWebhookConfiguration-specific fields"""
         section_header = QLabel("VALIDATING WEBHOOK DETAILS")
-        section_header.setStyleSheet(EnhancedStyles.get_section_header_style())
+        section_header.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
         self.specific_layout.addWidget(section_header)
 
         webhooks = data.get("webhooks", [])
         webhooks_info = QLabel(f"Webhooks: {len(webhooks)}")
-        webhooks_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        webhooks_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(webhooks_info)
 
         if webhooks:
             first_webhook = webhooks[0]
             name = first_webhook.get("name", "Unknown")
             name_info = QLabel(f"First Webhook Name: {name}")
-            name_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+            name_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
             self.specific_layout.addWidget(name_info)
 
     def _add_mutating_webhook_specific_fields(self, data):
         """Add MutatingWebhookConfiguration-specific fields"""
         section_header = QLabel("MUTATING WEBHOOK DETAILS")
-        section_header.setStyleSheet(EnhancedStyles.get_section_header_style())
+        section_header.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
         self.specific_layout.addWidget(section_header)
 
         webhooks = data.get("webhooks", [])
         webhooks_info = QLabel(f"Webhooks: {len(webhooks)}")
-        webhooks_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        webhooks_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(webhooks_info)
 
     def _add_replicationcontroller_specific_fields(self, data):
@@ -1854,17 +1866,17 @@ class DetailPageOverviewSection(BaseDetailSection):
         status = data.get("status", {})
 
         section_header = QLabel("REPLICATION CONTROLLER DETAILS")
-        section_header.setStyleSheet(EnhancedStyles.get_section_header_style())
+        section_header.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
         self.specific_layout.addWidget(section_header)
 
         replicas = spec.get("replicas", 0)
         replicas_info = QLabel(f"Desired Replicas: {replicas}")
-        replicas_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        replicas_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(replicas_info)
 
         ready_replicas = status.get("readyReplicas", 0)
         ready_info = QLabel(f"Ready Replicas: {ready_replicas}")
-        ready_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        ready_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(ready_info)
 
     def _add_ingressclass_specific_fields(self, data):
@@ -1872,18 +1884,18 @@ class DetailPageOverviewSection(BaseDetailSection):
         spec = data.get("spec", {})
 
         section_header = QLabel("INGRESS CLASS DETAILS")
-        section_header.setStyleSheet(EnhancedStyles.get_section_header_style())
+        section_header.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
         self.specific_layout.addWidget(section_header)
 
         controller = spec.get("controller", "Unknown")
         controller_info = QLabel(f"Controller: {controller}")
-        controller_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+        controller_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(controller_info)
 
         parameters = spec.get("parameters", {})
         if parameters:
             params_info = QLabel(f"Parameters: {parameters}")
-            params_info.setStyleSheet(EnhancedStyles.get_field_value_style())
+            params_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
             params_info.setWordWrap(True)
             self.specific_layout.addWidget(params_info)
 
@@ -1895,12 +1907,12 @@ class DetailPageOverviewSection(BaseDetailSection):
 
         # Create pods section header
         pods_header = QLabel("PODS RUNNING ON THIS NODE")
-        pods_header.setStyleSheet(EnhancedStyles.get_section_header_style())
+        pods_header.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
         self.specific_layout.addWidget(pods_header)
 
         # Create loading label
         self.pods_loading_label = QLabel("Loading pods...")
-        self.pods_loading_label.setStyleSheet(EnhancedStyles.get_field_value_style())
+        self.pods_loading_label.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         self.specific_layout.addWidget(self.pods_loading_label)
 
         # Create container for pods table
@@ -1919,7 +1931,6 @@ class DetailPageOverviewSection(BaseDetailSection):
 
         # Configure table properties
         self.pods_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.pods_table.setAlternatingRowColors(True)
         self.pods_table.verticalHeader().setVisible(False)
         
         # Connect single-click event to navigate to pod
@@ -2404,4 +2415,3 @@ class DetailPageOverviewSection(BaseDetailSection):
             
         except Exception as e:
             logging.error(f"Error updating release status: {e}")
-
