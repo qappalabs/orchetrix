@@ -25,12 +25,33 @@ class DetailPageEventsSection(BaseDetailSection):
 
     def _on_theme_changed(self, theme_name):
         """Refresh styles when theme changes"""
-        # Refresh events list style
+        # Refresh the list container
         if hasattr(self, 'events_list'):
             self.events_list.setStyleSheet(EventsSectionStyles.get_events_list_style())
-        # Re-render dynamic content with new theme
-        if self.current_data:
-            self.update_ui_with_data(self.current_data)
+
+        # Refresh all event item widgets
+        self._refresh_event_widgets()
+
+        # DO NOT call update_ui_with_data() - eliminates race condition
+
+    def _refresh_event_widgets(self):
+        """Iterate through QListWidget and refresh all event item widgets"""
+        if not hasattr(self, 'events_list'):
+            return
+
+        for i in range(self.events_list.count()):
+            item = self.events_list.item(i)
+            if item:
+                widget = self.events_list.itemWidget(item)
+                if widget:
+                    # Re-apply the event widget stylesheet
+                    widget.setStyleSheet(EventsSectionStyles.get_event_widget_style())
+                    # Also refresh child widgets if they exist
+                    for child in widget.findChildren(QLabel):
+                        # Re-apply stylesheet to child labels
+                        # Note: This applies generic styling - specific styles (type badges)
+                        # are already theme-aware from their style functions
+                        child.setStyleSheet(child.styleSheet())
     
     def set_raw_data(self, raw_data):
         """Set raw data for special resources like charts and releases"""
