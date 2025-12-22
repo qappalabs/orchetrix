@@ -523,13 +523,12 @@ class NavIconButton(QToolButton):
                 text_color=self.get_text_color()
             ))
         
-        # Update label colors based on active state (skip for coming_soon buttons)
-        if not self.coming_soon:
-            text_color = self.get_text_color()
-            if hasattr(self, 'icon_label') and self.icon_label:
-                self.icon_label.setStyleSheet(f"background-color: transparent; color: {text_color}; font-size: 14px;")
-            if hasattr(self, 'text_label') and self.text_label:
-                self.text_label.setStyleSheet(f"background-color: transparent; color: {text_color}; font-size: 14px;")
+        # Update label colors based on active state and coming_soon status
+        text_color = self.get_text_color() if not self.coming_soon else SidebarStyles.get_text_subtle()
+        if hasattr(self, 'icon_label') and self.icon_label:
+            self.icon_label.setStyleSheet(f"background-color: transparent; color: {text_color}; font-size: 14px;")
+        if hasattr(self, 'text_label') and self.text_label:
+            self.text_label.setStyleSheet(f"background-color: transparent; color: {text_color}; font-size: 14px;")
 
     def get_background_color(self):
         if self.coming_soon:
