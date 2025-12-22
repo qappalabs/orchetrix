@@ -21,6 +21,7 @@ class DetailPageOverviewSection(BaseDetailSection):
 
     def __init__(self, kubernetes_client, parent=None):
         super().__init__("Overview", kubernetes_client, parent)
+        self._current_status_type = 'default'  # Track status type for theme updates
         self.setup_overview_ui()
         # Note: Theme signals connected via ThemeAwareMixin in BaseDetailSection
 
@@ -30,11 +31,15 @@ class DetailPageOverviewSection(BaseDetailSection):
         if hasattr(self, 'overview_content'):
             self.overview_content.setStyleSheet(OverviewSectionStyles.get_overview_content_style())
 
-        # Refresh resource header widgets
+        # Refresh resource header widgets (static)
         if hasattr(self, 'resource_name_label'):
             self.resource_name_label.setStyleSheet(BaseDetailSectionStyles.get_primary_text_style())
+        if hasattr(self, 'resource_info_label'):
+            self.resource_info_label.setStyleSheet(BaseDetailSectionStyles.get_secondary_text_style())
+        if hasattr(self, 'creation_time_label'):
+            self.creation_time_label.setStyleSheet(BaseDetailSectionStyles.get_secondary_text_style())
 
-        # Refresh section headers
+        # Refresh section headers (static)
         if hasattr(self, 'status_header'):
             self.status_header.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
         if hasattr(self, 'conditions_header'):
@@ -42,15 +47,57 @@ class DetailPageOverviewSection(BaseDetailSection):
         if hasattr(self, 'labels_header'):
             self.labels_header.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
 
-        # Refresh tables if they exist
-        if hasattr(self, 'history_table'):
+        # Refresh status widgets (static)
+        if hasattr(self, 'status_text_label'):
+            self.status_text_label.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
+
+        # Refresh status badge with current status type (static)
+        if hasattr(self, 'status_badge') and hasattr(self, '_current_status_type'):
+            if self._current_status_type == 'success':
+                self.status_badge.setStyleSheet(OverviewSectionStyles.get_status_badge_success_style())
+            elif self._current_status_type == 'warning':
+                self.status_badge.setStyleSheet(OverviewSectionStyles.get_status_badge_warning_style())
+            elif self._current_status_type == 'error':
+                self.status_badge.setStyleSheet(OverviewSectionStyles.get_status_badge_error_style())
+            else:
+                self.status_badge.setStyleSheet(OverviewSectionStyles.get_status_badge_default_style())
+
+        # Refresh labels content (static)
+        if hasattr(self, 'labels_content'):
+            self.labels_content.setStyleSheet(BaseDetailSectionStyles.get_field_value_style() + """
+                font-family: 'Consolas', 'Courier New', monospace;
+                background-color: rgba(255, 255, 255, 0.05);
+                padding: 8px;
+                border-radius: 4px;
+            """)
+
+        # Refresh tables if they exist (static)
+        if hasattr(self, 'history_table') and self.history_table:
             self.history_table.setStyleSheet(OverviewSectionStyles.get_history_table_style())
-        if hasattr(self, 'pods_table'):
+        if hasattr(self, 'pods_table') and self.pods_table:
             self.pods_table.setStyleSheet(OverviewSectionStyles.get_pods_table_style())
-        # Re-render dynamic content with new theme
-        if self.current_data:
-            self.update_ui_with_data(self.current_data)
-    
+
+        # Refresh dynamic widgets in layouts by iterating through them
+        if hasattr(self, 'conditions_container_layout'):
+            self._refresh_dynamic_widgets_in_layout(self.conditions_container_layout)
+        if hasattr(self, 'specific_layout'):
+            self._refresh_dynamic_widgets_in_layout(self.specific_layout)
+
+        # DO NOT call update_ui_with_data() - eliminates race condition
+
+    def _refresh_dynamic_widgets_in_layout(self, layout):
+        """Iterate through layout and refresh stylesheets of dynamic widgets"""
+        if not layout:
+            return
+
+        for i in range(layout.count()):
+            item = layout.itemAt(i)
+            if item and item.widget():
+                widget = item.widget()
+                # Refresh stylesheet by re-applying theme-aware function
+                # Most dynamic widgets use field_value_style
+                widget.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
+
     def set_raw_data(self, raw_data):
         """Set raw data for special resources like charts and releases"""
         logging.info(f"OverviewSection: Received raw data for {self.resource_type}, keys: {list(raw_data.keys()) if raw_data else 'None'}")
@@ -723,6 +770,9 @@ class DetailPageOverviewSection(BaseDetailSection):
                 status_text = f"Resource phase: {phase}"
                 status_type = "default"
 
+        # Store status type for theme updates
+        self._current_status_type = status_type
+
         # Apply styling
         self.status_badge.setText(status_value)
         if status_type == "success":
@@ -764,6 +814,7 @@ class DetailPageOverviewSection(BaseDetailSection):
             condition_message = condition.get("message", "")
 
             condition_widget = QLabel(f"{condition_type}: {condition_status} - {condition_message}")
+            condition_widget.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
             self.conditions_container_layout.addWidget(condition_widget)
 
     def update_labels(self, data):
