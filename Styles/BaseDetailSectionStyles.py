@@ -55,7 +55,7 @@ def get_field_value_style():
         QLabel {{
             font-size: 13px;
             font-weight: normal;
-            color: {theme.colors.TEXT_SECONDARY};
+            color: {theme.colors.TEXT_LIGHT};
             line-height: 1.5;
         }}
     """
