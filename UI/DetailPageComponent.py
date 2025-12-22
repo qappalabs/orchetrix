@@ -14,7 +14,8 @@ from PyQt6.QtCore import (
 from PyQt6.QtGui import QColor, QIcon
 from typing import Optional, Dict, Any
 import logging
-from UI.Icons import resource_path
+from UI.Icons import resource_path, Icons
+from UI.ThemeManager import get_theme_manager
 
 # Import Kubernetes client
 from Utils.kubernetes_client import get_kubernetes_client
@@ -83,6 +84,15 @@ class DetailPageComponent(ThemeAwareMixin, QWidget):
         # Refresh tab widget
         if hasattr(self, 'tab_widget'):
             self.tab_widget.setStyleSheet(DetailPageComponentStyles.get_tab_widget_style())
+        # Update icon
+        self.update_theme_icon(theme_name)
+
+    def update_theme_icon(self, theme_name):
+        """Update close button icon when theme changes"""
+        if hasattr(self, 'back_button'):
+            icon = Icons.get_theme_icon("Detailpage_Close.svg", theme_name)
+            if icon and not icon.isNull():
+                self.back_button.setIcon(icon)
 
     def setup_ui(self):
         """Setup main UI structure"""
@@ -124,7 +134,10 @@ class DetailPageComponent(ThemeAwareMixin, QWidget):
 
         # Back/Close button - FIXED: Added icon and proper styling
         self.back_button = QPushButton()
-        self.back_button.setIcon(QIcon(resource_path("Icons/Detailpage_Close.svg")))
+        
+        # Determine current theme and load correct icon
+        theme_name = get_theme_manager().get_current_theme_name() or "Dark"
+        self.back_button.setIcon(Icons.get_theme_icon("Detailpage_Close.svg", theme_name))
         self.back_button.setIconSize(QSize(20, 20))
         self.back_button.setFixedSize(40, 40)
         self.back_button.setCursor(Qt.CursorShape.PointingHandCursor)  # Hand cursor on hover
