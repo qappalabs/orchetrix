@@ -23,12 +23,40 @@ class DetailPageDetailsSection(BaseDetailSection):
 
     def _on_theme_changed(self, theme_name):
         """Refresh styles when theme changes"""
-        # Refresh static widgets
+        # Refresh static container
         if hasattr(self, 'details_content'):
             self.details_content.setStyleSheet(DetailSectionStyles.get_content_style())
-        # Re-render dynamic content with new theme
-        if self.current_data:
-            self.update_ui_with_data(self.current_data)
+
+        # Refresh all dynamic widgets by iterating through the layout
+        if hasattr(self, 'details_layout'):
+            self._refresh_dynamic_widgets_in_layout(self.details_layout)
+
+        # DO NOT call update_ui_with_data() - eliminates race condition
+
+    def _refresh_dynamic_widgets_in_layout(self, layout):
+        """Recursively iterate through layout and refresh stylesheets of all widgets"""
+        if not layout:
+            return
+
+        for i in range(layout.count()):
+            item = layout.itemAt(i)
+            if item:
+                if item.widget():
+                    widget = item.widget()
+                    # Determine widget type and apply appropriate stylesheet
+                    class_name = widget.__class__.__name__
+                    if class_name == 'QLabel':
+                        # Check if it's a section header (all caps text) or field label/value
+                        text = widget.text()
+                        if text and text.isupper() and len(text.split()) <= 2:
+                            # Section header like "METADATA", "SPEC", "STATUS"
+                            widget.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
+                        else:
+                            # Field value (most common)
+                            widget.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
+                elif item.layout():
+                    # Recursively refresh nested layouts
+                    self._refresh_dynamic_widgets_in_layout(item.layout())
     
     def set_raw_data(self, raw_data):
         """Set raw data for special resources like charts and releases"""
