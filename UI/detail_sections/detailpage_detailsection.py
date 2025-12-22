@@ -10,7 +10,7 @@ from typing import Dict, Any
 import logging
 
 from .base_detail_section import BaseDetailSection
-from UI.Styles import EnhancedStyles
+import Styles.BaseDetailSectionStyles as BaseDetailSectionStyles
 import Styles.DetailSectionStyles as DetailSectionStyles
 
 
@@ -48,9 +48,9 @@ class DetailPageDetailsSection(BaseDetailSection):
         self.details_content = QWidget()
         self.details_content.setStyleSheet(DetailSectionStyles.get_content_style())
         self.details_layout = QVBoxLayout(self.details_content)
-        padding = EnhancedStyles.CONTENT_PADDING
+        padding = BaseDetailSectionStyles.CONTENT_PADDING
         self.details_layout.setContentsMargins(padding, padding, padding, padding)
-        self.details_layout.setSpacing(EnhancedStyles.SECTION_GAP)
+        self.details_layout.setSpacing(BaseDetailSectionStyles.SECTION_GAP)
 
         self.scroll_area.setWidget(self.details_content)
         self.content_layout.addWidget(self.scroll_area)
@@ -108,7 +108,7 @@ class DetailPageDetailsSection(BaseDetailSection):
     def add_metadata_section(self, data):
         """Add metadata section"""
         metadata_title = QLabel("METADATA")
-        metadata_title.setStyleSheet(EnhancedStyles.get_section_header_style())
+        metadata_title.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
         self.details_layout.addWidget(metadata_title)
 
         metadata = data.get("metadata", {})
@@ -139,7 +139,7 @@ class DetailPageDetailsSection(BaseDetailSection):
     def add_spec_section(self, spec):
         """Add spec section"""
         spec_title = QLabel("SPEC")
-        spec_title.setStyleSheet(EnhancedStyles.get_section_header_style())
+        spec_title.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
         self.details_layout.addWidget(spec_title)
 
         self.add_object_fields(spec, self.details_layout)
@@ -147,7 +147,7 @@ class DetailPageDetailsSection(BaseDetailSection):
     def add_status_section(self, status):
         """Add status section"""
         status_title = QLabel("STATUS")
-        status_title.setStyleSheet(EnhancedStyles.get_section_header_style())
+        status_title.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
         self.details_layout.addWidget(status_title)
 
         self.add_object_fields(status, self.details_layout)
@@ -160,10 +160,10 @@ class DetailPageDetailsSection(BaseDetailSection):
 
         name_label = QLabel(field_name + ":")
         name_label.setFixedWidth(150)
-        name_label.setStyleSheet(EnhancedStyles.get_field_label_style())
+        name_label.setStyleSheet(BaseDetailSectionStyles.get_field_label_style())
 
         value_label = QLabel(str(field_value))
-        value_label.setStyleSheet(EnhancedStyles.get_field_value_style())
+        value_label.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
         value_label.setWordWrap(True)
 
         field_layout.addWidget(name_label)
