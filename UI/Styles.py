@@ -32,6 +32,7 @@ class AppColors:
     BORDER_COLOR = "#2d2d2d"
     BORDER_LIGHT = "#454545"
     BORDER_DARK = "#2a2a2a"
+    BORDER_SUBTLE = "#2d2d2d"  # Same as BORDER_COLOR for backward compatibility
 
     # UI element colors
     CARD_BG = "#1e1e1e"
@@ -2158,5 +2159,3 @@ def get_status_disconnected_color():
     """
     theme = get_theme_manager().get_current_theme()
     return theme.colors.STATUS_DISCONNECTED
-
-
