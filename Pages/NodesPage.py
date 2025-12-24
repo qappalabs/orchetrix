@@ -370,12 +370,8 @@ class NodesPage(BaseResourcePage):
             graphs_widget = QWidget()
             graphs_widget.setLayout(graphs_layout)
             self.layout().insertWidget(0, graphs_widget)
-        
-        # Apply table style
-        self.table.setStyleSheet(AppStyles.TABLE_STYLE)
-        self.table.horizontalHeader().setStyleSheet(AppStyles.CUSTOM_HEADER_STYLE)
 
-        # Configure column widths
+        # Configure column widths (base class handles table styling)
         self.configure_columns()
 
         # Create no-data widget
@@ -571,9 +567,8 @@ class NodesPage(BaseResourcePage):
                 logging.warning(f"Row {row}: Node has no valid name")
                 return
             
-            # Create checkbox container (visible)
+            # Create checkbox container (base class handles styling)
             checkbox_container = self._create_checkbox_container(row, node_name)
-            checkbox_container.setStyleSheet(AppStyles.CHECKBOX_STYLE)
             self.table.setCellWidget(row, 0, checkbox_container)
             
             # Get utilization data from graphs (already loaded in background)
@@ -693,17 +688,12 @@ class NodesPage(BaseResourcePage):
             status_widget.clicked.connect(lambda: self.table.selectRow(row))
             self.table.setCellWidget(row, status_col, status_widget)
             
-            # Create and add action button with proper styling
-            action_button = self._create_node_action_button(row, node_name)
-            action_button.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE +
-        """
-        QToolButton::menu-indicator { image: none; width: 0px; }
-        """)
-            
-            # Create action container with proper styling
+            # Create and add action button (base class handles styling)
+            action_button = self._create_action_button(row, node_name)
+
+            # Create action container (styling already handled by default widget behavior)
             action_container = QWidget()
             action_container.setFixedWidth(AppConstants.SIZES["ACTION_WIDTH"])
-            action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
             action_layout = QHBoxLayout(action_container)
             action_layout.setContentsMargins(0, 0, 0, 0)
             action_layout.setSpacing(0)
@@ -737,9 +727,12 @@ class NodesPage(BaseResourcePage):
                 else:
                     item.setBackground(QColor("transparent"))
 
-    def _create_node_action_button(self, row, node_name):
+    def _create_action_button(self, row, resource_name=None, resource_namespace=None):
         """Create an action button with node-specific options"""
         try:
+            # Use node_name parameter (NodesPage specific)
+            node_name = resource_name
+            
             button = QToolButton()
 
             # Use custom SVG icon instead of text
@@ -752,13 +745,11 @@ class NodesPage(BaseResourcePage):
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
 
             button.setFixedWidth(30)
-            button.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE)
             button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
 
-            # Create menu
+            # Create menu (base class handles styling)
             menu = QMenu(button)
-            menu.setStyleSheet(AppStyles.MENU_STYLE)
 
             # Connect signals to change row appearance when menu opens/closes
             menu.aboutToShow.connect(lambda: self._highlight_active_row(row, True))
@@ -770,7 +761,7 @@ class NodesPage(BaseResourcePage):
                 detail_action.setIcon(QIcon(resource_path("icons/edit.png")))
             except:
                 pass  # Icon not critical
-            detail_action.triggered.connect(lambda: self._handle_node_action("Detail", row, node_name))
+            detail_action.triggered.connect(lambda: self._handle_action("Detail", row))
             
             delete_action = menu.addAction("Delete")
             try:
@@ -778,14 +769,14 @@ class NodesPage(BaseResourcePage):
             except:
                 pass  # Icon not critical
             delete_action.setProperty("dangerous", True)
-            delete_action.triggered.connect(lambda: self._handle_node_action("Delete", row, node_name))
+            delete_action.triggered.connect(lambda: self._handle_action("Delete", row))
             
             view_metrics = menu.addAction("View Metrics")
             try:
                 view_metrics.setIcon(QIcon(resource_path("icons/chart.png")))
             except:
                 pass  # Icon not critical
-            view_metrics.triggered.connect(lambda: self._handle_node_action("View Metrics", row, node_name))
+            view_metrics.triggered.connect(lambda: self._handle_action("View Metrics", row))
 
             button.setMenu(menu)
             
@@ -803,6 +794,39 @@ class NodesPage(BaseResourcePage):
             button.setFixedWidth(30)
             return button
     
+    def _handle_action(self, action, row):
+        """Handle action button clicks - integrates with base class and node-specific actions"""
+        if row >= len(self.nodes_data):
+            return
+            
+        # Get node name from the row data
+        node_name = None
+        if self.table.item(row, 1):  # Name column
+            node_name = self.table.item(row, 1).text()
+            
+        if not node_name:
+            logging.warning(f"No node name found for row {row}")
+            return
+        
+        # Handle common actions using base class methods when appropriate
+        if action == "Edit":
+            # Use base class edit functionality if it exists
+            if hasattr(self, '_handle_edit_resource'):
+                resource = self.nodes_data[row]
+                self._handle_edit_resource(node_name, "", resource)
+            else:
+                # Fallback to detail view
+                self._handle_node_action("Detail", row, node_name)
+        elif action == "Delete":
+            # Use base class delete functionality
+            if hasattr(self, 'delete_resource'):
+                self.delete_resource(node_name, "")
+            else:
+                self._handle_node_action("Delete", row, node_name)
+        else:
+            # Handle node-specific actions
+            self._handle_node_action(action, row, node_name)
+
     def _handle_node_action(self, action, row, node_name):
         """Handle node-specific actions"""
         if row >= len(self.nodes_data):
