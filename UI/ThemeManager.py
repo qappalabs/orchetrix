@@ -1008,6 +1008,7 @@ class LightColors:
     BORDER_LIGHT = "#E1E4E8"  # Lightest borders
     BORDER_COLOR = "#D1D5DA"  # Standard borders
     BORDER_DARK = "#C6CBD1"   # Darkest borders
+    BORDER_SUBTLE = "#F0F0F0" # Subtle borders (lighter than standard)
     
     # Hover states
     HOVER_BG = "rgba(0, 0, 0, 0.05)"  # Light hover background
