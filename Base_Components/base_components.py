@@ -15,6 +15,8 @@ import weakref
 
 from UI.Styles import AppStyles, AppColors, AppConstants
 from UI.Icons import resource_path
+from UI.ThemeAwarePage import ThemeAwareMixin
+import Styles.BaseTablePageStyles as BaseTablePageStyles
 import logging
 import os
 
@@ -215,11 +217,11 @@ class CustomHeader(QHeaderView):
             painter.drawLine(arrow_x, arrow_y + 3, arrow_x + 4, arrow_y - 3)
             painter.drawLine(arrow_x + 4, arrow_y - 3, arrow_x + 8, arrow_y + 3)
             
-class BaseTablePage(QWidget):
+class BaseTablePage(ThemeAwareMixin, QWidget):
     """
     Base class for table-based pages with common functionality.
     Implements table creation, checkbox management, and action menu creation.
-    
+
     Attributes:
         selected_items: A set tracking selected item names
         select_all_checkbox: Reference to the select-all checkbox
@@ -229,6 +231,7 @@ class BaseTablePage(QWidget):
         self.selected_items = set()
         self.select_all_checkbox = None
         self._setup_refs()
+        self._connect_theme_manager()  # Connect to theme changes
         
     def _setup_refs(self):
         """Set up weak references to avoid memory leaks"""
@@ -261,14 +264,14 @@ class BaseTablePage(QWidget):
         """Create header with title and item count"""
         header_layout = QHBoxLayout()
 
-        title_label = QLabel(title)
-        title_label.setStyleSheet(AppStyles.BASE_TITLE_STYLE)
+        self.title_label = QLabel(title)
+        self.title_label.setStyleSheet(BaseTablePageStyles.get_title_style())
 
         self.items_count = QLabel("0 items")
-        self.items_count.setStyleSheet(AppStyles.BASE_COUNT_STYLE)
+        self.items_count.setStyleSheet(BaseTablePageStyles.get_count_style())
         self.items_count.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
-        header_layout.addWidget(title_label)
+        header_layout.addWidget(self.title_label)
         header_layout.addWidget(self.items_count)
         header_layout.addStretch()
 
@@ -287,7 +290,7 @@ class BaseTablePage(QWidget):
         table.setSortingEnabled(True)
 
         # Apply enhanced styling with platform overrides
-        table.setStyleSheet(AppStyles.TABLE_STYLE)
+        table.setStyleSheet(BaseTablePageStyles.get_table_style())
         table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -365,59 +368,9 @@ class BaseTablePage(QWidget):
     def _create_checkbox(self, row, item_name):
         """Create a checkbox with proper icon loading and zero margins"""
         checkbox = QCheckBox()
-        
-        # Get resolved icon paths using the resource_path function
-        unchecked_icon_path = resource_path("Icons/check_box_unchecked.svg")
-        checked_icon_path = resource_path("Icons/check_box_checked.svg")
-        
-        # Verify icons exist, use fallback if needed
-        if not os.path.exists(unchecked_icon_path):
-            logging.warning(f"Unchecked icon not found: {unchecked_icon_path}")
-            unchecked_icon_path = self._create_fallback_checkbox_icon(False)
-        
-        if not os.path.exists(checked_icon_path):
-            logging.warning(f"Checked icon not found: {checked_icon_path}")
-            checked_icon_path = self._create_fallback_checkbox_icon(True)
-        
-        # Create stylesheet with resolved paths
-        checkbox_style = f"""
-            QCheckBox {{
-                margin: 0px;
-                padding: 0px;
-                spacing: 0px;
-                background: transparent;
-                border: none;
-                outline: none;
-                width: 16px;
-                height: 16px;
-                max-width: 16px;
-                max-height: 16px;
-                min-width: 16px;
-                min-height: 16px;
-            }}
-            QCheckBox::indicator {{
-                width: 16px;
-                height: 16px;
-                border: none;
-                background: transparent;
-                margin: 0px;
-                padding: 0px;
-                spacing: 0px;
-                subcontrol-position: center;
-                subcontrol-origin: content;
-            }}
-            QCheckBox::indicator:unchecked {{
-                image: url({unchecked_icon_path.replace(os.sep, '/')});
-            }}
-            QCheckBox::indicator:checked {{
-                image: url({checked_icon_path.replace(os.sep, '/')});
-            }}
-            QCheckBox::indicator:hover {{
-                opacity: 0.8;
-            }}
-        """
-        
-        checkbox.setStyleSheet(checkbox_style)
+
+        # Apply theme-aware checkbox styling
+        checkbox.setStyleSheet(BaseTablePageStyles.get_checkbox_style())
         checkbox.setFixedSize(16, 16)
         checkbox.stateChanged.connect(partial(self._handle_checkbox_change, item_name=item_name))
         return checkbox
@@ -456,52 +409,9 @@ class BaseTablePage(QWidget):
     def _create_select_all_checkbox(self):
         """Create the select-all checkbox for the header using resolved icon paths"""
         checkbox = QCheckBox()
-        
-        # Get resolved icon paths
-        unchecked_icon_path = resource_path("Icons/check_box_unchecked.svg")
-        checked_icon_path = resource_path("Icons/check_box_checked.svg")
-        
-        # Verify icons exist, use fallback if needed
-        if not os.path.exists(unchecked_icon_path):
-            unchecked_icon_path = self._create_fallback_checkbox_icon(False)
-        
-        if not os.path.exists(checked_icon_path):
-            checked_icon_path = self._create_fallback_checkbox_icon(True)
-        
-        # Apply consistent styling with resolved paths
-        select_all_style = f"""
-            QCheckBox {{
-                margin: 0px;
-                padding: 0px;
-                spacing: 0px;
-                background: transparent;
-                border: none;
-                outline: none;
-                width: 16px;
-                height: 16px;
-            }}
-            QCheckBox::indicator {{
-                width: 16px;
-                height: 16px;
-                border: none;
-                background: transparent;
-                margin: 0px;
-                padding: 0px;
-                subcontrol-position: center;
-                subcontrol-origin: content;
-            }}
-            QCheckBox::indicator:unchecked {{
-                image: url({unchecked_icon_path.replace(os.sep, '/')});
-            }}
-            QCheckBox::indicator:checked {{
-                image: url({checked_icon_path.replace(os.sep, '/')});
-            }}
-            QCheckBox::indicator:hover {{
-                opacity: 0.8;
-            }}
-        """
-        
-        checkbox.setStyleSheet(select_all_style)
+
+        # Apply theme-aware checkbox styling
+        checkbox.setStyleSheet(BaseTablePageStyles.get_checkbox_style())
         checkbox.stateChanged.connect(self._handle_select_all)
         self.select_all_checkbox = checkbox
         return checkbox
@@ -522,9 +432,9 @@ class BaseTablePage(QWidget):
         header.setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
         header.resizeSection(col, 40)
         self.table.setHorizontalHeaderItem(col, QTableWidgetItem(""))
-        
+
         container = QWidget()
-        container.setStyleSheet("background-color: #252525;")
+        container.setStyleSheet(BaseTablePageStyles.get_header_widget_style())
         container_layout = QHBoxLayout(container)
         container_layout.setContentsMargins(0, 0, 0, 0)
         container_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -549,13 +459,13 @@ class BaseTablePage(QWidget):
         button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
 
         button.setFixedWidth(30)
-        button.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE)
+        button.setStyleSheet(BaseTablePageStyles.get_action_button_style())
         button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         button.setCursor(Qt.CursorShape.PointingHandCursor)
 
         # Create menu
         menu = QMenu(button)
-        menu.setStyleSheet(AppStyles.MENU_STYLE)
+        menu.setStyleSheet(BaseTablePageStyles.get_menu_style())
 
         # Connect signals to change row appearance when menu opens/closes
         menu.aboutToShow.connect(lambda: self._highlight_active_row(row, True))
@@ -629,7 +539,7 @@ class BaseTablePage(QWidget):
 
         # Create the content container with proper sizing
         content_widget = QWidget()
-        content_widget.setStyleSheet(AppStyles.EMPTY_STATE_STYLE)
+        content_widget.setStyleSheet(BaseTablePageStyles.get_empty_state_style())
         content_widget.setFixedWidth(500)
         content_layout = QVBoxLayout(content_widget)
         content_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -645,7 +555,7 @@ class BaseTablePage(QWidget):
         if description:
             desc_label = QLabel(description)
             desc_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            desc_label.setStyleSheet("font-size: 14px; margin-top: 5px; color: #888888;")
+            desc_label.setStyleSheet(BaseTablePageStyles.get_empty_message_style())
             desc_label.setWordWrap(True)
             content_layout.addWidget(desc_label)
 
@@ -653,3 +563,64 @@ class BaseTablePage(QWidget):
         empty_layout.addWidget(content_widget, 0, Qt.AlignmentFlag.AlignCenter)
 
         return empty_widget
+
+    def _on_theme_changed(self, theme_name):
+        """Refresh all styles when theme changes"""
+        logging.debug(f"BaseTablePage: Refreshing theme to {theme_name}")
+
+        # Refresh title and count labels
+        if hasattr(self, 'title_label') and self.title_label:
+            self.title_label.setStyleSheet(BaseTablePageStyles.get_title_style())
+        if hasattr(self, 'items_count') and self.items_count:
+            self.items_count.setStyleSheet(BaseTablePageStyles.get_count_style())
+
+        # Refresh table
+        if hasattr(self, 'table') and self.table:
+            self.table.setStyleSheet(BaseTablePageStyles.get_table_style())
+
+            # Clear any direct header stylesheet so it inherits from table's QHeaderView::section
+            header = self.table.horizontalHeader()
+            if header:
+                header.setStyleSheet("")  # Forces header to use table's stylesheet
+
+        # Refresh select-all checkbox
+        if hasattr(self, 'select_all_checkbox') and self.select_all_checkbox:
+            self.select_all_checkbox.setStyleSheet(BaseTablePageStyles.get_checkbox_style())
+
+        # Refresh all row checkboxes
+        if hasattr(self, 'table') and self.table:
+            for row in range(self.table.rowCount()):
+                # Get checkbox container from column 0
+                checkbox_container = self.table.cellWidget(row, 0)
+                if checkbox_container:
+                    # Find checkbox widget inside container
+                    for child in checkbox_container.children():
+                        if isinstance(child, QCheckBox):
+                            child.setStyleSheet(BaseTablePageStyles.get_checkbox_style())
+                            break
+
+        # Refresh header widget container
+        if hasattr(self, '_item_widgets') and 'header_widget' in self._item_widgets:
+            header_widget = self._item_widgets['header_widget']
+            if header_widget:
+                header_widget.setStyleSheet(BaseTablePageStyles.get_header_widget_style())
+
+        # Refresh action buttons and menus in all rows
+        if hasattr(self, 'table') and self.table:
+            for row in range(self.table.rowCount()):
+                # Action buttons are typically in the last column
+                action_col = self.table.columnCount() - 1
+                action_container = self.table.cellWidget(row, action_col)
+
+                if action_container:
+                    # Find action button inside container
+                    for child in action_container.children():
+                        if isinstance(child, QToolButton):
+                            child.setStyleSheet(BaseTablePageStyles.get_action_button_style())
+
+                            # Refresh menu if exists
+                            if child.menu():
+                                child.menu().setStyleSheet(BaseTablePageStyles.get_menu_style())
+                            break
+
+        logging.debug(f"BaseTablePage: Theme refresh complete for {theme_name}")
