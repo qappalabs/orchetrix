@@ -23,6 +23,8 @@ from .virtual_scroll_table import VirtualScrollTable
 from Base_Components.base_components import BaseTablePage
 from UI.Styles import AppStyles, AppColors
 from UI.Icons import resource_path
+import Styles.BaseResourcePageStyles as BaseResourcePageStyles
+import Styles.BaseTablePageStyles as BaseTablePageStyles
 from UI.LoadingSpinner import LoadingOverlay, create_loading_overlay, create_compact_spinner
 from Utils.unified_resource_loader import get_unified_resource_loader, LoadResult
 from Utils.data_formatters import format_age, parse_memory_value, format_percentage, truncate_string
@@ -60,6 +62,7 @@ class BaseResourcePage(BaseTablePage):
         self.namespace_filter = "default"  # Start with default namespace, will be updated when namespaces are loaded
         self.search_bar = None
         self.namespace_combo = None
+        self._delete_btn = None
 
         self.loading_thread = None
         self.delete_thread = None
@@ -418,8 +421,8 @@ class BaseResourcePage(BaseTablePage):
         header_layout.addStretch(1)
 
         # Add delete selected button
-        delete_btn = self._create_delete_selected_button()
-        header_layout.addWidget(delete_btn)
+        self._delete_btn = self._create_delete_selected_button()
+        header_layout.addWidget(self._delete_btn)
 
         refresh_btn = QPushButton("Refresh")
         refresh_style = getattr(AppStyles, "SECONDARY_BUTTON_STYLE",
@@ -444,28 +447,8 @@ class BaseResourcePage(BaseTablePage):
         return delete_btn
     
     def _get_delete_button_style(self):
-        """Centralized delete button styling"""
-        return """
-            QPushButton#deleteSelectedBtn {
-                background-color: #d32f2f;
-                color: #ffffff;
-                border: none;
-                border-radius: 4px;
-                padding: 5px 16px;
-                font-size: 13px;
-                margin-right: 8px;
-            }
-            QPushButton#deleteSelectedBtn:hover {
-                background-color: #b71c1c;
-            }
-            QPushButton#deleteSelectedBtn:pressed {
-                background-color: #8d1e1e;
-            }
-            QPushButton#deleteSelectedBtn:disabled {
-                background-color: #cccccc;
-                color: #666666;
-            }
-        """
+        """Centralized delete button styling - uses BaseResourcePageStyles for theme support"""
+        return BaseResourcePageStyles.get_delete_button_style()
     
     def _handle_delete_selected(self):
         """Base implementation for delete selected functionality"""
@@ -542,7 +525,7 @@ class BaseResourcePage(BaseTablePage):
         
         # Search bar with label
         search_label = QLabel("Search:")
-        search_label.setStyleSheet("color: #ffffff; font-size: 12px; font-weight: normal;")
+        search_label.setStyleSheet(BaseResourcePageStyles.get_search_label_style())
         search_label.setMinimumWidth(50)
         
         self.search_bar = QLineEdit()
@@ -571,7 +554,7 @@ class BaseResourcePage(BaseTablePage):
         namespace_label = None
         if getattr(self, 'show_namespace_dropdown', True):
             namespace_label = QLabel("Namespace:")
-            namespace_label.setStyleSheet("color: #ffffff; font-size: 12px; font-weight: normal;")
+            namespace_label.setStyleSheet(BaseResourcePageStyles.get_namespace_label_style())
             namespace_label.setMinimumWidth(70)
             
             self.namespace_combo = QComboBox()
@@ -1297,10 +1280,10 @@ class BaseResourcePage(BaseTablePage):
         
         # Apply styling to both title and subtitle
         empty_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        empty_title.setStyleSheet("color: #ffffff; font-size: 20px; font-weight: bold; background-color: transparent; margin: 8px;")
-        
-        empty_subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)  
-        empty_subtitle.setStyleSheet("color: #9ca3af; font-size: 14px; background-color: transparent; margin: 4px;")
+        empty_title.setStyleSheet(BaseResourcePageStyles.get_empty_title_style())
+
+        empty_subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_subtitle.setStyleSheet(BaseResourcePageStyles.get_empty_subtitle_style())
         
         # Add widgets to message container
         self._message_widget_container.layout().addWidget(empty_title)
@@ -1318,7 +1301,7 @@ class BaseResourcePage(BaseTablePage):
         
         error_label = QLabel(f"Error: {message}")
         error_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        error_label.setStyleSheet("color: #ef4444; font-size: 16px;")
+        error_label.setStyleSheet(BaseResourcePageStyles.get_error_label_style())
         error_label.setWordWrap(True)
         
         self._message_widget_container.layout().addWidget(error_label)
@@ -1705,7 +1688,7 @@ class BaseResourcePage(BaseTablePage):
         table.setSortingEnabled(True)
 
         # Apply enhanced styling with platform overrides
-        table.setStyleSheet(AppStyles.TABLE_STYLE)
+        table.setStyleSheet(BaseTablePageStyles.get_table_style())
         table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -2041,10 +2024,9 @@ class BaseResourcePage(BaseTablePage):
         # Create menu
         menu = QMenu(button)
         try:
-            from UI.Styles import AppStyles
-            menu.setStyleSheet(AppStyles.MENU_STYLE)
+            menu.setStyleSheet(BaseTablePageStyles.get_menu_style())
         except (ImportError, AttributeError) as e:
-            logging.debug(f"Could not load AppStyles for menu: {e}")
+            logging.debug(f"Could not load BaseTablePageStyles for menu: {e}")
             # Fallback menu styling
             menu.setStyleSheet("""
                 QMenu {
@@ -2053,7 +2035,9 @@ class BaseResourcePage(BaseTablePage):
                     color: white;
                 }
                 QMenu::item {
-                    padding: 5px 20px;
+                    padding: 10px 24px 10px 36px;
+                    font-size: 13px;
+                    margin: 2px 0px;
                 }
                 QMenu::item:selected {
                     background-color: #0078d4;
@@ -2461,6 +2445,31 @@ class BaseResourcePage(BaseTablePage):
                 # No manual cache cleanup needed
         except Exception as e:
             logging.error(f"Error in BaseResourcePage destructor: {e}")
+
+    def _on_theme_changed(self, theme_name):
+        """Refresh resource page specific styles when theme changes"""
+        # Call parent's theme change handler first
+        super()._on_theme_changed(theme_name)
+
+        # Refresh resource-specific widgets
+        # Note: Most widgets (table, checkboxes, action buttons) are already handled by BaseTablePage
+
+        # Refresh search bar if it exists
+        if hasattr(self, 'search_bar') and self.search_bar:
+            self.search_bar.setStyleSheet(BaseResourcePageStyles.get_search_input_style())
+
+        # Refresh namespace combo if it exists
+        if hasattr(self, 'namespace_combo') and self.namespace_combo:
+            self.namespace_combo.setStyleSheet(BaseResourcePageStyles.get_namespace_combo_style())
+
+        # Refresh delete button if it exists
+        if hasattr(self, '_delete_btn') and self._delete_btn:
+            self._delete_btn.setStyleSheet(BaseResourcePageStyles.get_delete_button_style())
+
+        # Note: Search/namespace labels and empty state widgets are recreated when shown,
+        # so they will automatically use the current theme
+
+        logging.debug(f"BaseResourcePage: Theme refresh complete for {theme_name}")
 
     def cleanup_on_destroy(self):
         """Explicit cleanup method that can be called before destruction"""
