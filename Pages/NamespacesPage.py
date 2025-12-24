@@ -149,8 +149,7 @@ class NamespacesPage(BaseResourcePage):
             else:
                 button_layout.addWidget(self.add_namespace_button)
 
-        self.table.setStyleSheet(AppStyles.TABLE_STYLE)
-        self.table.horizontalHeader().setStyleSheet(AppStyles.CUSTOM_HEADER_STYLE)
+        # Table styling is already handled by BaseResourcePage
         self.configure_columns()
         
         # Add delete selected button
@@ -191,8 +190,8 @@ class NamespacesPage(BaseResourcePage):
         self.table.setRowHeight(row, 40)
         resource_name = resource["name"]
 
+        # Checkbox styling is already handled by BaseResourcePage
         checkbox_container = self._create_checkbox_container(row, resource_name)
-        checkbox_container.setStyleSheet(AppStyles.CHECKBOX_STYLE)
         self.table.setCellWidget(row, 0, checkbox_container)
 
         raw_data = resource.get("raw_data", {})
@@ -235,15 +234,13 @@ class NamespacesPage(BaseResourcePage):
         status_widget.clicked.connect(lambda: self.table.selectRow(row))
         self.table.setCellWidget(row, status_col, status_widget)
 
-        # Replace the action button creation section with this:
+        # Action button styling is already handled by BaseResourcePage
         action_button = self._create_action_button(row, resource["name"], "")
-        action_button.setStyleSheet(AppStyles.ACTION_BUTTON_STYLE)
 
         # Connect the action button to handle the click properly
         action_button.clicked.connect(lambda checked, name=resource_name: self._handle_action_button_click(name))
 
         action_container = self._create_action_container(row, action_button)
-        action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
         self.table.setCellWidget(row, len(columns) + 2, action_container)
 
     def refresh_table(self):
