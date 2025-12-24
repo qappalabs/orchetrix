@@ -51,11 +51,9 @@ class PortForwardingPage(BaseResourcePage):
         
         # Set up the base UI components
         layout = super().setup_ui("Port Forwarding", headers, sortable_columns)
-        
-        # Apply table style
-        self.table.setStyleSheet(AppStyles.TABLE_STYLE)
-        self.table.horizontalHeader().setStyleSheet(AppStyles.CUSTOM_HEADER_STYLE)
-        
+
+        # Table styling is already handled by BaseResourcePage
+
         # Configure column widths
         self.configure_columns()
         self._add_management_buttons()
@@ -194,10 +192,9 @@ class PortForwardingPage(BaseResourcePage):
         """Populate a single row with port forward data"""
         self.table.setRowHeight(row, 40)
         
-        # Create checkbox for row selection
+        # Create checkbox for row selection - styling handled by BaseResourcePage
         resource_name = resource["name"]
         checkbox_container = self._create_checkbox_container(row, resource_name)
-        checkbox_container.setStyleSheet(AppStyles.CHECKBOX_STYLE)
         self.table.setCellWidget(row, 0, checkbox_container)
         
         # Calculate uptime
@@ -275,11 +272,9 @@ class PortForwardingPage(BaseResourcePage):
         status_widget.clicked.connect(lambda: self.table.selectRow(row))
         self.table.setCellWidget(row, status_col, status_widget)
         
-        # Action button
+        # Action button - styling handled by BaseResourcePage
         action_button = self._create_action_button(row, resource["resource_name"], resource["namespace"])
-        action_button.setStyleSheet(AppStyles.ACTION_BUTTON_STYLE)
         action_container = self._create_action_container(row, action_button)
-        action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
         self.table.setCellWidget(row, 9, action_container)
 
     def _create_action_button(self, row, resource_name=None, resource_namespace=None):

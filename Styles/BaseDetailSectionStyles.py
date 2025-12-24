@@ -18,9 +18,7 @@ FIELD_GAP = 8
 CONTENT_PADDING = 20
 
 
-# ============================================================================
 # THEME-AWARE TYPOGRAPHY STYLES (moved from EnhancedStyles)
-# ============================================================================
 
 def get_section_header_style():
     """Theme-aware section header style (e.g., 'METADATA', 'STATUS', 'SPEC')"""
@@ -87,9 +85,7 @@ def get_secondary_text_style():
     """
 
 
-# ============================================================================
 # ERROR/INFO WIDGET STYLES (updated to be theme-aware)
-# ============================================================================
 
 def get_error_widget_error_style():
     """Error widget style for actual errors (red) - theme-aware"""

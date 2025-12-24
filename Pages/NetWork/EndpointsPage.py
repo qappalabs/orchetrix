@@ -84,7 +84,6 @@ class EndpointsPage(BaseResourcePage):
         # Create checkbox for row selection
         resource_name = resource["name"]
         checkbox_container = self._create_checkbox_container(row, resource_name)
-        checkbox_container.setStyleSheet(AppStyles.CHECKBOX_STYLE)
         self.table.setCellWidget(row, 0, checkbox_container)
         
         # Prepare data columns
@@ -133,7 +132,6 @@ class EndpointsPage(BaseResourcePage):
         # Create action container with proper styling
         action_container = QWidget()
         action_container.setFixedWidth(AppConstants.SIZES["ACTION_WIDTH"])
-        action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
         action_layout = QHBoxLayout(action_container)
         action_layout.setContentsMargins(0, 0, 0, 0)
         action_layout.setSpacing(0)

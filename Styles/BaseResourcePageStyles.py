@@ -88,9 +88,10 @@ def get_checkbox_container_style():
 
 
 def get_delete_button_style():
-    """Style for delete selected button - hardcoded red for semantic meaning"""
-    return """
-        QPushButton#deleteSelectedBtn {
+    """Style for delete selected button - red for semantic meaning, theme-aware disabled state"""
+    theme = _get_theme()
+    return f"""
+        QPushButton#deleteSelectedBtn {{
             background-color: #d32f2f;
             color: #ffffff;
             border: none;
@@ -98,17 +99,17 @@ def get_delete_button_style():
             padding: 5px 16px;
             font-size: 13px;
             margin-right: 8px;
-        }
-        QPushButton#deleteSelectedBtn:hover {
+        }}
+        QPushButton#deleteSelectedBtn:hover {{
             background-color: #b71c1c;
-        }
-        QPushButton#deleteSelectedBtn:pressed {
+        }}
+        QPushButton#deleteSelectedBtn:pressed {{
             background-color: #8d1e1e;
-        }
-        QPushButton#deleteSelectedBtn:disabled {
-            background-color: #cccccc;
-            color: #666666;
-        }
+        }}
+        QPushButton#deleteSelectedBtn:disabled {{
+            background-color: {theme.colors.BG_MEDIUM};
+            color: {theme.colors.TEXT_SUBTLE};
+        }}
     """
 
 

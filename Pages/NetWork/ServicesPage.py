@@ -45,10 +45,9 @@ class ServicesPage(BaseResourcePage):
         sortable_columns = {1, 2, 3, 4, 5, 6, 7, 8, 9}
         
         layout = super().setup_ui("Services", headers, sortable_columns)
-        
-        self.table.setStyleSheet(AppStyles.TABLE_STYLE)
-        self.table.horizontalHeader().setStyleSheet(AppStyles.CUSTOM_HEADER_STYLE)
-        
+
+        # Table styling is already handled by BaseResourcePage
+
         self.configure_columns()
         self._add_port_forward_management_button()
 
@@ -124,8 +123,8 @@ class ServicesPage(BaseResourcePage):
         self.table.setRowHeight(row, 40)
         
         resource_name = resource["name"]
+        # Checkbox styling handled by BaseResourcePage
         checkbox_container = self._create_checkbox_container(row, resource_name)
-        checkbox_container.setStyleSheet(AppStyles.CHECKBOX_STYLE)
         self.table.setCellWidget(row, 0, checkbox_container)
         
         # Use processed data from unified resource loader when available
@@ -221,10 +220,9 @@ class ServicesPage(BaseResourcePage):
         status_widget.clicked.connect(lambda: self.table.selectRow(row))
         self.table.setCellWidget(row, status_col, status_widget)
         
+        # Action button styling handled by BaseResourcePage
         action_button = self._create_action_button(row, resource["name"], resource["namespace"])
-        action_button.setStyleSheet(AppStyles.ACTION_BUTTON_STYLE)
         action_container = self._create_action_container(row, action_button)
-        action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
         self.table.setCellWidget(row, len(columns) + 2, action_container)
 
     # Removed duplicate _create_action_button - now uses base class implementation

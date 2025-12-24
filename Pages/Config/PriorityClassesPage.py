@@ -80,10 +80,9 @@ class PriorityClassesPage(BaseResourcePage):
         # Set row height
         self.table.setRowHeight(row, 40)
         
-        # Create checkbox for row selection
+        # Create checkbox for row selection (styling already handled by BaseResourcePage)
         resource_name = resource["name"]
         checkbox_container = self._create_checkbox_container(row, resource_name)
-        checkbox_container.setStyleSheet(AppStyles.CHECKBOX_STYLE)        
         self.table.setCellWidget(row, 0, checkbox_container)
         
         # Prepare data columns
@@ -128,9 +127,7 @@ class PriorityClassesPage(BaseResourcePage):
         
         # Create and add action button
         action_button = self._create_action_button(row, resource["name"], resource["namespace"])
-        action_button.setStyleSheet(AppStyles.ACTION_BUTTON_STYLE)
         action_container = self._create_action_container(row, action_button)
-        action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
         self.table.setCellWidget(row, len(columns) + 1, action_container)
     
     def handle_row_click(self, row, column):

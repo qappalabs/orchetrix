@@ -83,8 +83,7 @@ class CustomResourceInstancePage(BaseResourcePage):
     
     def _apply_table_styling(self):
         """Apply consistent table styling"""
-        self.table.setStyleSheet(AppStyles.TABLE_STYLE)
-        self.table.horizontalHeader().setStyleSheet(AppStyles.CUSTOM_HEADER_STYLE)
+        # Table styling is already handled by BaseResourcePage
         
     def configure_columns(self):
         """Configure column widths for custom resource instances"""
@@ -120,7 +119,6 @@ class CustomResourceInstancePage(BaseResourcePage):
         # Create checkbox for row selection
         resource_name = resource["name"]
         checkbox_container = self._create_checkbox_container(row, resource_name)
-        checkbox_container.setStyleSheet(AppStyles.CHECKBOX_STYLE)
         self.table.setCellWidget(row, 0, checkbox_container)
         
         # Extract custom resource details from raw data
@@ -203,9 +201,7 @@ class CustomResourceInstancePage(BaseResourcePage):
         
         # Create and add action button
         action_button = self._create_action_button(row, resource["name"], namespace if self.scope == "Namespaced" else "")
-        action_button.setStyleSheet(AppStyles.ACTION_BUTTON_STYLE)
         action_container = self._create_action_container(row, action_button)
-        action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
         self.table.setCellWidget(row, len(columns) + 1, action_container)
     
     def handle_row_click(self, row, column):

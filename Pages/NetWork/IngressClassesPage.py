@@ -33,11 +33,9 @@ class IngressClassesPage(BaseResourcePage):
         
         # Set up the base UI components
         layout = super().setup_ui("Ingress Classes", headers, sortable_columns)
-        
-        # Apply table style
-        self.table.setStyleSheet(AppStyles.TABLE_STYLE)
-        self.table.horizontalHeader().setStyleSheet(AppStyles.CUSTOM_HEADER_STYLE)
-        
+
+        # Table styling is already handled by BaseResourcePage
+
         # Configure column widths
         self.configure_columns()
         
@@ -87,8 +85,8 @@ class IngressClassesPage(BaseResourcePage):
         
         # Create checkbox for row selection
         resource_name = resource["name"]
+        # Checkbox styling handled by BaseResourcePage
         checkbox_container = self._create_checkbox_container(row, resource_name)
-        checkbox_container.setStyleSheet(AppStyles.CHECKBOX_STYLE)
         self.table.setCellWidget(row, 0, checkbox_container)
         
         # Extract data from raw_data
@@ -156,11 +154,9 @@ class IngressClassesPage(BaseResourcePage):
             # Add item to table
             self.table.setItem(row, cell_col, item)
         
-        # Create and add action button
+        # Create and add action button - styling handled by BaseResourcePage
         action_button = self._create_action_button(row, resource["name"], resource.get("namespace", ""))
-        action_button.setStyleSheet(AppStyles.ACTION_BUTTON_STYLE)
         action_container = self._create_action_container(row, action_button)
-        action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
         self.table.setCellWidget(row, len(columns) + 1, action_container)
 
     def handle_row_click(self, row, column):

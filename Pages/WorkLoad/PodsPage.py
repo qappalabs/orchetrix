@@ -36,11 +36,9 @@ class PodsPage(BaseResourcePage):
         
         # Set up the base UI components with styles
         layout = super().setup_ui("Pods", headers, sortable_columns)
-        
-        # Apply table style
-        self.table.setStyleSheet(AppStyles.TABLE_STYLE)
-        self.table.horizontalHeader().setStyleSheet(AppStyles.CUSTOM_HEADER_STYLE)
-        
+
+        # Table styling is already handled by BaseResourcePage
+
         # Configure column widths
         self.configure_columns()
         
@@ -129,9 +127,8 @@ class PodsPage(BaseResourcePage):
         self.table.setRowHeight(row, 40)
         name = resource["name"]
         
-        # 1) Checkbox
+        # 1) Checkbox - styling handled by BaseResourcePage
         cb = self._create_checkbox_container(row, name)
-        cb.setStyleSheet(AppStyles.CHECKBOX_STYLE)
         self.table.setCellWidget(row, 0, cb)
 
         # Get data from the kubernetes client response
@@ -259,11 +256,9 @@ class PodsPage(BaseResourcePage):
         status_widget.clicked.connect(lambda: self.table.selectRow(row))
         self.table.setCellWidget(row, status_col, status_widget)
 
-        # 4) Action menu (last column index 10)
+        # 4) Action menu (last column index 10) - styling handled by BaseResourcePage
         action_btn = self._create_action_button(row, name, resource.get("namespace", ""))
-        action_btn.setStyleSheet(AppStyles.ACTION_BUTTON_STYLE)
         action_container = self._create_action_container(row, action_btn)
-        action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
         self.table.setCellWidget(row, status_col + 1, action_container)
 
     # Removed duplicate _create_action_button - now uses base class implementation

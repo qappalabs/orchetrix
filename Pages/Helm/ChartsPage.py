@@ -389,8 +389,7 @@ class ChartsPage(BaseResourcePage):
             self.search_bar.textChanged.connect(self._on_search_text_changed)
             self.search_bar.returnPressed.connect(self.handle_search)
         
-        self.table.setStyleSheet(AppStyles.TABLE_STYLE)
-        self.table.horizontalHeader().setStyleSheet(AppStyles.CUSTOM_HEADER_STYLE)
+        # Table styling is already handled by BaseResourcePage
         
         self.configure_columns()
         
@@ -1037,9 +1036,7 @@ class ChartsPage(BaseResourcePage):
         
         # Create and add action button
         action_button = self._create_action_button(row, chart_name)
-        action_button.setStyleSheet(AppStyles.ACTION_BUTTON_STYLE)
         action_container = self._create_action_container(row, action_button)
-        action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
         self.table.setCellWidget(row, len(columns) + 1, action_container)
    
     def _create_action_button(self, row, chart_name):

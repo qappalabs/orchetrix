@@ -34,11 +34,9 @@ class CronJobsPage(BaseResourcePage):
         
         # Set up the base UI components with styles
         layout = super().setup_ui("Cron Jobs", headers, sortable_columns)
-        
-        # Apply table style
-        self.table.setStyleSheet(AppStyles.TABLE_STYLE)
-        self.table.horizontalHeader().setStyleSheet(AppStyles.CUSTOM_HEADER_STYLE)
-        
+
+        # Table styling is already handled by BaseResourcePage
+
         # Configure column widths
         self.configure_columns()
         
@@ -87,10 +85,9 @@ class CronJobsPage(BaseResourcePage):
         # Set row height
         self.table.setRowHeight(row, 40)
         
-        # Create checkbox for row selection
+        # Create checkbox for row selection - styling handled by BaseResourcePage
         resource_name = resource["name"]
         checkbox_container = self._create_checkbox_container(row, resource_name)
-        checkbox_container.setStyleSheet(AppStyles.CHECKBOX_STYLE)
         self.table.setCellWidget(row, 0, checkbox_container)
         
         # Extract additional data from the raw_data field if available
@@ -230,11 +227,9 @@ class CronJobsPage(BaseResourcePage):
             # Add the item to the table
             self.table.setItem(row, cell_col, item)
         
-        # Create and add action button with only Edit and Delete options
+        # Create and add action button - styling handled by BaseResourcePage
         action_button = self._create_action_button(row, resource_name, resource["namespace"])
-        action_button.setStyleSheet(AppStyles.ACTION_BUTTON_STYLE)
         action_container = self._create_action_container(row, action_button)
-        action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
         self.table.setCellWidget(row, len(columns) + 1, action_container)
     
     # def handle_row_click(self, row, column):
