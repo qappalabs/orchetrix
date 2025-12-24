@@ -44,9 +44,7 @@ class EventsPage(BaseResourcePage):
         header.setMinimumHeight(35)
         header.setDefaultSectionSize(100)
 
-        # Apply enhanced table style
-        if hasattr(AppStyles, 'TABLE_STYLE'):
-            self.table.setStyleSheet(AppStyles.TABLE_STYLE)
+        # Table styling is already handled by BaseResourcePage
 
         # FIXED: Enhanced header style with better text visibility
         header.setStyleSheet(f"""
