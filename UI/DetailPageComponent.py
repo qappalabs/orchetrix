@@ -513,8 +513,13 @@ class DetailPageComponent(ThemeAwareMixin, QWidget):
         if 0 <= current_index < len(sections):
             current_section = sections[current_index]
 
-            # Check if this section already has data to avoid reloading
-            if hasattr(current_section, 'current_data') and current_section.current_data:
+            # Check if data matches current resource before reusing
+            if (hasattr(current_section, 'current_data') and
+                current_section.current_data and
+                current_section.resource_type == self.resource_type and
+                current_section.resource_name == self.resource_name and
+                current_section.resource_namespace == self.resource_namespace):
+                # Data is for current resource, safe to reuse
                 return
 
             # Load data asynchronously
@@ -670,10 +675,34 @@ class DetailPageComponent(ThemeAwareMixin, QWidget):
             self._closing = False
 
     def close_detail(self):
-        """Close detail page"""
+        """Close detail page with complete state cleanup"""
         # Clean up timers
         if hasattr(self, '_tab_change_timer'):
             self._tab_change_timer.stop()
+
+        # CRITICAL: Disconnect all section signals to stop async operations
+        sections = [self.overview_section, self.details_section, self.yaml_section, self.events_section]
+        for section in sections:
+            if hasattr(section, 'disconnect_api_signals'):
+                section.disconnect_api_signals()
+
+        # Clear all sections to remove data
+        self.clear_all_sections()
+
+        # Clear special resource data
+        self.resource_type = None
+        self.resource_name = None
+        self.resource_namespace = None
+
+        # Clear raw data to prevent reuse for wrong resources
+        if hasattr(self, 'chart_raw_data'):
+            self.chart_raw_data = None
+        if hasattr(self, 'release_raw_data'):
+            self.release_raw_data = None
+        if hasattr(self, 'resource_raw_data'):
+            self.resource_raw_data = None
+        if hasattr(self, 'event_raw_data'):
+            self.event_raw_data = None
 
         self.detail_closed_signal.emit()
 

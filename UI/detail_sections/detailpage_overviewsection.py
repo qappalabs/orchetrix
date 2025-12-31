@@ -1829,6 +1829,9 @@ class DetailPageOverviewSection(BaseDetailSection):
 
     def clear_content(self):
         """Clear all overview content"""
+        # Defensive: Clear cached data
+        self.current_data = None
+
         self.resource_name_label.setText("Resource Name")
         self.resource_info_label.setText("Type / Namespace")
         self.creation_time_label.setText("Created: unknown")

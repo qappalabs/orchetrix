@@ -251,6 +251,9 @@ class DetailPageDetailsSection(BaseDetailSection):
 
     def clear_content(self):
         """Clear all details content"""
+        # Defensive: Clear cached data
+        self.current_data = None
+
         while self.details_layout.count():
             item = self.details_layout.takeAt(0)
             if item.widget():

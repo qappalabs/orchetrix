@@ -182,4 +182,7 @@ class DetailPageEventsSection(BaseDetailSection):
 
     def clear_content(self):
         """Clear events content"""
+        # Defensive: Clear cached data
+        self.current_data = None
+
         self.events_list.clear()

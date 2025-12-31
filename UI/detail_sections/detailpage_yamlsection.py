@@ -1132,6 +1132,9 @@ class DetailPageYAMLSection(BaseDetailSection):
 
     def clear_content(self):
         """Clear YAML content"""
+        # Defensive: Clear cached data
+        self.current_data = None
+
         self.yaml_editor.clear()
         self.original_yaml = None
         self.yaml_edited = False
