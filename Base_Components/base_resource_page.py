@@ -1740,33 +1740,8 @@ class BaseResourcePage(BaseTablePage):
         from PyQt6.QtWidgets import QCheckBox
 
         select_all_checkbox = QCheckBox()
-        # Generate dynamic checkbox style with proper resource path resolution
-        unchecked_path = resource_path("Icons/check_box_unchecked.svg")
-        checked_path = resource_path("Icons/check_box_checked.svg")
-        
-        select_all_checkbox.setStyleSheet(f"""
-            QCheckBox {{
-                margin: 0px;
-                padding: 0px;
-                background-color: transparent;
-            }}
-            QCheckBox::indicator {{
-                width: 14px;
-                height: 14px;
-                margin: 1px;
-                background-color: transparent;
-                border: none;
-                image: url({unchecked_path.replace(os.sep, '/')});
-            }}
-            QCheckBox::indicator:checked {{
-                background-color: transparent;
-                border: none;
-                image: url({checked_path.replace(os.sep, '/')});
-            }}
-            QCheckBox::indicator:hover {{
-                border-color: #0078d4;
-            }}
-        """)
+        # Use theme-aware checkbox styling (BaseTablePageStyles already imported at line 27)
+        select_all_checkbox.setStyleSheet(BaseTablePageStyles.get_checkbox_style())
         select_all_checkbox.stateChanged.connect(self._on_select_all_changed)
         return select_all_checkbox
 
@@ -1986,11 +1961,10 @@ class BaseResourcePage(BaseTablePage):
         
         button = QToolButton()
 
-        # Use custom SVG icon
+        # Use pre-loaded theme-aware icon from parent class (BaseTablePage)
         try:
-            icon_path = resource_path("Icons/Moreaction_Button.svg")
-            if os.path.exists(icon_path):
-                button.setIcon(QIcon(icon_path))
+            if hasattr(self, 'action_button_icon'):
+                button.setIcon(self.action_button_icon)
                 button.setIconSize(QSize(16, 16))
         except Exception as e:
             logging.warning(f"Could not load action button icon: {e}")
@@ -2347,33 +2321,8 @@ class BaseResourcePage(BaseTablePage):
         checkbox.setProperty("resource_name", resource_name)
         checkbox.stateChanged.connect(self._on_row_checkbox_changed)
         
-        # Apply styling to use proper icons with dynamic resource path resolution
-        unchecked_path = resource_path("Icons/check_box_unchecked.svg")
-        checked_path = resource_path("Icons/check_box_checked.svg")
-        
-        checkbox.setStyleSheet(f"""
-            QCheckBox {{
-                margin: 0px;
-                padding: 0px;
-                background-color: transparent;
-            }}
-            QCheckBox::indicator {{
-                width: 14px;
-                height: 14px;
-                margin: 1px;
-                background-color: transparent;
-                border: none;
-                image: url({unchecked_path.replace(os.sep, '/')});
-            }}
-            QCheckBox::indicator:checked {{
-                background-color: transparent;
-                border: none;
-                image: url({checked_path.replace(os.sep, '/')});
-            }}
-            QCheckBox::indicator:hover {{
-                border-color: #0078d4;
-            }}
-        """)
+        # Apply theme-aware checkbox styling
+        checkbox.setStyleSheet(BaseTablePageStyles.get_checkbox_style())
         
         layout.addWidget(checkbox)
         return container
