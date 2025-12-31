@@ -14,8 +14,9 @@ from functools import partial
 import weakref
 
 from UI.Styles import AppStyles, AppColors, AppConstants
-from UI.Icons import resource_path
+from UI.Icons import Icons, resource_path
 from UI.ThemeAwarePage import ThemeAwareMixin
+from UI.ThemeManager import get_theme_manager
 import Styles.BaseTablePageStyles as BaseTablePageStyles
 import logging
 import os
@@ -232,10 +233,16 @@ class BaseTablePage(ThemeAwareMixin, QWidget):
         self.select_all_checkbox = None
         self._setup_refs()
         self._connect_theme_manager()  # Connect to theme changes
+        self._load_action_button_icon()  # Load theme-aware icon once for performance
         
     def _setup_refs(self):
         """Set up weak references to avoid memory leaks"""
         self._item_widgets = weakref.WeakValueDictionary()
+
+    def _load_action_button_icon(self):
+        """Load action button icon once (theme-aware) and cache for reuse across all rows"""
+        theme_name = get_theme_manager().get_current_theme_name() or "Dark"
+        self.action_button_icon = Icons.get_theme_icon("Moreaction_Button.svg", theme_name)
     
     def setup_ui(self, title, headers, sortable_columns=None):
         """Set up the basic UI structure with title, table, and headers"""
@@ -377,12 +384,13 @@ class BaseTablePage(ThemeAwareMixin, QWidget):
 
     def _create_fallback_checkbox_icon(self, is_checked):
         """Create a fallback checkbox icon if SVG files are not available"""
-        # For fallback, just return the standard checkbox style paths
+        # For fallback, return theme-aware checkbox icon paths
         # This should rarely be needed if the SVG files are properly bundled
+        theme_name = get_theme_manager().get_current_theme_name() or "Dark"
         if is_checked:
-            return "Icons/check_box_checked.svg"
+            return Icons.get_theme_icon_path("check_box_checked.svg", theme_name)
         else:
-            return "Icons/check_box_unchecked.svg"
+            return Icons.get_theme_icon_path("check_box_unchecked.svg", theme_name)
 
     def _handle_checkbox_change(self, state, item_name):
         """Handle checkbox state changes"""
@@ -449,9 +457,8 @@ class BaseTablePage(ThemeAwareMixin, QWidget):
         """Create an action button with menu"""
         button = QToolButton()
 
-        # Use custom SVG icon instead of text
-        icon = resource_path("Icons/Moreaction_Button.svg")
-        button.setIcon(QIcon(icon))
+        # Use pre-loaded theme-aware icon (loaded once, reused for all rows)
+        button.setIcon(self.action_button_icon)
         button.setIconSize(QSize(AppConstants.SIZES["ICON_SIZE"], AppConstants.SIZES["ICON_SIZE"]))
 
         # Remove text and change to icon-only style
@@ -568,6 +575,9 @@ class BaseTablePage(ThemeAwareMixin, QWidget):
         """Refresh all styles when theme changes"""
         logging.debug(f"BaseTablePage: Refreshing theme to {theme_name}")
 
+        # Reload action button icon for new theme
+        self._load_action_button_icon()
+
         # Refresh title and count labels
         if hasattr(self, 'title_label') and self.title_label:
             self.title_label.setStyleSheet(BaseTablePageStyles.get_title_style())
@@ -583,6 +593,15 @@ class BaseTablePage(ThemeAwareMixin, QWidget):
             if header:
                 header.setStyleSheet("")  # Forces header to use table's stylesheet
 
+            # Clear all item backgrounds so theme-aware stylesheet colors apply
+            for row in range(self.table.rowCount()):
+                for col in range(self.table.columnCount()):
+                    item = self.table.item(row, col)
+                    if item:
+                        # Clear any programmatic background override
+                        item.setBackground(QColor("transparent"))
+                        # Note: Stylesheet colors (theme-aware) will now apply
+
         # Refresh select-all checkbox
         if hasattr(self, 'select_all_checkbox') and self.select_all_checkbox:
             self.select_all_checkbox.setStyleSheet(BaseTablePageStyles.get_checkbox_style())
@@ -596,7 +615,12 @@ class BaseTablePage(ThemeAwareMixin, QWidget):
                     # Find checkbox widget inside container
                     for child in checkbox_container.children():
                         if isinstance(child, QCheckBox):
+                            # Clear stylesheet first to force Qt to invalidate image cache
+                            child.setStyleSheet("")
+                            # Apply new theme-aware stylesheet
                             child.setStyleSheet(BaseTablePageStyles.get_checkbox_style())
+                            # Force visual update
+                            child.update()
                             break
 
         # Refresh header widget container
@@ -617,6 +641,9 @@ class BaseTablePage(ThemeAwareMixin, QWidget):
                     for child in action_container.children():
                         if isinstance(child, QToolButton):
                             child.setStyleSheet(BaseTablePageStyles.get_action_button_style())
+
+                            # Update icon to new theme's icon
+                            child.setIcon(self.action_button_icon)
 
                             # Refresh menu if exists
                             if child.menu():
