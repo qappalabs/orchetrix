@@ -130,12 +130,15 @@ def get_count_style():
 # CHECKBOX STYLING
 
 def get_checkbox_style():
-    """Theme-aware checkbox style with icon paths"""
-    from UI.Icons import resource_path
+    """Theme-aware checkbox style with icon paths from current theme folder"""
+    from UI.Icons import Icons
+    from UI.ThemeManager import get_theme_manager
     import os
 
-    unchecked_icon = resource_path("Icons/check_box_unchecked.svg")
-    checked_icon = resource_path("Icons/check_box_checked.svg")
+    # Get current theme and load theme-specific icon paths
+    theme_name = get_theme_manager().get_current_theme_name() or "Dark"
+    unchecked_icon = Icons.get_theme_icon_path("check_box_unchecked.svg", theme_name)
+    checked_icon = Icons.get_theme_icon_path("check_box_checked.svg", theme_name)
 
     return f"""
         QCheckBox {{
