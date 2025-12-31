@@ -1289,9 +1289,9 @@ class ReleasesPage(BaseResourcePage):
     def _create_action_button(self, row, resource_name, resource_namespace):
         """Create an action button with enhanced upgrade and delete options"""
         button = QToolButton()
-        
-        icon = resource_path("Icons/Moreaction_Button.svg")
-        button.setIcon(QIcon(icon))
+
+        # Use theme-aware icon from parent class (cached and updates with theme)
+        button.setIcon(self.action_button_icon)
         button.setIconSize(QSize(AppConstants.SIZES["ICON_SIZE"], AppConstants.SIZES["ICON_SIZE"]))
 
         # Remove text and change to icon-only style

@@ -282,8 +282,8 @@ class PortForwardingPage(BaseResourcePage):
         from PyQt6.QtWidgets import QToolButton
         
         button = QToolButton()
-        icon = resource_path("Icons/Moreaction_Button.svg")
-        button.setIcon(QIcon(icon))
+        # Use theme-aware icon from parent class (cached and updates with theme)
+        button.setIcon(self.action_button_icon)
         button.setIconSize(QSize(16, 16))
         button.setText("")
         button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)

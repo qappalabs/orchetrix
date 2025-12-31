@@ -319,10 +319,8 @@ class EventsPage(BaseResourcePage):
         """Create a very compact action button"""
         button = QToolButton()
 
-        # Use custom SVG icon
-        moreaction_icon = resource_path("Icons/Moreaction_Button.svg")
-        icon = QIcon(moreaction_icon)
-        button.setIcon(icon)
+        # Use theme-aware icon from parent class (cached and updates with theme)
+        button.setIcon(self.action_button_icon)
         button.setIconSize(QSize(AppConstants.SIZES["ICON_SIZE"], AppConstants.SIZES["ICON_SIZE"]))  # Even smaller icon
 
         # Very compact button styling

@@ -1049,9 +1049,8 @@ class ChartsPage(BaseResourcePage):
         
         button = QToolButton()
 
-        # Use custom SVG icon instead of text
-        icon = resource_path("Icons/Moreaction_Button.svg")
-        button.setIcon(QIcon(icon))
+        # Use theme-aware icon from parent class (cached and updates with theme)
+        button.setIcon(self.action_button_icon)
         button.setIconSize(QSize(AppConstants.SIZES["ICON_SIZE"], AppConstants.SIZES["ICON_SIZE"]))
 
         # Remove text and change to icon-only style
