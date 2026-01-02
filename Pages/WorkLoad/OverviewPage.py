@@ -9,7 +9,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QFont
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal,QThread
 
-from UI.Styles import AppStyles, AppColors
+import Styles.OverviewPageStyles as OverviewPageStyles  # Theme-aware styles
+from UI.ThemeAwarePage import ThemeAwarePage  # Automatic theme handling
 import logging
 
 
@@ -289,15 +290,6 @@ class MetricCard(QWidget):
         self.running = 0
         self.total = 0
 
-        # Define colors with fallbacks
-        self.colors = {
-            'text_primary': getattr(AppColors, 'TEXT_LIGHT', '#ffffff'),
-            'text_secondary': getattr(AppColors, 'TEXT_SECONDARY', '#8b8b8b'),
-            'bg_secondary': getattr(AppColors, 'BG_SIDEBAR', '#2a2a2a'),
-            'border_color': getattr(AppColors, 'BORDER_COLOR', '#404040'),
-            'accent_color': '#FF5733',
-        }
-
         self.setup_ui(title)
 
     def setup_ui(self, title):
@@ -310,17 +302,7 @@ class MetricCard(QWidget):
         # Card frame
         self.card = QFrame()
         self.card.setObjectName("metricCard")
-        self.card.setStyleSheet(f"""
-            QFrame#metricCard {{
-                background-color: {self.colors['bg_secondary']};
-                border: 1px solid {self.colors['border_color']};
-                border-radius: 8px;
-                padding: 0px;
-            }}
-            QFrame#metricCard:hover {{
-                border-color: {self.colors['accent_color']};
-            }}
-        """)
+        self.card.setStyleSheet(OverviewPageStyles.get_metric_card_style())
 
         # Card content layout
         card_layout = QVBoxLayout(self.card)
@@ -334,14 +316,7 @@ class MetricCard(QWidget):
         title_font.setPointSize(14)
         title_font.setWeight(QFont.Weight.Medium)
         self.title_label.setFont(title_font)
-        self.title_label.setStyleSheet(f"""
-            QLabel {{
-                color: {self.colors['text_primary']};
-                background-color: transparent;
-                border: none;
-                margin: 0px;
-            }}
-        """)
+        self.title_label.setStyleSheet(OverviewPageStyles.get_title_label_style())
         card_layout.addWidget(self.title_label)
 
         # Main metric display
@@ -351,14 +326,7 @@ class MetricCard(QWidget):
         metric_font.setPointSize(32)
         metric_font.setWeight(QFont.Weight.Bold)
         self.metric_label.setFont(metric_font)
-        self.metric_label.setStyleSheet(f"""
-            QLabel {{
-                color: {self.colors['text_primary']};
-                background-color: transparent;
-                border: none;
-                margin: 8px 0px;
-            }}
-        """)
+        self.metric_label.setStyleSheet(OverviewPageStyles.get_metric_label_style())
         self.metric_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
         card_layout.addWidget(self.metric_label)
 
@@ -368,14 +336,7 @@ class MetricCard(QWidget):
         subtitle_font.setFamily("Segoe UI")
         subtitle_font.setPointSize(10)
         self.subtitle_label.setFont(subtitle_font)
-        self.subtitle_label.setStyleSheet(f"""
-            QLabel {{
-                color: {self.colors['text_secondary']};
-                background-color: transparent;
-                border: none;
-                margin: 0px;
-            }}
-        """)
+        self.subtitle_label.setStyleSheet(OverviewPageStyles.get_subtitle_label_style())
         card_layout.addWidget(self.subtitle_label)
 
         main_layout.addWidget(self.card)
@@ -403,19 +364,11 @@ class MetricCard(QWidget):
         self.subtitle_label.update()
         
         # Use different styling for progressive vs final display
-        border_color = self.colors['accent_color'] if "+" in str(total) else self.colors['border_color']
-        
-        self.card.setStyleSheet(f"""
-            QFrame#metricCard {{
-                background-color: {self.colors['bg_secondary']};
-                border: 1px solid {border_color};
-                border-radius: 8px;
-                padding: 0px;
-            }}
-            QFrame#metricCard:hover {{
-                border-color: {self.colors['accent_color']};
-            }}
-        """)
+        from UI.ThemeManager import get_theme_manager
+        theme = get_theme_manager().get_current_theme()
+        border_color = theme.colors.ACCENT_BLUE if "+" in str(total) else theme.colors.BORDER_COLOR
+
+        self.card.setStyleSheet(OverviewPageStyles.get_metric_card_style_with_border(border_color))
         
         logging.info(f"MetricCard: Successfully updated {self.resource_type} card display")
 
@@ -423,14 +376,7 @@ class MetricCard(QWidget):
         """Show loading state with spinner indicator."""
         self.metric_label.setText("⏳")
         self.subtitle_label.setText("Loading...")
-        self.card.setStyleSheet(f"""
-            QFrame#metricCard {{
-                background-color: {self.colors['bg_secondary']};
-                border: 1px solid {self.colors['accent_color']};
-                border-radius: 8px;
-                padding: 0px;
-            }}
-        """)
+        self.card.setStyleSheet(OverviewPageStyles.get_metric_card_loading_style())
         self.metric_label.update()
         self.subtitle_label.update()
 
@@ -439,32 +385,35 @@ class MetricCard(QWidget):
         if show_error:
             self.metric_label.setText("Error")
             self.subtitle_label.setText(error_message)
-            self.card.setStyleSheet(f"""
-                QFrame#metricCard {{
-                    background-color: {self.colors['bg_secondary']};
-                    border: 1px solid #ff4444;
-                    border-radius: 8px;
-                    padding: 0px;
-                }}
-            """)
+            self.card.setStyleSheet(OverviewPageStyles.get_metric_card_error_style())
         else:
             # Clear error state and show data
             self.metric_label.setText(f"{self.running} / {self.total}")
             self.subtitle_label.setText(f"Running / Total {self.resource_type.title()}")
-            self.card.setStyleSheet(f"""
-                QFrame#metricCard {{
-                    background-color: {self.colors['bg_secondary']};
-                    border: 1px solid {self.colors['border_color']};
-                    border-radius: 8px;
-                    padding: 0px;
-                }}
-                QFrame#metricCard:hover {{
-                    border-color: {self.colors['accent_color']};
-                }}
-            """)
+            self.card.setStyleSheet(OverviewPageStyles.get_metric_card_normal_style())
+
+    def refresh_styles(self):
+        """Refresh all styles to match current theme"""
+        try:
+            # Refresh card style (keep current state)
+            if hasattr(self, 'card') and self.card:
+                self.card.setStyleSheet(OverviewPageStyles.get_metric_card_normal_style())
+
+            # Refresh labels
+            if hasattr(self, 'title_label') and self.title_label:
+                self.title_label.setStyleSheet(OverviewPageStyles.get_title_label_style())
+
+            if hasattr(self, 'metric_label') and self.metric_label:
+                self.metric_label.setStyleSheet(OverviewPageStyles.get_metric_label_style())
+
+            if hasattr(self, 'subtitle_label') and self.subtitle_label:
+                self.subtitle_label.setStyleSheet(OverviewPageStyles.get_subtitle_label_style())
+
+        except Exception as e:
+            logging.error(f"MetricCard: Error refreshing styles: {e}")
 
 
-class OverviewPage(QWidget):
+class OverviewPage(ThemeAwarePage):
     """Overview page showing workload metrics with async data loading."""
     
     def __init__(self, parent=None):
@@ -535,20 +484,13 @@ class OverviewPage(QWidget):
 
         # Page title
         title_label = QLabel("Overview")
+        title_label.setObjectName("pageTitle")
         title_font = QFont()
         title_font.setFamily("Segoe UI")
         title_font.setPointSize(28)
         title_font.setWeight(QFont.Weight.Bold)
         title_label.setFont(title_font)
-        title_label.setStyleSheet(f"""
-            QLabel {{
-                color: {getattr(AppColors, 'TEXT_LIGHT', '#ffffff')};
-                background-color: transparent;
-                border: none;
-                margin: 24px 0px 32px 0px;
-                padding: 0px 24px;
-            }}
-        """)
+        title_label.setStyleSheet(OverviewPageStyles.get_page_title_style())
         main_layout.addWidget(title_label)
 
         # Cards container
@@ -615,15 +557,31 @@ class OverviewPage(QWidget):
         scroll_area.setWidget(cards_container)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        scroll_area.setStyleSheet(f"""
-            QScrollArea {{
-                border: none;
-                background-color: transparent;
-            }}
-            {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
-        """)
+        scroll_area.setStyleSheet(OverviewPageStyles.get_scroll_area_style())
 
         main_layout.addWidget(scroll_area)
+
+    def _on_theme_changed(self, theme_name):
+        """Refresh all styles when theme changes"""
+        try:
+            logging.info(f"OverviewPage: Theme changed to {theme_name}, refreshing styles")
+
+            # Refresh all metric cards
+            for card in self.metric_cards.values():
+                if hasattr(card, 'refresh_styles'):
+                    card.refresh_styles()
+
+            # Refresh page title
+            title_label = self.findChild(QLabel, "pageTitle")
+            if title_label:
+                title_label.setStyleSheet(OverviewPageStyles.get_page_title_style())
+
+            # Refresh scroll area
+            for scroll_area in self.findChildren(QScrollArea):
+                scroll_area.setStyleSheet(OverviewPageStyles.get_scroll_area_style())
+
+        except Exception as e:
+            logging.error(f"OverviewPage: Error refreshing theme: {e}")
 
     def _show_loading_on_all_cards(self):
         """Show loading indicators on all metric cards"""
