@@ -691,9 +691,10 @@ class NodesPage(BaseResourcePage):
             # Create and add action button (base class handles styling)
             action_button = self._create_action_button(row, node_name)
 
-            # Create action container (styling already handled by default widget behavior)
+            # Create action container
             action_container = QWidget()
             action_container.setFixedWidth(AppConstants.SIZES["ACTION_WIDTH"])
+            action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
             action_layout = QHBoxLayout(action_container)
             action_layout.setContentsMargins(0, 0, 0, 0)
             action_layout.setSpacing(0)
@@ -744,11 +745,17 @@ class NodesPage(BaseResourcePage):
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
 
             button.setFixedWidth(30)
+            button.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE +
+                """
+                QToolButton::menu-indicator { image: none; width: 0px; }
+                """
+            )
             button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
 
-            # Create menu (base class handles styling)
+            # Create menu
             menu = QMenu(button)
+            menu.setStyleSheet(AppStyles.MENU_STYLE)
 
             # Connect signals to change row appearance when menu opens/closes
             menu.aboutToShow.connect(lambda: self._highlight_active_row(row, True))

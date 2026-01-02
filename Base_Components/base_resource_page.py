@@ -1976,7 +1976,11 @@ class BaseResourcePage(BaseTablePage):
         button.setFixedWidth(30)
         try:
             from UI.Styles import AppStyles
-            button.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE)
+            button.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE +
+                """
+                QToolButton::menu-indicator { image: none; width: 0px; }
+                """
+            )
         except (ImportError, AttributeError) as e:
             logging.debug(f"Could not load AppStyles for button: {e}")
             # Fallback styling
@@ -1990,6 +1994,7 @@ class BaseResourcePage(BaseTablePage):
                     background-color: #3d3d3d;
                     border-radius: 2px;
                 }
+                QToolButton::menu-indicator { image: none; width: 0px; }
             """)
         
         button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
@@ -2120,6 +2125,20 @@ class BaseResourcePage(BaseTablePage):
     def _create_action_container(self, row, action_button):
         """Create container widget for action button"""
         container = QWidget()
+        try:
+            from UI.Styles import AppStyles
+            container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
+        except (ImportError, AttributeError) as e:
+            logging.debug(f"Could not load ACTION_CONTAINER_STYLE: {e}")
+            # Fallback styling
+            container.setStyleSheet("""
+                QWidget {
+                    background-color: transparent;
+                    border: none;
+                    margin: 0;
+                    padding: 0;
+                }
+            """)
         layout = QHBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)

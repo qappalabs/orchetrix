@@ -142,12 +142,25 @@ def get_checkbox_style():
 
     return f"""
         QCheckBox {{
+            width: 14px;
+            height: 14px;
+            margin: 0px;
+            padding: 0px;
+            spacing: 0px;
             background-color: transparent;
-            spacing: 3px;
+            border: none;
+            outline: none;
         }}
         QCheckBox::indicator {{
             width: 14px;
             height: 14px;
+            border: none;
+            background: transparent;
+            margin: 0px;
+            padding: 0px;
+            spacing: 0px;
+            subcontrol-position: center;
+            subcontrol-origin: content;
         }}
         QCheckBox::indicator:unchecked {{
             image: url({unchecked_icon.replace(os.sep, '/')});
@@ -156,10 +169,10 @@ def get_checkbox_style():
             image: url({checked_icon.replace(os.sep, '/')});
         }}
         QCheckBox::indicator:unchecked:hover {{
-            image: url({unchecked_icon.replace(os.sep, '/')});
+            opacity: 0.8;
         }}
         QCheckBox::indicator:checked:hover {{
-            image: url({checked_icon.replace(os.sep, '/')});
+            opacity: 0.8;
         }}
     """
 
