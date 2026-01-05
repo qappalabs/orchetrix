@@ -110,9 +110,14 @@ class DetailManager(QObject):
         })
 
         # Handle special data for different resource types
+        # NOTE: For events, we want to treat the raw event data like a normal resource
+        # so that all detail sections (Overview, Details, YAML, Events) can render it
+        # directly without making an extra API call.
         if raw_data:
+            # Use generic resource_raw_data for events so DetailPageComponent can
+            # distribute it to all sections via _handle_special_resource_data.
             if resource_type.lower() == "event":
-                detail_page.event_raw_data = raw_data
+                detail_page.resource_raw_data = raw_data
             elif resource_type.lower() in ["chart", "helmchart"]:
                 detail_page.chart_raw_data = raw_data
             elif resource_type.lower() in ["helmrelease", "release"]:
