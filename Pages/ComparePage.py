@@ -22,6 +22,7 @@ from Utils.cluster_connector import get_cluster_connector
 from UI.detail_sections.detailpage_yamlsection import YamlEditorWithLineNumbers, DetailPageYAMLSection
 
 from UI.Styles import AppStyles
+from UI.ThemeManager import get_theme_manager
 
 LOG = logging.getLogger(__name__)
 
@@ -414,7 +415,11 @@ class ComparePage(QWidget):
         # Section header label (will be placed in a top bar with controls)
         self.header = QLabel("Compare")
         self.header.setObjectName("header")
-        self.header.setStyleSheet(AppStyles.TITLE_STYLE)
+        # Preserve size/weight, make color theme-aware
+        theme = get_theme_manager().get_current_theme()
+        self.header.setStyleSheet(
+            f"font-size: 20px; font-weight: bold; color: {theme.colors.TEXT_LIGHT};"
+        )
         self.header.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.header.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.header.setFixedHeight(32)
@@ -435,7 +440,11 @@ class ComparePage(QWidget):
             lbl.setFixedHeight(32)
             lbl.setMinimumWidth(70)
             lbl.setContentsMargins(0, 0, 8, 0)
-            lbl.setStyleSheet(AppStyles.TEXT_STYLE)
+            # Keep size/margins, only color comes from theme
+            theme = get_theme_manager().get_current_theme()
+            lbl.setStyleSheet(
+                f"color: {theme.colors.TEXT_SUBTLE}; font-size: 14px;"
+            )
 
             combo = QComboBox()
             combo.setObjectName(combo_name)
@@ -449,7 +458,7 @@ class ComparePage(QWidget):
             combo.setMinimumContentsLength(1)
             combo.addItem(placeholder)
 
-            # Match other pages: use dropdown style with visible arrow
+            # Match other pages: keep same dropdown geometry, but colors theme-aware
             combo.setStyleSheet(AppStyles.get_dropdown_style_with_icon())
 
             # Configure dropdown behavior to match other pages
@@ -517,7 +526,11 @@ class ComparePage(QWidget):
         left_label = QLabel("Resource 1:")
         left_label.setFixedHeight(32)
         left_label.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-        left_label.setStyleSheet(AppStyles.TEXT_STYLE)
+        # Keep size, only color theme-aware
+        theme = get_theme_manager().get_current_theme()
+        left_label.setStyleSheet(
+            f"color: {theme.colors.TEXT_SUBTLE}; font-size: 14px;"
+        )
         left_group_layout.addWidget(left_label)
         left_group_layout.addWidget(self.resource1_combo)
         left_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -530,7 +543,11 @@ class ComparePage(QWidget):
         right_label = QLabel("Resource 2:")
         right_label.setFixedHeight(32)
         right_label.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-        right_label.setStyleSheet(AppStyles.TEXT_STYLE)
+        # Keep size, only color theme-aware
+        theme = get_theme_manager().get_current_theme()
+        right_label.setStyleSheet(
+            f"color: {theme.colors.TEXT_SUBTLE}; font-size: 14px;"
+        )
         right_group_layout.addWidget(right_label)
         right_group_layout.addWidget(self.resource2_combo)
         right_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
