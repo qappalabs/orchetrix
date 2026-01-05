@@ -23,6 +23,7 @@ from .virtual_scroll_table import VirtualScrollTable
 from Base_Components.base_components import BaseTablePage
 from UI.Styles import AppStyles, AppColors
 from UI.Icons import resource_path
+from UI.ThemeManager import get_theme_manager
 import Styles.BaseResourcePageStyles as BaseResourcePageStyles
 import Styles.BaseTablePageStyles as BaseTablePageStyles
 from UI.LoadingSpinner import LoadingOverlay, create_loading_overlay, create_compact_spinner
@@ -402,14 +403,20 @@ class BaseResourcePage(BaseTablePage):
         self._resize_loading_overlay()
 
     def _create_title_and_count(self, layout, title_text):
-        """Create title and count labels"""
+        """Create title and count labels (theme-aware colors, same sizes)"""
+        theme = get_theme_manager().get_current_theme()
+
         title_label = QLabel(title_text)
-        title_label_style = getattr(AppStyles, "TITLE_STYLE", "font-size: 20px; font-weight: bold; color: #ffffff;")
-        title_label.setStyleSheet(title_label_style)
+        # Preserve original font size/weight, only make color theme-aware
+        title_label.setStyleSheet(
+            f"font-size: 20px; font-weight: bold; color: {theme.colors.TEXT_LIGHT};"
+        )
 
         self.items_count = QLabel("0 items")
-        items_count_style = getattr(AppStyles, "COUNT_STYLE", "color: #9ca3af; font-size: 12px; margin-left: 8px;")
-        self.items_count.setStyleSheet(items_count_style)
+        # Preserve original size/margin, only make color theme-aware
+        self.items_count.setStyleSheet(
+            f"color: {theme.colors.TEXT_SUBTLE}; font-size: 12px; margin-left: 8px;"
+        )
         self.items_count.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         layout.addWidget(title_label)
@@ -534,20 +541,8 @@ class BaseResourcePage(BaseTablePage):
         self.search_bar.setFixedWidth(200)
         self.search_bar.setFixedHeight(32)
         
-        # Apply consistent styling
-        search_style = getattr(AppStyles, 'SEARCH_INPUT', 
-            """QLineEdit {
-                background-color: #2d2d2d;
-                color: #ffffff;
-                border: 1px solid #3d3d3d;
-                border-radius: 4px;
-                padding: 6px 12px;
-                font-size: 12px;
-            }
-            QLineEdit:focus {
-                border-color: #0078d4;
-                background-color: #353535;
-            }""")
+        # Apply consistent styling (theme-aware colors, same geometry)
+        search_style = BaseResourcePageStyles.get_search_input_style()
         self.search_bar.setStyleSheet(search_style)
         
         # Namespace combo with label - only show for namespaced resources
@@ -566,39 +561,10 @@ class BaseResourcePage(BaseTablePage):
         else:
             self.namespace_combo = None
         
-        # Apply consistent styling with proper icon
+        # Apply consistent styling with proper icon (theme-aware colors, same geometry)
         import os
 
-        down_arrow_icon = resource_path("Icons/down_btn.svg")
-        
-        combo_style = getattr(AppStyles, 'NAMESPACE_DROPDOWN',
-            f"""QComboBox {{
-                background-color: #2d2d2d;
-                color: #ffffff;
-                border: 1px solid #3d3d3d;
-                border-radius: 4px;
-                padding: 6px 12px;
-                font-size: 12px;
-            }}
-            QComboBox:hover {{
-                border-color: #4d4d4d;
-                background-color: #353535;
-            }}
-            QComboBox::drop-down {{
-                border: none;
-                width: 20px;
-                subcontrol-origin: padding;
-                subcontrol-position: top right;
-            }}
-            QComboBox::down-arrow {{
-                image: url({down_arrow_icon.replace(os.sep, '/')});
-                width: 12px;
-                height: 12px;
-                margin-right: 4px;
-            }}
-            QComboBox::down-arrow:hover {{
-                opacity: 0.8;
-            }}""")
+        combo_style = BaseResourcePageStyles.get_namespace_combo_style()
         if self.namespace_combo:
             self.namespace_combo.setStyleSheet(combo_style)
         
