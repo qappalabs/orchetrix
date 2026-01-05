@@ -13,13 +13,14 @@ from PyQt6.QtWidgets import (
     QPushButton, QFrame, QSizePolicy, QTextEdit, QScrollArea, QGraphicsView,
     QGraphicsScene, QGraphicsRectItem, QGraphicsTextItem, QGraphicsLineItem,
     QMessageBox, QProgressDialog, QGraphicsPixmapItem, QFileDialog, QMenu, QToolButton,
-    QSplitter
+    QSplitter, QApplication
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTimer, QRectF, QPointF
 from PyQt6.QtGui import QFont, QPen, QBrush, QColor, QPainter, QPixmap, QIcon, QAction
 
 from UI.Styles import AppStyles, AppColors
 from UI.Icons import resource_path
+from UI.ThemeManager import get_theme_manager
 from Business_Logic.app_flow_business import (
     AppFlowBusinessLogic, ResourceType, GraphLayout, ResourceInfo, ConnectionInfo
 )
@@ -30,8 +31,12 @@ from Utils.unified_resource_loader import get_unified_resource_loader
 from Utils.data_formatters import format_age, truncate_string
 from .app_flow_analyzer import AppFlowAnalyzer
 
+# Import theme-aware components
+import Styles.AppsPageStyles as AppsPageStyles
+from UI.ThemeAwarePage import ThemeAwarePage
 
-class AppsPage(QWidget):
+
+class AppsPage(ThemeAwarePage):
     """Simple Apps page with proper header layout matching other pages"""
     
     def __init__(self, parent=None):
@@ -79,28 +84,7 @@ class AppsPage(QWidget):
         
         # Live monitoring button
         self.live_monitor_btn = QPushButton("▶ Start Live")
-        self.live_monitor_btn.setStyleSheet("""
-            QPushButton { 
-                background-color: #28a745; 
-                color: #ffffff; 
-                border: 1px solid #34ce57;
-                border-radius: 4px; 
-                padding: 3px 8px; 
-                font-weight: bold;
-                font-size: 12px;
-            }
-            QPushButton:hover { 
-                background-color: #34ce57; 
-            }
-            QPushButton:pressed { 
-                background-color: #1e7e34; 
-            }
-            QPushButton:disabled {
-                background-color: #6c757d;
-                border-color: #6c757d;
-                color: #adb5bd;
-            }
-        """)
+        self.live_monitor_btn.setStyleSheet(AppsPageStyles.get_live_monitor_btn_start_style())
         self.live_monitor_btn.clicked.connect(self.toggle_live_monitoring)
         header_controls_layout.addWidget(self.live_monitor_btn)
         
@@ -109,22 +93,8 @@ class AppsPage(QWidget):
         
         # Refresh button (far right) - optional, matching other pages
         refresh_btn = QPushButton("Refresh")
-        refresh_btn.setStyleSheet("""
-            QPushButton { 
-                background-color: #2d2d2d; 
-                color: #ffffff; 
-                border: 1px solid #3d3d3d;
-                border-radius: 4px; 
-                padding: 3px 8px; 
-                font-size: 12px;
-            }
-            QPushButton:hover { 
-                background-color: #3d3d3d; 
-            }
-            QPushButton:pressed { 
-                background-color: #1e1e1e; 
-            }
-        """)
+        refresh_btn.setObjectName("refreshButton")
+        refresh_btn.setStyleSheet(AppsPageStyles.get_refresh_btn_style())
         refresh_btn.clicked.connect(self.refresh_page)
         header_controls_layout.addWidget(refresh_btn)
         
@@ -137,7 +107,8 @@ class AppsPage(QWidget):
     def _create_title_and_count(self, layout):
         """Create title label only"""
         title_label = QLabel("AppsChart")
-        title_label.setStyleSheet("font-size: 20px; font-weight: bold; color: #ffffff;")
+        title_label.setObjectName("pageTitle")
+        title_label.setStyleSheet(AppsPageStyles.get_title_label_style())
         
         layout.addWidget(title_label)
     
@@ -154,17 +125,19 @@ class AppsPage(QWidget):
         
         # Namespace control
         namespace_label = QLabel("Namespace:")
-        namespace_label.setStyleSheet("color: #ffffff; font-size: 13px; margin-right: 5px;")
+        namespace_label.setObjectName("namespaceLabel")
+        namespace_label.setStyleSheet(AppsPageStyles.get_filter_label_style())
         filters_layout.addWidget(namespace_label)
         
         self.namespace_combo = QComboBox()
+        self.namespace_combo.setObjectName("namespaceCombo")
         self.namespace_combo.setFixedHeight(30)
         self.namespace_combo.setMinimumWidth(150)
         # Configure dropdown behavior to prevent upward opening
         self._configure_dropdown_behavior(self.namespace_combo)
         
-        # Use the centralized dropdown style utility from AppStyles class
-        self.namespace_combo.setStyleSheet(AppStyles.get_dropdown_style_with_icon())
+        # Use theme-aware dropdown style specific to AppsPage
+        self.namespace_combo.setStyleSheet(AppsPageStyles.get_theme_aware_dropdown_style())
         self.namespace_combo.addItem("Loading...")
         self.namespace_combo.setEnabled(False)
         filters_layout.addWidget(self.namespace_combo)
@@ -174,17 +147,19 @@ class AppsPage(QWidget):
         
         # Workload control
         workload_label = QLabel("Workload:")
-        workload_label.setStyleSheet("color: #ffffff; font-size: 13px; margin-right: 5px;")
+        workload_label.setObjectName("workloadLabel")
+        workload_label.setStyleSheet(AppsPageStyles.get_filter_label_style())
         filters_layout.addWidget(workload_label)
         
         self.workload_combo = QComboBox()
+        self.workload_combo.setObjectName("workloadCombo")
         self.workload_combo.setFixedHeight(30)
         self.workload_combo.setMinimumWidth(150)
         # Configure dropdown behavior to prevent upward opening
         self._configure_dropdown_behavior(self.workload_combo)
         
-        # Use the centralized dropdown style utility from AppStyles class
-        self.workload_combo.setStyleSheet(AppStyles.get_dropdown_style_with_icon())
+        # Use theme-aware dropdown style specific to AppsPage
+        self.workload_combo.setStyleSheet(AppsPageStyles.get_theme_aware_dropdown_style())
         
         # Add workload items
         workload_items = [
@@ -206,17 +181,19 @@ class AppsPage(QWidget):
         
         # Resource instances control
         resource_label = QLabel("Resource:")
-        resource_label.setStyleSheet("color: #ffffff; font-size: 13px; margin-right: 5px;")
+        resource_label.setObjectName("resourceLabel")
+        resource_label.setStyleSheet(AppsPageStyles.get_filter_label_style())
         filters_layout.addWidget(resource_label)
         
         self.resource_combo = QComboBox()
+        self.resource_combo.setObjectName("resourceCombo")
         self.resource_combo.setFixedHeight(30)
         self.resource_combo.setFixedWidth(150)  # Further reduced width for better visibility
         # Configure dropdown behavior to prevent upward opening
         self._configure_dropdown_behavior(self.resource_combo)
         
-        # Use the centralized dropdown style utility from AppStyles class
-        self.resource_combo.setStyleSheet(AppStyles.get_dropdown_style_with_icon())
+        # Use theme-aware dropdown style specific to AppsPage
+        self.resource_combo.setStyleSheet(AppsPageStyles.get_theme_aware_dropdown_style())
         self.resource_combo.addItem("Select namespace and workload first")
         self.resource_combo.setEnabled(False)
         # Connect resource selection change
@@ -557,7 +534,7 @@ class AppsPage(QWidget):
         """Handle app flow analysis error"""
         self.status_text.append(f"\nError: {error_message}")
         self.diagram_scene.clear()
-        self.add_text_to_scene("App flow analysis failed", 10, 10, QColor("#ff4444"))
+        self.add_text_to_scene("App flow analysis failed", 10, 10, QColor(self.get_theme_color('ACCENT_RED', "#ff4444")))
     
     def toggle_live_monitoring(self):
         """Toggle live monitoring on/off"""
@@ -566,22 +543,7 @@ class AppsPage(QWidget):
             self.live_monitor_timer.stop()
             self.live_monitoring_enabled = False
             self.live_monitor_btn.setText("▶ Start Live")
-            self.live_monitor_btn.setStyleSheet("""
-                QPushButton { 
-                    background-color: #28a745; 
-                    color: #ffffff; 
-                    border: 1px solid #34ce57;
-                    border-radius: 4px; 
-                    padding: 5px 10px; 
-                    font-weight: bold;
-                }
-                QPushButton:hover { 
-                    background-color: #34ce57; 
-                }
-                QPushButton:pressed { 
-                    background-color: #1e7e34; 
-                }
-            """)
+            self.live_monitor_btn.setStyleSheet(AppsPageStyles.get_live_monitor_btn_start_style())
             # Remove live indicator from diagram title
             current_title = self.diagram_title.text()
             if "🔴 LIVE - " in current_title:
@@ -593,22 +555,7 @@ class AppsPage(QWidget):
                 self.live_monitor_timer.start()
                 self.live_monitoring_enabled = True
                 self.live_monitor_btn.setText("⏸ Stop Live")
-                self.live_monitor_btn.setStyleSheet("""
-                    QPushButton { 
-                        background-color: #dc3545; 
-                        color: #ffffff; 
-                        border: 1px solid #dc3545;
-                        border-radius: 4px; 
-                        padding: 5px 10px; 
-                        font-weight: bold;
-                    }
-                    QPushButton:hover { 
-                        background-color: #c82333; 
-                    }
-                    QPushButton:pressed { 
-                        background-color: #bd2130; 
-                    }
-                """)
+                self.live_monitor_btn.setStyleSheet(AppsPageStyles.get_live_monitor_btn_stop_style())
                 # Update diagram title to show live monitoring status
                 current_title = self.diagram_title.text()
                 if "🔴 LIVE" not in current_title:
@@ -808,17 +755,10 @@ class AppsPage(QWidget):
     def create_diagram_area(self, main_layout):
         """Create the diagram visualization area"""
         # Create diagram container
-        diagram_frame = QFrame()
-        diagram_frame.setStyleSheet(f"""
-            QFrame {{
-                background-color: {AppColors.BG_MEDIUM};
-                border: 1px solid {AppColors.BORDER_COLOR};
-                border-radius: 6px;
-                margin-top: 10px;
-            }}
-        """)
+        self.diagram_frame = QFrame()
+        self.diagram_frame.setStyleSheet(AppsPageStyles.get_diagram_area_main_style())
         
-        diagram_layout = QVBoxLayout(diagram_frame)
+        diagram_layout = QVBoxLayout(self.diagram_frame)
         diagram_layout.setContentsMargins(8, 2, 8, 8)
         diagram_layout.setSpacing(2)
         
@@ -831,16 +771,7 @@ class AppsPage(QWidget):
         self.diagram_title.setMaximumHeight(18)
         self.diagram_title.setMinimumHeight(16)
         self.diagram_title.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        self.diagram_title.setStyleSheet(f"""
-            QLabel {{
-                color: {AppColors.TEXT_LIGHT};
-                font-size: 11px;
-                font-weight: bold;
-                margin: 0px;
-                padding: 0px;
-                max-height: 16px;
-            }}
-        """)
+        self.diagram_title.setStyleSheet(AppsPageStyles.get_diagram_title_style())
         header_layout.addWidget(self.diagram_title)
         
         # Add stretch to push export button to right
@@ -854,47 +785,11 @@ class AppsPage(QWidget):
         else:
             self.export_btn.setText("⬇")
         self.export_btn.setToolTip("Export Graph")
-        self.export_btn.setStyleSheet("""
-            QToolButton {
-                background-color: #3d3d3d;
-                color: #ffffff;
-                border: 1px solid #5d5d5d;
-                border-radius: 3px;
-                padding: 2px 6px;
-                font-size: 12px;
-                min-width: 20px;
-                max-height: 16px;
-            }
-            QToolButton:hover {
-                background-color: #4d4d4d;
-            }
-            QToolButton:pressed {
-                background-color: #2d2d2d;
-            }
-            QToolButton::menu-indicator {
-                image: none;
-            }
-        """)
+        self.export_btn.setStyleSheet(AppsPageStyles.get_export_btn_style())
         
         # Create export menu
         export_menu = QMenu(self.export_btn)
-        export_menu.setStyleSheet(f"""
-            QMenu {{
-                background-color: {AppColors.BG_MEDIUM};
-                border: 1px solid {AppColors.BORDER_COLOR};
-                border-radius: 4px;
-                padding: 2px;
-            }}
-            QMenu::item {{
-                background-color: transparent;
-                color: {AppColors.TEXT_LIGHT};
-                padding: 4px 12px;
-                border-radius: 2px;
-            }}
-            QMenu::item:selected {{
-                background-color: {AppColors.BG_LIGHT};
-            }}
-        """)
+        export_menu.setStyleSheet(AppsPageStyles.get_export_menu_style())
         
         # Add export actions
         export_image_action = QAction("Export as Image", self)
@@ -933,101 +828,51 @@ class AppsPage(QWidget):
         # Enable mouse wheel zooming
         self.diagram_view.wheelEvent = self.enhanced_wheel_event
         
-        self.diagram_view.setStyleSheet(f"""
-            QGraphicsView {{
-                background-color: {AppColors.BG_DARK};
-                border: 1px solid {AppColors.BORDER_LIGHT};
-                border-radius: 4px;
-            }}
-            {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
-        """)
+        self.diagram_view.setStyleSheet(AppsPageStyles.get_diagram_view_style())
         self.diagram_view.setMinimumHeight(350)
         # Create splitter for diagram and status text
-        diagram_splitter = QSplitter(Qt.Orientation.Vertical)
-        diagram_splitter.setStyleSheet(f"""
-            QSplitter {{
-                background-color: {AppColors.BG_MEDIUM};
-            }}
-            QSplitter::handle {{
-                background-color: {AppColors.BORDER_LIGHT};
-                height: 3px;
-                border-radius: 1px;
-                margin: 2px 0px;
-            }}
-            QSplitter::handle:hover {{
-                background-color: {AppColors.ACCENT_BLUE};
-            }}
-            QSplitter::handle:pressed {{
-                background-color: {AppColors.ACCENT_BLUE};
-            }}
-        """)
-        
+        self.diagram_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.diagram_splitter.setStyleSheet(AppsPageStyles.get_diagram_splitter_style())
+            
         # Add diagram view to splitter
-        diagram_splitter.addWidget(self.diagram_view)
+        self.diagram_splitter.addWidget(self.diagram_view)
         
         # Create status text area with resizable container
-        status_container = QFrame()
-        status_container.setStyleSheet(f"""
-            QFrame {{
-                background-color: {AppColors.BG_MEDIUM};
-                border: none;
-                margin: 0px;
-            }}
-        """)
-        status_layout = QVBoxLayout(status_container)
+        self.status_container = QFrame()
+        self.status_container.setStyleSheet(AppsPageStyles.get_status_container_style())
+        status_layout = QVBoxLayout(self.status_container)
         status_layout.setContentsMargins(0, 5, 0, 0)
         status_layout.setSpacing(2)
         
         # Status area header
-        status_header = QLabel("Analysis Log")
-        status_header.setStyleSheet(f"""
-            QLabel {{
-                color: {AppColors.TEXT_LIGHT};
-                font-size: 10px;
-                font-weight: bold;
-                margin: 2px 8px;
-                padding: 0px;
-            }}
-        """)
-        status_layout.addWidget(status_header)
+        self.status_header = QLabel("Analysis Log")
+        self.status_header.setStyleSheet(AppsPageStyles.get_status_header_style())
+        status_layout.addWidget(self.status_header)
         
         # Status text area (resizable)
         self.status_text = QTextEdit()
         self.status_text.setReadOnly(True)
-        self.status_text.setStyleSheet(f"""
-            QTextEdit {{
-                background-color: {AppColors.BG_DARK};
-                border: 1px solid {AppColors.BORDER_LIGHT};
-                border-radius: 4px;
-                color: {AppColors.TEXT_SECONDARY};
-                font-size: 12px;
-                padding: 8px;
-                margin: 0px 2px 2px 2px;
-            }}
-            {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
-        """)
+        self.status_text.setStyleSheet(AppsPageStyles.get_status_text_style())
         self.status_text.setPlainText("Select a namespace and click Refresh to view apps")
         status_layout.addWidget(self.status_text)
         
         # Add status container to splitter
-        diagram_splitter.addWidget(status_container)
+        self.diagram_splitter.addWidget(self.status_container)
         
         # Set splitter properties and constraints
-        diagram_splitter.setCollapsible(0, False)  # Diagram view cannot be collapsed
-        diagram_splitter.setCollapsible(1, False)  # Status text cannot be collapsed
+        self.diagram_splitter.setCollapsible(0, False)  # Diagram view cannot be collapsed
+        self.diagram_splitter.setCollapsible(1, False)  # Status text cannot be collapsed
         
         # Set initial sizes: diagram view takes most space, status text gets smaller portion
-        diagram_splitter.setSizes([300, 80])  # Initial sizes
+        self.diagram_splitter.setSizes([300, 80])  # Initial sizes
         
         # Set size constraints for the status area
-        status_container.setMinimumHeight(50)   # Minimum height
-        status_container.setMaximumHeight(200)  # Maximum height
-        
+        self.status_container.setMinimumHeight(50)   # Minimum height
+        self.status_container.setMaximumHeight(200)  # Maximum height
+            
         # Add splitter to main layout
-        diagram_layout.addWidget(diagram_splitter)
-        
-        main_layout.addWidget(diagram_frame)
-    
+        diagram_layout.addWidget(self.diagram_splitter)            
+        main_layout.addWidget(self.diagram_frame)
     
     
     def create_app_flow_diagram(self, app_flow):
@@ -1121,7 +966,8 @@ class AppsPage(QWidget):
         # Add to diagram
         summary_font = QFont("Segoe UI", 10, QFont.Weight.Bold)
         summary_item = self.diagram_scene.addText(summary_text, summary_font)
-        summary_item.setDefaultTextColor(QColor("#ffffff"))
+        # Use light text for better contrast on dark backgrounds
+        summary_item.setDefaultTextColor(QColor(self.get_theme_color('TEXT_LIGHT', "#ffffff")))
         summary_item.setPos(60, 10)
     
     def add_layer_headers(self, positions, resources):
@@ -1141,7 +987,7 @@ class AppsPage(QWidget):
         for resource_type, x_pos in layer_positions.items():
             header_text = resource_type.title() + "s"
             header_item = self.diagram_scene.addText(header_text, header_font)
-            header_item.setDefaultTextColor(QColor("#cccccc"))
+            header_item.setDefaultTextColor(QColor(self.get_theme_color('TEXT_SECONDARY', "#cccccc")))
             header_item.setPos(x_pos, 35)  # Above the resources
     
     def draw_simple_pod_box(self, pod_resources, positions):
@@ -1238,7 +1084,7 @@ class AppsPage(QWidget):
         # Draw simple box border only
         container_box = self.diagram_scene.addRect(
             min_x, centered_min_y, box_width, box_height,
-            QPen(QColor("#666666"), 1),  # Simple gray border
+            QPen(QColor(self.get_theme_color('BORDER_LIGHT', "#666666")), 1),  # Theme-aware border
             QBrush(Qt.BrushStyle.NoBrush)  # No fill
         )
         container_box.setZValue(-1)  # Put behind everything
@@ -1281,7 +1127,8 @@ class AppsPage(QWidget):
         name_font = QFont("Segoe UI", 8, QFont.Weight.Bold)
         display_name = resource.name[:12] + "..." if len(resource.name) > 12 else resource.name
         name_text = self.diagram_scene.addText(display_name, name_font)
-        name_text.setDefaultTextColor(QColor("#ffffff"))
+        # Use light text so resource names stay legible on dark diagram backgrounds
+        name_text.setDefaultTextColor(QColor(self.get_theme_color('TEXT_LIGHT', "#ffffff")))
         
         # Position text based on resource type
         is_pod = resource.resource_type.value.lower() == 'pod'
@@ -1316,17 +1163,28 @@ class AppsPage(QWidget):
                 'export_data': self.create_export_resource_data(resource)
             })
     
+    def get_theme_color(self, color_name: str, fallback: str = "#ffffff") -> str:
+        """Get theme-aware color by name using the global ThemeManager"""
+        try:
+            theme = get_theme_manager().get_current_theme()
+            if hasattr(theme, 'colors'):
+                return getattr(theme.colors, color_name, fallback)
+            return fallback
+        except Exception:
+            return fallback
+    
     def get_status_color(self, status: str) -> str:
-        """Get color based on resource status"""
+        """Get color based on resource status - theme-aware"""
+        # Use theme-aware colors
         status_colors = {
-            "Running": "#4CAF50",
-            "Ready": "#4CAF50", 
-            "Active": "#4CAF50",
-            "Bound": "#4CAF50",
-            "Pending": "#FF9800",
-            "Failed": "#F44336",
-            "Error": "#F44336",
-            "Unknown": "#9E9E9E"
+            "Running": self.get_theme_color('STATUS_ACTIVE', "#4CAF50"),
+            "Ready": self.get_theme_color('STATUS_ACTIVE', "#4CAF50"), 
+            "Active": self.get_theme_color('STATUS_ACTIVE', "#4CAF50"),
+            "Bound": self.get_theme_color('STATUS_ACTIVE', "#4CAF50"),
+            "Pending": self.get_theme_color('ACCENT_ORANGE', "#FF9800"),
+            "Failed": self.get_theme_color('ACCENT_RED', "#F44336"),
+            "Error": self.get_theme_color('ACCENT_RED', "#F44336"),
+            "Unknown": self.get_theme_color('TEXT_SUBTLE', "#9E9E9E")
         }
         
         # Check for fraction status like "2/3"
@@ -1336,16 +1194,16 @@ class AppsPage(QWidget):
                 ready = int(parts[0])
                 total = int(parts[1])
                 if ready == total:
-                    return "#4CAF50"  # All ready
+                    return self.get_theme_color('STATUS_ACTIVE', "#4CAF50")  # All ready
                 elif ready > 0:
-                    return "#FF9800"  # Partially ready
+                    return self.get_theme_color('ACCENT_ORANGE', "#FF9800")  # Partially ready
                 else:
-                    return "#F44336"  # None ready
+                    return self.get_theme_color('ACCENT_RED', "#F44336")  # None ready
         
-        return status_colors.get(status, "#9E9E9E")
+        return status_colors.get(status, self.get_theme_color('TEXT_SUBTLE', "#9E9E9E"))
     
     def get_pod_status_color(self, status: str) -> str:
-        """Get color for pod circles - green for running, red for problems"""
+        """Get color for pod circles - green for running, red for problems - theme-aware"""
         # Green for running/healthy pods
         healthy_statuses = ["Running", "Succeeded", "Ready"]
         
@@ -1359,14 +1217,14 @@ class AppsPage(QWidget):
         
         # Check if status indicates healthy pod
         if status in healthy_statuses:
-            return "#4CAF50"  # Green
+            return self.get_theme_color('STATUS_ACTIVE', "#4CAF50")  # Green
         
         # Check if status indicates problematic pod
         if status in problem_statuses:
-            return "#F44336"  # Red
+            return self.get_theme_color('ACCENT_RED', "#F44336")  # Red
         
         # For other statuses like "Pending", "ContainerCreating", etc. use yellow/orange
-        return "#FF9800"  # Orange/Yellow for unknown or transitional states
+        return self.get_theme_color('ACCENT_ORANGE', "#FF9800")  # Orange/Yellow for unknown or transitional states
     
     def create_interactive_resource_group(self, main_rect, icon_item, resource: ResourceInfo, x: float, y: float, width: float, height: float):
         """Create interactive group with hover tooltips"""
@@ -1550,17 +1408,17 @@ class AppsPage(QWidget):
             to_point_x = to_center_x
             to_point_y = to_center_y
         
-        # Enhanced color mapping with better visibility
+        # Enhanced color mapping with theme-aware colors
         color_map = {
-            "ingress_to_service": "#E91E63",    # Pink
-            "service_to_deployment": "#28a745",  # Green
-            "deployment_to_pod": "#007acc",     # Blue
-            "pod_to_config": "#4CAF50",         # Light Green
-            "pod_to_secret": "#FF9800",         # Orange
-            "pod_to_pvc": "#9C27B0"             # Purple
+            "ingress_to_service": self.get_theme_color('ACCENT_RED', "#E91E63"),    # Pink
+            "service_to_deployment": self.get_theme_color('STATUS_ACTIVE', "#28a745"),  # Green
+            "deployment_to_pod": self.get_theme_color('ACCENT_BLUE', "#007acc"),     # Blue
+            "pod_to_config": self.get_theme_color('STATUS_ACTIVE', "#4CAF50"),         # Light Green
+            "pod_to_secret": self.get_theme_color('ACCENT_ORANGE', "#FF9800"),         # Orange
+            "pod_to_pvc": self.get_theme_color('ACCENT_PURPLE', "#9C27B0")             # Purple
         }
         
-        color = color_map.get(connection_type, "#666666")
+        color = color_map.get(connection_type, self.get_theme_color('BORDER_LIGHT', "#666666"))
         
         # Draw smarter connection lines with reduced visual noise
         if abs(from_point_y - to_point_y) < 5:
@@ -1630,7 +1488,8 @@ class AppsPage(QWidget):
         label = label_map.get(connection_type, "→")
         label_font = QFont("Segoe UI", 10, QFont.Weight.Bold)
         label_text = self.diagram_scene.addText(label, label_font)
-        label_text.setDefaultTextColor(QColor("#ffffff"))
+        # Use light text for connection labels to maintain contrast
+        label_text.setDefaultTextColor(QColor(self.get_theme_color('TEXT_LIGHT', "#ffffff")))
         
         # Position label
         text_width = label_text.boundingRect().width()
@@ -1725,7 +1584,7 @@ class AppsPage(QWidget):
             # Create high-quality pixmap with extra margins
             margin = 60
             pixmap = QPixmap(int(scene_rect.width() + margin*2), int(scene_rect.height() + margin*2))
-            pixmap.fill(QColor("#1e1e1e"))  # Use dark background matching app display
+            pixmap.fill(QColor(self.get_theme_color('BG_DARK', "#1e1e1e")))  # Use theme-aware background
             
             # Render scene to pixmap with enhanced quality
             painter = QPainter()
@@ -1839,11 +1698,11 @@ class AppsPage(QWidget):
             for item in self.diagram_scene.items():
                 if hasattr(item, 'setDefaultTextColor'):
                     if for_pdf:
-                        # Set to black for PDF visibility
+                        # Set to black for PDF visibility on light PDF background
                         item.setDefaultTextColor(QColor("#000000"))
                     else:
-                        # Restore to white for app display
-                        item.setDefaultTextColor(QColor("#ffffff"))
+                        # Restore to theme-aware light text color for in-app dark background
+                        item.setDefaultTextColor(QColor(self.get_theme_color('TEXT_LIGHT', "#ffffff")))
         except Exception as e:
             logging.warning(f"Error adjusting text colors: {e}")
     
@@ -1973,7 +1832,7 @@ class AppsPage(QWidget):
         # Draw container box with darker border for export visibility
         container_box = self.diagram_scene.addRect(
             min_x, centered_min_y, box_width, box_height,
-            QPen(QColor("#333333"), 2),  # Darker, thicker border for export visibility
+            QPen(QColor(self.get_theme_color('BG_DARKER', "#333333")), 2),  # Darker, thicker border for export visibility
             QBrush(Qt.BrushStyle.NoBrush)  # No fill
         )
         container_box.setZValue(-1)  # Put behind everything
@@ -2008,7 +1867,7 @@ class AppsPage(QWidget):
         name_font = QFont("Segoe UI", 9, QFont.Weight.Bold)
         display_name = resource.name[:12] + "..." if len(resource.name) > 12 else resource.name
         name_text = self.diagram_scene.addText(display_name, name_font)
-        name_text.setDefaultTextColor(QColor("#000000"))  # Dark color for PDF visibility
+        name_text.setDefaultTextColor(QColor("#000000"))  # Dark color for PDF visibility (export only)
         text_width = name_text.boundingRect().width()
         name_text.setPos(x + (icon_width - text_width) // 2, y + icon_height + 5)
         
@@ -2022,8 +1881,8 @@ class AppsPage(QWidget):
     
     def add_export_metadata_to_image(self, painter: QPainter, width: int, height: int):
         """Add metadata information to exported image"""
-        # Add title and timestamp - Use white color for dark background visibility
-        painter.setPen(QColor("#ffffff"))  # White text for dark background
+        # Add title and timestamp - Use theme-aware text color for dark background visibility
+        painter.setPen(QColor(self.get_theme_color('TEXT_LIGHT', "#ffffff")))  # Theme-aware text for dark background
         painter.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
         
         # Use deployment name instead of namespace in title
@@ -2127,28 +1986,7 @@ class AppsPage(QWidget):
             self.live_monitor_timer.stop()
             self.live_monitoring_enabled = False
             self.live_monitor_btn.setText("▶ Start Live")
-            self.live_monitor_btn.setStyleSheet("""
-                QPushButton { 
-                    background-color: #28a745; 
-                    color: #ffffff; 
-                    border: 1px solid #34ce57;
-                    border-radius: 4px; 
-                    padding: 3px 8px; 
-                    font-weight: bold;
-                    font-size: 12px;
-                }
-                QPushButton:hover { 
-                    background-color: #34ce57; 
-                }
-                QPushButton:pressed { 
-                    background-color: #1e7e34; 
-                }
-                QPushButton:disabled {
-                    background-color: #6c757d;
-                    border-color: #6c757d;
-                    color: #dee2e6;
-                }
-            """)
+            self.live_monitor_btn.setStyleSheet(AppsPageStyles.get_live_monitor_btn_start_style())
             
         # Clear diagram
         if hasattr(self, 'diagram_scene') and self.diagram_scene:
@@ -2160,3 +1998,84 @@ class AppsPage(QWidget):
             
         # Reload namespaces for the new cluster
         QTimer.singleShot(200, self.load_namespaces)
+    
+    def _update_diagram_colors_only(self):
+        """Update existing diagram text colors without doing a full redraw."""
+        if not hasattr(self, 'diagram_scene') or self.diagram_scene is None:
+            return
+        try:
+            # Use light text for better contrast on the dark diagram background
+            text_color = QColor(self.get_theme_color('TEXT_LIGHT', "#ffffff"))
+            for item in self.diagram_scene.items():
+                if hasattr(item, 'setDefaultTextColor'):
+                    item.setDefaultTextColor(text_color)
+        except Exception as e:
+            logging.warning(f"Diagram color update failed: {e}")
+
+    def _on_theme_changed(self, theme_name):
+        """Explicitly reapply all style functions like other pages"""
+        try:
+            logging.info(f"AppsPage: Theme changed to {theme_name}")
+
+            # 0. Reapply main background style (match ClusterPage pattern)
+            self.setStyleSheet(AppsPageStyles.get_main_background_style())
+
+            # 1. Reapply page title style
+            title_label = self.findChild(QLabel, "pageTitle")
+            if title_label:
+                title_label.setStyleSheet(AppsPageStyles.get_title_label_style())
+
+            # 2. Reapply filter label styles
+            for label in self.findChildren(QLabel):
+                if label.objectName() in ["namespaceLabel", "workloadLabel", "resourceLabel"]:
+                    label.setStyleSheet(AppsPageStyles.get_filter_label_style())
+
+            # 3. Reapply button styles
+            if hasattr(self, 'live_monitor_btn'):
+                if self.live_monitoring_enabled:
+                    self.live_monitor_btn.setStyleSheet(AppsPageStyles.get_live_monitor_btn_stop_style())
+                else:
+                    self.live_monitor_btn.setStyleSheet(AppsPageStyles.get_live_monitor_btn_start_style())
+
+            refresh_btn = self.findChild(QPushButton, "refreshButton")
+            if refresh_btn:
+                refresh_btn.setStyleSheet(AppsPageStyles.get_refresh_btn_style())
+
+            # 4. Reapply diagram-related styles
+            if hasattr(self, 'diagram_title'):
+                self.diagram_title.setStyleSheet(AppsPageStyles.get_diagram_title_style())
+
+            if hasattr(self, 'diagram_frame'):
+                self.diagram_frame.setStyleSheet(AppsPageStyles.get_diagram_area_main_style())
+
+            if hasattr(self, 'diagram_view'):
+                self.diagram_view.setStyleSheet(AppsPageStyles.get_diagram_view_style())
+
+            if hasattr(self, 'status_header'):
+                self.status_header.setStyleSheet(AppsPageStyles.get_status_header_style())
+
+            if hasattr(self, 'status_container'):
+                self.status_container.setStyleSheet(AppsPageStyles.get_status_container_style())
+
+            if hasattr(self, 'status_text'):
+                self.status_text.setStyleSheet(AppsPageStyles.get_status_text_style())
+
+            # Reapply dropdown styles (namespace, workload, resource)
+            if hasattr(self, 'namespace_combo'):
+                self.namespace_combo.setStyleSheet(AppsPageStyles.get_theme_aware_dropdown_style())
+            if hasattr(self, 'workload_combo'):
+                self.workload_combo.setStyleSheet(AppsPageStyles.get_theme_aware_dropdown_style())
+            if hasattr(self, 'resource_combo'):
+                self.resource_combo.setStyleSheet(AppsPageStyles.get_theme_aware_dropdown_style())
+
+            # 5. Update diagram text colors without full redraw
+            if hasattr(self, 'diagram_scene') and self.diagram_scene:
+                self._update_diagram_colors_only()
+
+            # 6. Force UI repaint
+            self.update()
+
+            logging.info(f"AppsPage: Successfully reapplied all styles for {theme_name}")
+
+        except Exception as e:
+            logging.error(f"AppsPage theme change error: {e}")
