@@ -1,6 +1,10 @@
 """
 Resource Search Index - Efficient search for large datasets
-Provides indexed search to replace O(n) linear search patterns
+
+NOTE: This file is currently UNUSED. It was created to provide an inverted index-based
+search system with relevance scoring to replace O(n) linear search patterns. However,
+the application uses simpler direct filtering in UI components instead. Kept for
+potential future integration if advanced search capabilities are needed.
 """
 
 import re

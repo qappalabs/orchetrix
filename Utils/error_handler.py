@@ -330,48 +330,13 @@ class ResourceCleaner:
         return cleaned_count
 
 
-class ConnectionStateManager:
-    """Thread-safe connection state management"""
-    
-    def __init__(self):
-        self._states: Dict[str, str] = {}
-        self._lock = threading.RLock()
-    
-    def set_state(self, cluster_name: str, state: str) -> None:
-        """Set connection state thread-safely"""
-        with self._lock:
-            self._states[cluster_name] = state
-            logging.debug(f"Connection state for {cluster_name}: {state}")
-    
-    def get_state(self, cluster_name: str) -> str:
-        """Get connection state thread-safely"""
-        with self._lock:
-            return self._states.get(cluster_name, "disconnected")
-    
-    def remove_state(self, cluster_name: str) -> None:
-        """Remove connection state thread-safely"""
-        with self._lock:
-            self._states.pop(cluster_name, None)
-    
-    def clear_all(self) -> None:
-        """Clear all connection states"""
-        with self._lock:
-            self._states.clear()
-
-
 # Global instances
 _global_error_handler = ErrorHandler()
-_global_connection_manager = ConnectionStateManager()
 
 
 def get_error_handler() -> ErrorHandler:
     """Get the global error handler instance"""
     return _global_error_handler
-
-
-def get_connection_manager() -> ConnectionStateManager:
-    """Get the global connection state manager"""
-    return _global_connection_manager
 
 
 def safe_execute(func: Callable, context: str = "", default_return: Any = None) -> Any:

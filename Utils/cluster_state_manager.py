@@ -292,8 +292,7 @@ class ClusterStateManager(QObject):
             worker = ClusterConnectionWorker(cluster_name)
             worker.signals.finished.connect(lambda result: self._handle_connection_result(cluster_name, result))
             worker.signals.error.connect(lambda error: self._handle_connection_error(cluster_name, error))
-            # worker.signals.progress.connect(lambda msg: logging.info(f"Connection progress for {cluster_name}: {msg}"))  # Removed progress logging
-            
+
             thread_manager = get_thread_manager()
             thread_manager.submit_worker(f"cluster_connect_{cluster_name}", worker)
             
@@ -371,33 +370,7 @@ class ClusterStateManager(QObject):
     def get_cluster_state(self, cluster_name: str) -> ClusterState:
         """Get cluster state safely"""
         return self.cluster_states.get(cluster_name, ClusterState.DISCONNECTED)
-        
-    def is_switching(self) -> bool:
-        """Check if currently switching"""
-        return self.pending_switch is not None
-        
-    def reset_cluster_state(self, cluster_name: str):
-        """Reset cluster state to disconnected - useful for cleanup"""
-        try:
-            with self.switching_lock:
-                if cluster_name in self.cluster_states:
-                    old_state = self.cluster_states[cluster_name]
-                    self.cluster_states[cluster_name] = ClusterState.DISCONNECTED
-                    
-                    if self.current_cluster == cluster_name:
-                        self.current_cluster = None
-                        
-                    if cluster_name in self.cluster_data:
-                        del self.cluster_data[cluster_name]
-                        
-                    if old_state != ClusterState.DISCONNECTED:
-                        self.state_changed.emit(cluster_name, ClusterState.DISCONNECTED)
-                        
-                    logging.info(f"Reset cluster state for {cluster_name}")
-                    
-        except Exception as e:
-            logging.error(f"Error resetting cluster state for {cluster_name}: {e}")
-            
+
     def disconnect_cluster(self, cluster_name: str):
         """Disconnect from cluster and reset all states"""
         try:

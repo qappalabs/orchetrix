@@ -6,7 +6,6 @@ Replaces the complex monolithic cluster_connector.py with a clean, maintainable 
 import logging
 import threading
 import time
-from collections import defaultdict, deque
 from typing import Dict, List, Optional, Tuple, Any, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -21,35 +20,6 @@ from log_handler import method_logger, class_logger
 
 
 @dataclass
-class ClusterMetrics:
-    """Data structure for cluster metrics"""
-    cpu_usage: float = 0.0
-    memory_usage: float = 0.0
-    disk_usage: float = 0.0
-    pods_count: int = 0
-    nodes_count: int = 0
-    timestamp: float = field(default_factory=time.time)
-
-
-@dataclass
-class NodeInfo:
-    """Data structure for processed node information"""
-    name: str
-    status: str
-    roles: List[str]
-    cpu_capacity: str
-    memory_capacity: str
-    disk_capacity: str
-    cpu_usage: Optional[float] = None
-    memory_usage: Optional[float] = None
-    disk_usage: Optional[float] = None
-    taints: str = "0"
-    version: str = "Unknown"
-    age: str = "Unknown"
-    raw_data: Optional[Dict] = None
-
-
-@dataclass  
 class ConnectionState:
     """Thread-safe connection state"""
     cluster_name: str
@@ -327,9 +297,17 @@ class EnhancedClusterConnector(QObject):
         """Thread-safe current cluster getter"""
         with self._state_lock:
             return self._current_cluster
-    
+
+    # NOTE: The following connect_to_cluster() method and its helper methods are LEGACY CODE.
+    # Cluster connection is now handled by cluster_state_manager. This method is never called,
+    # but its signals (connection_started, connection_complete) are still connected to in UI code.
+    # Future cleanup: Remove this method and update UI signal handlers to use cluster_state_manager signals instead.
+
     def connect_to_cluster(self, cluster_name: str) -> None:
-        """Connect to a Kubernetes cluster"""
+        """Connect to a Kubernetes cluster
+
+        LEGACY: This method is not used. Connection workflow now handled by cluster_state_manager.
+        """
         if self._shutting_down:
             return
         
@@ -805,8 +783,3 @@ def shutdown_cluster_connector():
     if _connector_instance is not None:
         _connector_instance.cleanup()
         _connector_instance = None
-
-# Backward compatibility aliases
-get_enhanced_cluster_connector = get_cluster_connector
-shutdown_enhanced_cluster_connector = shutdown_cluster_connector
-ClusterConnection = EnhancedClusterConnector
