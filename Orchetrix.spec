@@ -59,9 +59,21 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
-        'logs', 'data', '.git', '__pycache__', 
+        # File/directory patterns
+        'logs', 'data', '.git', '__pycache__',
         '*.log', '*.tmp', 'build_*', 'windows_*',
-        'README.md', '.gitignore'
+        'README.md', '.gitignore',
+
+        # Python modules - deepdiff's optional dependencies (not needed for YAML comparison)
+        'matplotlib', 'matplotlib.*',
+        'pandas', 'pandas.*',
+        'numpy', 'numpy.*',
+        'scipy', 'scipy.*',
+
+        # Development/testing modules (not needed in production)
+        'IPython', 'jupyter', 'notebook',
+        'tkinter', 'unittest', 'test', 'tests',
+        'distutils', 'setuptools', 'sphinx', 'docutils'
     ],
     noarchive=False,
     optimize=0,
