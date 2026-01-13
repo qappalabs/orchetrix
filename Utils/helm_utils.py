@@ -12,7 +12,6 @@ import string
 import traceback
 import re
 import json
-import tempfile
 import requests
 import base64
 import gzip
@@ -219,16 +218,6 @@ def add_helm_repository(repo_name, repo_url):
 def update_helm_repositories():
     """Update Helm repositories with reasonable timeout"""
     return run_helm_command(['repo', 'update'], timeout=60)
-
-
-def search_helm_chart(chart_name, repo=None):
-    """Search for charts in Helm repositories"""
-    if repo:
-        search_term = f"{repo}/{chart_name}"
-    else:
-        search_term = chart_name
-    
-    return run_helm_command(['search', 'repo', search_term])
 
 
 def install_helm_chart_cli(release_name, chart, namespace, values_file=None, values=None, version=None, create_namespace=False):
@@ -1635,67 +1624,6 @@ def install_helm_chart(chart_name, repository, options, parent=None):
         return False, error_msg
 
 
-class ScrollableMessageBox(QDialog):
-    """Enhanced scrollable message box with better formatting"""
-    
-    def __init__(self, title, text, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle(title)
-        self.setMinimumWidth(700)
-        self.setMinimumHeight(500)
-        self.setStyleSheet(f"""
-            QDialog {{
-                background-color: {AppColors.BG_DARK};
-                color: {AppColors.TEXT_LIGHT};
-            }}
-        """)
-        
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(15)
-        
-        # Message text
-        text_edit = QTextEdit(self)
-        text_edit.setReadOnly(True)
-        text_edit.setText(text)
-        text_edit.setStyleSheet("""
-            QTextEdit {
-                background-color: #2d2d2d;
-                color: #ffffff;
-                border: 1px solid #3d3d3d;
-                border-radius: 4px;
-                padding: 12px;
-                font-family: 'Consolas', 'Courier New', monospace;
-                font-size: 12px;
-                line-height: 1.4;
-            }
-        """)
-        layout.addWidget(text_edit)
-        
-        # Button box
-        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
-        button_box.setStyleSheet("""
-            QDialogButtonBox QPushButton {
-                background-color: #0078d7;
-                color: #ffffff;
-                border: none;
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-size: 13px;
-                font-weight: bold;
-                min-width: 80px;
-            }
-            QDialogButtonBox QPushButton:hover {
-                background-color: #0086e7;
-            }
-            QDialogButtonBox QPushButton:pressed {
-                background-color: #0063b1;
-            }
-        """)
-        button_box.accepted.connect(self.accept)
-        layout.addWidget(button_box)
-
-
 class HelmUpgradeThread(QThread):
     """Thread for upgrading Helm releases using Kubernetes API"""
     progress_update = pyqtSignal(str)
@@ -2026,62 +1954,4 @@ def upgrade_helm_release(release_name, namespace, chart_name, repository, option
         error_msg = f"Upgrade failed: {str(e)}"
         if parent:
             QMessageBox.critical(parent, "Upgrade Error", error_msg)
-        return False, error_msg
-
-
-def uninstall_helm_release(release_name, namespace, parent=None, keep_history=False):
-    """Function to uninstall a Helm release"""
-    if not all([release_name, namespace]):
-        error_msg = "Release name and namespace are required."
-        if parent:
-            QMessageBox.critical(parent, "Uninstall Error", error_msg)
-        else:
-            logging.error(error_msg)
-        return False, error_msg
-
-    try:
-        # Ensure Helm is available
-        helm_available, helm_message = ensure_helm_available()
-        if not helm_available:
-            error_msg = f"Helm not available: {helm_message}"
-            if parent:
-                QMessageBox.critical(parent, "Uninstall Error", error_msg)
-            return False, error_msg
-
-        # Create progress dialog
-        progress = QProgressDialog("Uninstalling Helm release...", "Cancel", 0, 100, parent)
-        progress.setWindowTitle(f"Uninstalling {release_name}")
-        progress.setWindowModality(Qt.WindowModality.WindowModal)
-        progress.setMinimumDuration(0)
-        progress.show()
-        
-        progress.setValue(25)
-
-        # Run Helm uninstall command
-        success, message = uninstall_helm_release_cli(release_name, namespace, keep_history)
-        
-        progress.setValue(100)
-        progress.close()
-
-        if success:
-            success_msg = f"Successfully uninstalled release '{release_name}' from namespace '{namespace}'"
-            logging.info(success_msg)
-            return True, success_msg
-        else:
-            # Handle specific error cases
-            if "no release provided" in message.lower():
-                error_msg = f"Release '{release_name}' not found. It may have been already deleted or the name is incorrect."
-            elif "not found" in message.lower():
-                error_msg = f"Release '{release_name}' not found in namespace '{namespace}'."
-            else:
-                error_msg = f"Failed to uninstall release '{release_name}': {message}"
-            
-            logging.error(error_msg)
-            return False, error_msg
-
-    except Exception as e:
-        error_msg = f"Uninstall failed: {str(e)}"
-        logging.error(error_msg)
-        if parent:
-            QMessageBox.critical(parent, "Uninstall Error", error_msg)
         return False, error_msg
