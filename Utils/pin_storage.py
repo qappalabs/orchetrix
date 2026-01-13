@@ -48,9 +48,11 @@ class PinStorageManager:
             # Convert set to list for JSON serialization
             pinned_list = list(pinned_items) if pinned_items else []
             
+            from datetime import datetime
+
             data = {
                 "pinned_items": pinned_list,
-                "last_updated": self._get_current_timestamp()
+                "last_updated": datetime.now().isoformat()
             }
             
             with open(self.pins_file, 'w', encoding='utf-8') as f:
@@ -87,65 +89,6 @@ class PinStorageManager:
         except Exception as e:
             logging.error(f"Failed to load pinned items: {e}")
             return set()
-            
-    def add_pinned_item(self, item_name: str) -> bool:
-        """
-        Add an item to pinned items.
-        
-        Args:
-            item_name: Name of the item to pin
-            
-        Returns:
-            bool: True if saved successfully, False otherwise
-        """
-        pinned_items = self.load_pinned_items()
-        pinned_items.add(item_name)
-        return self.save_pinned_items(pinned_items)
-        
-    def remove_pinned_item(self, item_name: str) -> bool:
-        """
-        Remove an item from pinned items.
-        
-        Args:
-            item_name: Name of the item to unpin
-            
-        Returns:
-            bool: True if saved successfully, False otherwise
-        """
-        pinned_items = self.load_pinned_items()
-        pinned_items.discard(item_name)  # discard doesn't raise error if item not found
-        return self.save_pinned_items(pinned_items)
-        
-    def is_item_pinned(self, item_name: str) -> bool:
-        """
-        Check if an item is pinned.
-        
-        Args:
-            item_name: Name of the item to check
-            
-        Returns:
-            bool: True if item is pinned, False otherwise
-        """
-        pinned_items = self.load_pinned_items()
-        return item_name in pinned_items
-        
-    def clear_all_pins(self) -> bool:
-        """
-        Clear all pinned items.
-        
-        Returns:
-            bool: True if cleared successfully, False otherwise
-        """
-        return self.save_pinned_items(set())
-        
-    def get_pins_file_path(self) -> str:
-        """Get the path to the pins file."""
-        return self.pins_file
-        
-    def _get_current_timestamp(self) -> str:
-        """Get current timestamp as string."""
-        from datetime import datetime
-        return datetime.now().isoformat()
 
 # Global instance
 _pin_storage_manager = None

@@ -78,13 +78,7 @@ class EnhancedThreadPoolManager(QObject):
                     self.thread_pool.start(worker)
             
             return True
-    
-    def start_worker(self, worker, priority=0):
-        """Start a worker - backward compatibility method"""
-        # Generate a unique worker ID if not provided
-        worker_id = getattr(worker, 'worker_id', f"worker_{id(worker)}")
-        return self.submit_worker(worker_id, worker, priority)
-    
+
     def cancel_worker(self, worker_id):
         with self.lock:
             worker = self.active_workers.get(worker_id)
@@ -115,11 +109,7 @@ class EnhancedThreadPoolManager(QObject):
                     self.active_workers.pop(worker_id, None)
                     self.worker_refs.pop(worker_id, None)
                 logging.info(f"Cleaned up {len(expired_workers)} expired workers: {expired_workers}")
-    
-    def get_active_count(self):
-        with self.lock:
-            return len(self.active_workers)
-    
+
     def shutdown(self):
         self._shutdown = True
         self.cleanup_timer.stop()

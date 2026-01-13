@@ -4,14 +4,13 @@ Uses proper socket forwarding without subprocess, compatible with Kubernetes Pyt
 """
 
 import logging
-import select
 import socket
 import subprocess
 import threading
 import time
 import sys
 
-# Windows subprocess configuration to prevent terminal popup  
+# Windows subprocess configuration to prevent terminal popup
 if sys.platform == 'win32':
     SUBPROCESS_FLAGS = subprocess.CREATE_NO_WINDOW
 else:
@@ -19,8 +18,6 @@ else:
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple, List
 
-from kubernetes import client
-from kubernetes.stream import stream, portforward
 from PyQt6.QtCore import QObject, pyqtSignal, QThread, QTimer
 
 from Utils.kubernetes_client import get_kubernetes_client
@@ -183,36 +180,7 @@ class KubernetesPortForwarder:
         except Exception as e:
             logging.error(f"Error monitoring kubectl process: {e}")
             self.running = False
-                
-    def _get_available_ports(self, resource):
-        """Extract available ports from resource"""
-        ports = []
-        try:
-            if self.config.resource_type == 'pod':
-                raw_data = resource.get('raw_data', {})
-                if raw_data and 'spec' in raw_data:
-                    containers = raw_data['spec'].get('containers', [])
-                    for container in containers:
-                        container_ports = container.get('ports', [])
-                        for port_spec in container_ports:
-                            port_num = port_spec.get('containerPort')
-                            if port_num:
-                                ports.append(port_num)
-            
-            elif self.config.resource_type == 'service':
-                raw_data = resource.get('raw_data', {})
-                if raw_data and 'spec' in raw_data:
-                    service_ports = raw_data['spec'].get('ports', [])
-                    for port_spec in service_ports:
-                        port_num = port_spec.get('port')
-                        if port_num:
-                            ports.append(port_num)
-                            
-        except Exception as e:
-            logging.error(f"Error extracting ports: {e}")
-            
-        return sorted(list(set(ports)))  # Remove duplicates and sort
-                
+
     def _check_kubectl_available(self):
         """Check if kubectl is available and configured"""
         try:
@@ -369,89 +337,6 @@ class KubernetesPortForwarder:
             return self.process.poll() is None
             
         return False
-
-
-class SimplePortForwarder:
-    """Simplified port forwarder that creates a basic HTTP proxy"""
-    
-    def __init__(self, config: PortForwardConfig):
-        self.config = config
-        self.kube_client = get_kubernetes_client()
-        self.server_socket = None
-        self.running = False
-        
-    def start(self):
-        """Start simple HTTP proxy"""
-        try:
-            self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self.server_socket.bind(('localhost', self.config.local_port))
-            self.server_socket.listen(5)
-            self.running = True
-            
-            logging.info(f"Simple port forwarder listening on localhost:{self.config.local_port}")
-            
-            while self.running:
-                try:
-                    client_socket, addr = self.server_socket.accept()
-                    
-                    # Send a simple response for testing
-                    response = f"""HTTP/1.1 200 OK
-Content-Type: text/html
-Connection: close
-
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Port Forward Active</title>
-    <style>
-        body {{ font-family: Arial, sans-serif; margin: 40px; background-color: #f5f5f5; }}
-        .container {{ background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
-        .status {{ color: #4CAF50; font-weight: bold; }}
-        .details {{ background: #f8f9fa; padding: 15px; border-radius: 4px; margin: 10px 0; }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>🚀 Port Forward Active</h1>
-        <p class="status">✅ Connection established successfully</p>
-        
-        <div class="details">
-            <h3>Forward Details:</h3>
-            <p><strong>Resource:</strong> {self.config.resource_type}/{self.config.resource_name}</p>
-            <p><strong>Namespace:</strong> {self.config.namespace}</p>
-            <p><strong>Local Port:</strong> {self.config.local_port}</p>
-            <p><strong>Target Port:</strong> {self.config.target_port}</p>
-            <p><strong>Protocol:</strong> {self.config.protocol}</p>
-        </div>
-        
-        <p><em>This port forward is managed by Orchestrix Kubernetes Manager</em></p>
-    </div>
-</body>
-</html>"""
-                    
-                    client_socket.send(response.encode('utf-8'))
-                    client_socket.close()
-                    
-                except socket.error as e:
-                    if self.running:
-                        logging.error(f"Socket error: {e}")
-                        break
-                        
-        except Exception as e:
-            logging.error(f"Error in simple port forwarder: {e}")
-            raise e
-    
-    def stop(self):
-        """Stop the forwarder"""
-        self.running = False
-        if self.server_socket:
-            try:
-                self.server_socket.close()
-            except (OSError, socket.error) as e:
-                logging.debug(f"Error closing server socket: {e}")
-            except Exception as e:
-                logging.error(f"Unexpected error closing server socket: {e}")
 
 
 class PortForwardWorker(QThread):

@@ -1,5 +1,10 @@
 """
 Performance Configuration - Centralized settings for optimal performance
+
+NOTE: This file is currently UNUSED. It was created as an attempt to centralize
+performance settings, but the project uses direct constants in individual files
+instead (e.g., BATCH_SIZE in base_resource_page.py). This approach was abandoned
+in favor of simpler, directly-defined constants. Kept for potential future use.
 """
 
 # Table Rendering Performance

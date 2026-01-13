@@ -1,6 +1,10 @@
 """
 Performance Optimizer - Utilities for memory management and performance optimization
-Added as part of the architectural refactoring improvements
+
+NOTE: This file is currently UNUSED. It was created during architectural refactoring to
+provide memory monitoring, performance profiling, and resource cleanup utilities. However,
+the application uses simpler, direct approaches instead. ResourceCleaner functionality was
+moved to error_handler.py. Kept for potential future performance optimization work.
 """
 
 import gc
