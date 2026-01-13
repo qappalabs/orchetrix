@@ -81,15 +81,6 @@ class ThreadSafeAPIClient:
             self._creation_attempts = 0
             logging.debug(f"Reset {self.api_class.__name__} API client")
     
-    def is_initialized(self):
-        """Check if the API client is initialized without triggering initialization"""
-        return self._instance is not None
-    
-    def has_failed(self):
-        """Check if initialization has permanently failed"""
-        return self._initialization_failed
-
-
 class KubernetesAPIService:
     """Service for managing Kubernetes API clients"""
     
@@ -230,17 +221,7 @@ class KubernetesAPIService:
             else:
                 logging.error(f"API Service: Kubernetes API connectivity check failed: {error_type}: {e}")
             return False
-    
-    def reset_timeout_detection(self):
-        """Reset timeout detection flags - call this when cluster becomes available"""
-        self._consecutive_timeouts = 0
-        self._api_timeout_detected = False
-        logging.info("API Service: Timeout detection reset - connectivity checks resumed")
-    
-    def should_skip_api_calls(self) -> bool:
-        """Check if API calls should be skipped due to consecutive timeouts"""
-        return self._consecutive_timeouts >= self._max_consecutive_timeouts
-    
+
     def get_cluster_version(self) -> Optional[str]:
         """Get Kubernetes cluster version"""
         try:

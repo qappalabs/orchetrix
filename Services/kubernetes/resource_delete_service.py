@@ -23,27 +23,6 @@ class DeleteResult:
     execution_time_ms: float = 0
 
 
-@dataclass
-class BatchDeleteResult:
-    """Result of a batch delete operation"""
-    total_requested: int
-    successful_deletes: List[DeleteResult]
-    failed_deletes: List[DeleteResult]
-    execution_time_ms: float = 0
-    
-    @property
-    def success_count(self) -> int:
-        return len(self.successful_deletes)
-    
-    @property
-    def failure_count(self) -> int:
-        return len(self.failed_deletes)
-    
-    @property
-    def overall_success(self) -> bool:
-        return self.failure_count == 0
-
-
 class KubernetesResourceDeleteService:
     """
     Service layer for deleting Kubernetes resources (MVC Model)
@@ -336,53 +315,6 @@ class KubernetesResourceDeleteService:
                 error_message=error_msg,
                 execution_time_ms=execution_time
             )
-    
-    def delete_resources_batch(self, resource_type: str, resource_items: List[Tuple[str, str]]) -> BatchDeleteResult:
-        """
-        Delete multiple resources in batch
-        
-        Args:
-            resource_type: Type of resources to delete
-            resource_items: List of (resource_name, namespace) tuples
-            
-        Returns:
-            BatchDeleteResult with detailed results for each resource
-        """
-        start_time = time.time()
-        successful_deletes = []
-        failed_deletes = []
-        
-        logging.info(f"Starting batch delete of {len(resource_items)} {resource_type}")
-        
-        for resource_name, namespace in resource_items:
-            result = self.delete_resource(resource_type, resource_name, namespace)
-            
-            if result.success:
-                successful_deletes.append(result)
-            else:
-                failed_deletes.append(result)
-            
-            # Small delay between deletes to avoid overwhelming the API
-            time.sleep(0.1)
-        
-        execution_time = (time.time() - start_time) * 1000
-        
-        logging.info(f"Batch delete completed: {len(successful_deletes)} successful, {len(failed_deletes)} failed in {execution_time:.1f}ms")
-        
-        return BatchDeleteResult(
-            total_requested=len(resource_items),
-            successful_deletes=successful_deletes,
-            failed_deletes=failed_deletes,
-            execution_time_ms=execution_time
-        )
-    
-    def is_delete_supported(self, resource_type: str) -> bool:
-        """Check if delete operation is supported for the resource type"""
-        return resource_type.lower() in self._delete_method_mapping
-    
-    def get_supported_resource_types(self) -> List[str]:
-        """Get list of all supported resource types for deletion"""
-        return list(self._delete_method_mapping.keys())
 
 
 # Global service instance

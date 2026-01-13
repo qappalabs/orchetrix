@@ -138,67 +138,7 @@ class KubernetesMetricsService:
         except Exception as e:
             logging.error(f"Error calculating cluster metrics: {e}")
             return self._get_default_metrics()
-    
-    def _parse_cpu_value(self, cpu_str: str) -> float:
-        """Parse CPU values (cores, millicores) to cores"""
-        if not cpu_str or not isinstance(cpu_str, str):
-            return 0.0
-        
-        cpu_str = cpu_str.strip()
-        
-        # Handle millicores (e.g., "500m" = 0.5 cores)
-        if cpu_str.endswith('m'):
-            try:
-                return float(cpu_str[:-1]) / 1000.0
-            except ValueError:
-                return 0.0
-        
-        # Handle cores (e.g., "2" = 2 cores)
-        try:
-            return float(cpu_str)
-        except ValueError:
-            return 0.0
-    
-    def _parse_storage_value(self, storage_str: str) -> int:
-        """Parse storage values to bytes"""
-        # Storage parsing is same as memory parsing
-        return self._parse_memory_value(storage_str)
-    
-    def _parse_memory_value(self, memory_str: str) -> int:
-        """Parse memory values to bytes"""
-        if not memory_str or not isinstance(memory_str, str):
-            return 0
-        
-        memory_str = memory_str.strip()
-        
-        # Memory unit multipliers
-        multipliers = {
-            'Ki': 1024,
-            'Mi': 1024**2,
-            'Gi': 1024**3,
-            'Ti': 1024**4,
-            'K': 1000,
-            'M': 1000**2,
-            'G': 1000**3,
-            'T': 1000**4
-        }
-        
-        # Check for unit suffixes
-        for suffix, multiplier in multipliers.items():
-            if memory_str.endswith(suffix):
-                try:
-                    value = float(memory_str[:-len(suffix)])
-                    return int(value * multiplier)
-                except ValueError:
-                    return 0
-        
-        # Handle plain numbers (assume bytes)
-        try:
-            return int(float(memory_str))
-        except ValueError:
-            return 0
 
-    
     def _get_default_metrics(self) -> Dict[str, Any]:
         """Return default metrics when calculation fails"""
         return {
@@ -350,61 +290,14 @@ class KubernetesMetricsService:
             logging.error(f"Error processing nodes in batches: {e}")
             return {}
 
-    def get_all_node_metrics(self, node_names: list = None) -> Dict[str, Dict[str, Any]]:
-        """Get metrics for all nodes efficiently in batch - PERFORMANCE OPTIMIZED"""
-        try:
-            start_time = time.time()
-            
-            # Get all nodes at once
-            nodes_list = self.api_service.v1.list_node()
-            if not nodes_list.items:
-                return {}
-            
-            # Filter nodes if specific names provided
-            if node_names:
-                nodes_list.items = [node for node in nodes_list.items if node.metadata.name in node_names]
-            
-            # Get ALL pods for all namespaces at once (single API call)
-            all_pods = self.api_service.v1.list_pod_for_all_namespaces()
-            
-            # Group pods by node for efficient lookup
-            pods_by_node = {}
-            for pod in all_pods.items:
-                if pod.spec and pod.spec.node_name:
-                    node_name = pod.spec.node_name
-                    if node_name not in pods_by_node:
-                        pods_by_node[node_name] = []
-                    pods_by_node[node_name].append(pod)
-            
-            # Calculate metrics for all nodes
-            all_metrics = {}
-            for node in nodes_list.items:
-                node_name = node.metadata.name
-                try:
-                    metrics = self._calculate_single_node_metrics(node, pods_by_node.get(node_name, []))
-                    if metrics:
-                        all_metrics[node_name] = metrics
-                except Exception as e:
-                    logging.warning(f"Error calculating metrics for node {node_name}: {e}")
-                    # Set default metrics for failed nodes
-                    all_metrics[node_name] = self._get_default_node_metrics(node_name)
-            
-            processing_time = (time.time() - start_time) * 1000
-            logging.info(f"Batch calculated metrics for {len(all_metrics)} nodes in {processing_time:.1f}ms")
-            return all_metrics
-            
-        except Exception as e:
-            logging.error(f"Error in batch node metrics calculation: {e}")
-            return {}
-    
-    def _calculate_single_node_metrics(self, node, node_pods: list) -> Optional[Dict[str, Any]]:
-        """Calculate metrics for a single node using pre-fetched pods"""
+    def _calculate_single_node_metrics_fast(self, node, node_pods: list, include_disk_usage: bool = False) -> Optional[Dict[str, Any]]:
+        """Calculate metrics for a single node using pre-fetched pods - FAST VERSION with real metrics when available"""
         try:
             node_name = node.metadata.name
-            
+
             if not node.status or not node.status.capacity:
                 return self._get_default_node_metrics(node_name)
-            
+
             # Parse node capacity and allocatable resources
             cpu_capacity = self._parse_cpu_value(node.status.capacity.get('cpu', '0'))
             memory_capacity = self._parse_memory_value(node.status.capacity.get('memory', '0Ki'))
