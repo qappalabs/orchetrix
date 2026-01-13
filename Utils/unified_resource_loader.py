@@ -9,8 +9,8 @@ import time
 import threading
 # Use unified thread manager instead of separate ThreadPoolExecutor
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Any, Callable, Union, Set
+from datetime import datetime, timezone
+from typing import Dict, List, Optional, Any, Callable, Set
 from collections import defaultdict
 
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer, Qt, QMetaObject
