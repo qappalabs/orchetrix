@@ -24,19 +24,9 @@ class VirtualizedResourceModel(QAbstractTableModel):
         self._data = resource_data or []
         self._columns = columns or []
         self._formatters = formatters or {}
-        
+
         # Performance optimizations
         self._dirty_rows = set()  # Track which rows need updates
-        self._cache_hits = 0
-        self._cache_misses = 0
-        
-        # Use unified cache system
-        # Cache system removed
-        
-        # Cache system removed
-        
-        # Configuration - caching disabled
-        self.enable_caching = False
         
         logging.info(f"VirtualizedResourceModel initialized with {len(self._data)} rows, {len(self._columns)} columns")
     
@@ -79,25 +69,14 @@ class VirtualizedResourceModel(QAbstractTableModel):
         return None
     
     def _get_display_data(self, row: int, col: int) -> str:
-        """Get display data with caching"""
+        """Get display data"""
         if col >= len(self._columns):
             return ""
-            
-        # Create cache key
-        cache_key = f"display_{row}_{col}"
-        
-        # Use cache if row is not dirty and caching is enabled
-        if (self.enable_caching and 
-            row not in self._dirty_rows):
-            cached_value = self._formatted_cache.get(cache_key)
-            if cached_value is not None:
-                self._cache_hits += 1
-                return cached_value
-        
+
         # Calculate value
         column_key = self._columns[col]
         item = self._data[row]
-        
+
         # Use custom formatter if available
         if column_key in self._formatters:
             try:
@@ -107,12 +86,7 @@ class VirtualizedResourceModel(QAbstractTableModel):
                 value = str(item.get(column_key, ""))
         else:
             value = self._format_cell_value(item, column_key)
-        
-        # Cache the result if caching is enabled (bounded cache handles size limits)
-        if self.enable_caching:
-            self._formatted_cache.set(cache_key, value)
-        
-        self._cache_misses += 1
+
         return value
     
     def _format_cell_value(self, item: Dict, column_key: str) -> str:
@@ -131,21 +105,9 @@ class VirtualizedResourceModel(QAbstractTableModel):
     
     def _get_background_color(self, row: int, col: int) -> Optional[QColor]:
         """Get background color for cell"""
-        # Use bounded cache for row colors
-        cache_key = f"row_color_{row}"
-        
-        cached_color = self._row_colors_cache.get(cache_key)
-        if cached_color is not None:
-            return cached_color.get('background')
-        
         # Calculate row color based on status or other criteria
         item = self._data[row]
         color = self._calculate_row_color(item)
-        
-        # Cache the color
-        color_data = {'background': color}
-        self._row_colors_cache.set(cache_key, color_data)
-        
         return color
     
     def _get_foreground_color(self, row: int, col: int) -> Optional[QColor]:
@@ -177,23 +139,10 @@ class VirtualizedResourceModel(QAbstractTableModel):
     def mark_row_dirty(self, row: int):
         """Mark a row as needing update"""
         self._dirty_rows.add(row)
-        
-        # Clear cache for this row (bounded cache handles pattern clearing)
-        if self.enable_caching:
-            self._formatted_cache.clear_pattern(f"display_{row}_")
-            self._row_colors_cache.clear_pattern(f"row_color_{row}")
     
     def mark_all_dirty(self):
         """Mark all rows as dirty - forces complete refresh"""
         self._dirty_rows = set(range(len(self._data)))
-        self.clear_cache()
-    
-    def clear_cache(self):
-        """Clear all cached data"""
-        self._formatted_cache.clear()
-        self._row_colors_cache.clear()
-        self._cache_hits = 0
-        self._cache_misses = 0
     
     def update_data(self, new_data: List[Dict], incremental: bool = False):
         """Update model data efficiently"""
@@ -206,22 +155,19 @@ class VirtualizedResourceModel(QAbstractTableModel):
             logging.info(f"Appended {len(new_data) - old_count} new rows")
         else:
             # Complete refresh
-            if len(new_data) != len(self._data):
-                # Size changed, clear all cache
-                self.clear_cache()
-            else:
+            if len(new_data) == len(self._data):
                 # Check for changes and mark dirty rows
                 for i, (old, new) in enumerate(zip(self._data, new_data)):
                     if old != new:
                         self.mark_row_dirty(i)
-            
+
             self._data = new_data
         
         self._dirty_rows.clear()
         self.endResetModel()
         self.data_changed_custom.emit()
-        
-        logging.info(f"Model updated: {len(self._data)} rows, cache hits: {self._cache_hits}, cache misses: {self._cache_misses}")
+
+        logging.info(f"Model updated: {len(self._data)} rows")
     
     def refresh_data(self, new_data: List[Dict]):
         """Refresh data - alias for update_data"""
@@ -274,46 +220,34 @@ class VirtualizedResourceModel(QAbstractTableModel):
         """Sort data by column"""
         if column >= len(self._columns):
             return
-            
+
         column_key = self._columns[column]
         reverse = (order == Qt.SortOrder.DescendingOrder)
-        
+
         try:
             self._data.sort(key=lambda item: str(item.get(column_key, "")), reverse=reverse)
-            self.clear_cache()  # Clear cache after sorting
             self.layoutChanged.emit()
             logging.info(f"Sorted by column {column_key}, reverse={reverse}")
         except Exception as e:
             logging.error(f"Error sorting data: {e}")
     
     def get_cache_stats(self) -> Dict[str, int]:
-        """Get cache performance statistics"""
-        total_requests = self._cache_hits + self._cache_misses
-        hit_rate = (self._cache_hits / total_requests * 100) if total_requests > 0 else 0
-        
+        """Get cache performance statistics - caching disabled, returns zeros"""
         return {
-            'cache_hits': self._cache_hits,
-            'cache_misses': self._cache_misses,
-            'hit_rate_percent': round(hit_rate, 2),
-            'cache_size': len(self._formatted_cache),
-            'color_cache_size': len(self._row_colors_cache)
+            'cache_hits': 0,
+            'cache_misses': 0,
+            'hit_rate_percent': 0,
+            'cache_size': 0,
+            'color_cache_size': 0
         }
     
     def set_formatters(self, formatters: Dict[str, Callable]):
         """Set custom formatters for columns"""
         self._formatters = formatters
-        self.clear_cache()  # Clear cache when formatters change
-    
-    def enable_cache(self, enabled: bool = True):
-        """Enable or disable caching"""
-        self.enable_caching = enabled
-        if not enabled:
-            self.clear_cache()
             
     def __del__(self):
         """Cleanup when model is destroyed"""
         try:
-            self.clear_cache()
-            logging.debug(f"VirtualizedResourceModel destroyed, cleaned up caches")
+            logging.debug(f"VirtualizedResourceModel destroyed")
         except Exception as e:
             logging.debug(f"Error during VirtualizedResourceModel cleanup: {e}")

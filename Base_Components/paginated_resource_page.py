@@ -1,6 +1,12 @@
 """
 Paginated Resource Page - Implements proper pagination for large datasets
 Extends BaseResourcePage with pagination capabilities
+
+NOTE: This file is currently UNUSED. It was created to provide enhanced pagination
+capabilities with page-based navigation, but the application currently uses
+BaseResourcePage with incremental loading instead. The pagination controls widget
+and associated functionality remain here for potential future adoption if
+explicit page-based navigation is needed.
 """
 
 import logging
@@ -17,7 +23,6 @@ from .virtualized_table_model import VirtualizedResourceModel
 from .virtual_scroll_table import VirtualScrollTable
 from Utils.unified_resource_loader import get_unified_resource_loader
 from .resource_processing_worker import create_processing_worker
-from Utils.thread_manager import get_thread_manager
 
 
 class PaginationControls(QFrame):

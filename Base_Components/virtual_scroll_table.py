@@ -275,12 +275,7 @@ class VirtualScrollTable(QTableView):
         if self._model:
             return self._model.search_and_filter(search_terms, search_columns)
         return []
-    
-    def enable_caching(self, enabled: bool = True):
-        """Enable or disable model caching"""
-        if self._model:
-            self._model.enable_cache(enabled)
-    
+
     def get_cache_stats(self) -> Dict[str, Any]:
         """Get cache performance statistics"""
         if self._model:

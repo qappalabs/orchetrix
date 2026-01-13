@@ -1,6 +1,11 @@
 """
 Background Data Processing Worker
 Moves heavy data processing off the main UI thread to prevent freezing
+
+NOTE: This file is currently UNUSED. It was created to provide background processing
+for PaginatedResourcePage, but PaginatedResourcePage itself is unused. The application
+currently handles resource processing differently using the unified resource loader.
+Kept for potential future adoption if heavy background processing is needed.
 """
 
 from PyQt6.QtCore import QThread, pyqtSignal, QTimer
