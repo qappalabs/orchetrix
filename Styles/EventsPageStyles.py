@@ -3,42 +3,44 @@ EventsPage-specific styles
 Contains styles that are unique to EventsPage and defined inline in the page.
 """
 
-from UI.Styles import AppColors
+from UI.ThemeManager import get_theme_manager
 
 
 def get_header_style():
-    """Enhanced header style with better text visibility"""
+    """Enhanced header style with better text visibility using current theme"""
+    theme = get_theme_manager().get_current_theme()
     return f"""
             QHeaderView::section {{
-                background-color: {AppColors.HEADER_BG};
+                background-color: {theme.colors.HEADER_BG};
                 color: #FFFFFF;
                 padding: 10px 8px;
                 border: none;
-                border-bottom: 1px solid {AppColors.BORDER_COLOR};
-                border-right: 1px solid {AppColors.BORDER_COLOR};
+                border-bottom: 1px solid {theme.colors.BORDER_COLOR};
+                border-right: 1px solid {theme.colors.BORDER_COLOR};
                 font-size: 12px;
                 font-weight: bold;
                 text-align: center;
                 margin: 0px;
             }}
             QHeaderView::section:hover {{
-                background-color: {AppColors.BG_MEDIUM};
+                background-color: {theme.colors.BG_MEDIUM};
                 color: #FFFFFF;
             }}
             QHeaderView::section:first {{
-                border-left: 1px solid {AppColors.BORDER_COLOR};
+                border-left: 1px solid {theme.colors.BORDER_COLOR};
                 padding-left: 0px;
                 margin-left: 0px;
             }}
             QHeaderView::section:pressed {{
-                background-color: {AppColors.BG_DARKER};
+                background-color: {theme.colors.BG_DARKER};
                 color: #FFFFFF;
             }}
         """
 
 
 def get_action_button_style():
-    """Very compact button styling for action buttons"""
+    """Very compact button styling for action buttons using current theme"""
+    theme = get_theme_manager().get_current_theme()
     return f"""
             QToolButton {{
                 background-color: transparent;
@@ -46,14 +48,14 @@ def get_action_button_style():
                 border-radius: 4px;
                 padding: 3px;
                 margin: 0px;
-                color: {AppColors.TEXT_SECONDARY};
+                color: {theme.colors.TEXT_SECONDARY};
             }}
             QToolButton:hover {{
-                background-color: {AppColors.HOVER_BG};
-                color: {AppColors.TEXT_LIGHT};
+                background-color: {theme.colors.HOVER_BG};
+                color: {theme.colors.TEXT_LIGHT};
             }}
             QToolButton:pressed {{
-                background-color: {AppColors.HOVER_BG_DARKER};
+                background-color: {theme.colors.HOVER_BG_DARKER};
             }}
             QToolButton::menu-indicator {{
                 image: none;
@@ -64,17 +66,18 @@ def get_action_button_style():
 
 
 def get_menu_style():
-    """Menu style for action button dropdown"""
+    """Menu style for action button dropdown using current theme"""
+    theme = get_theme_manager().get_current_theme()
     return f"""
             QMenu {{
-                background-color: {AppColors.BG_DARKER};
-                border: 1px solid {AppColors.BORDER_COLOR};
+                background-color: {theme.colors.BG_DARKER};
+                border: 1px solid {theme.colors.BORDER_COLOR};
                 border-radius: 6px;
                 padding: 4px;
-                color: {AppColors.TEXT_LIGHT};
+                color: {theme.colors.TEXT_LIGHT};
             }}
             QMenu::item {{
-                color: {AppColors.TEXT_LIGHT};
+                color: {theme.colors.TEXT_LIGHT};
                 padding: 8px 12px;
                 border-radius: 3px;
                 font-size: 12px;
@@ -82,12 +85,12 @@ def get_menu_style():
                 min-width: 80px;
             }}
             QMenu::item:selected {{
-                background-color: {AppColors.SELECTED_BG};
-                color: {AppColors.TEXT_LIGHT};
+                background-color: {theme.colors.SELECTED_BG};
+                color: {theme.colors.TEXT_LIGHT};
             }}
             QMenu::separator {{
                 height: 1px;
-                background-color: {AppColors.BORDER_COLOR};
+                background-color: {theme.colors.BORDER_COLOR};
                 margin: 3px 6px;
             }}
         """

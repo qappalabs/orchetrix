@@ -12,6 +12,7 @@ from UI.Styles import AppStyles, AppColors, AppConstants
 from Utils.thread_manager import get_thread_manager
 
 from UI.Icons import resource_path
+import Styles.EventsPageStyles as EventsPageStyles
 
 class EventsPage(BaseResourcePage):
     """
@@ -46,34 +47,8 @@ class EventsPage(BaseResourcePage):
 
         # Table styling is already handled by BaseResourcePage
 
-        # FIXED: Enhanced header style with better text visibility
-        header.setStyleSheet(f"""
-            QHeaderView::section {{
-                background-color: {AppColors.HEADER_BG};
-                color: #FFFFFF;
-                padding: 10px 8px;
-                border: none;
-                border-bottom: 1px solid {AppColors.BORDER_COLOR};
-                border-right: 1px solid {AppColors.BORDER_COLOR};
-                font-size: 12px;
-                font-weight: bold;
-                text-align: center;
-                margin: 0px;
-            }}
-            QHeaderView::section:hover {{
-                background-color: {AppColors.BG_MEDIUM};
-                color: #FFFFFF;
-            }}
-            QHeaderView::section:first {{
-                border-left: 1px solid {AppColors.BORDER_COLOR};
-                padding-left: 0px;
-                margin-left: 0px;
-            }}
-            QHeaderView::section:pressed {{
-                background-color: {AppColors.BG_DARKER};
-                color: #FFFFFF;
-            }}
-        """)
+        # Enhanced header style with better text visibility
+        header.setStyleSheet(EventsPageStyles.get_header_style())
 
         # Configure column widths
         self.configure_columns()
@@ -324,28 +299,7 @@ class EventsPage(BaseResourcePage):
         button.setIconSize(QSize(AppConstants.SIZES["ICON_SIZE"], AppConstants.SIZES["ICON_SIZE"]))  # Even smaller icon
 
         # Very compact button styling
-        button.setStyleSheet(f"""
-            QToolButton {{
-                background-color: transparent;
-                border: none;
-                border-radius: 4px;
-                padding: 3px;
-                margin: 0px;
-                color: {AppColors.TEXT_SECONDARY};
-            }}
-            QToolButton:hover {{
-                background-color: {AppColors.HOVER_BG};
-                color: {AppColors.TEXT_LIGHT};
-            }}
-            QToolButton:pressed {{
-                background-color: {AppColors.HOVER_BG_DARKER};
-            }}
-            QToolButton::menu-indicator {{
-                image: none;
-                width: 0px;
-                height: 0px;
-            }}
-        """)
+        button.setStyleSheet(EventsPageStyles.get_action_button_style())
 
         button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
@@ -354,32 +308,7 @@ class EventsPage(BaseResourcePage):
 
         # Create simple menu
         menu = QMenu(button)
-        menu.setStyleSheet(f"""
-            QMenu {{
-                background-color: {AppColors.BG_DARKER};
-                border: 1px solid {AppColors.BORDER_COLOR};
-                border-radius: 6px;
-                padding: 4px;
-                color: {AppColors.TEXT_LIGHT};
-            }}
-            QMenu::item {{
-                color: {AppColors.TEXT_LIGHT};
-                padding: 8px 12px;
-                border-radius: 3px;
-                font-size: 12px;
-                margin: 1px 0px;
-                min-width: 80px;
-            }}
-            QMenu::item:selected {{
-                background-color: {AppColors.SELECTED_BG};
-                color: {AppColors.TEXT_LIGHT};
-            }}
-            QMenu::separator {{
-                height: 1px;
-                background-color: {AppColors.BORDER_COLOR};
-                margin: 3px 6px;
-            }}
-        """)
+        menu.setStyleSheet(EventsPageStyles.get_menu_style())
 
         # Simple menu actions
         view_action = menu.addAction("View Details")
@@ -402,14 +331,7 @@ class EventsPage(BaseResourcePage):
         """Create a well-spaced action button container - FIXED: Better spacing on right"""
         container = QWidget()
         container.setFixedSize(40, 24)  # Increased width from 24 to 40 for better right spacing
-        container.setStyleSheet("""
-            QWidget {
-                background-color: transparent;
-                border: none;
-                margin: 0px;
-                padding: 0px;
-            }
-        """)
+        container.setStyleSheet(EventsPageStyles.ACTION_CONTAINER_STYLE)
 
         layout = QHBoxLayout(container)
         layout.setContentsMargins(5, 0, 10, 0)  # Add left and right margins for better spacing
@@ -443,19 +365,9 @@ class EventsPage(BaseResourcePage):
         action_container = self.table.cellWidget(row, self.table.columnCount() - 1)
         if action_container:
             if is_active:
-                action_container.setStyleSheet("""
-                    QWidget {
-                        background-color: rgba(33, 150, 243, 0.08);
-                        border-radius: 4px;
-                    }
-                """)
+                action_container.setStyleSheet(EventsPageStyles.ACTION_CONTAINER_ACTIVE_STYLE)
             else:
-                action_container.setStyleSheet("""
-                    QWidget {
-                        background-color: transparent;
-                        border: none;
-                    }
-                """)
+                action_container.setStyleSheet(EventsPageStyles.ACTION_CONTAINER_INACTIVE_STYLE)
 
     def _handle_action(self, action, row):
         """Handle action button clicks"""
@@ -505,3 +417,14 @@ class EventsPage(BaseResourcePage):
     def _handle_checkbox_change(self, state, item_name):
         """Override to do nothing - events don't support bulk operations"""
         pass
+
+    def _on_theme_changed(self, theme_name):
+        """Refresh styles when theme changes"""
+        # Call parent implementation first
+        super()._on_theme_changed(theme_name)
+
+        # Refresh EventsPage-specific header styling
+        if hasattr(self, 'table') and self.table:
+            header = self.table.horizontalHeader()
+            if header:
+                header.setStyleSheet(EventsPageStyles.get_header_style())
