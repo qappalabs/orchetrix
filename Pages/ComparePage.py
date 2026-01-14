@@ -23,6 +23,8 @@ from UI.detail_sections.detailpage_yamlsection import YamlEditorWithLineNumbers,
 
 from UI.Styles import AppStyles
 from UI.ThemeManager import get_theme_manager
+from UI.ThemeAwarePage import ThemeAwareMixin
+import Styles.ComparePageStyles as ComparePageStyles
 
 LOG = logging.getLogger(__name__)
 
@@ -337,7 +339,7 @@ class FieldLevelMatcher:
         return not diff
 
 
-class ComparePage(QWidget):
+class ComparePage(ThemeAwareMixin, QWidget):
     """
     ComparePage with defensive handling of unified loader results:
       - populates namespaces via unified loader
@@ -389,6 +391,75 @@ class ComparePage(QWidget):
         self._populate_namespaces()
 
         # Remove redundant cluster signal handlers to prevent conflicts with ClusterView clearing
+
+    def _on_theme_changed(self, theme_name):
+        """Refresh styles when theme changes"""
+        theme = get_theme_manager().get_current_theme()
+
+        # Refresh page header
+        if hasattr(self, 'header'):
+            self.header.setStyleSheet(
+                f"font-size: 20px; font-weight: bold; color: {theme.colors.TEXT_LIGHT};"
+            )
+
+        # Refresh dropdown labels (Namespace, Resource Type)
+        for widget in self.findChildren(QLabel):
+            if widget.objectName() == "form_label":
+                widget.setStyleSheet(f"color: {theme.colors.TEXT_LIGHT}; font-size: 14px;")
+
+        # Refresh resource selector labels (Resource 1:, Resource 2:)
+        if hasattr(self, 'left_resource_label'):
+            self.left_resource_label.setStyleSheet(f"color: {theme.colors.TEXT_LIGHT}; font-size: 14px;")
+        if hasattr(self, 'right_resource_label'):
+            self.right_resource_label.setStyleSheet(f"color: {theme.colors.TEXT_LIGHT}; font-size: 14px;")
+
+        # Refresh dropdowns (they use AppStyles which is already theme-aware, but re-apply)
+        for combo in self.findChildren(QComboBox):
+            combo.setStyleSheet(AppStyles.get_dropdown_style_with_icon())
+
+        # Refresh Compare button
+        if hasattr(self, 'compare_btn'):
+            self.compare_btn.setStyleSheet(AppStyles.BUTTON_PRIMARY_STYLE)
+
+        # Refresh button styles (Edit and Save are theme-aware, Deploy/Cancel are semantic)
+        if hasattr(self, 'left_edit_btn'):
+            self.left_edit_btn.setStyleSheet(ComparePageStyles.get_edit_btn_style())
+        if hasattr(self, 'left_save_btn'):
+            self.left_save_btn.setStyleSheet(ComparePageStyles.get_save_btn_style())
+        if hasattr(self, 'left_deploy_btn'):
+            self.left_deploy_btn.setStyleSheet(ComparePageStyles.get_deploy_btn_style())
+        if hasattr(self, 'left_cancel_btn'):
+            self.left_cancel_btn.setStyleSheet(ComparePageStyles.get_cancel_btn_style())
+
+        if hasattr(self, 'right_edit_btn'):
+            self.right_edit_btn.setStyleSheet(ComparePageStyles.get_edit_btn_style())
+        if hasattr(self, 'right_save_btn'):
+            self.right_save_btn.setStyleSheet(ComparePageStyles.get_save_btn_style())
+        if hasattr(self, 'right_deploy_btn'):
+            self.right_deploy_btn.setStyleSheet(ComparePageStyles.get_deploy_btn_style())
+        if hasattr(self, 'right_cancel_btn'):
+            self.right_cancel_btn.setStyleSheet(ComparePageStyles.get_cancel_btn_style())
+
+        # Refresh error widgets
+        if hasattr(self, 'left_error_widget'):
+            self.left_error_widget.setStyleSheet(ComparePageStyles.get_error_widget_style())
+        if hasattr(self, 'right_error_widget'):
+            self.right_error_widget.setStyleSheet(ComparePageStyles.get_error_widget_style())
+
+        # Refresh search menus and inputs for searchable combos
+        if hasattr(self, 'resource1_combo'):
+            combo = self.resource1_combo
+            if hasattr(combo, '_search_menu') and combo._search_menu:
+                combo._search_menu.setStyleSheet(ComparePageStyles.get_search_menu_style())
+            if hasattr(combo, '_search_input') and combo._search_input:
+                combo._search_input.setStyleSheet(ComparePageStyles.get_search_input_style())
+
+        if hasattr(self, 'resource2_combo'):
+            combo = self.resource2_combo
+            if hasattr(combo, '_search_menu') and combo._search_menu:
+                combo._search_menu.setStyleSheet(ComparePageStyles.get_search_menu_style())
+            if hasattr(combo, '_search_input') and combo._search_input:
+                combo._search_input.setStyleSheet(ComparePageStyles.get_search_input_style())
 
     def _request_namespaces(self):
         """Request namespaces using unified loader."""
@@ -443,7 +514,7 @@ class ComparePage(QWidget):
             # Keep size/margins, only color comes from theme
             theme = get_theme_manager().get_current_theme()
             lbl.setStyleSheet(
-                f"color: {theme.colors.TEXT_SUBTLE}; font-size: 14px;"
+                f"color: {theme.colors.TEXT_LIGHT}; font-size: 14px;"
             )
 
             combo = QComboBox()
@@ -523,15 +594,15 @@ class ComparePage(QWidget):
         left_group_layout = QHBoxLayout(left_group)
         left_group_layout.setContentsMargins(0, 0, 0, 0)
         left_group_layout.setSpacing(8)
-        left_label = QLabel("Resource 1:")
-        left_label.setFixedHeight(32)
-        left_label.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        self.left_resource_label = QLabel("Resource 1:")
+        self.left_resource_label.setFixedHeight(32)
+        self.left_resource_label.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         # Keep size, only color theme-aware
         theme = get_theme_manager().get_current_theme()
-        left_label.setStyleSheet(
-            f"color: {theme.colors.TEXT_SUBTLE}; font-size: 14px;"
+        self.left_resource_label.setStyleSheet(
+            f"color: {theme.colors.TEXT_LIGHT}; font-size: 14px;"
         )
-        left_group_layout.addWidget(left_label)
+        left_group_layout.addWidget(self.left_resource_label)
         left_group_layout.addWidget(self.resource1_combo)
         left_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
@@ -540,15 +611,15 @@ class ComparePage(QWidget):
         right_group_layout = QHBoxLayout(right_group)
         right_group_layout.setContentsMargins(0, 0, 0, 0)
         right_group_layout.setSpacing(8)
-        right_label = QLabel("Resource 2:")
-        right_label.setFixedHeight(32)
-        right_label.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        self.right_resource_label = QLabel("Resource 2:")
+        self.right_resource_label.setFixedHeight(32)
+        self.right_resource_label.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         # Keep size, only color theme-aware
         theme = get_theme_manager().get_current_theme()
-        right_label.setStyleSheet(
-            f"color: {theme.colors.TEXT_SUBTLE}; font-size: 14px;"
+        self.right_resource_label.setStyleSheet(
+            f"color: {theme.colors.TEXT_LIGHT}; font-size: 14px;"
         )
-        right_group_layout.addWidget(right_label)
+        right_group_layout.addWidget(self.right_resource_label)
         right_group_layout.addWidget(self.resource2_combo)
         right_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
@@ -579,58 +650,11 @@ class ComparePage(QWidget):
         self.left_cancel_btn = QPushButton("Cancel")
 
         # Style buttons like DetailPageYAMLSection
-        self.left_edit_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2d2d2d;
-                color: #ffffff;
-                border: 1px solid #3d3d3d;
-                border-radius: 4px;
-                padding: 5px 15px;
-            }
-            QPushButton:hover {
-                background-color: #3d3d3d;
-            }
-        """)
+        self.left_edit_btn.setStyleSheet(ComparePageStyles.get_edit_btn_style())
         # Save button uses refresh button style (SECONDARY_BUTTON_STYLE)
-        self.left_save_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2d2d2d;
-                color: #ffffff;
-                border: 1px solid #3d3d3d;
-                border-radius: 4px;
-                padding: 5px 10px;
-            }
-            QPushButton:hover {
-                background-color: #3d3d3d;
-            }
-            QPushButton:pressed {
-                background-color: #1e1e1e;
-            }
-        """)
-        self.left_deploy_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: #ffffff;
-                border: none;
-                border-radius: 4px;
-                padding: 5px 15px;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-        """)
-        self.left_cancel_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #f44336;
-                color: #ffffff;
-                border: none;
-                border-radius: 4px;
-                padding: 5px 15px;
-            }
-            QPushButton:hover {
-                background-color: #d32f2f;
-            }
-        """)
+        self.left_save_btn.setStyleSheet(ComparePageStyles.get_save_btn_style())
+        self.left_deploy_btn.setStyleSheet(ComparePageStyles.get_deploy_btn_style())
+        self.left_cancel_btn.setStyleSheet(ComparePageStyles.get_cancel_btn_style())
 
         # Initially hide save/deploy/cancel buttons
         self.left_save_btn.hide()
@@ -653,58 +677,11 @@ class ComparePage(QWidget):
         self.right_cancel_btn = QPushButton("Cancel")
 
         # Style buttons like DetailPageYAMLSection
-        self.right_edit_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2d2d2d;
-                color: #ffffff;
-                border: 1px solid #3d3d3d;
-                border-radius: 4px;
-                padding: 5px 15px;
-            }
-            QPushButton:hover {
-                background-color: #3d3d3d;
-            }
-        """)
+        self.right_edit_btn.setStyleSheet(ComparePageStyles.get_edit_btn_style())
         # Save button uses refresh button style (SECONDARY_BUTTON_STYLE)
-        self.right_save_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2d2d2d;
-                color: #ffffff;
-                border: 1px solid #3d3d3d;
-                border-radius: 4px;
-                padding: 5px 10px;
-            }
-            QPushButton:hover {
-                background-color: #3d3d3d;
-            }
-            QPushButton:pressed {
-                background-color: #1e1e1e;
-            }
-        """)
-        self.right_deploy_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: #ffffff;
-                border: none;
-                border-radius: 4px;
-                padding: 5px 15px;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-        """)
-        self.right_cancel_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #f44336;
-                color: #ffffff;
-                border: none;
-                border-radius: 4px;
-                padding: 5px 15px;
-            }
-            QPushButton:hover {
-                background-color: #d32f2f;
-            }
-        """)
+        self.right_save_btn.setStyleSheet(ComparePageStyles.get_save_btn_style())
+        self.right_deploy_btn.setStyleSheet(ComparePageStyles.get_deploy_btn_style())
+        self.right_cancel_btn.setStyleSheet(ComparePageStyles.get_cancel_btn_style())
 
         # Initially hide save/deploy/cancel buttons
         self.right_save_btn.hide()
@@ -883,15 +860,7 @@ class ComparePage(QWidget):
         # Create and configure error widgets
         for side, layout in [('left', left_layout), ('right', right_layout)]:
             error_widget = QLabel()
-            error_widget.setStyleSheet(f"""
-                QLabel {{
-                    color: #ff4444;
-                    background-color: rgba(255, 68, 68, 0.1);
-                    padding: 10px;
-                    border-radius: 4px;
-                    border: 1px solid rgba(255, 68, 68, 0.3);
-                }}
-            """)
+            error_widget.setStyleSheet(ComparePageStyles.get_error_widget_style())
             error_widget.setWordWrap(True)
             error_widget.hide()
 
@@ -1784,17 +1753,7 @@ class ComparePage(QWidget):
             # Enter edit mode - clear any errors
             self._clear_error('left')
             self.left_box.setReadOnly(False)
-            self.left_box.setStyleSheet(f"""
-                QTextEdit {{
-                    background-color: #1E1E1E;
-                    color: #D4D4D4;
-                    border: 1px solid #0078d7;
-                    selection-background-color: #264F78;
-                    selection-color: #D4D4D4;
-                    padding: 20px;
-                }}
-                {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
-            """)
+            self.left_box.setStyleSheet(ComparePageStyles.get_edit_mode_text_box_style())
             self._left_original_yaml = self.left_box.toPlainText()
             self.left_edit_btn.hide()
             self.left_save_btn.show()
@@ -1822,17 +1781,7 @@ class ComparePage(QWidget):
             # Enter edit mode - clear any errors
             self._clear_error('right')
             self.right_box.setReadOnly(False)
-            self.right_box.setStyleSheet(f"""
-                QTextEdit {{
-                    background-color: #1E1E1E;
-                    color: #D4D4D4;
-                    border: 1px solid #0078d7;
-                    selection-background-color: #264F78;
-                    selection-color: #D4D4D4;
-                    padding: 20px;
-                }}
-                {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
-            """)
+            self.right_box.setStyleSheet(ComparePageStyles.get_edit_mode_text_box_style())
             self._right_original_yaml = self.right_box.toPlainText()
             self.right_edit_btn.hide()
             self.right_save_btn.show()
@@ -2155,41 +2104,14 @@ class ComparePage(QWidget):
         # Create or update the search menu
         if not combo._search_menu:
             combo._search_menu = QMenu(self)
-            combo._search_menu.setStyleSheet(f"""
-                QMenu {{
-                    background-color: #2d2d2d;
-                    color: #ffffff;
-                    border: 1px solid #3d3d3d;
-                    border-radius: 4px;
-                    padding: 5px;
-                }}
-                QMenu::item {{
-                    padding: 5px 20px;
-                    border-radius: 3px;
-                }}
-                QMenu::item:selected {{
-                    background-color: #0078d7;
-                }}
-            """)
+            combo._search_menu.setStyleSheet(ComparePageStyles.get_search_menu_style())
 
         # Create search input if not exists
         if not combo._search_input:
             combo._search_input = QLineEdit(self)
             combo._search_input.setPlaceholderText("Search resources...")
             combo._search_input.setFixedWidth(combo.width() - 10)
-            combo._search_input.setStyleSheet(f"""
-                QLineEdit {{
-                    background-color: #2d2d2d;
-                    color: #ffffff;
-                    border: 1px solid #3d3d3d;
-                    border-radius: 3px;
-                    padding: 5px;
-                    font-size: 12px;
-                }}
-                QLineEdit:focus {{
-                    border: 1px solid #0078d7;
-                }}
-            """)
+            combo._search_input.setStyleSheet(ComparePageStyles.get_search_input_style())
             combo._search_input.textChanged.connect(lambda text: self._filter_menu_items(combo, text))
             combo._search_action = QWidgetAction(self)
             combo._search_action.setDefaultWidget(combo._search_input)
