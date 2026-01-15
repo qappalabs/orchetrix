@@ -5,21 +5,20 @@ This module contains reusable classes and functions for efficient UI creation.
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
-    QLabel, QHeaderView, QToolButton, QMenu, QCheckBox, QFrame, QApplication,
-    QStyle, QStyleOptionHeader, QSizePolicy, QAbstractItemView
+    QLabel, QHeaderView, QToolButton, QMenu, QCheckBox, QAbstractItemView
 )
 from PyQt6.QtCore import Qt, QSize, QPoint, QEvent, QPropertyAnimation, pyqtSignal
-from PyQt6.QtGui import QColor, QIcon, QCursor, QFont, QLinearGradient, QPainter, QPen, QBrush
+from PyQt6.QtGui import QColor, QIcon, QPainter, QPen
 from functools import partial
 import weakref
 
-from UI.Styles import AppStyles, AppColors, AppConstants
-from UI.Icons import Icons, resource_path
+from UI.Styles import AppColors, AppConstants
+from UI.Icons import Icons
 from UI.ThemeAwarePage import ThemeAwareMixin
 from UI.ThemeManager import get_theme_manager
 import Styles.BaseTablePageStyles as BaseTablePageStyles
+import Styles.BaseComponentsStyles as BaseComponentsStyles
 import logging
-import os
 
 class SortableTableWidgetItem(QTableWidgetItem):
     """
@@ -55,13 +54,13 @@ class StatusLabel(QWidget):
         
         # Set color if provided, otherwise use default color
         if color:
-            self.label.setStyleSheet(f"color: {QColor(color).name()}; background-color: transparent;")
+            self.label.setStyleSheet(BaseComponentsStyles.get_status_badge_label_style(color))
         
         # Add label to layout
         layout.addWidget(self.label)
-        
+
         # Make sure this widget has a transparent background
-        self.setStyleSheet("background-color: transparent;")
+        self.setStyleSheet(BaseComponentsStyles.STATUS_BADGE_WIDGET_STYLE)
     
     def mousePressEvent(self, event):
         """Emit clicked signal when widget is clicked"""
@@ -97,23 +96,24 @@ class CustomHeader(QHeaderView):
         self.setMouseTracking(True)
 
     def _get_header_style(self):
-        """Get consistent header styling"""
+        """Get consistent header styling using current theme"""
+        theme = get_theme_manager().get_current_theme()
         return f"""
             QHeaderView::section {{
-                background-color: {AppColors.HEADER_BG};
-                color: {AppColors.TEXT_SECONDARY};
+                background-color: {theme.colors.HEADER_BG};
+                color: {theme.colors.TEXT_SECONDARY};
                 padding: 8px;
                 border: none;
-                border-bottom: 1px solid {AppColors.BORDER_COLOR};
+                border-bottom: 1px solid {theme.colors.BORDER_COLOR};
                 font-size: 12px;
                 text-align: center;
                 font-weight: bold;
             }}
-            
+
             QHeaderView::section:hover {{
-                background-color: {AppColors.BG_MEDIUM};
+                background-color: {theme.colors.BG_MEDIUM};
             }}
-            
+
             /* Completely hide default sort indicators */
             QHeaderView::down-arrow, QHeaderView::up-arrow {{
                 image: none;
@@ -232,7 +232,6 @@ class BaseTablePage(ThemeAwareMixin, QWidget):
         self.selected_items = set()
         self.select_all_checkbox = None
         self._setup_refs()
-        self._connect_theme_manager()  # Connect to theme changes
         self._load_action_button_icon()  # Load theme-aware icon once for performance
         
     def _setup_refs(self):
@@ -354,7 +353,7 @@ class BaseTablePage(ThemeAwareMixin, QWidget):
     def _create_checkbox_container(self, row, item_name):
         """Create a container for the checkbox with zero padding and margins"""
         container = QWidget()
-        container.setStyleSheet("background-color: transparent;")
+        container.setStyleSheet(BaseComponentsStyles.CONTAINER_TRANSPARENT_STYLE)
         container.setContentsMargins(0, 0, 0, 0)
         container.setAttribute(Qt.WidgetAttribute.WA_LayoutUsesWidgetRect, True)
         
@@ -382,16 +381,6 @@ class BaseTablePage(ThemeAwareMixin, QWidget):
         checkbox.stateChanged.connect(partial(self._handle_checkbox_change, item_name=item_name))
         return checkbox
 
-    def _create_fallback_checkbox_icon(self, is_checked):
-        """Create a fallback checkbox icon if SVG files are not available"""
-        # For fallback, return theme-aware checkbox icon paths
-        # This should rarely be needed if the SVG files are properly bundled
-        theme_name = get_theme_manager().get_current_theme_name() or "Dark"
-        if is_checked:
-            return Icons.get_theme_icon_path("check_box_checked.svg", theme_name)
-        else:
-            return Icons.get_theme_icon_path("check_box_unchecked.svg", theme_name)
-
     def _handle_checkbox_change(self, state, item_name):
         """Handle checkbox state changes"""
         if state == Qt.CheckState.Checked.value:
@@ -405,14 +394,6 @@ class BaseTablePage(ThemeAwareMixin, QWidget):
                 self.select_all_checkbox.blockSignals(True)
                 self.select_all_checkbox.setChecked(False)
                 self.select_all_checkbox.blockSignals(False)
-
-    # def _create_select_all_checkbox(self):
-    #     """Create the select-all checkbox for the header using the same SVG icon as row checkboxes"""
-    #     checkbox = QCheckBox()
-    #     checkbox.setStyleSheet(AppStyles.BASE_CHECKBOX_STYLE)
-    #     checkbox.stateChanged.connect(self._handle_select_all)
-    #     self.select_all_checkbox = checkbox
-    #     return checkbox
 
     def _create_select_all_checkbox(self):
         """Create the select-all checkbox for the header using resolved icon paths"""
@@ -470,21 +451,47 @@ class BaseTablePage(ThemeAwareMixin, QWidget):
         button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         button.setCursor(Qt.CursorShape.PointingHandCursor)
 
-        # Create menu
+        # Create menu using virtual method (allows child classes to override)
+        # This follows PyQt6 best practices for extensibility
+        self._create_action_menu(button, row)
+        self._item_widgets[f"action_button_{row}"] = button
+        return button
+
+    def _create_action_menu(self, button, row):
+        """
+        Create and attach menu to action button.
+        Virtual method - child classes can override to customize menus.
+
+        This method follows PyQt6 best practices:
+        - Uses functools.partial for signal connections to avoid lambda capture issues
+        - Sets button as parent for proper Qt object ownership and cleanup
+        - Returns menu for reference (already attached to button)
+
+        Args:
+            button: QToolButton to attach menu to (becomes menu parent)
+            row: Row number for this action button
+
+        Returns:
+            QMenu object (for reference, though it's already attached to button)
+        """
+        # Create menu with button as parent for proper Qt ownership
         menu = QMenu(button)
         menu.setStyleSheet(BaseTablePageStyles.get_menu_style())
 
-        # Connect signals to change row appearance when menu opens/closes
-        menu.aboutToShow.connect(lambda: self._highlight_active_row(row, True))
-        menu.aboutToHide.connect(lambda: self._highlight_active_row(row, False))
+        # Connect signals using functools.partial (better than lambda for PyQt6)
+        # This avoids capture issues and provides proper object lifecycle
+        menu.aboutToShow.connect(partial(self._highlight_active_row, row, True))
+        menu.aboutToHide.connect(partial(self._highlight_active_row, row, False))
 
-        actions  = []
-        # Only show "View Logs" for pods
-        if self.resource_type == "pods":
+        # Build default actions list
+        actions = []
+
+        # Resource-specific actions (e.g., pods get View Logs and SSH)
+        if hasattr(self, 'resource_type') and self.resource_type == "pods":
             actions.append({"text": "View Logs", "icon": "Icons/logs.png", "dangerous": False})
             actions.append({"text": "SSH", "icon": "Icons/terminal.png", "dangerous": False})
 
-        # Add default actions
+        # Default actions for all resources
         actions.extend([
             {"text": "Edit", "icon": "Icons/edit.png", "dangerous": False},
             {"text": "Delete", "icon": "Icons/delete.png", "dangerous": True}
@@ -494,16 +501,18 @@ class BaseTablePage(ThemeAwareMixin, QWidget):
         for action_info in actions:
             action = menu.addAction(action_info["text"])
             if "icon" in action_info:
-                action.setIcon(QIcon(action_info["icon"]))
+                try:
+                    action.setIcon(QIcon(action_info["icon"]))
+                except Exception:
+                    pass  # Icon loading failure is not critical
             if action_info.get("dangerous", False):
                 action.setProperty("dangerous", True)
-            action.triggered.connect(
-                partial(self._handle_action, action_info["text"], row)
-            )
+            # Use functools.partial for proper signal handling
+            action.triggered.connect(partial(self._handle_action, action_info["text"], row))
 
+        # Attach menu to button (button is already parent, so ownership is clear)
         button.setMenu(menu)
-        self._item_widgets[f"action_button_{row}"] = button
-        return button
+        return menu
 
     def _highlight_active_row(self, row, is_active):
         """Highlight the row when its menu is active"""
@@ -527,7 +536,7 @@ class BaseTablePage(ThemeAwareMixin, QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(button)
-        container.setStyleSheet("background-color: transparent;")
+        container.setStyleSheet(BaseComponentsStyles.CONTAINER_TRANSPARENT_STYLE)
         return container
         
     def handle_row_click(self, row, column):
@@ -555,7 +564,7 @@ class BaseTablePage(ThemeAwareMixin, QWidget):
         # Main message
         message_label = QLabel(message)
         message_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        message_label.setStyleSheet("font-size: 18px; font-weight: bold; margin-bottom: 10px;")
+        message_label.setStyleSheet(BaseComponentsStyles.EMPTY_STATE_MESSAGE_LABEL_STYLE)
         content_layout.addWidget(message_label)
 
         # Description (optional)
@@ -588,10 +597,10 @@ class BaseTablePage(ThemeAwareMixin, QWidget):
         if hasattr(self, 'table') and self.table:
             self.table.setStyleSheet(BaseTablePageStyles.get_table_style())
 
-            # Clear any direct header stylesheet so it inherits from table's QHeaderView::section
+            # Refresh CustomHeader if present
             header = self.table.horizontalHeader()
-            if header:
-                header.setStyleSheet("")  # Forces header to use table's stylesheet
+            if header and isinstance(header, CustomHeader):
+                header.setStyleSheet(header._get_header_style())
 
             # Clear all item backgrounds so theme-aware stylesheet colors apply
             for row in range(self.table.rowCount()):
@@ -640,14 +649,20 @@ class BaseTablePage(ThemeAwareMixin, QWidget):
                     # Find action button inside container
                     for child in action_container.children():
                         if isinstance(child, QToolButton):
+                            # Update button style
                             child.setStyleSheet(BaseTablePageStyles.get_action_button_style())
 
                             # Update icon to new theme's icon
                             child.setIcon(self.action_button_icon)
 
-                            # Refresh menu if exists
-                            if child.menu():
-                                child.menu().setStyleSheet(BaseTablePageStyles.get_menu_style())
+                            # Skip menu recreation - it breaks Qt event handling
+                            # Menus will retain original theme colors until page navigation
+                            # This matches HomePage behavior and ensures menus continue working
+                            #
+                            # Note: Do NOT try to recreate or update menus during theme change.
+                            # Qt has a known limitation where swapping menus on buttons breaks
+                            # event handling. HomePage solves this by recreating entire rows
+                            # when needed, not trying to update menus in place.
                             break
 
         logging.debug(f"BaseTablePage: Theme refresh complete for {theme_name}")
