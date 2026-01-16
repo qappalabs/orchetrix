@@ -61,8 +61,6 @@ class FieldLevelMatcher:
         # Map[(source_array_path, target_array_path)] -> {"source_to_target": {}, "target_consumed": set()}
         self._match_state = {}
 
-
-
     def resolve(self, source_dict, target_dict, path):
         """Return tuple of (source_value, target_value) with recursive array matching."""
         if not path:
@@ -105,7 +103,7 @@ class FieldLevelMatcher:
         next_source = None
         next_target = None
         matched_key = None
-        
+
         if isinstance(source_node, dict) or isinstance(target_node, dict):
             # Try shortest-first: single segment, then 2 segments, etc.
             for i in range(1, len(remaining) + 2):  # +2 because we include segment + up to all remaining
@@ -114,11 +112,11 @@ class FieldLevelMatcher:
                 # Build candidate key from segment + next (i-1) tokens
                 key_parts = [segment] + remaining[:i-1]
                 candidate_key = '.'.join(key_parts)
-                
+
                 # Check if this key exists in either dict
                 source_match = isinstance(source_node, dict) and candidate_key in source_node
                 target_match = isinstance(target_node, dict) and candidate_key in target_node
-                
+
                 if source_match or target_match:
                     # Found a match - use this key
                     matched_key = candidate_key
@@ -127,7 +125,7 @@ class FieldLevelMatcher:
                     # Update remaining tokens to skip the ones we consumed
                     remaining = remaining[i-1:]
                     break
-        
+
         # Fallback: if no match found, use original single-segment behavior
         if matched_key is None:
             matched_key = segment
@@ -372,7 +370,7 @@ class ComparePage(ThemeAwareMixin, QWidget):
         self._right_original_yaml = None
         self._left_resource_info = None  # (namespace, resource_type, name)
         self._right_resource_info = None
-        
+
         # Real-time highlighting state
         self._highlight_timer = QTimer()
         self._highlight_timer.setSingleShot(True)
@@ -512,7 +510,6 @@ class ComparePage(ThemeAwareMixin, QWidget):
             lbl.setMinimumWidth(70)
             lbl.setContentsMargins(0, 0, 8, 0)
             # Keep size/margins, only color comes from theme
-            theme = get_theme_manager().get_current_theme()
             lbl.setStyleSheet(
                 f"color: {theme.colors.TEXT_LIGHT}; font-size: 14px;"
             )
@@ -598,7 +595,6 @@ class ComparePage(ThemeAwareMixin, QWidget):
         self.left_resource_label.setFixedHeight(32)
         self.left_resource_label.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         # Keep size, only color theme-aware
-        theme = get_theme_manager().get_current_theme()
         self.left_resource_label.setStyleSheet(
             f"color: {theme.colors.TEXT_LIGHT}; font-size: 14px;"
         )
@@ -615,7 +611,6 @@ class ComparePage(ThemeAwareMixin, QWidget):
         self.right_resource_label.setFixedHeight(32)
         self.right_resource_label.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         # Keep size, only color theme-aware
-        theme = get_theme_manager().get_current_theme()
         self.right_resource_label.setStyleSheet(
             f"color: {theme.colors.TEXT_LIGHT}; font-size: 14px;"
         )
@@ -787,7 +782,7 @@ class ComparePage(ThemeAwareMixin, QWidget):
 
         self.left_box.mousePressEvent = create_focus_handler(self.left_box)
         self.right_box.mousePressEvent = create_focus_handler(self.right_box)
-        
+
         # Connect real-time highlighting
         self._setup_realtime_highlighting()
 
@@ -796,33 +791,33 @@ class ComparePage(ThemeAwareMixin, QWidget):
         # Connect textChanged signals with debouncing
         self.left_box.textChanged.connect(self._on_text_changed)
         self.right_box.textChanged.connect(self._on_text_changed)
-    
+
     def _on_text_changed(self):
         """Handle text change with debouncing"""
         if not self._realtime_highlighting_enabled:
             return
-            
+
         # Only trigger during edit mode
         if not (self._left_edit_mode or self._right_edit_mode):
             return
-            
+
         # Debounce: restart timer on each change
         self._highlight_timer.stop()
         self._highlight_timer.start(200)  # 200ms delay
-    
+
     def _update_realtime_highlighting(self):
         """Update highlighting in real-time"""
         try:
             left_yaml = self.left_box.toPlainText()
             right_yaml = self.right_box.toPlainText()
-            
+
             # Skip if either editor is empty
             if not left_yaml.strip() or not right_yaml.strip():
                 return
-            
+
             # Apply comparison highlighting
             self._apply_comparison_highlighting(left_yaml, right_yaml)
-            
+
         except Exception as e:
             LOG.debug(f"Error in real-time highlighting: {e}")
 
@@ -1022,7 +1017,7 @@ class ComparePage(ThemeAwareMixin, QWidget):
         # Temporarily disconnect signal to prevent unwanted triggers
         try:
             self.namespace_combo.currentTextChanged.disconnect(self._on_namespace_changed)
-        except:
+        except Exception:
             pass
 
         self.namespace_combo.clear()
@@ -1063,7 +1058,7 @@ class ComparePage(ThemeAwareMixin, QWidget):
 
         # Reconnect the signal
         self.namespace_combo.currentTextChanged.connect(self._on_namespace_changed)
-        
+
         # Trigger resource type scan for initial load
         if not self._initial_resource_types_loaded:
             QTimer.singleShot(50, lambda: self._on_namespace_changed(self.namespace_combo.currentText()))
@@ -1129,7 +1124,7 @@ class ComparePage(ThemeAwareMixin, QWidget):
             else:
                 self.resource_type_combo.setCurrentIndex(0)
         self.resource_type_combo.blockSignals(False)
-        
+
         # Mark resource types as loaded after first successful scan
         self._initial_resource_types_loaded = True
 
@@ -1270,7 +1265,7 @@ class ComparePage(ThemeAwareMixin, QWidget):
         line_to_path = {}
         path_stack = []  # Stack of (component, indent) tuples
         array_indices = {}  # Track array indices per parent path
-        
+
         def build_path_from_stack():
             """Build path from stack, handling brackets without dots"""
             path_parts = []
@@ -1283,21 +1278,20 @@ class ComparePage(ThemeAwareMixin, QWidget):
                 else:
                     path_parts.append(component)
             return '.'.join(path_parts)
-        
+
         in_quoted_string = False
-        last_key_indent = -1
-        
+
         for i, line in enumerate(lines, 1):  # 1-indexed
             stripped = line.strip()
-            
+
             # Handle empty lines and comments
             if not stripped or stripped.startswith('#'):
                 if path_stack:
                     line_to_path[i] = build_path_from_stack()
                 continue
-            
+
             indent = len(line) - len(line.lstrip())
-            
+
             # Handle list items (check before popping stack)
             if stripped.startswith('- '):
                 # Pop stack for items at GREATER indent
@@ -1306,16 +1300,16 @@ class ComparePage(ThemeAwareMixin, QWidget):
                 # Also pop if last item is a list item at SAME indent
                 if path_stack and path_stack[-1][1] == indent and '[' in path_stack[-1][0]:
                     path_stack.pop()
-                
+
                 # Get parent path and array index
                 parent_path = build_path_from_stack()
-                
+
                 # Initialize or get counter for this array
                 if parent_path not in array_indices:
                     array_indices[parent_path] = 0
                 list_idx = array_indices[parent_path]
                 array_indices[parent_path] += 1
-                
+
                 # Check for inline key:value
                 rest = stripped[2:].strip()
                 if ':' in rest and not rest.startswith('{'):
@@ -1343,7 +1337,7 @@ class ComparePage(ThemeAwareMixin, QWidget):
                 # For non-list items, pop stack for items at same or greater indent
                 while path_stack and path_stack[-1][1] >= indent:
                     path_stack.pop()
-            
+
             # If we're inside a quoted string, this is a continuation line
             if in_quoted_string:
                 if path_stack:
@@ -1353,7 +1347,7 @@ class ComparePage(ThemeAwareMixin, QWidget):
                 if (stripped.endswith('"') and not stripped.endswith('\\"')) or stripped.endswith("'"):
                     in_quoted_string = False
                 continue
-            
+
             # Handle key:value pairs
             if ':' in stripped and not stripped.startswith('{'):
                 key = stripped.split(':', 1)[0].strip()
@@ -1366,59 +1360,58 @@ class ComparePage(ThemeAwareMixin, QWidget):
                     line_to_path[i] = full_path
                     path_to_line[full_path] = i
                     path_stack.append((key, indent))
-                    last_key_indent = indent
-                    
+
                     # Reset nested array counters when entering new section
                     keys_to_remove = [k for k in array_indices.keys() if k.startswith(full_path + '.') or k.startswith(full_path + '[')]
                     for k in keys_to_remove:
                         del array_indices[k]
-                    
+
                     # Check if this line starts a multi-line quoted string
                     value_part = stripped.split(':', 1)[1].strip() if ':' in stripped else ''
                     if (value_part.startswith('"') and not (value_part.count('"') >= 2 and value_part.endswith('"'))) or \
                        (value_part.startswith("'") and not (value_part.count("'") >= 2 and value_part.endswith("'"))):
                         in_quoted_string = True
                 continue
-            
+
             # Continuation lines
             if path_stack:
                 line_to_path[i] = build_path_from_stack()
-        
+
         return path_to_line, line_to_path
 
     def compare_yaml_semantically(self, yaml1, yaml2):
         """Compare YAML semantically using DeepDiff (handles field reordering)"""
         dict1 = self.parse_yaml_string(yaml1)
         dict2 = self.parse_yaml_string(yaml2)
-        
+
         # Build line mappings with new parser
         paths1, line_to_path1 = self.build_yaml_line_maps(yaml1)
         paths2, line_to_path2 = self.build_yaml_line_maps(yaml2)
-        
+
         matching_lines1 = set()
         different_lines1 = set()
         matching_lines2 = set()
         different_lines2 = set()
-        
+
         lines1 = yaml1.splitlines()
         lines2 = yaml2.splitlines()
-        
+
         left_matcher = FieldLevelMatcher()
-        
+
         for i in range(len(lines1)):
             path = line_to_path1.get(i + 1)  # Use 1-indexed line numbers
             if path:
                 # Compare actual values at each path with recursive array matching
                 val1, val2 = left_matcher.resolve(dict1, dict2, path)
-                
+
                 # Fix: Mark as different if both are None (path resolution failed)
                 if val1 is None and val2 is None:
                     different_lines1.add(i)
                     continue
-                
+
                 # Check if this is a parent key (dict or list)
                 is_parent_key = isinstance(val1, (dict, list)) or isinstance(val2, (dict, list))
-                
+
                 if is_parent_key:
                     # Parent headers are GREEN if key exists in both
                     if val1 is not None and val2 is not None:
@@ -1429,28 +1422,28 @@ class ComparePage(ThemeAwareMixin, QWidget):
                     # Leaf values use DeepDiff
                     value_diff = DeepDiff(val1, val2, ignore_order=True)
                     is_changed = bool(value_diff)
-                
+
                 if is_changed:
                     different_lines1.add(i)
                 else:
                     matching_lines1.add(i)
-        
+
         right_matcher = FieldLevelMatcher()
-        
+
         for i in range(len(lines2)):
             path = line_to_path2.get(i + 1)  # Use 1-indexed line numbers
             if path:
                 # Compare actual values at each path with recursive array matching
                 val2, val1 = right_matcher.resolve(dict2, dict1, path)
-                
+
                 # Fix: Mark as different if both are None (path resolution failed)
                 if val1 is None and val2 is None:
                     different_lines2.add(i)
                     continue
-                
+
                 # Check if this is a parent key (dict or list)
                 is_parent_key = isinstance(val1, (dict, list)) or isinstance(val2, (dict, list))
-                
+
                 if is_parent_key:
                     # Parent headers are GREEN if key exists in both
                     if val1 is not None and val2 is not None:
@@ -1461,12 +1454,12 @@ class ComparePage(ThemeAwareMixin, QWidget):
                     # Leaf values use DeepDiff
                     value_diff = DeepDiff(val1, val2, ignore_order=True)
                     is_changed = bool(value_diff)
-                
+
                 if is_changed:
                     different_lines2.add(i)
                 else:
                     matching_lines2.add(i)
-        
+
         return (different_lines1, matching_lines1), (different_lines2, matching_lines2)
 
     def _apply_comparison_highlighting(self, left_yaml, right_yaml):
@@ -1478,7 +1471,7 @@ class ComparePage(ThemeAwareMixin, QWidget):
 
         # Compare semantically and get different/matching sets
         (left_diff, left_match), (right_diff, right_match) = self.compare_yaml_semantically(left_yaml, right_yaml)
-        
+
         # Update highlighters with both different and matching lines
         self.left_highlighter.set_comparison_lines(left_diff, left_match)
         self.right_highlighter.set_comparison_lines(right_diff, right_match)
@@ -1728,7 +1721,6 @@ class ComparePage(ThemeAwareMixin, QWidget):
             self._initial_resource_types_loaded = False  # Reset flag for new cluster
 
             # Trigger namespace reload after clearing
-            from PyQt6.QtCore import QTimer
             QTimer.singleShot(100, self._populate_namespaces)
 
         except Exception as e:
@@ -1907,7 +1899,7 @@ class ComparePage(ThemeAwareMixin, QWidget):
 
             # Handle result - exact same logic as DetailPageYAMLSection
             if not result or not isinstance(result, dict):
-                LOG.error(f"Deployment failed: Invalid update result received")
+                LOG.error("Deployment failed: Invalid update result received")
                 return
 
             if result.get('success', False):
