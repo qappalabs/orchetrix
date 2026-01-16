@@ -59,10 +59,7 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
-        # Directories to exclude from bundle
-        'logs', 'data', '.git', '__pycache__',
-
-        # Python modules - deepdiff's optional dependencies (not needed for YAML comparison)
+        # Python modules to exclude from bundle (excludes applies only to Python modules)
         # PyInstaller excludes the package and all submodules when given top-level name
         'matplotlib',
         'pandas',
