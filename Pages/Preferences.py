@@ -24,11 +24,11 @@ class ToggleSwitch(QCheckBox):
         self.toggled.connect(self.on_state_changed)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._circle_position = 10
-        
+
         # Connect to theme changes
         from UI.ThemeManager import get_theme_manager
         get_theme_manager().theme_changed.connect(self._on_theme_changed)
-    
+
     def _on_theme_changed(self, theme_name):
         """Refresh widget when theme changes"""
         self.update()
@@ -39,7 +39,7 @@ class ToggleSwitch(QCheckBox):
 
         # Get theme-aware colors
         colors = PreferencesStyles.get_toggle_switch_colors()
-        
+
         # Set colors based on state
         if self.isChecked():
             bg_color = QColor(colors['checked_bg'])
@@ -136,7 +136,7 @@ class PreferencesWidget(ThemeAwareMixin, QWidget):
 
         # Initialize timezone
         self.current_timezone = self.get_system_timezone()
-        
+
         # Initialize theme manager and settings
         self.theme_manager = get_theme_manager()
         from PyQt6.QtCore import QSettings
@@ -226,10 +226,10 @@ class PreferencesWidget(ThemeAwareMixin, QWidget):
         """Actual UI update logic"""
         # Update sidebar style
         self.sidebar.setStyleSheet(PreferencesStyles.get_sidebar_style())
-        
+
         # Update scroll area style
         self.content_scroll.setStyleSheet(PreferencesStyles.get_scroll_style())
-        
+
         # Refresh sidebar buttons
         if hasattr(self, 'app_btn'):
             self.app_btn.setStyleSheet(PreferencesStyles.get_sidebar_button_style())
@@ -241,7 +241,7 @@ class PreferencesWidget(ThemeAwareMixin, QWidget):
             self.editor_btn.setStyleSheet(PreferencesStyles.get_sidebar_button_style())
         if hasattr(self, 'terminal_btn'):
             self.terminal_btn.setStyleSheet(PreferencesStyles.get_sidebar_button_style())
-        
+
         # Update Back Button Icon
         if hasattr(self, 'back_btn'):
             from UI.Icons import Icons
@@ -258,11 +258,11 @@ class PreferencesWidget(ThemeAwareMixin, QWidget):
 
     def create_back_button(self):
         self.back_btn = QPushButton()
-        
+
         # Use theme-aware icon
         theme_name = get_theme_manager().get_current_theme_name() or "Dark"
         icon = Icons.get_theme_icon("back_arrow.png", theme_name)
-        
+
         self.back_btn.setIcon(icon)
         self.back_btn.setIconSize(QSize(24, 24))
         self.back_btn.setFixedSize(30, 30)
@@ -325,11 +325,11 @@ class PreferencesWidget(ThemeAwareMixin, QWidget):
         self.theme_combo.addItems(["Dark", "Light"])
         self.theme_combo.setStyleSheet(PreferencesStyles.get_dropdown_style())
         self.theme_combo.setCursor(Qt.CursorShape.PointingHandCursor)
-        
+
         # Set current theme from settings
         current_theme = self.settings.value("theme", "Light")
         self.theme_combo.setCurrentText(current_theme)
-        
+
         # Connect signal
         self.theme_combo.currentTextChanged.connect(self.on_theme_changed)
         content_layout.addWidget(self.theme_combo)
@@ -1029,10 +1029,10 @@ class PreferencesWidget(ThemeAwareMixin, QWidget):
     def on_theme_changed(self, theme_name):
         """Handle theme change from dropdown"""
         print(f"PreferencesWidget: Theme changed to {theme_name}")
-        
+
         # Save to settings
         self.settings.setValue("theme", theme_name)
-        
+
         # Apply theme - theme_changed signal will update all widgets
         self.theme_manager.set_theme(theme_name)
 
@@ -1040,10 +1040,10 @@ class PreferencesWidget(ThemeAwareMixin, QWidget):
         """Handle terminal font family change"""
         print(f"PreferencesWidget: Font family changed to {font_family}")
         self.current_font_family = font_family
-        
+
         # Emit signal for other components
         self.font_changed.emit(font_family)
-        
+
         # Update terminal if available
         if self.terminal_panel:
             self.terminal_panel.update_font(font_family)
@@ -1055,10 +1055,10 @@ class PreferencesWidget(ThemeAwareMixin, QWidget):
             if 6 <= size <= 72:
                 print(f"PreferencesWidget: Font size changed to {size}")
                 self.current_font_size = size
-                
+
                 # Emit signal for other components
                 self.font_size_changed.emit(size)
-                
+
                 # Update terminal if available
                 if self.terminal_panel:
                     self.terminal_panel.update_font_size(size)
@@ -1077,14 +1077,14 @@ class PreferencesWidget(ThemeAwareMixin, QWidget):
             if 6 <= size <= 72:
                 if size == self.last_emitted_size:
                     return
-                    
+
                 print(f"PreferencesWidget: Editor font size changed to {size}")
                 self.current_font_size = size
                 self.last_emitted_size = size
-                
+
                 # Emit signal for other components
                 self.font_size_changed.emit(size)
-                
+
                 # Update terminal font size input too to keep in sync
                 if hasattr(self, 'font_size_input'):
                     self.font_size_input.setText(str(size))
@@ -1097,10 +1097,10 @@ class PreferencesWidget(ThemeAwareMixin, QWidget):
         """Handle editor font family change"""
         print(f"PreferencesWidget: Editor font family changed to {font_family}")
         self.current_font_family = font_family
-        
+
         # Emit signal for other components
         self.font_changed.emit(font_family)
-        
+
         # Update terminal font family combo too to keep in sync
         if hasattr(self, 'font_family_combo'):
             self.font_family_combo.setCurrentText(font_family)
@@ -1135,7 +1135,7 @@ class PreferencesWidget(ThemeAwareMixin, QWidget):
         """Set the terminal panel reference"""
         print("PreferencesWidget: Setting terminal panel reference")
         self.terminal_panel = terminal_panel
-        
+
         # Apply any pending font size
         if self.pending_font_size:
             print(f"PreferencesWidget: Applying pending font size {self.pending_font_size}")
