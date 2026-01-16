@@ -1,27 +1,27 @@
 from PyQt6.QtWidgets import (
-    QHeaderView, QWidget, QLabel, QHBoxLayout,
-    QToolButton, QMenu, QVBoxLayout, QTableWidgetItem, QApplication, QPushButton
+    QHeaderView, QWidget, QHBoxLayout,
+    QToolButton, QMenu
 )
 from PyQt6.QtCore import Qt, QTimer, QSize
-from PyQt6.QtGui import QColor, QIcon
-import logging
+from PyQt6.QtGui import QColor
 
 from Base_Components.base_components import SortableTableWidgetItem
 from Base_Components.base_resource_page import BaseResourcePage
-from UI.Styles import AppStyles, AppColors, AppConstants
-from Utils.thread_manager import get_thread_manager
+from UI.Styles import AppColors, AppConstants
+from UI.ThemeManager import get_theme_manager
 
-from UI.Icons import resource_path
 import Styles.EventsPageStyles as EventsPageStyles
+import datetime
+
 
 class EventsPage(BaseResourcePage):
     """
     Displays Kubernetes events with live data and resource operations.
-    Simplified version without pagination/lazy loading and checkboxes.
+    Simplified version without pagination / lazy loading and checkboxes.
     """
 
     def __init__(self, parent=None):
-        super().__init__(parent)
+
         self.resource_type = "events"
 
         # FIXED: Enable pagination for events to prevent loading massive datasets
@@ -31,13 +31,12 @@ class EventsPage(BaseResourcePage):
         self.setup_page_ui()
 
     def setup_page_ui(self):
-        """Set up the main UI elements for the Events page"""
+
         # Define headers - include proper header for checkbox column even though it's hidden
-        headers = ["✓", "Type", "Message", "Namespace", "Involved Object", "Source", "Count", "Age", "Last Seen", ""]
-        sortable_columns = {1, 3, 4, 6, 7, 8}  # Type, Namespace, Involved Object, Count, Age, Last Seen
+        headers = ["", "Type", "Message", "Namespace", "Involved Object", "Source", "Count", "Age", "Last Seen", ""]
 
         # Create base UI - this will add a checkbox column at index 0
-        layout = super().setup_ui("Events", headers, sortable_columns)
+        page_layout = super().setup_ui("Events", headers)
 
         # Ensure proper header visibility and styling
         header = self.table.horizontalHeader()
@@ -46,52 +45,53 @@ class EventsPage(BaseResourcePage):
         header.setDefaultSectionSize(100)
 
         # Table styling is already handled by BaseResourcePage
-
-        # Enhanced header style with better text visibility
-        header.setStyleSheet(EventsPageStyles.get_header_style())
+        # Header styling is handled by CustomHeader (theme - aware)
 
         # Configure column widths
         self.configure_columns()
-        
-        # Add delete selected button        # Force load data after setup is complete
+
+        # Force load data after setup is complete
         QTimer.singleShot(100, self.force_load_data)
 
-        return layout
+        return page_layout
 
     def configure_columns(self):
-        """FIXED: Configure column widths for optimal display with resizable message column"""
+
         if not self.table:
             return
 
         header = self.table.horizontalHeader()
 
         # FIXED: Ensure proper column resize behavior and dragging
-        header.setSectionsMovable(False)  # Disable moving columns but allow resizing
+        # Disable moving columns but allow resizing
+        header.setSectionsMovable(False)
         header.setMinimumSectionSize(50)  # Minimum width for resizing
-        header.setStretchLastSection(False)  # We'll manually control stretching
+        # We'll manually control stretching
+        header.setStretchLastSection(False)
 
         # Simple column configuration for better performance
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        
+
         # Hide first column (checkbox)
         self.table.setColumnHidden(0, True)
-        
+
         # Set last column as stretch to fill remaining space
-        header.setSectionResizeMode(self.table.columnCount() - 2, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(
+            self.table.columnCount() - 2, QHeaderView.ResizeMode.Stretch)
 
         # Simple width setting - message column will stretch automatically
         widths = [0, 80, 0, 100, 150, 120, 60, 80, 100, 50]
         for i, width in enumerate(widths):
             if i < self.table.columnCount() and width > 0:
                 self.table.setColumnWidth(i, width)
-    
+
     def _handle_scroll(self, value):
-        """FIXED: Re-enable scroll handling for pagination"""
+
         # Use base class scroll handling which includes pagination
         super()._handle_scroll(value)
 
     def on_resources_loaded(self, new_resources, resource_type, next_continue_token, load_more=False):
-        """FIXED: Handle paginated data loading for events"""
+
         if self._shutting_down:
             return
 
@@ -99,34 +99,34 @@ class EventsPage(BaseResourcePage):
         try:
             # Call the base class method which handles pagination properly
             super()._on_resources_loaded((new_resources, resource_type, next_continue_token))
-            
+
         except AttributeError:
             # Fallback to manual pagination handling if base method not available
             if load_more:
                 # Append to existing resources
                 self.resources.extend(new_resources)
             else:
-                # Replace resources 
+                # Replace resources
                 self.resources = new_resources
-            
+
             # Update pagination state
             self.current_continue_token = next_continue_token
             self.all_data_loaded = not next_continue_token
-            
+
             # Update UI
             self._display_resources(self.resources)
             self._update_items_count()
-            
+
             self.is_loading_initial = False
             self.is_loading_more = False
-            
+
             if self.all_data_loaded:
                 self.all_items_loaded_signal.emit()
-            
+
             self.load_more_complete.emit()
 
     def populate_resource_row(self, row, resource):
-        """FIXED: Populate a single row with event data - no message truncation, add tooltips"""
+
         # Set row height - increased for better readability
         self.table.setRowHeight(row, 50)
 
@@ -151,7 +151,8 @@ class EventsPage(BaseResourcePage):
         # Get source
         source_info = raw_data.get("source", {})
         if isinstance(source_info, dict):
-            source = source_info.get("component", source_info.get("host", "Unknown"))
+            source = source_info.get(
+                "component", source_info.get("host", "Unknown"))
         else:
             source = str(source_info) if source_info else "Unknown"
 
@@ -162,15 +163,16 @@ class EventsPage(BaseResourcePage):
         age = resource.get("age", "Unknown")
 
         # Get last seen with better parsing
-        last_seen = raw_data.get("lastTimestamp", raw_data.get("eventTime", ""))
+        last_seen = raw_data.get(
+            "lastTimestamp", raw_data.get("eventTime", ""))
         if last_seen:
-            import datetime
             try:
                 if 'Z' in last_seen:
                     last_seen = last_seen.replace('Z', '+00:00')
                 last_seen_time = datetime.datetime.fromisoformat(last_seen)
                 if last_seen_time.tzinfo is None:
-                    last_seen_time = last_seen_time.replace(tzinfo=datetime.timezone.utc)
+                    last_seen_time = last_seen_time.replace(
+                        tzinfo=datetime.timezone.utc)
                 now = datetime.datetime.now(datetime.timezone.utc)
                 diff = now - last_seen_time
                 days = diff.days
@@ -200,7 +202,7 @@ class EventsPage(BaseResourcePage):
         ]
 
         # Column 0 is hidden checkbox, so start data population from column 1
-        # Populate columns 1-8 with data
+        # Populate columns 1 - 8 with data
         for i, value in enumerate(display_values):
             col = i + 1  # Skip checkbox column at index 0
             if col >= self.table.columnCount() - 1:  # Leave room for action column
@@ -213,71 +215,57 @@ class EventsPage(BaseResourcePage):
 
             # Set alignment
             if col == 2:  # Message column (accounting for checkbox offset)
-                item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+                item.setTextAlignment(
+                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             else:
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
             # Enhanced color coding for different event types and columns
             if col == 1:  # Type column - different colors for different event types
                 # Force color application with important styling
-                type_colors = {
-                    "Normal": "#4CAF50",      # Green for normal events
-                    "Warning": "#FF9800",     # Orange for warnings
-                    "Error": "#F44336",       # Red for errors
-                    "FailedMount": "#F44336", # Red for failed mounts
-                    "Failed": "#F44336",      # Red for failed events
-                    "FailedScheduling": "#F44336",  # Red for scheduling failures
-                    "Unhealthy": "#FF5722",   # Deep orange for health issues
-                    "BackOff": "#FF9800",     # Orange for backoff events
-                    "Killing": "#FF5722",     # Deep orange for killing events
-                    "Created": "#2196F3",     # Blue for creation events
-                    "Started": "#4CAF50",     # Green for started events
-                    "Pulled": "#4CAF50",      # Green for successful pulls
-                    "Scheduled": "#4CAF50",   # Green for successful scheduling
-                }
-                color = type_colors.get(event_type, "#ffffff")  # Default to white
+                color = EventsPageStyles.TYPE_COLORS.get(event_type, "#FFFFFF")  # Default to white
                 item.setForeground(QColor(color))
                 # Force the color by setting data role as well
                 item.setData(Qt.ItemDataRole.ForegroundRole, QColor(color))
 
-            elif col == 2:  # Message column - inherit color from event type for warnings/errors
+            elif col == 2:  # Message column - inherit color from event type for warnings / errors
                 if event_type in ["Warning", "Error", "Failed", "FailedMount", "FailedScheduling"]:
-                    color = QColor("#F44336")  # Red for error messages
+                    color = QColor(EventsPageStyles.get_error_message_color())
                 elif event_type in ["BackOff", "Unhealthy"]:
-                    color = QColor("#FF9800")  # Orange for warning messages
+                    color = QColor(EventsPageStyles.get_warning_message_color())
                 else:
-                    color = QColor("#ffffff")  # White for normal messages
+                    color = QColor(EventsPageStyles.get_message_color())
                 item.setForeground(color)
                 item.setData(Qt.ItemDataRole.ForegroundRole, color)
 
             elif col == 3:  # Namespace column
-                color = QColor("#64B5F6")  # Light blue for namespace
+                color = QColor(EventsPageStyles.get_namespace_color())
                 item.setForeground(color)
                 item.setData(Qt.ItemDataRole.ForegroundRole, color)
 
             elif col == 4:  # Involved Object column
-                color = QColor("#81C784")  # Light green for objects
+                color = QColor(EventsPageStyles.get_object_color())
                 item.setForeground(color)
                 item.setData(Qt.ItemDataRole.ForegroundRole, color)
 
             elif col == 5:  # Source column
-                color = QColor("#FFB74D")  # Light orange for source
+                color = QColor(EventsPageStyles.get_source_color())
                 item.setForeground(color)
                 item.setData(Qt.ItemDataRole.ForegroundRole, color)
 
             elif col == 6:  # Count column
                 count_value = int(value) if str(value).isdigit() else 0
                 if count_value > 10:
-                    color = QColor("#F44336")  # Red for high count
+                    color = QColor(EventsPageStyles.get_count_high_color())
                 elif count_value > 5:
-                    color = QColor("#FF9800")  # Orange for medium count
+                    color = QColor(EventsPageStyles.get_count_medium_color())
                 else:
-                    color = QColor("#4CAF50")  # Green for low count
+                    color = QColor(EventsPageStyles.get_count_low_color())
                 item.setForeground(color)
                 item.setData(Qt.ItemDataRole.ForegroundRole, color)
 
             else:  # Age and Last Seen columns
-                color = QColor("#B0BEC5")  # Light gray for timestamps
+                color = QColor(EventsPageStyles.get_timestamp_color())
                 item.setForeground(color)
                 item.setData(Qt.ItemDataRole.ForegroundRole, color)
 
@@ -286,17 +274,20 @@ class EventsPage(BaseResourcePage):
 
         # Enhanced action button in last column
         action_column = self.table.columnCount() - 1
-        action_button = self._create_enhanced_action_button(row, resource.get("name", ""), resource.get("namespace", ""))
+        action_button = self._create_enhanced_action_button(
+            row, resource.get("name", ""), resource.get("namespace", ""))
         action_container = self._create_perfect_action_container(action_button)
         self.table.setCellWidget(row, action_column, action_container)
 
     def _create_enhanced_action_button(self, row, resource_name, resource_namespace):
-        """Create a very compact action button"""
+
         button = QToolButton()
 
-        # Use theme-aware icon from parent class (cached and updates with theme)
+        # Use theme - aware icon from parent class (cached and updates with theme)
         button.setIcon(self.action_button_icon)
-        button.setIconSize(QSize(AppConstants.SIZES["ICON_SIZE"], AppConstants.SIZES["ICON_SIZE"]))  # Even smaller icon
+        button.setIconSize(QSize(
+            # Even smaller icon
+            AppConstants.SIZES["ICON_SIZE"], AppConstants.SIZES["ICON_SIZE"]))
 
         # Very compact button styling
         button.setStyleSheet(EventsPageStyles.get_action_button_style())
@@ -312,29 +303,34 @@ class EventsPage(BaseResourcePage):
 
         # Simple menu actions
         view_action = menu.addAction("View Details")
-        view_action.triggered.connect(lambda: self._handle_view_event_details(row))
+        view_action.triggered.connect(
+            lambda: self._handle_view_event_details(row))
 
         menu.addSeparator()
 
         delete_action = menu.addAction("Delete")
-        delete_action.triggered.connect(lambda: self._handle_action("Delete", row))
+        delete_action.triggered.connect(
+            lambda: self._handle_action("Delete", row))
 
         button.setMenu(menu)
 
         # Connect row highlighting
         menu.aboutToShow.connect(lambda: self._highlight_active_row(row, True))
-        menu.aboutToHide.connect(lambda: self._highlight_active_row(row, False))
+        menu.aboutToHide.connect(
+            lambda: self._highlight_active_row(row, False))
 
         return button
 
     def _create_perfect_action_container(self, button):
-        """Create a well-spaced action button container - FIXED: Better spacing on right"""
+
         container = QWidget()
-        container.setFixedSize(40, 24)  # Increased width from 24 to 40 for better right spacing
+        # Increased width from 24 to 40 for better right spacing
+        container.setFixedSize(40, 24)
         container.setStyleSheet(EventsPageStyles.ACTION_CONTAINER_STYLE)
 
         layout = QHBoxLayout(container)
-        layout.setContentsMargins(5, 0, 10, 0)  # Add left and right margins for better spacing
+        # Add left and right margins for better spacing
+        layout.setContentsMargins(5, 0, 10, 0)
         layout.setSpacing(0)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(button)
@@ -342,13 +338,14 @@ class EventsPage(BaseResourcePage):
         return container
 
     def _handle_view_event_details(self, row):
-        """Handle viewing event details"""
+
         if row < len(self.resources):
             # Trigger the existing detail view mechanism
-            self.handle_row_click(row, 1)  # Simulate clicking on a non-action column
+            # Simulate clicking on a non - action column
+            self.handle_row_click(row, 1)
 
     def _highlight_active_row(self, row, is_active):
-        """Enhanced row highlighting for better visual feedback"""
+
         if row >= self.table.rowCount():
             return
 
@@ -357,20 +354,27 @@ class EventsPage(BaseResourcePage):
             if item:
                 if is_active:
                     # More subtle highlight color
-                    item.setBackground(QColor(f"{AppColors.ACCENT_BLUE}15"))  # Very transparent blue
+                    # Very transparent blue
+                    accent_color = getattr(get_theme_manager().get_current_theme().colors, 'ACCENT_BLUE', AppColors.ACCENT_BLUE)
+                    highlight_color = QColor(accent_color)
+                    highlight_color.setAlpha(0x15)  # 21/255 = ~8% opacity
+                    item.setBackground(highlight_color)
                 else:
                     item.setBackground(QColor("transparent"))
 
         # Also highlight any cell widgets (like the action button)
-        action_container = self.table.cellWidget(row, self.table.columnCount() - 1)
+        action_container = self.table.cellWidget(
+            row, self.table.columnCount() - 1)
         if action_container:
             if is_active:
-                action_container.setStyleSheet(EventsPageStyles.ACTION_CONTAINER_ACTIVE_STYLE)
+                action_container.setStyleSheet(
+                    EventsPageStyles.ACTION_CONTAINER_ACTIVE_STYLE)
             else:
-                action_container.setStyleSheet(EventsPageStyles.ACTION_CONTAINER_INACTIVE_STYLE)
+                action_container.setStyleSheet(
+                    EventsPageStyles.ACTION_CONTAINER_INACTIVE_STYLE)
 
     def _handle_action(self, action, row):
-        """Handle action button clicks"""
+
         if row >= len(self.resources):
             return
         resource = self.resources[row]
@@ -378,7 +382,7 @@ class EventsPage(BaseResourcePage):
             self.delete_resource(resource["name"], resource["namespace"])
 
     def _parse_age_to_minutes(self, age):
-        """Parse age string to minutes for sorting"""
+
         if 'm' in age:
             return int(age.replace('m', ''))
         elif 'h' in age:
@@ -392,7 +396,7 @@ class EventsPage(BaseResourcePage):
                 return 0
 
     def handle_row_click(self, row, column):
-        """Handle row click event to show detail page"""
+
         if column != self.table.columnCount() - 1:  # Not the action column
             self.table.selectRow(row)
 
@@ -405,26 +409,15 @@ class EventsPage(BaseResourcePage):
             if parent and hasattr(parent, 'show_detail_for_table_item'):
                 parent.show_detail_for_table_item(row, column, self, "Events")
 
-    # Override checkbox-related methods to disable them for events
+    # Override checkbox - related methods to disable them for events
     def _create_select_all_checkbox(self):
-        """Override to return None - events don't need bulk selection"""
+
         return None
 
     def _handle_select_all(self, state):
-        """Override to do nothing - events don't support bulk operations"""
+
         pass
 
     def _handle_checkbox_change(self, state, item_name):
-        """Override to do nothing - events don't support bulk operations"""
+
         pass
-
-    def _on_theme_changed(self, theme_name):
-        """Refresh styles when theme changes"""
-        # Call parent implementation first
-        super()._on_theme_changed(theme_name)
-
-        # Refresh EventsPage-specific header styling
-        if hasattr(self, 'table') and self.table:
-            header = self.table.horizontalHeader()
-            if header:
-                header.setStyleSheet(EventsPageStyles.get_header_style())
