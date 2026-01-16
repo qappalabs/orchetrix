@@ -19,34 +19,34 @@ class PriorityClassesPage(BaseResourcePage):
     3. Deleting PriorityClasses (individual and batch)
     4. Resource details viewer
     """
-    
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.resource_type = "priorityclasses"
         self.show_namespace_dropdown = False  # PriorityClasses are cluster-scoped
         self.setup_page_ui()
-        
+
     def setup_page_ui(self):
         """Set up the main UI elements for the PriorityClasses page"""
         # Define headers and sortable columns
         headers = ["", "Name", "Value", "Global Default", "Age", ""]
         sortable_columns = {1, 2, 3, 4}
-        
+
         # Set up the base UI components
         layout = super().setup_ui("Priority Classes", headers, sortable_columns)
-        
+
         # Configure column widths
         self.configure_columns()
-        
+
         # Add delete selected button
 
     def configure_columns(self):
         """Configure column widths for full screen utilization"""
         if not self.table:
             return
-        
+
         header = self.table.horizontalHeader()
-        
+
         # Column specifications with optimized default widths
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
@@ -56,7 +56,7 @@ class PriorityClassesPage(BaseResourcePage):
             (4, 80, "stretch"),      # Status - stretch to fill remaining space
             (5, 40, "fixed")        # Actions
         ]
-        
+
         # Apply column configuration
         for col_index, default_width, resize_type in column_specs:
             if col_index < self.table.columnCount():
@@ -69,7 +69,7 @@ class PriorityClassesPage(BaseResourcePage):
                 elif resize_type == "stretch":
                     header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Stretch)
                     self.table.setColumnWidth(col_index, default_width)
-        
+
         # Ensure full width utilization after configuration
         QTimer.singleShot(100, self._ensure_full_width_utilization)
 
@@ -79,12 +79,12 @@ class PriorityClassesPage(BaseResourcePage):
         """
         # Set row height
         self.table.setRowHeight(row, 40)
-        
+
         # Create checkbox for row selection (styling already handled by BaseResourcePage)
         resource_name = resource["name"]
         checkbox_container = self._create_checkbox_container(row, resource_name)
         self.table.setCellWidget(row, 0, checkbox_container)
-        
+
         # Prepare data columns
         columns = [
             resource["name"],
@@ -92,11 +92,11 @@ class PriorityClassesPage(BaseResourcePage):
             resource.get("global_default", "false"),
             resource["age"]
         ]
-        
+
         # Add columns to table
         for col, value in enumerate(columns):
             cell_col = col + 1  # Adjust for checkbox column
-            
+
             # Handle numeric columns for sorting
             if col == 1:  # Value column
                 try:
@@ -106,58 +106,68 @@ class PriorityClassesPage(BaseResourcePage):
                 item = SortableTableWidgetItem(value, num)
             elif col == 3:  # Age column
                 try:
-                    num = int(value.replace('d', ''))
-                except ValueError:
+                    # Parse age with support for d, h, m, s suffixes
+                    age_str = str(value)
+                    if age_str and age_str[-1] in 'dhms':
+                        unit = age_str[-1]
+                        numeric_part = age_str[:-1]
+                        # Convert to seconds for consistent sorting
+                        unit_multipliers = {'d': 86400, 'h': 3600, 'm': 60, 's': 1}
+                        num = int(float(numeric_part) * unit_multipliers.get(unit, 1))
+                    else:
+                        # No suffix, try to parse as integer
+                        num = int(float(age_str)) if age_str else 0
+                except (ValueError, TypeError):
                     num = 0
                 item = SortableTableWidgetItem(value, num)
             else:
                 item = SortableTableWidgetItem(value)
-            
+
             # Set text alignment
             if col in [1, 2, 3]:
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             else:
                 item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-            
+
             # Make cells non-editable
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            
+
             # Add item to table
             self.table.setItem(row, cell_col, item)
-        
+
         # Create and add action button
         action_button = self._create_action_button(row, resource["name"], resource["namespace"])
         action_container = self._create_action_container(row, action_button)
         self.table.setCellWidget(row, len(columns) + 1, action_container)
-    
+
     def handle_row_click(self, row, column):
         if column != self.table.columnCount() - 1:  # Skip action column
             # Select the row
             self.table.selectRow(row)
-            
+
             # Get resource details
             resource_name = None
             namespace = None
-            
+
             # Get the resource name
             if self.table.item(row, 1) is not None:
                 resource_name = self.table.item(row, 1).text()
-            
+
             # Get namespace if applicable
             if self.table.item(row, 2) is not None:
                 namespace = self.table.item(row, 2).text()
-            
+
             # Show detail view
             if resource_name:
                 # Find the ClusterView instance
                 parent = self.parent()
                 while parent and not hasattr(parent, 'detail_manager'):
                     parent = parent.parent()
-                
+
                 if parent and hasattr(parent, 'detail_manager'):
                     # Get singular resource type
                     # resource_type = self.resource_type
                     # if resource_type.endswith('s'):
                     #     resource_type = resource_type[:-1]
-                    
+
                     parent.detail_manager.show_detail("priorityclasses", resource_name, namespace)
