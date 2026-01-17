@@ -38,7 +38,7 @@ def get_status_panel_style():
 
 def get_status_box_style():
     theme = _get_theme()
-    
+
     return f"""
         #statusBox {{
             background-color: {theme.colors.BG_SIDEBAR};
@@ -80,7 +80,7 @@ def get_resource_label_capacity_style():
 
 def get_active_button_style():
     theme = _get_theme()
-    
+
     return f"""
         QPushButton {{
             background-color: {theme.colors.BG_HEADER};
@@ -109,7 +109,7 @@ def get_inactive_button_style():
 
 def get_disabled_button_style():
     theme = _get_theme()
-    
+
     return f"""
         QPushButton {{
             background-color: {theme.colors.BG_SIDEBAR};
@@ -157,7 +157,7 @@ def get_status_subtitle_style():
 
 def get_bar_chart_tooltip_style():
     theme = _get_theme()
-    
+
     return f"""
         QToolTip {{
             background-color: {theme.colors.BG_SIDEBAR};
