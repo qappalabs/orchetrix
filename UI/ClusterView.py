@@ -10,6 +10,7 @@ from UI.Sidebar import Sidebar
 from UI.Styles import AppColors
 from UI.ThemeAwarePage import ThemeAwareMixin
 from UI.ThemeManager import get_theme_manager
+import Styles.ClusterViewStyles as ClusterViewStyles
 from UI.TerminalPanel import TerminalPanel
 from Utils.cluster_connector import get_cluster_connector
 from UI.DetailPageComponent import DetailPageComponent as DetailPage
@@ -125,7 +126,7 @@ PAGE_CONFIG = {
     'Persistent Volume Claims': PersistentVolumeClaimsPage,
     'Persistent Volumes': PersistentVolumesPage,
     'Storage Classes': StorageClassesPage,
-    
+
     # Helm pages
     'Charts': ChartsPage,
     'Releases': ReleasesPage,
@@ -140,13 +141,13 @@ PAGE_CONFIG = {
 
     # Custom Resource pages
     'Definitions': DefinitionsPage,
-    
+
     # Apps page
     'AppsChart': AppsPage,
-    
+
     # Compare page
     'Compare': ComparePage,
-    
+
     # AI Assistant page
     # 'AI Assistant': AIAssistantPage,
 }
@@ -186,16 +187,7 @@ class LoadingOverlay(QWidget):
     def _setup_ui(self) -> None:
         """Setup the UI components"""
         self.setObjectName("loadingOverlay")
-        self.setStyleSheet(f"""
-            #loadingOverlay {{
-                background-color: rgba(20, 20, 20, 0.8);
-            }}
-            QLabel {{
-                color: white;
-                font-size: 18px;
-                font-weight: bold;
-            }}
-        """)
+        self.setStyleSheet(ClusterViewStyles.get_loading_overlay_style())
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
         layout = QVBoxLayout(self)
@@ -318,12 +310,7 @@ class ClusterView(ThemeAwareMixin, QWidget):
 
     def _setup_ui(self) -> None:
         """Setup the main UI components"""
-        self.setStyleSheet(f"""
-            QWidget {{
-                background-color: {get_theme_manager().get_current_theme().colors.BG_DARK};
-                color: {get_theme_manager().get_current_theme().colors.TEXT_LIGHT};
-            }}
-        """)
+        self.setStyleSheet(ClusterViewStyles.get_cluster_view_main_style())
 
         # Main layout
         main_layout = QHBoxLayout(self)
@@ -345,7 +332,7 @@ class ClusterView(ThemeAwareMixin, QWidget):
     def _create_right_container(self) -> QWidget:
         """Create the right side container with stacked widget"""
         self.right_container = QWidget()
-        self.right_container.setStyleSheet(f"background-color: {get_theme_manager().get_current_theme().colors.BG_DARK};")
+        self.right_container.setStyleSheet(ClusterViewStyles.get_right_container_style())
 
         right_layout = QVBoxLayout(self.right_container)
         right_layout.setContentsMargins(0, 0, 0, 0)
@@ -353,7 +340,7 @@ class ClusterView(ThemeAwareMixin, QWidget):
 
         # Create stacked widget
         self.stacked_widget = QStackedWidget()
-        self.stacked_widget.setStyleSheet(f"background-color: {get_theme_manager().get_current_theme().colors.BG_DARK};")
+        self.stacked_widget.setStyleSheet(ClusterViewStyles.get_stacked_widget_style())
         self.stacked_widget.currentChanged.connect(
             lambda index: self.handle_page_change(self.stacked_widget.widget(index))
         )
@@ -368,22 +355,17 @@ class ClusterView(ThemeAwareMixin, QWidget):
     def _on_theme_changed(self, theme_name: str) -> None:
         """Handle theme changes by updating container styles"""
         theme = get_theme_manager().get_current_theme()
-        
+
         # Update main widget style
-        self.setStyleSheet(f"""
-            QWidget {{
-                background-color: {theme.colors.BG_DARK};
-                color: {theme.colors.TEXT_LIGHT};
-            }}
-        """)
-        
+        self.setStyleSheet(ClusterViewStyles.get_main_widget_style_for_theme(theme))
+
         # Update right container
         if hasattr(self, 'right_container'):
-            self.right_container.setStyleSheet(f"background-color: {theme.colors.BG_DARK};")
-        
+            self.right_container.setStyleSheet(ClusterViewStyles.get_right_container_style_for_theme(theme))
+
         # Update stacked widget
         if hasattr(self, 'stacked_widget'):
-            self.stacked_widget.setStyleSheet(f"background-color: {theme.colors.BG_DARK};")
+            self.stacked_widget.setStyleSheet(ClusterViewStyles.get_stacked_widget_style_for_theme(theme))
 
     def _initialize_detail_manager(self) -> None:
         """Initialize the detail page manager"""
@@ -555,26 +537,26 @@ class ClusterView(ThemeAwareMixin, QWidget):
         try:
             from Utils.thread_manager import get_thread_manager
             from Utils.enhanced_worker import EnhancedBaseWorker
-            
+
             # Create a worker for the refresh operation (only for delay, not Qt operations)
             class PageRefreshWorker(EnhancedBaseWorker):
                 def __init__(self, delay_ms):
                     super().__init__(f"page_refresh_{page_name}")
                     self.delay_ms = delay_ms
                     self._timeout = 30  # 30 second timeout for refresh operations
-                
+
                 def execute(self):
                     # Small delay to let Kubernetes propagate changes
                     import time
                     time.sleep(self.delay_ms / 1000.0)
-                    
+
                     # Don't call Qt methods from worker thread - just return success
                     return f"Delay completed for {page_name}"
-            
+
             # Submit the worker to thread manager
             thread_manager = get_thread_manager()
             worker = PageRefreshWorker(delay_ms)
-            
+
             def on_refresh_complete(result):
                 # Now perform the actual Qt refresh operations on the main thread
                 try:
@@ -586,16 +568,16 @@ class ClusterView(ThemeAwareMixin, QWidget):
                     logging.debug(f"Page {page_name} refreshed successfully")
                 except Exception as e:
                     logging.error(f"Error refreshing page {page_name} on main thread: {e}")
-            
+
             def on_refresh_error(error):
                 logging.error(f"Page refresh error for {page_name}: {error}")
-            
+
             # Use queued connection to ensure the completion handler runs on main thread
             worker.signals.finished.connect(on_refresh_complete, Qt.ConnectionType.QueuedConnection)
             worker.signals.error.connect(on_refresh_error, Qt.ConnectionType.QueuedConnection)
-            
+
             thread_manager.submit_worker(f"page_refresh_{page_name}_{id(page)}", worker)
-            
+
         except Exception as e:
             logging.error(f"Error starting async page refresh for {page_name}: {e}")
             # Fallback to sync refresh if async fails - use QTimer to ensure main thread execution
@@ -609,7 +591,7 @@ class ClusterView(ThemeAwareMixin, QWidget):
                         logging.debug(f"Sync fallback refresh completed for {page_name}")
                     except Exception as sync_error:
                         logging.error(f"Sync fallback refresh failed for {page_name}: {sync_error}")
-                
+
                 # Use QTimer to ensure execution on main thread
                 QTimer.singleShot(500, perform_sync_refresh)
             except Exception as fallback_error:
@@ -774,7 +756,7 @@ class ClusterView(ThemeAwareMixin, QWidget):
         """Set the active cluster and update the UI accordingly - FIXED for proper cluster switching"""
         if self.active_cluster == cluster_name:
             logging.info(f"ClusterView: Already active cluster {cluster_name}, ensuring data is loaded")
-            
+
             # FIXED: Even if same cluster, ensure UI is updated
             if 'Cluster' in self.pages:
                 cluster_page = self.pages['Cluster']
@@ -787,7 +769,7 @@ class ClusterView(ThemeAwareMixin, QWidget):
         if old_cluster and old_cluster != cluster_name:
             logging.info(f"ClusterView: Switching from cluster '{old_cluster}' to '{cluster_name}'")
             self._clear_all_page_data()
-            
+
         self.active_cluster = cluster_name
         logging.info(f"ClusterView: Setting active cluster to {cluster_name}")
 
@@ -797,12 +779,12 @@ class ClusterView(ThemeAwareMixin, QWidget):
             logging.info(f"ClusterView: Set cluster connector current cluster to {cluster_name}")
 
         # Check if cluster state manager already connected
-        if (hasattr(self, 'cluster_connector') and 
+        if (hasattr(self, 'cluster_connector') and
             self.cluster_connector and
             hasattr(self.cluster_connector, 'connection_states')):
-            
+
             current_state = self.cluster_connector.connection_states.get(cluster_name, "disconnected")
-            
+
             # If already connected, try to update UI with cached data
             if current_state == "connected":
                 logging.info(f"ClusterView: Cluster {cluster_name} already connected, updating from cache")
@@ -814,7 +796,7 @@ class ClusterView(ThemeAwareMixin, QWidget):
                         if hasattr(cluster_page, 'refresh_data'):
                             QTimer.singleShot(500, cluster_page.refresh_data)
                 return
-        
+
         logging.info(f"ClusterView: Set active cluster to {cluster_name}, waiting for connection events")
 
     def show_detail_for_table_item(self, row: int, col: int, page, page_name: str) -> None:
@@ -902,6 +884,11 @@ class ClusterView(ThemeAwareMixin, QWidget):
     def get_available_crds(self):
         """Get available CustomResourceDefinitions for sidebar menu"""
         try:
+            # Check if we have an active cluster connection first
+            if not hasattr(self, 'active_cluster') or not self.active_cluster:
+                logging.debug("No active cluster, returning empty CRDs list")
+                return []
+
             # First try to fetch CRDs directly from API
             from Utils.kubernetes_client import get_kubernetes_client
             kubernetes_client = get_kubernetes_client()
@@ -919,7 +906,7 @@ class ClusterView(ThemeAwareMixin, QWidget):
                             spec = crd_dict.get("spec", {})
                             names = spec.get("names", {})
                             metadata = crd_dict.get("metadata", {})
-                            
+
                             crd_info = {
                                 "name": metadata.get("name", ""),
                                 "kind": names.get("kind", metadata.get("name", "")),
@@ -932,7 +919,7 @@ class ClusterView(ThemeAwareMixin, QWidget):
                         logging.info("No CRD items found in API response")
                 except Exception as e:
                     logging.warning(f"Failed to fetch CRDs directly: {e}")
-            
+
             # Fallback: Try to get CRDs from the definitions page if it's loaded
             if "Definitions" in self.pages:
                 definitions_page = self.pages["Definitions"]
@@ -942,7 +929,7 @@ class ClusterView(ThemeAwareMixin, QWidget):
                         raw_data = resource.get("raw_data", {})
                         spec = raw_data.get("spec", {})
                         names = spec.get("names", {})
-                        
+
                         crd_info = {
                             "name": resource["name"],
                             "kind": names.get("kind", resource["name"]),
@@ -953,7 +940,7 @@ class ClusterView(ThemeAwareMixin, QWidget):
                     return crds
                 else:
                     logging.info("Definitions page loaded but no resources or resources empty")
-            
+
             return []
         except Exception as e:
             logging.error(f"Error getting available CRDs: {e}")
@@ -968,7 +955,7 @@ class ClusterView(ThemeAwareMixin, QWidget):
             page_widget = self._ensure_page_loaded(item_name)
             self.stacked_widget.setCurrentWidget(page_widget)
             self._load_page_data(page_widget)
-            
+
             # If we just loaded the Definitions page, refresh the sidebar
             if item_name == "Definitions" and hasattr(self, 'sidebar'):
                 # Wait a bit longer for the page to fully load
@@ -981,7 +968,7 @@ class ClusterView(ThemeAwareMixin, QWidget):
                 if crd["kind"] == item_name:
                     crd_match = crd
                     break
-            
+
             if crd_match:
                 # Create or get the CRD instance page
                 page_key = f"CRD_{crd_match['kind']}"
@@ -990,7 +977,7 @@ class ClusterView(ThemeAwareMixin, QWidget):
                     crd_page = CustomResourceInstancePage(crd_match["name"], crd_match["spec"], self)
                     self.pages[page_key] = crd_page
                     self.stacked_widget.addWidget(crd_page)
-                
+
                 page_widget = self.pages[page_key]
                 self.stacked_widget.setCurrentWidget(page_widget)
                 self._load_page_data(page_widget)
@@ -1027,7 +1014,7 @@ class ClusterView(ThemeAwareMixin, QWidget):
     def _on_cluster_data_loaded(self, cluster_info: Dict[str, Any]) -> None:
         """Handle cluster data loaded"""
         self.loading_overlay.hide_loading()
-        
+
     def _on_error(self, error_message: str) -> None:
         """Handle error messages"""
         self.loading_overlay.hide_loading()
@@ -1053,11 +1040,11 @@ class ClusterView(ThemeAwareMixin, QWidget):
                         events_page.force_load_data()
                     elif hasattr(events_page, 'load_data'):
                         events_page.load_data()
-                        
+
                 logging.debug(f"Resource update completed for {resource_type}/{resource_name}")
             except Exception as e:
                 logging.error(f"Error in resource update for {resource_type}/{resource_name}: {e}")
-        
+
         # Use QTimer to ensure execution on main thread
         QTimer.singleShot(0, perform_resource_update)
 
@@ -1133,14 +1120,14 @@ class ClusterView(ThemeAwareMixin, QWidget):
             # Use the detail_manager to close detail panels
             if hasattr(self, 'detail_manager') and self.detail_manager:
                 if self.detail_manager.is_detail_visible():
-                    print("Closing detail panel via detail_manager")
+                    logging.debug("Closing detail panel via detail_manager")
                     self.detail_manager.hide_detail()
 
             # Fallback: Also search for any DetailPage instances that might exist
             detail_panels = self.findChildren(DetailPage)
             for detail_panel in detail_panels:
                 if detail_panel.isVisible():
-                    print(f"Closing detail panel: {detail_panel}")
+                    logging.debug(f"Closing detail panel: {detail_panel}")
                     detail_panel.close_detail_panel()
 
             # Also check for detail panels that might be direct children of main window
@@ -1148,11 +1135,11 @@ class ClusterView(ThemeAwareMixin, QWidget):
                 main_window_detail_panels = self.parent().findChildren(DetailPage)
                 for detail_panel in main_window_detail_panels:
                     if detail_panel.isVisible():
-                        print(f"Closing main window detail panel: {detail_panel}")
+                        logging.debug(f"Closing main window detail panel: {detail_panel}")
                         detail_panel.close_detail_panel()
 
         except Exception as e:
-            print(f"Error closing detail panels: {e}")
+            logging.exception(f"Error closing detail panels: {e}")
 
     # Also add this method to ensure detail panels are closed in handle_page_change:
 
@@ -1160,7 +1147,7 @@ class ClusterView(ThemeAwareMixin, QWidget):
         """Handle page changes with optimized performance"""
         # Close detail page first - this is the important part!
         if hasattr(self, 'detail_manager') and self.detail_manager.is_detail_visible():
-            print("Closing detail panel on page change")
+            logging.debug("Closing detail panel on page change")
             self.detail_manager.hide_detail()
 
         # Find page name
@@ -1178,12 +1165,12 @@ class ClusterView(ThemeAwareMixin, QWidget):
         self._set_active_navigation(page_name)
 
         # Load data with delay to allow UI update
-        QTimer.singleShot(50, lambda: self._load_page_data(page_widget))    
+        QTimer.singleShot(50, lambda: self._load_page_data(page_widget))
     def _clear_all_page_data(self):
         """Clear data from all loaded pages when switching clusters - FIXED"""
         try:
             logging.info("ClusterView: Clearing data from all loaded pages for cluster switch")
-            
+
             for page_name, page_widget in self.pages.items():
                 if hasattr(page_widget, 'clear_for_cluster_change'):
                     try:
@@ -1197,55 +1184,63 @@ class ClusterView(ThemeAwareMixin, QWidget):
                     if hasattr(page_widget, 'table') and hasattr(page_widget.table, 'setRowCount'):
                         page_widget.table.setRowCount(0)
                     logging.debug(f"Cleared resources for page: {page_name}")
-            
+
             logging.info("ClusterView: Completed clearing page data for cluster switch")
-            
+
         except Exception as e:
             logging.error(f"Error clearing page data for cluster switch: {e}")
-    
+
     def cleanup_on_destroy(self):
         """Cleanup method called when ClusterView is being destroyed"""
         try:
-            logging.debug("ClusterView cleanup_on_destroy called")
-            
+            logging.debug("ClusterView cleanup called")
+
             # Close any open detail panels
             if hasattr(self, 'detail_manager') and self.detail_manager:
                 if self.detail_manager.is_detail_visible():
                     self.detail_manager.hide_detail()
-            
+
             # Stop and cleanup terminal
             if hasattr(self, 'terminal_panel') and self.terminal_panel:
                 if hasattr(self.terminal_panel, 'cleanup'):
                     self.terminal_panel.cleanup()
-            
-            # Disconnect cluster connector signals
+
+            # Disconnect cluster connector signals safely
             if hasattr(self, 'cluster_connector') and self.cluster_connector:
-                try:
-                    # Disconnect all signals
-                    self.cluster_connector.connection_started.disconnect()
-                    self.cluster_connector.connection_complete.disconnect()
-                    self.cluster_connector.cluster_data_loaded.disconnect()
-                    self.cluster_connector.error_occurred.disconnect()
-                except Exception as e:
-                    logging.error(f"Error disconnecting cluster connector signals: {e}")
-            
+                # Disconnect specific slots with proper error handling
+                disconnect_mappings = [
+                    (self.cluster_connector.connection_started, self._on_connection_started),
+                    (self.cluster_connector.connection_complete, self._on_connection_complete),
+                    (self.cluster_connector.cluster_data_loaded, self._on_cluster_data_loaded),
+                    (self.cluster_connector.error_occurred, self._on_error)
+                ]
+
+                for signal, slot in disconnect_mappings:
+                    try:
+                        signal.disconnect(slot)
+                    except TypeError:
+                        # Signal was not connected or already disconnected
+                        logging.debug(f"Signal {signal} was not connected to slot {slot}")
+                    except Exception as e:
+                        logging.error(f"Error disconnecting signal {signal}: {e}")
+
             # Cleanup individual pages
             for page_name, page_widget in self.pages.items():
-                if hasattr(page_widget, 'cleanup_on_destroy'):
-                    try:
-                        page_widget.cleanup_on_destroy()
-                    except Exception as e:
-                        logging.error(f"Error cleaning up page {page_name}: {e}")
-            
+                try:
+                    if hasattr(page_widget, 'cleanup'):
+                        page_widget.cleanup()
+                except Exception as e:
+                    logging.error(f"Error cleaning up page {page_name}: {e}")
+
             # Clear pages dictionary
             self.pages.clear()
             self._loaded_pages.clear()
-            
+
             logging.debug("ClusterView cleanup completed")
-            
+
         except Exception as e:
-            logging.error(f"Error in ClusterView cleanup_on_destroy: {e}")
-    
+            logging.error(f"Error in ClusterView cleanup: {e}")
+
     def __del__(self):
         """Destructor to ensure cleanup when ClusterView is destroyed"""
         try:
