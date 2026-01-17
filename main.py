@@ -196,15 +196,6 @@ class MainWindow(QMainWindow):
             except Exception as cache_error:
                 logging.debug(f"Could not cleanup age cache: {cache_error}")
 
-            # Cleanup debounced updater
-            try:
-                from Utils.debounced_updater import get_debounced_updater
-                updater = get_debounced_updater()
-                # Clear old throttle history to prevent memory accumulation
-                updater.clear_throttle_history()
-            except Exception as updater_error:
-                logging.debug(f"Could not cleanup debounced updater: {updater_error}")
-
             # Cleanup background workers that may be finished
             self._cleanup_finished_workers()
 
