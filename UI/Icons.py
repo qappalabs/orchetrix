@@ -13,13 +13,13 @@ def resource_path(relative_path):
         # PyInstaller creates a temp folder and stores path in _MEIPASS
         if getattr(sys, 'frozen', False):
             base_path = sys._MEIPASS
-            
+
             # Log the resolved path for debugging
             logging.debug(f"Resolving resource: {relative_path} from base {base_path}")
             full_path = os.path.join(base_path, relative_path)
             exists = os.path.exists(full_path)
             logging.debug(f"Resolved path {full_path} exists: {exists}")
-            
+
             # If file doesn't exist, try alternative paths
             if not exists:
                 # Try without subdirectory
@@ -28,19 +28,19 @@ def resource_path(relative_path):
                 if os.path.exists(alt_path):
                     logging.debug(f"Found alternative path: {alt_path}")
                     return alt_path
-                
+
                 # Try in _internal/Icons directory (PyInstaller structure)
                 alt_path2 = os.path.join(base_path, "_internal", "Icons", filename)
                 if os.path.exists(alt_path2):
                     logging.debug(f"Found in _internal/Icons subdirectory: {alt_path2}")
                     return alt_path2
-                
+
                 # Try in Icons subdirectory
                 alt_path3 = os.path.join(base_path, "Icons", filename)
                 if os.path.exists(alt_path3):
                     logging.debug(f"Found in icons subdirectory: {alt_path3}")
                     return alt_path3
-            
+
             return full_path
         else:
             # Running in normal Python environment
@@ -58,10 +58,10 @@ Support for both SVG and PNG formats.
 
 class Icons:
     """Static class to provide consistent icons throughout the app"""
-    
+
     # Base path for icons - change this to your local directory
     ICONS_BASE_PATH = "Icons/"
-    
+
     # Emoji-based fallback icons
     CLUSTER = "⚙️"
     NODES = "💻"
@@ -75,41 +75,41 @@ class Icons:
     NAMESPACES = "🔖"
     EVENTS = "🕒"
     APPS = "📱"
-    
+
     HOME = "🏠"
     PREFERENCES = "⚙️"
     PROFILE = "👤"
     NOTIFICATIONS = "🔔"
     HELP = "❓"
-    
+
     COMPARE = "🔍"
     TERMINAL = "⌨️"
     AI_ASSIS = "💬"
-    
+
     # Navigation
     BACK = "←"
     FORWARD = "→"
-    
+
     # Window controls
     MINIMIZE = "─"
     MAXIMIZE = "□"
     MAXIMIZE_ACTIVE = "❐"
     CLOSE = "✕"
-    
+
     # Menu indicators
     DROPDOWN_ARROW = "▼"
     RIGHT_ARROW = "▸"
     MENU_DOTS = "⋮"
-    
+
     # Status
     STATUS_OK = "✓"
     STATUS_ERROR = "✗"
     STATUS_WARNING = "⚠"
-    
+
     # Cache to store loaded icons
     _icon_cache = {}
-    
-    
+
+
     @staticmethod
     def get_icon_from_path(icon_path, fallback_text=None):
         """
@@ -119,16 +119,16 @@ class Icons:
         # Check if already cached
         if icon_path in Icons._icon_cache:
             return Icons._icon_cache[icon_path]
-        
+
         # Try to load from file
         try:
             # Use resource_path to resolve the path
             resolved_path = resource_path(icon_path)
-            
+
             # Check if file exists before creating QIcon
             if os.path.exists(resolved_path):
                 icon = QIcon(resolved_path)
-                
+
                 # Test if icon loaded successfully
                 if not icon.isNull():
                     # Cache the icon
@@ -139,19 +139,19 @@ class Icons:
                     logging.warning(f"QIcon created but is null for: {icon_path}")
             else:
                 logging.warning(f"Icon file does not exist: {resolved_path}")
-                
+
         except Exception as e:
             logging.error(f"Failed to load icon from {icon_path}: {e}")
-        
+
         # If we get here, loading failed - use fallback
         if fallback_text:
             logging.debug(f"Using fallback text '{fallback_text}' for icon: {icon_path}")
             return Icons.create_text_icon(fallback_text)
-        
+
         # Last resort - empty icon
         logging.warning(f"No fallback available for icon: {icon_path}")
         return QIcon()
-    
+
     @staticmethod
     def get_icon(icon_id, use_local=True):
         """
@@ -160,16 +160,16 @@ class Icons:
         # Get the fallback text for this icon
         fallback_attr = icon_id.upper() if isinstance(icon_id, str) else None
         fallback_text = getattr(Icons, fallback_attr, "⚙️") if fallback_attr else "⚙️"
-        
+
         # If not using local files, return text icon directly
         if not use_local:
             return Icons.create_text_icon(fallback_text)
-        
+
         # Try to load from SVG first
         try:
             icon_path_svg = os.path.join(Icons.ICONS_BASE_PATH, f"{icon_id.lower()}.svg")
             resolved_path_svg = resource_path(icon_path_svg)
-            
+
             if os.path.exists(resolved_path_svg):  # Check if file exists before trying to load
                 icon = QIcon(resolved_path_svg)
                 if not icon.isNull():
@@ -177,7 +177,7 @@ class Icons:
                     return icon
         except Exception as e:
             logging.debug(f"Failed to load SVG icon {icon_id}: {e}")
-                
+
         # Try PNG as fallback
         try:
             icon_path_png = os.path.join(Icons.ICONS_BASE_PATH, f"{icon_id.lower()}.png")
@@ -190,10 +190,10 @@ class Icons:
                     return icon
         except Exception as e:
             logging.debug(f"Failed to load PNG icon {icon_id}: {e}")
-        
+
         # Fall back to text icon
         return Icons.create_text_icon(fallback_text)
-    
+
     @staticmethod
     def get_theme_icon(icon_filename, theme_name):
         """Get a theme-specific icon from Icons/<theme>/ using existing path logic.
@@ -207,7 +207,7 @@ class Icons:
         # Derive fallback text
         base_name, _ = os.path.splitext(icon_filename)
         fallback_attr = base_name.upper()
-        
+
         # Determine theme folder (default to dark if unknown)
         theme_folder = theme_name.lower()
         if theme_folder not in ["light", "dark"]:
@@ -216,14 +216,14 @@ class Icons:
         # Try to load from theme folder first
         themed_path = os.path.join(Icons.ICONS_BASE_PATH, theme_folder, icon_filename)
         resolved_themed_path = resource_path(themed_path)
-        
+
         if os.path.exists(resolved_themed_path):
              return Icons.get_icon_from_path(themed_path)
 
         # Fallback to base folder (backward compatibility)
         original_path = os.path.join(Icons.ICONS_BASE_PATH, icon_filename)
         return Icons.get_icon_from_path(original_path, fallback_text=getattr(Icons, fallback_attr, "⚙️"))
-    
+
     @staticmethod
     def get_theme_icon_path(icon_filename, theme_name):
         """Get the resolved file path for a theme-specific icon.
@@ -234,22 +234,22 @@ class Icons:
         """
         if not isinstance(icon_filename, str) or not isinstance(theme_name, str):
             return resource_path(os.path.join(Icons.ICONS_BASE_PATH, icon_filename))
-        
+
         # Determine theme folder (default to dark if unknown)
         theme_folder = theme_name.lower()
         if theme_folder not in ["light", "dark"]:
             theme_folder = "dark"
-        
+
         # Try theme-specific path first
         themed_path = os.path.join(Icons.ICONS_BASE_PATH, theme_folder, icon_filename)
         resolved_themed_path = resource_path(themed_path)
-        
+
         if os.path.exists(resolved_themed_path):
             return resolved_themed_path
-        
+
         # Fallback to base folder
         return resource_path(os.path.join(Icons.ICONS_BASE_PATH, icon_filename))
-    
+
     @staticmethod
     def get_theme_icon_by_id(icon_id, theme_name):
         """
@@ -264,38 +264,38 @@ class Icons:
         """
         if not isinstance(icon_id, str):
             return QIcon()
-            
+
         # Determine theme folder
         theme_folder = theme_name.lower() if isinstance(theme_name, str) else "dark"
         if theme_folder not in ["light", "dark"]:
             theme_folder = "dark"
-            
+
         # 1. Try Theme SVG (Highest Priority)
         svg_filename = f"{icon_id}.svg"
         svg_path = os.path.join(Icons.ICONS_BASE_PATH, theme_folder, svg_filename)
         # Use resource_path to check existence before trying to load
         if os.path.exists(resource_path(svg_path)):
             return Icons.get_icon_from_path(svg_path)
-            
+
         # 2. Try Theme PNG (Secondary Priority)
         png_filename = f"{icon_id}.png"
         png_path = os.path.join(Icons.ICONS_BASE_PATH, theme_folder, png_filename)
         if os.path.exists(resource_path(png_path)):
             return Icons.get_icon_from_path(png_path)
-            
+
         # 3. Fallback to Default (Root folder)
         # This handles the case where we haven't created a theme asset yet
         return Icons.get_icon(icon_id)
-    
+
     @staticmethod
     def create_text_icon(text, size=AppStyles.TEXT_ICON_SIZE):
         """Create a simple text-based icon"""
         pixmap = QPixmap(size)
         pixmap.fill(Qt.GlobalColor.transparent)
-        
+
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
+
         # Draw text with centralized styling
         painter.setPen(QColor(AppStyles.TEXT_ICON_COLOR))
         font = painter.font()
@@ -303,42 +303,42 @@ class Icons:
         painter.setFont(font)
         painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, text)
         painter.end()
-        
+
         return QIcon(pixmap)
-    
+
     @staticmethod
     def create_tag_icon(text, color):
         """Create a colored tag icon with text"""
         pixmap = QPixmap(AppStyles.TAG_ICON_SIZE)
         pixmap.fill(Qt.GlobalColor.transparent)
-        
+
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
+
         # Draw background rectangle
         painter.setBrush(QColor(color))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(0, 0, AppStyles.TAG_ICON_SIZE.width(), AppStyles.TAG_ICON_SIZE.height(),
                               AppStyles.TAG_ICON_RADIUS, AppStyles.TAG_ICON_RADIUS)
-        
+
         # Draw text
         painter.setPen(QColor(AppStyles.TAG_ICON_TEXT_COLOR))
         painter.drawText(QRect(0, 0, AppStyles.TAG_ICON_SIZE.width(), AppStyles.TAG_ICON_SIZE.height()),
                         Qt.AlignmentFlag.AlignCenter, text)
         painter.end()
-        
+
         return QIcon(pixmap)
-    
+
     @staticmethod
     def create_logo(size=AppStyles.LOGO_ICON_SIZE, text="Ox",
                    start_color=AppStyles.LOGO_START_COLOR, end_color=AppStyles.LOGO_END_COLOR):
         """Create a logo with specified dimensions and gradient"""
         pixmap = QPixmap(size)
         pixmap.fill(Qt.GlobalColor.transparent)
-        
+
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
+
         # Create gradient background
         gradient = QLinearGradient(0, 0, size.width(), size.height())
         gradient.setColorAt(0, QColor(start_color))
@@ -346,7 +346,7 @@ class Icons:
         painter.setBrush(gradient)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(0, 0, size.width(), size.height(), AppStyles.LOGO_ICON_RADIUS, AppStyles.LOGO_ICON_RADIUS)
-        
+
         # Add text
         painter.setPen(QColor(AppStyles.LOGO_TEXT_COLOR))
         font = painter.font()
@@ -354,9 +354,9 @@ class Icons:
         painter.setFont(font)
         painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, text)
         painter.end()
-        
+
         return QIcon(pixmap)
-    
+
     @staticmethod
     def get_app_logo(size=AppStyles.APP_LOGO_SIZE):
         """Get the application logo, trying SVG first, then PNG"""
@@ -368,7 +368,7 @@ class Icons:
                 if not pixmap.isNull():
                     return QIcon(pixmap.scaled(size, Qt.AspectRatioMode.KeepAspectRatio,
                                             Qt.TransformationMode.SmoothTransformation))
-                                         
+
             # Try PNG as fallback
             png_path = resource_path("Icons/logoIcon.png")
             if os.path.exists(png_path):
@@ -378,6 +378,6 @@ class Icons:
                                             Qt.TransformationMode.SmoothTransformation))
         except Exception as e:
             logging.debug(f"Failed to load app logo: {e}")
-            
+
         # Fallback to a generated logo
         return Icons.create_logo(size, "Orchestrix")
