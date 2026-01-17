@@ -1,13 +1,14 @@
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QLabel, QPushButton, QLineEdit, QTreeWidget,
                              QTreeWidgetItem, QFrame, QMenu, QHeaderView, QApplication,
-                             QMessageBox, QToolButton, QGraphicsOpacityEffect)
+                             QMessageBox, QToolButton)
 from PyQt6.QtCore import Qt, QObject, pyqtSignal, QPoint, QSize, QTimer
 from PyQt6.QtGui import QColor, QPainter, QIcon, QMouseEvent, QFont, QPixmap
 
-from UI.Styles import AppColors, AppStyles, AppConstants
+from UI.Styles import AppConstants
 import Styles.HomePageStyles as HomePageStyles
 from UI.ThemeAwarePage import ThemeAwareMainWindow
+from UI.ThemeManager import get_theme_manager
 from Utils.kubernetes_client import get_kubernetes_client
 from Utils.cluster_connector import get_cluster_connector
 from Utils.pin_storage import get_pin_storage_manager
@@ -15,9 +16,10 @@ import logging
 from collections import defaultdict
 from log_handler import method_logger, class_logger
 import webbrowser  # Added for opening URLs
+import os  # Added for os.path.basename
 
 from math import sin, cos
-from UI.Icons import resource_path
+from UI.Icons import Icons, resource_path
 
 # Global icon cache to prevent redundant operations
 ICON_CACHE = {}
@@ -79,7 +81,7 @@ class LoadingIndicator(QWidget):
             x = center.x() + radius * cos(angle * 3.14159 / 180)
             y = center.y() + radius * sin(angle * 3.14159 / 180)
 
-            color = QColor(AppColors.ACCENT_GREEN)
+            color = QColor(get_theme_manager().get_current_theme().colors.ACCENT_GREEN)
             color.setAlphaF(opacity)
             painter.setBrush(color)
 
@@ -125,7 +127,7 @@ class SmallLoadingIndicator(QWidget):
             x = center.x() + radius * cos(angle_rad)
             y = center.y() + radius * sin(angle_rad)
 
-            color = QColor(AppColors.ACCENT_GREEN)
+            color = QColor(get_theme_manager().get_current_theme().colors.ACCENT_GREEN)
             color.setAlphaF(opacity)
             painter.setBrush(color)
 
@@ -143,10 +145,11 @@ class SidebarButton(QPushButton):
     """Customized button for sidebar navigation"""
     def __init__(self, text, icon_text, icon_path=None, parent=None):
         super().__init__(text, parent)
+        self.icon_name = None
         if icon_path:
-            resolved_path = resource_path(icon_path)
-            self.setIcon(QIcon(resolved_path))
-            self.setIconSize(QSize(AppConstants.SIZES["ICON_SIZE"], AppConstants.SIZES["ICON_SIZE"]))
+            # Store the basename (e.g. "browse.svg") for theme lookups
+            self.icon_name = os.path.basename(icon_path)
+            self.update_theme_icon()
             self.setText(f" {text}")
         else:
             self.setText(f"{icon_text}  {text}")
@@ -154,6 +157,15 @@ class SidebarButton(QPushButton):
         self.setFlat(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setStyleSheet(HomePageStyles.get_sidebar_button_style())
+
+    def update_theme_icon(self):
+        """Update icon based on current theme"""
+        if self.icon_name:
+            theme_name = get_theme_manager().get_current_theme_name() or "Dark"
+            icon = Icons.get_theme_icon(self.icon_name, theme_name)
+            if not icon.isNull():
+                self.setIcon(icon)
+                self.setIconSize(QSize(AppConstants.SIZES["ICON_SIZE"], AppConstants.SIZES["ICON_SIZE"]))
 
 @class_logger(log_level=logging.INFO, exclude_methods=['__init__', 'set_cluster_icon', 'context_menu_requested', 'open_cluster_signal', 'open_preferences_signal', 'update_pinned_items_signal'])
 class OrchestrixGUI(ThemeAwareMainWindow):
@@ -221,6 +233,7 @@ class OrchestrixGUI(ThemeAwareMainWindow):
         self._update_timer.timeout.connect(self._process_pending_updates)
         self._update_timer.setSingleShot(True)
 
+        self.setup_theme_connections()
         self.init_data_model()
         self.setup_ui()
         self.update_content_view("Browse All")
@@ -235,31 +248,44 @@ class OrchestrixGUI(ThemeAwareMainWindow):
         self.cluster_refresh_timer.start(300000)  # 5 minutes - much less aggressive
         logging.info("HomePage: Set up periodic cluster status refresh (5min interval)")
 
+    def setup_theme_connections(self):
+        """Setup connections for theme changes"""
+        # Connect using the ThemeManager's singleton instance
+        get_theme_manager().theme_changed.connect(self._on_theme_changed)
+
     def _on_theme_changed(self, theme_name):
-        """Refresh widgets when theme changes"""
-        logging.info(f"HomePage: Theme changed to {theme_name}, refreshing widgets")
-        # Refresh container backgrounds
-        if self.sidebar is not None:
-            self.sidebar.setStyleSheet(HomePageStyles.get_sidebar_container_style())
-        if self.top_bar is not None:
-            self.top_bar.setStyleSheet(HomePageStyles.get_top_bar_style())
-        if self.table_container is not None:
-            self.table_container.setStyleSheet(HomePageStyles.get_content_area_style())
-        if self.tree_widget is not None:
-            self.tree_widget.setStyleSheet(HomePageStyles.get_tree_widget_style())
-        if self.search is not None:
-            self.search.setStyleSheet(HomePageStyles.get_search_style())
-        # Refresh sidebar buttons
-        if self.sidebar_buttons is not None:
-            for button in self.sidebar_buttons:
-                button.setStyleSheet(HomePageStyles.get_sidebar_button_style())
-        # Refresh labels
-        if self.browser_label is not None:
-            self.browser_label.setStyleSheet(HomePageStyles.get_browser_label_style())
-        if self.items_label is not None:
-            self.items_label.setStyleSheet(HomePageStyles.get_items_label_style())
-        # Refresh the table to apply new theme colors
-        self.filter_content(self.search_filter)
+        """Handle theme change event"""
+        try:
+            logging.info(f"HomePage handling theme change to: {theme_name}")
+            
+            # 1. Update Sidebar Icons
+            if hasattr(self, 'sidebar_buttons'):
+                for btn in self.sidebar_buttons:
+                    if hasattr(btn, 'update_theme_icon'):
+                        btn.update_theme_icon()
+                    btn.setStyleSheet(HomePageStyles.get_sidebar_button_style())
+
+            # 2. Update Styles for Main Components
+            if hasattr(self, 'sidebar'):
+                self.sidebar.setStyleSheet(HomePageStyles.get_sidebar_container_style())
+            if hasattr(self, 'top_bar'):
+                self.top_bar.setStyleSheet(HomePageStyles.get_top_bar_style())
+            if hasattr(self, 'browser_label'):
+                self.browser_label.setStyleSheet(HomePageStyles.get_browser_label_style())
+            if hasattr(self, 'items_label'):
+                self.items_label.setStyleSheet(HomePageStyles.get_items_label_style())
+            if hasattr(self, 'search'):
+                self.search.setStyleSheet(HomePageStyles.get_search_style())
+            if hasattr(self, 'table_container'):
+                self.table_container.setStyleSheet(HomePageStyles.get_content_area_style())
+            if hasattr(self, 'tree_widget') and self.tree_widget:
+                self.tree_widget.setStyleSheet(HomePageStyles.get_tree_widget_style())
+                self.tree_widget.setHeaderHidden(False)  # Force refresh header
+
+            # 3. Refresh Content (Status colors etc)
+            self.update_content_view(self.current_view)
+        except Exception as e:
+            logging.error(f"Error handling theme change in HomePage: {e}")
 
     def _connect_signals(self):
         """Connect signals with error handling"""
@@ -876,7 +902,9 @@ class OrchestrixGUI(ThemeAwareMainWindow):
         action_layout.setSpacing(0)
         action_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         menu_btn = QToolButton()
-        icon = QIcon(resource_path("Icons/Moreaction_Button.svg"))
+        # Use theme-aware icon
+        theme_name = get_theme_manager().get_current_theme_name() or "Dark"
+        icon = Icons.get_theme_icon("Moreaction_Button.svg", theme_name)
         menu_btn.setIcon(icon)
         menu_btn.setIconSize(QSize(AppConstants.SIZES["ICON_SIZE"], AppConstants.SIZES["ICON_SIZE"]))
         menu_btn.setText("")
@@ -889,10 +917,6 @@ class OrchestrixGUI(ThemeAwareMainWindow):
         if status in ["connecting", "loading"] and (name in self.connecting_clusters or self.waiting_for_cluster_load == name):
             menu_btn.setEnabled(False)
             menu_btn.setStyleSheet(HomePageStyles.get_home_action_button_disabled_style())
-            # Apply opacity effect programmatically since Qt stylesheets don't support opacity
-            opacity_effect = QGraphicsOpacityEffect(menu_btn)
-            opacity_effect.setOpacity(0.5)
-            menu_btn.setGraphicsEffect(opacity_effect)
         else:
             menu = QMenu(action_widget)
             menu.setStyleSheet(HomePageStyles.get_menu_style())
