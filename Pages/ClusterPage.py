@@ -8,6 +8,8 @@ import datetime
 import logging
 
 from UI.Styles import AppStyles, AppColors
+import Styles.ClusterPageStyles as ClusterPageStyles
+from UI.ThemeAwarePage import ThemeAwareMixin
 from Utils.cluster_connector import get_cluster_connector
 
 class BarChart(QWidget):
@@ -17,7 +19,7 @@ class BarChart(QWidget):
         self.data = []
         self.current_value = 0
         self.setMinimumHeight(300)
-        self.setStyleSheet(AppStyles.BAR_CHART_TOOLTIP_STYLE)
+        self.setStyleSheet(ClusterPageStyles.get_bar_chart_tooltip_style())
 
         # Use provided title, or fall back to color-based titles
         if title:
@@ -240,7 +242,7 @@ class ResourceCircularIndicator(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setMouseTracking(True)
         self.title = ""
-        self.setStyleSheet(AppStyles.CIRCULAR_INDICATOR_TOOLTIP_STYLE)
+        self.setStyleSheet(ClusterPageStyles.get_circular_indicator_tooltip_style())
         self.has_data = False
 
     def set_title(self, title):
@@ -447,7 +449,7 @@ class ResourceStatusWidget(QWidget):
 
         self.box = QFrame()
         self.box.setObjectName("statusBox")
-        self.box.setStyleSheet(AppStyles.CLUSTER_STATUS_BOX_STYLE)
+        self.box.setStyleSheet(ClusterPageStyles.get_status_box_style())
 
         box_layout = QVBoxLayout(self.box)
         box_layout.setContentsMargins(10, 10, 10, 10)
@@ -458,7 +460,7 @@ class ResourceStatusWidget(QWidget):
         font = QFont()
         font.setBold(True)
         self.title_label.setFont(font)
-        self.title_label.setStyleSheet(AppStyles.CLUSTER_RESOURCE_TITLE_STYLE)
+        self.title_label.setStyleSheet(ClusterPageStyles.get_resource_title_style())
         self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         box_layout.addWidget(self.title_label)
 
@@ -482,29 +484,29 @@ class ResourceStatusWidget(QWidget):
         labels_layout.setSpacing(1)
 
         self.usage_label = QLabel("● Usage: Loading...")
-        self.usage_label.setStyleSheet(AppStyles.CLUSTER_RESOURCE_LABEL_USAGE_STYLE)
+        self.usage_label.setStyleSheet(ClusterPageStyles.get_resource_label_usage_style())
         self.usage_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
         labels_layout.addWidget(self.usage_label)
 
         self.requests_label = QLabel("● Requests: Loading...")
-        self.requests_label.setStyleSheet(AppStyles.CLUSTER_RESOURCE_LABEL_REQUESTS_STYLE)
+        self.requests_label.setStyleSheet(ClusterPageStyles.get_resource_label_requests_style())
         self.requests_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
         labels_layout.addWidget(self.requests_label)
 
         # For CPU and Memory, add limits and allocated labels
         if resource_type != "pods":
             self.limits_label = QLabel("● Limits: Loading...")
-            self.limits_label.setStyleSheet(AppStyles.CLUSTER_RESOURCE_LABEL_LIMITS_STYLE)
+            self.limits_label.setStyleSheet(ClusterPageStyles.get_resource_label_limits_style())
             self.limits_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
             labels_layout.addWidget(self.limits_label)
 
             self.allocated_label = QLabel("● Allocated: Loading...")
-            self.allocated_label.setStyleSheet(AppStyles.CLUSTER_RESOURCE_LABEL_ALLOCATED_STYLE)
+            self.allocated_label.setStyleSheet(ClusterPageStyles.get_resource_label_allocated_style())
             self.allocated_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
             labels_layout.addWidget(self.allocated_label)
 
         self.capacity_label = QLabel("● Capacity: Loading...")
-        self.capacity_label.setStyleSheet(AppStyles.CLUSTER_RESOURCE_LABEL_CAPACITY_STYLE)
+        self.capacity_label.setStyleSheet(ClusterPageStyles.get_resource_label_capacity_style())
         self.capacity_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
         labels_layout.addWidget(self.capacity_label)
 
@@ -604,7 +606,7 @@ class IssuesTable(QTableWidget):
         self.setColumnWidth(0, 80)
         self.setColumnWidth(1, 120)
         self.setColumnWidth(3, 80)
-        self.setStyleSheet(AppStyles.TABLE_STYLE)
+        self.setStyleSheet(ClusterPageStyles.get_issues_table_style())
         self.verticalHeader().setVisible(False)
         self.setAlternatingRowColors(True)
         self.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -653,7 +655,7 @@ class IssuesTable(QTableWidget):
             self.setRowHeight(row, 40)
 
 
-class ClusterPage(QWidget):
+class ClusterPage(ThemeAwareMixin, QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -707,8 +709,86 @@ class ClusterPage(QWidget):
         except Exception as e:
             logging.error(f"ClusterPage: Error connecting cluster signals: {e}")
 
+    def _on_theme_changed(self, theme_name):
+        """Refresh UI when theme changes"""
+        logging.info(f"ClusterPage: Theme changed to {theme_name}, refreshing widgets")
+        
+        # Refresh main background
+        self.setStyleSheet(ClusterPageStyles.get_main_background_style())
+        
+        # Refresh panel styles
+        if hasattr(self, 'chart_panel'):
+            self.chart_panel.setStyleSheet(ClusterPageStyles.get_chart_panel_style())
+        if hasattr(self, 'metrics_container'):
+            self.metrics_container.setStyleSheet(ClusterPageStyles.get_metrics_panel_style())
+        if hasattr(self, 'status_widget'):
+            self.status_widget.setStyleSheet(ClusterPageStyles.get_status_panel_style())
+        
+        # Refresh resource status widgets
+        if hasattr(self, 'cpu_status') and hasattr(self.cpu_status, 'box'):
+            self.cpu_status.box.setStyleSheet(ClusterPageStyles.get_status_box_style())
+            self.cpu_status.title_label.setStyleSheet(ClusterPageStyles.get_resource_title_style())
+            self.cpu_status.usage_label.setStyleSheet(ClusterPageStyles.get_resource_label_usage_style())
+            self.cpu_status.requests_label.setStyleSheet(ClusterPageStyles.get_resource_label_requests_style())
+            if hasattr(self.cpu_status, 'limits_label'):
+                self.cpu_status.limits_label.setStyleSheet(ClusterPageStyles.get_resource_label_limits_style())
+            if hasattr(self.cpu_status, 'allocated_label'):
+                self.cpu_status.allocated_label.setStyleSheet(ClusterPageStyles.get_resource_label_allocated_style())
+            self.cpu_status.capacity_label.setStyleSheet(ClusterPageStyles.get_resource_label_capacity_style())
+        
+        if hasattr(self, 'memory_status') and hasattr(self.memory_status, 'box'):
+            self.memory_status.box.setStyleSheet(ClusterPageStyles.get_status_box_style())
+            self.memory_status.title_label.setStyleSheet(ClusterPageStyles.get_resource_title_style())
+            self.memory_status.usage_label.setStyleSheet(ClusterPageStyles.get_resource_label_usage_style())
+            self.memory_status.requests_label.setStyleSheet(ClusterPageStyles.get_resource_label_requests_style())
+            if hasattr(self.memory_status, 'limits_label'):
+                self.memory_status.limits_label.setStyleSheet(ClusterPageStyles.get_resource_label_limits_style())
+            if hasattr(self.memory_status, 'allocated_label'):
+                self.memory_status.allocated_label.setStyleSheet(ClusterPageStyles.get_resource_label_allocated_style())
+            self.memory_status.capacity_label.setStyleSheet(ClusterPageStyles.get_resource_label_capacity_style())
+        
+        if hasattr(self, 'disk_status') and hasattr(self.disk_status, 'box'):
+            self.disk_status.box.setStyleSheet(ClusterPageStyles.get_status_box_style())
+            self.disk_status.title_label.setStyleSheet(ClusterPageStyles.get_resource_title_style())
+            self.disk_status.usage_label.setStyleSheet(ClusterPageStyles.get_resource_label_usage_style())
+            self.disk_status.requests_label.setStyleSheet(ClusterPageStyles.get_resource_label_requests_style())
+            self.disk_status.capacity_label.setStyleSheet(ClusterPageStyles.get_resource_label_capacity_style())
+        
+        # Refresh button styles
+        if hasattr(self, 'worker_btn'):
+            self.worker_btn.setStyleSheet(ClusterPageStyles.get_active_button_style())
+        if hasattr(self, 'master_btn'):
+            self.master_btn.setStyleSheet(ClusterPageStyles.get_disabled_button_style())
+        if hasattr(self, 'cpu_btn'):
+            self.cpu_btn.setStyleSheet(ClusterPageStyles.get_active_button_style())
+        if hasattr(self, 'memory_btn'):
+            self.memory_btn.setStyleSheet(ClusterPageStyles.get_inactive_button_style())
+        
+        # Refresh issues table
+        if hasattr(self, 'issues_table'):
+            self.issues_table.setStyleSheet(ClusterPageStyles.get_issues_table_style())
+        
+        # Refresh issues header
+        if hasattr(self, 'issues_header'):
+            self.issues_header.setStyleSheet(ClusterPageStyles.get_status_title_style())
+        
+        # Refresh tooltips for custom widgets
+        if hasattr(self, 'cpu_chart'):
+            self.cpu_chart.setStyleSheet(ClusterPageStyles.get_bar_chart_tooltip_style())
+        if hasattr(self, 'memory_chart'):
+            self.memory_chart.setStyleSheet(ClusterPageStyles.get_bar_chart_tooltip_style())
+        if hasattr(self, 'cpu_status') and hasattr(self.cpu_status, 'progress'):
+            self.cpu_status.progress.setStyleSheet(ClusterPageStyles.get_circular_indicator_tooltip_style())
+        if hasattr(self, 'memory_status') and hasattr(self.memory_status, 'progress'):
+            self.memory_status.progress.setStyleSheet(ClusterPageStyles.get_circular_indicator_tooltip_style())
+        if hasattr(self, 'disk_status') and hasattr(self.disk_status, 'progress'):
+            self.disk_status.progress.setStyleSheet(ClusterPageStyles.get_circular_indicator_tooltip_style())
+
 
     def setup_ui(self):
+        # Set main background
+        self.setStyleSheet(ClusterPageStyles.get_main_background_style())
+        
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -729,14 +809,14 @@ class ClusterPage(QWidget):
         top_layout.setSpacing(16)
 
         # Create the chart panel
-        chart_panel = self.create_chart_panel()
+        self.chart_panel = self.create_chart_panel()
 
         # Create metrics container
-        metrics_container = QWidget()
-        metrics_container.setStyleSheet(AppStyles.CLUSTER_METRICS_PANEL_STYLE)
-        metrics_container.setMinimumWidth(600)
+        self.metrics_container = QWidget()
+        self.metrics_container.setStyleSheet(ClusterPageStyles.get_metrics_panel_style())
+        self.metrics_container.setMinimumWidth(600)
 
-        metrics_grid = QGridLayout(metrics_container)
+        metrics_grid = QGridLayout(self.metrics_container)
         metrics_grid.setContentsMargins(16, 16, 16, 16)
         metrics_grid.setSpacing(15)
 
@@ -762,8 +842,8 @@ class ClusterPage(QWidget):
         metrics_grid.setColumnStretch(2, 1)
 
         # Add to top section
-        top_layout.addWidget(chart_panel, 1)
-        top_layout.addWidget(metrics_container, 0)
+        top_layout.addWidget(self.chart_panel, 1)
+        top_layout.addWidget(self.metrics_container, 0)
 
         # Status panel for issues
         self.status_panel = self.create_status_panel()
@@ -776,7 +856,7 @@ class ClusterPage(QWidget):
 
     def create_chart_panel(self):
         panel = QWidget()
-        panel.setStyleSheet(AppStyles.CLUSTER_CHART_PANEL_STYLE)
+        panel.setStyleSheet(ClusterPageStyles.get_chart_panel_style())
         panel.setMinimumHeight(380)
 
         main_layout = QVBoxLayout(panel)
@@ -791,12 +871,12 @@ class ClusterPage(QWidget):
 
         self.master_btn = QPushButton("Master")
         # Custom disabled style that clearly shows it's inactive and disabled
-        self.master_btn.setStyleSheet(AppStyles.CLUSTER_DISABLED_BTN_STYLE)
+        self.master_btn.setStyleSheet(ClusterPageStyles.get_disabled_button_style())
         self.master_btn.setEnabled(False)  # Disable the Master button
         # self.master_btn.clicked.connect(self.show_master_data)  # Removed click handler
 
         self.worker_btn = QPushButton("Worker")
-        self.worker_btn.setStyleSheet(AppStyles.CLUSTER_ACTIVE_BTN_STYLE)
+        self.worker_btn.setStyleSheet(ClusterPageStyles.get_active_button_style())
         self.worker_btn.clicked.connect(self.show_worker_data)
 
         tabs_layout.addWidget(self.master_btn)
@@ -804,11 +884,11 @@ class ClusterPage(QWidget):
         tabs_layout.addStretch()
 
         self.cpu_btn = QPushButton("CPU")
-        self.cpu_btn.setStyleSheet(AppStyles.CLUSTER_ACTIVE_BTN_STYLE)
+        self.cpu_btn.setStyleSheet(ClusterPageStyles.get_active_button_style())
         self.cpu_btn.clicked.connect(self.show_cpu_chart)
 
         self.memory_btn = QPushButton("Memory")
-        self.memory_btn.setStyleSheet(AppStyles.CLUSTER_INACTIVE_BTN_STYLE)
+        self.memory_btn.setStyleSheet(ClusterPageStyles.get_inactive_button_style())
         self.memory_btn.clicked.connect(self.show_memory_chart)
 
         tabs_layout.addWidget(self.cpu_btn)
@@ -845,19 +925,19 @@ class ClusterPage(QWidget):
         return panel
 
     # Reserved for future usage when master view is re-enabled. 
-    # Logic references master_btn, worker_btn and AppStyles constants (AppStyles.CLUSTER_ACTIVE_BTN_STYLE / AppStyles.CLUSTER_INACTIVE_BTN_STYLE)
+    # Logic references master_btn, worker_btn and ClusterPageStyles constants (ClusterPageStyles.get_active_button_style() / ClusterPageStyles.get_inactive_button_style())
     def show_master_data(self):
-        self.master_btn.setStyleSheet(AppStyles.CLUSTER_ACTIVE_BTN_STYLE)
-        self.worker_btn.setStyleSheet(AppStyles.CLUSTER_INACTIVE_BTN_STYLE)
+        self.master_btn.setStyleSheet(ClusterPageStyles.get_active_button_style())
+        self.worker_btn.setStyleSheet(ClusterPageStyles.get_inactive_button_style())
 
     def show_worker_data(self):
-        self.worker_btn.setStyleSheet(AppStyles.CLUSTER_ACTIVE_BTN_STYLE)
+        self.worker_btn.setStyleSheet(ClusterPageStyles.get_active_button_style())
         # Keep Master button disabled style
-        self.master_btn.setStyleSheet(AppStyles.CLUSTER_DISABLED_BTN_STYLE)
+        self.master_btn.setStyleSheet(ClusterPageStyles.get_disabled_button_style())
 
     def show_cpu_chart(self):
-        self.cpu_btn.setStyleSheet(AppStyles.CLUSTER_ACTIVE_BTN_STYLE)
-        self.memory_btn.setStyleSheet(AppStyles.CLUSTER_INACTIVE_BTN_STYLE)
+        self.cpu_btn.setStyleSheet(ClusterPageStyles.get_active_button_style())
+        self.memory_btn.setStyleSheet(ClusterPageStyles.get_inactive_button_style())
 
         if hasattr(self, 'charts_layout') and self.charts_layout and hasattr(self, 'cpu_chart'):
             self.charts_layout.setCurrentWidget(self.cpu_chart)
@@ -866,8 +946,8 @@ class ClusterPage(QWidget):
             logging.info("ClusterPage: Switched to CPU chart")
 
     def show_memory_chart(self):
-        self.memory_btn.setStyleSheet(AppStyles.CLUSTER_ACTIVE_BTN_STYLE)
-        self.cpu_btn.setStyleSheet(AppStyles.CLUSTER_INACTIVE_BTN_STYLE)
+        self.memory_btn.setStyleSheet(ClusterPageStyles.get_active_button_style())
+        self.cpu_btn.setStyleSheet(ClusterPageStyles.get_inactive_button_style())
 
         if hasattr(self, 'charts_layout') and self.charts_layout and hasattr(self, 'memory_chart'):
             self.charts_layout.setCurrentWidget(self.memory_chart)
@@ -882,7 +962,7 @@ class ClusterPage(QWidget):
         container_layout.setSpacing(0)
 
         self.status_widget = QWidget()
-        self.status_widget.setStyleSheet(AppStyles.CLUSTER_STATUS_PANEL_STYLE)
+        self.status_widget.setStyleSheet(ClusterPageStyles.get_status_panel_style())
 
         self.stacked_layout = QStackedLayout(self.status_widget)
         self.stacked_layout.setContentsMargins(0, 0, 0, 0)
@@ -896,14 +976,14 @@ class ClusterPage(QWidget):
 
         success_icon = QLabel("✓")
         success_icon.setFixedSize(80, 80)
-        success_icon.setStyleSheet(AppStyles.CLUSTER_STATUS_ICON_STYLE)
+        success_icon.setStyleSheet(ClusterPageStyles.get_status_icon_style())
 
         status_title = QLabel("No issues found")
-        status_title.setStyleSheet(AppStyles.CLUSTER_STATUS_TITLE_STYLE)
+        status_title.setStyleSheet(ClusterPageStyles.get_status_title_style())
         status_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         status_subtitle = QLabel("All resources are within acceptable limits")
-        status_subtitle.setStyleSheet(AppStyles.CLUSTER_STATUS_SUBTITLE_STYLE)
+        status_subtitle.setStyleSheet(ClusterPageStyles.get_status_subtitle_style())
         status_subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         no_issues_layout.addWidget(success_icon, 0, Qt.AlignmentFlag.AlignCenter)
@@ -916,13 +996,13 @@ class ClusterPage(QWidget):
         issues_layout.setContentsMargins(16, 2, 16, 16)
         issues_layout.setSpacing(8)
 
-        issues_header = QLabel("Cluster Issues")
-        issues_header.setStyleSheet(AppStyles.CLUSTER_STATUS_TITLE_STYLE)
-        issues_header.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self.issues_header = QLabel("Cluster Issues")
+        self.issues_header.setStyleSheet(ClusterPageStyles.get_status_title_style())
+        self.issues_header.setAlignment(Qt.AlignmentFlag.AlignLeft)
 
         self.issues_table = IssuesTable()
 
-        issues_layout.addWidget(issues_header)
+        issues_layout.addWidget(self.issues_header)
         issues_layout.addWidget(self.issues_table)
 
         # Add both widgets to stacked layout
