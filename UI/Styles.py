@@ -1805,6 +1805,268 @@ class AppStyles:
         }}
     """
 
+    @staticmethod
+    def get_base_checkbox_style():
+        """Generate checkbox style with properly resolved icon paths"""
+        try:
+            from UI.Icons import resource_path
+            unchecked_path = resource_path("Icons/check_box_unchecked.svg")
+            checked_path = resource_path("Icons/check_box_checked.svg")
+
+            return f"""
+            QCheckBox {{
+                margin: 0px;
+                padding: 0px;
+                spacing: 0px;
+                background: transparent;
+                border: none;
+                outline: none;
+                width: 16px;
+                height: 16px;
+                max-width: 16px;
+                max-height: 16px;
+                min-width: 16px;
+                min-height: 16px;
+            }}
+            QCheckBox::indicator {{
+                width: 16px;
+                height: 16px;
+                border: none;
+                background: transparent;
+                margin: 0px;
+                padding: 0px;
+                spacing: 0px;
+                subcontrol-position: center;
+                subcontrol-origin: content;
+            }}
+            QCheckBox::indicator:unchecked {{
+                image: url({unchecked_path.replace(os.sep, '/')});
+            }}
+            QCheckBox::indicator:checked {{
+                image: url({checked_path.replace(os.sep, '/')});
+                background-color: transparent;
+            }}
+            QCheckBox::indicator:hover {{
+                opacity: 0.8;
+            }}
+            """
+        except Exception:
+            return f"""
+            QCheckBox {{
+                margin: 0px;
+                padding: 0px;
+                spacing: 0px;
+                background: transparent;
+                border: none;
+                outline: none;
+            }}
+            QCheckBox::indicator {{
+                width: 16px;
+                height: 16px;
+                border: 1px solid {AppColors.TEXT_SECONDARY};
+                border-radius: 3px;
+                background: transparent;
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: {AppColors.ACCENT_BLUE};
+                border-color: {AppColors.ACCENT_BLUE};
+            }}
+            """
+
+    # Keep backward compatibility
+    BASE_CHECKBOX_STYLE = ""  # Will be set after class definition
+
+    EMPTY_STATE_STYLE = f"""
+        background-color: {AppColors.CARD_BG};
+        color: {AppColors.TEXT_SECONDARY};
+        border-radius: 8px;
+        border: 1px solid {AppColors.BORDER_COLOR};
+    """
+
+    DETAIL_PAGE_OVERVIEW_STYLE = f"""
+        QScrollArea {{
+            background-color: {AppColors.BG_SIDEBAR};
+            border: none;
+            outline: none;
+        }}
+        {UNIFIED_SCROLL_BAR_STYLE}
+    """
+
+    DETAIL_PAGE_DETAILS_STYLE = f"""
+        QScrollArea {{
+            background-color: {AppColors.BG_SIDEBAR};
+            border: none;
+            outline: none;
+        }}
+        {UNIFIED_SCROLL_BAR_STYLE}
+    """
+
+
+class EnhancedStyles:
+    # Typography hierarchy
+    SECTION_HEADER = {
+        'font_size': '16px',
+        'font_weight': 'bold',
+        'color': '#E8EAED',
+        'letter_spacing': '0.5px',
+        'text_transform': 'uppercase',
+        'margin_bottom': '12px'
+    }
+    FIELD_LABEL = {
+        'font_size': '13px',
+        'font_weight': '500',
+        'color': '#8AB4F8'
+    }
+    FIELD_VALUE = {
+        'font_size': '13px',
+        'font_weight': 'normal',
+        'color': '#DADCE0',
+        'line_height': '1.5'
+    }
+    PRIMARY_TEXT = {
+        'font_size': '20px',
+        'font_weight': 'bold',
+        'color': '#FFFFFF'
+    }
+    SECONDARY_TEXT = {
+        'font_size': '14px',
+        'font_weight': 'normal',
+        'color': '#9AA0A6'
+    }
+    # Spacing system
+    SECTION_GAP = 24
+    SUBSECTION_GAP = 16
+    FIELD_GAP = 8
+    CONTENT_PADDING = 20
+
+    @staticmethod
+    def get_section_header_style():
+        return f"""
+            QLabel {{
+                font-size: {EnhancedStyles.SECTION_HEADER['font_size']};
+                font-weight: {EnhancedStyles.SECTION_HEADER['font_weight']};
+                color: {EnhancedStyles.SECTION_HEADER['color']};
+                letter-spacing: {EnhancedStyles.SECTION_HEADER['letter_spacing']};
+                margin-bottom: {EnhancedStyles.SECTION_HEADER['margin_bottom']};
+            }}
+        """
+
+    @staticmethod
+    def get_field_label_style():
+        return f"""
+            QLabel {{
+                font-size: {EnhancedStyles.FIELD_LABEL['font_size']};
+                font-weight: {EnhancedStyles.FIELD_LABEL['font_weight']};
+                color: {EnhancedStyles.FIELD_LABEL['color']};
+            }}
+        """
+
+    @staticmethod
+    def get_field_value_style():
+        return f"""
+            QLabel {{
+                font-size: {EnhancedStyles.FIELD_VALUE['font_size']};
+                font-weight: {EnhancedStyles.FIELD_VALUE['font_weight']};
+                color: {EnhancedStyles.FIELD_VALUE['color']};
+                line-height: {EnhancedStyles.FIELD_VALUE['line_height']};
+            }}
+        """
+
+    @staticmethod
+    def get_primary_text_style():
+        return f"""
+            QLabel {{
+                font-size: {EnhancedStyles.PRIMARY_TEXT['font_size']};
+                font-weight: {EnhancedStyles.PRIMARY_TEXT['font_weight']};
+                color: {EnhancedStyles.PRIMARY_TEXT['color']};
+                padding: 4px 0px;
+            }}
+        """
+
+    @staticmethod
+    def get_secondary_text_style():
+        return f"""
+            QLabel {{
+                font-size: {EnhancedStyles.SECONDARY_TEXT['font_size']};
+                font-weight: {EnhancedStyles.SECONDARY_TEXT['font_weight']};
+                color: {EnhancedStyles.SECONDARY_TEXT['color']};
+                padding: 2px 0px;
+            }}
+        """
+
+
+class StyleLoader:
+    """Lazy loading style manager to improve performance"""
+
+    def __init__(self):
+        self._loaded_styles = {}
+        self._style_cache = {}
+
+    def get_style(self, style_name):
+        """Get a style with caching"""
+        if style_name in self._style_cache:
+            return self._style_cache[style_name]
+
+        # Get style from AppStyles
+        style = getattr(AppStyles, style_name, None)
+        if style:
+            self._style_cache[style_name] = style
+            return style
+
+        return ""
+
+    def get_component_styles(self, component_name):
+        """Get styles for a specific component"""
+        if component_name in self._loaded_styles:
+            return self._loaded_styles[component_name]
+
+        styles = {}
+
+        # Component-specific style mapping
+        component_styles = {
+            'table': ['TABLE_STYLE', 'TABLE_HEADER_STYLE', 'TABLE_ROW_STYLE'],
+            'button': ['BUTTON_STYLE', 'SECONDARY_BUTTON_STYLE', 'DANGER_BUTTON_STYLE'],
+            'input': ['INPUT_STYLE', 'SEARCH_BAR_STYLE', 'COMBO_BOX_STYLE'],
+            'terminal': ['TERMINAL_STYLE', 'TERMINAL_TEXTEDIT', 'TERMINAL_OUTPUT_STYLE'],
+            'sidebar': ['SIDEBAR_STYLE', 'SIDEBAR_BUTTON_STYLE'],
+            'main': ['MAIN_STYLE', 'TITLE_STYLE', 'COUNT_STYLE']
+        }
+
+        if component_name in component_styles:
+            for style_name in component_styles[component_name]:
+                styles[style_name] = self.get_style(style_name)
+
+        self._loaded_styles[component_name] = styles
+        return styles
+
+    def clear_cache(self):
+        """Clear style cache"""
+        self._style_cache.clear()
+        self._loaded_styles.clear()
+
+
+# Global style loader instance
+_style_loader = StyleLoader()
+
+
+def get_style_loader():
+    """Get the global style loader instance"""
+    return _style_loader
+
+
+def get_component_styles(component_name):
+    """Convenience function to get component styles"""
+    return _style_loader.get_component_styles(component_name)
+
+
+# Convenience function for backward compatibility
+def get_dropdown_style_with_icon():
+    """Generate dropdown style with properly resolved icon path"""
+    return AppStyles.get_dropdown_style_with_icon()
+
+
+# Set the BASE_CHECKBOX_STYLE after class definition
+AppStyles.BASE_CHECKBOX_STYLE = AppStyles.get_base_checkbox_style()
 
 # THEME-AWARE STYLE FUNCTIONS
 # These functions return theme-aware styles by delegating to ThemeManager.
