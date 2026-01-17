@@ -7,24 +7,25 @@ sys.path.append(project_root)
 
 from PyQt6.QtCore import Qt, QPoint, QEvent, QSize
 from PyQt6.QtGui import QFont, QLinearGradient, QPainter, QColor, QPixmap, QIcon, QPainterPath, QCursor, QAction
-from PyQt6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QLabel, QToolButton, QPushButton, QFrame, QLineEdit, QMenu, QSpacerItem, QWidgetAction
+from PyQt6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QLabel, QToolButton, QFrame, QLineEdit, QMenu, QSpacerItem, QWidgetAction
 
 from Styles import TitleBarStyles
 from UI.Icons import Icons, resource_path
 from UI.ThemeAwarePage import ThemeAwareMixin
 from UI.ThemeManager import get_theme_manager
 
+
 class TitleBar(ThemeAwareMixin, QWidget):
     def __init__(self, parent=None, update_pinned_items_signal=None):
-        self.parent = parent
+        self._parent_window = parent
         super().__init__(parent)
         self.setFixedHeight(40)
 
         # Define consistent icon sizes
         self.normal_icon_size = QSize(18, 18)      # Standard size for most icons
         self.logo_icon_size = QSize(24, 24)        # Size for the app logo
-        self.window_ctrl_size = QSize(18, 18)      # MODIFIED: Increased to match normal icon size
-        self.maximized_icon_size = QSize(18, 18)   # MODIFIED: Made consistent with other icons
+        self.window_ctrl_size = QSize(10, 10)      # Original size for window controls
+        self.maximized_icon_size = QSize(18, 18)   # Size for maximized state icon
 
         # Store the signal for pinned items updates
         self.update_pinned_items_signal = update_pinned_items_signal
@@ -102,7 +103,7 @@ class TitleBar(ThemeAwareMixin, QWidget):
         self.pinned_clusters_label.setStyleSheet(TitleBarStyles.get_pinned_cluster_label_style())
         self.pinned_clusters_label.setFixedHeight(30)
 
-        # Button for the ▼ arrow
+        # Button for the arrow
         self.pinned_clusters_arrow_btn = QToolButton()
         self.pinned_clusters_arrow_btn.setFixedSize(30, 30)
         self.pinned_clusters_arrow_btn.setIcon(self.create_down_arrow_icon())
@@ -125,13 +126,13 @@ class TitleBar(ThemeAwareMixin, QWidget):
 
         # Window control buttons
         self.minimize_btn = self.create_window_control_button("minimize", "Minimize")
-        self.minimize_btn.clicked.connect(self.parent.showMinimized)
+        self.minimize_btn.clicked.connect(self._parent_window.showMinimized)
 
         self.maximize_btn = self.create_window_control_button("maximize", "Maximize")
         self.maximize_btn.clicked.connect(self.toggle_maximize)
 
         self.close_btn = self.create_window_control_button("close", "Close")
-        self.close_btn.clicked.connect(self.parent.close)
+        self.close_btn.clicked.connect(self._parent_window.close)
         self.close_btn.setStyleSheet(TitleBarStyles.get_close_button_style())
 
         # Add widgets to layout (removed troubleshoot_btn, notifications_btn, and profile_btn)
@@ -166,7 +167,7 @@ class TitleBar(ThemeAwareMixin, QWidget):
         # Connect the pinned items signal if provided - with proper tracking
         if self.update_pinned_items_signal:
             self._connect_signal_safely(
-                self.update_pinned_items_signal, 
+                self.update_pinned_items_signal,
                 self.update_pinned_dropdown
             )
 
@@ -176,7 +177,7 @@ class TitleBar(ThemeAwareMixin, QWidget):
                 self.open_cluster_signal,
                 self.update_current_cluster
             )
-    
+
     def _on_theme_changed(self, theme_name):
         """Re-apply all styles when theme changes"""
         self.setStyleSheet(TitleBarStyles.get_title_bar_style())
@@ -227,15 +228,13 @@ class TitleBar(ThemeAwareMixin, QWidget):
 
         # Maximize button needs smart sizing based on state
         if hasattr(self, 'maximize_btn'):
-            is_maximized = bool(self.parent and self.parent.isMaximized())
+            is_maximized = bool(self._parent_window and self._parent_window.isMaximized())
             max_filename = "maximize_active.svg" if is_maximized else "maximize.svg"
             max_icon = Icons.get_theme_icon(max_filename, theme_folder)
-            
+
             # Determine correct size (Preserve original logic: 10x10 for restore, window_ctrl_size for maximized)
-            # Note: The logic in toggle_maximize uses 10x10 for 'maximize' (restore window) 
-            # and window_ctrl_size for 'maximize_active' (mazimized window)
             current_size = self.window_ctrl_size if is_maximized else QSize(10, 10)
-            
+
             if not max_icon.isNull():
                 self.maximize_btn.setIcon(max_icon)
                 self.maximize_btn.setIconSize(current_size)
@@ -264,8 +263,8 @@ class TitleBar(ThemeAwareMixin, QWidget):
         """Get cluster icon using the HomePage's color system"""
         try:
             # Access the HomePage's color and icon creation methods
-            if hasattr(self.parent, 'home_page'):
-                home_page = self.parent.home_page
+            if hasattr(self._parent_window, 'home_page'):
+                home_page = self._parent_window.home_page
 
                 # Get the cluster color using existing system
                 cluster_color = home_page.get_cluster_color(cluster_name)
@@ -274,7 +273,7 @@ class TitleBar(ThemeAwareMixin, QWidget):
                 colored_pixmap = home_page.create_colored_icon(
                     "Icons/Cluster_Logo.svg",
                     cluster_color,
-                    16  # Changed from 20 to 16
+                    16
                 )
 
                 return colored_pixmap
@@ -314,10 +313,8 @@ class TitleBar(ThemeAwareMixin, QWidget):
         if self.dropdown_menu and self.dropdown_menu.isVisible():
             self.dropdown_menu.hide()
             # Keep the current cluster name displayed when closing dropdown
-            # No need to reset the label here as it should maintain its current state
         else:
             self.create_or_update_dropdown()
-            # Remove the line that was setting label to "Pinned Clusters"
             # The label should maintain the current cluster name
             if self.search_input:
                 self.search_input.setFocus()  # Set focus to the search input when opening
@@ -403,9 +400,9 @@ class TitleBar(ThemeAwareMixin, QWidget):
             self.pinned_clusters_icon.hide()
 
         # Emit signal to open cluster
-        if self.open_cluster_signal and hasattr(self.parent.home_page, 'all_data'):
-            for view_type in self.parent.home_page.all_data:
-                for data_item in self.parent.home_page.all_data[view_type]:
+        if self.open_cluster_signal and hasattr(self._parent_window.home_page, 'all_data'):
+            for view_type in self._parent_window.home_page.all_data:
+                for data_item in self._parent_window.home_page.all_data[view_type]:
                     if data_item.get("name") == item and "Cluster" in data_item.get("kind", ""):
                         self.open_cluster_signal.emit(item)
                         break
@@ -446,11 +443,22 @@ class TitleBar(ThemeAwareMixin, QWidget):
                 btn.setIconSize(self.normal_icon_size)
                 btn.setText("")
             else:
-                fallback_text = getattr(Icons, icon_id.upper(), "⚙️") if isinstance(icon_id, str) else "⚙️"
+                fallback_text = getattr(Icons, icon_id.upper(), "") if isinstance(icon_id, str) else ""
                 btn.setText(fallback_text)
 
         btn.setStyleSheet(TitleBarStyles.get_icon_button_style())
         return btn
+
+    def _get_window_control_fallback_text(self, icon_id):
+        """Get fallback text for window control buttons when icon is unavailable"""
+        if icon_id == "minimize":
+            return "-"
+        elif icon_id == "maximize":
+            return "[]" if not self._parent_window or not self._parent_window.isMaximized() else "="
+        elif icon_id == "close":
+            return "X"
+        else:
+            return getattr(Icons, icon_id.upper(), "") if isinstance(icon_id, str) else ""
 
     def create_window_control_button(self, icon_id, tooltip):
         """Create a window control button with minimal style, using theme-aware icons."""
@@ -468,20 +476,8 @@ class TitleBar(ThemeAwareMixin, QWidget):
             btn.setIconSize(QSize(10, 10))
             btn.setText("")
         else:
-            fallback_text = ""
-            font_size = 9
-
-            if icon_id == "minimize":
-                fallback_text = "—"
-            elif icon_id == "maximize":
-                fallback_text = "□" if not self.parent or not self.parent.isMaximized() else "❐"
-            elif icon_id == "close":
-                fallback_text = "✕"
-            else:
-                fallback_text = getattr(Icons, icon_id.upper(), "⚙️") if isinstance(icon_id, str) else "⚙️"
-
-            btn.setText(fallback_text)
-            btn.setFont(QFont("Segoe UI", font_size))
+            btn.setText(self._get_window_control_fallback_text(icon_id))
+            btn.setFont(QFont("Segoe UI", 9))
 
         if icon_id == "close":
             btn.setStyleSheet(TitleBarStyles.get_close_button_style())
@@ -489,8 +485,6 @@ class TitleBar(ThemeAwareMixin, QWidget):
             btn.setStyleSheet(TitleBarStyles.get_window_control_style())
 
         return btn
-
-
 
     def create_back_icon(self):
         """Create a back arrow icon"""
@@ -567,8 +561,8 @@ class TitleBar(ThemeAwareMixin, QWidget):
 
     def navigate_to_home(self):
         """Navigate to the home page and reset cluster label"""
-        if hasattr(self.parent, 'switch_to_home'):
-            self.parent.switch_to_home()
+        if hasattr(self._parent_window, 'switch_to_home'):
+            self._parent_window.switch_to_home()
             self.current_cluster = None
             self.pinned_clusters_label.setText("Pinned Clusters")
             self.pinned_clusters_icon.hide()
@@ -583,26 +577,26 @@ class TitleBar(ThemeAwareMixin, QWidget):
         theme_name = get_theme_manager().get_current_theme_name()
         theme_folder = theme_name.lower() if isinstance(theme_name, str) else "dark"
 
-        if self.parent.isMaximized():
-            self.parent.showNormal()
+        if self._parent_window.isMaximized():
+            self._parent_window.showNormal()
             icon = Icons.get_theme_icon("maximize.svg", theme_folder)
             if not icon.isNull():
                 self.maximize_btn.setIcon(icon)
                 self.maximize_btn.setIconSize(QSize(10, 10))
                 self.maximize_btn.setText("")
             else:
-                self.maximize_btn.setText("□")
+                self.maximize_btn.setText("[]")
                 self.maximize_btn.setFont(QFont("Segoe UI", 9))
             self.maximize_btn.setStyleSheet(TitleBarStyles.get_window_control_style())
         else:
-            self.parent.showMaximized()
+            self._parent_window.showMaximized()
             icon = Icons.get_theme_icon("maximize_active.svg", theme_folder)
             if not icon.isNull():
                 self.maximize_btn.setIcon(icon)
                 self.maximize_btn.setIconSize(self.window_ctrl_size)
                 self.maximize_btn.setText("")
             else:
-                self.maximize_btn.setText("⯩")
+                self.maximize_btn.setText("=")
                 self.maximize_btn.setFont(QFont("Segoe UI", 9))
             self.maximize_btn.setStyleSheet(TitleBarStyles.get_window_control_style())
 
@@ -611,19 +605,18 @@ class TitleBar(ThemeAwareMixin, QWidget):
             self.drag_position = event.globalPosition().toPoint()
 
     def mouseDoubleClickEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton and self.parent:
+        if event.button() == Qt.MouseButton.LeftButton and self._parent_window:
             self.double_click_in_progress = True
-            if self.parent.isMaximized():
-                self.parent.showNormal()
+            if self._parent_window.isMaximized():
+                self._parent_window.showNormal()
                 self.update_maximize_button_icon(False)
                 cursor_pos = event.globalPosition().toPoint()
-                window_pos = self.parent.pos()
                 local_pos = event.position().toPoint()
                 new_window_pos = cursor_pos - local_pos
-                self.parent.move(new_window_pos)
+                self._parent_window.move(new_window_pos)
                 self.drag_position = cursor_pos
             else:
-                self.parent.showMaximized()
+                self._parent_window.showMaximized()
                 self.update_maximize_button_icon(True)
                 self.drag_position = None
             event.accept()
@@ -631,10 +624,10 @@ class TitleBar(ThemeAwareMixin, QWidget):
     def mouseMoveEvent(self, event):
         if (self.drag_position is not None and
                 event.buttons() == Qt.MouseButton.LeftButton and
-                self.parent and
-                not self.parent.isMaximized()):
+                self._parent_window and
+                not self._parent_window.isMaximized()):
             delta = event.globalPosition().toPoint() - self.drag_position
-            self.parent.move(self.parent.pos() + delta)
+            self._parent_window.move(self._parent_window.pos() + delta)
             self.drag_position = event.globalPosition().toPoint()
 
     def mouseReleaseEvent(self, event):
@@ -648,7 +641,7 @@ class TitleBar(ThemeAwareMixin, QWidget):
 
         icon_filename = "maximize_active.svg" if is_maximized else "maximize.svg"
         icon = Icons.get_theme_icon(icon_filename, theme_folder)
-        
+
         if not icon.isNull():
             self.maximize_btn.setIcon(icon)
             # Use correct size based on state (10x10 vs 18x18)
@@ -656,7 +649,7 @@ class TitleBar(ThemeAwareMixin, QWidget):
             self.maximize_btn.setIconSize(current_size)
             self.maximize_btn.setText("")
         else:
-            self.maximize_btn.setText("⯩" if is_maximized else "□")
+            self.maximize_btn.setText("=" if is_maximized else "[]")
             self.maximize_btn.setFont(QFont("Segoe UI", 9))
         self.maximize_btn.setStyleSheet(TitleBarStyles.get_window_control_style())
 
@@ -677,10 +670,10 @@ class TitleBar(ThemeAwareMixin, QWidget):
         except (RuntimeError, TypeError):
             # No existing connection or signal is invalid
             pass
-        
+
         try:
             # Connect the signal to the slot
-            connection = signal.connect(slot)
+            signal.connect(slot)
             # Store the connection info for later cleanup
             self._signal_connections.append((signal, slot))
             logging.debug(f"Connected signal to {slot.__name__}")
