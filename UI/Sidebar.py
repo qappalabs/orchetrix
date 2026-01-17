@@ -77,14 +77,14 @@ class SidebarToggleButton(QToolButton):
         # Load both icons for the current theme
         self.expanded_icon = Icons.get_theme_icon("back.svg", theme_name)
         self.collapsed_icon = Icons.get_theme_icon("forward.svg", theme_name)
-        
+
         # Verify if icons loaded successfully
         if self.expanded_icon.isNull() or self.collapsed_icon.isNull():
             logging.warning(f"Failed to load sidebar theme icons for {theme_name}")
             # Fallback to text-based icons
             self.expanded_icon = None
             self.collapsed_icon = None
-            
+
         # Refresh the button's current display
         self.update_icon()
 
@@ -141,7 +141,7 @@ class NavIconButton(QToolButton):
         """Update the icon using the standardized Icons helper"""
         # Get the correct icon from the central manager
         new_icon = Icons.get_theme_icon_by_id(self.icon_id, theme_name)
-        
+
         # Apply it
         if new_icon and not new_icon.isNull():
             self.icon = new_icon
@@ -420,7 +420,7 @@ class NavIconButton(QToolButton):
                                 menu_items.append(kind)
                         else:
                             # If no CRDs available now, try to load the Definitions page first
-                            if (hasattr(self.parent_window, '_ensure_page_loaded') and 
+                            if (hasattr(self.parent_window, '_ensure_page_loaded') and
                                 hasattr(self.parent_window, 'stacked_widget')):
                                 try:
                                     self.parent_window._ensure_page_loaded("Definitions")
@@ -522,13 +522,14 @@ class NavIconButton(QToolButton):
                 background_color=self.get_background_color(),
                 text_color=self.get_text_color()
             ))
-        
-        # Update label colors based on active state and coming_soon status
-        text_color = self.get_text_color() if not self.coming_soon else SidebarStyles.get_text_subtle()
-        if hasattr(self, 'icon_label') and self.icon_label:
-            self.icon_label.setStyleSheet(f"background-color: transparent; color: {text_color}; font-size: 14px;")
-        if hasattr(self, 'text_label') and self.text_label:
-            self.text_label.setStyleSheet(f"background-color: transparent; color: {text_color}; font-size: 14px;")
+
+        # Update label colors based on active state (skip for coming_soon buttons)
+        if not self.coming_soon:
+            text_color = self.get_text_color()
+            if hasattr(self, 'icon_label') and self.icon_label:
+                self.icon_label.setStyleSheet(f"background-color: transparent; color: {text_color}; font-size: 14px;")
+            if hasattr(self, 'text_label') and self.text_label:
+                self.text_label.setStyleSheet(f"background-color: transparent; color: {text_color}; font-size: 14px;")
 
     def get_background_color(self):
         if self.coming_soon:
@@ -579,7 +580,7 @@ class NavIconButton(QToolButton):
                 self.dropdown_menu.deleteLater()
         except Exception:
             pass  # Ignore errors during cleanup
-    
+
     def refresh_dropdown(self):
         """Refresh the dropdown menu (useful for dynamic content like CRDs)"""
         if self.has_dropdown and self.item_text == "Custom Resources":
@@ -607,24 +608,24 @@ class Sidebar(ThemeAwareMixin, QWidget):
     def _on_theme_changed(self, theme_name):
         """Refresh all sidebar styles when theme changes"""
         logging.info(f"Sidebar: Theme changed to {theme_name}, refreshing styles")
-        
+
         # Refresh sidebar container
         if hasattr(self, 'content_widget'):
             self.content_widget.setStyleSheet(SidebarStyles.get_sidebar_style())
-        
+
         # Refresh border
         if hasattr(self, 'border'):
             self.border.setStyleSheet(SidebarStyles.get_sidebar_border_style())
-        
+
         # Refresh toggle button
         if hasattr(self, 'toggle_btn'):
             self.toggle_btn.setStyleSheet(SidebarStyles.get_sidebar_toggle_button_style())
             self.toggle_btn.update_theme_icons(theme_name)
-        
+
         # Refresh sidebar controls (toggle area)
         if hasattr(self, 'sidebar_controls'):
             self.sidebar_controls.setStyleSheet(SidebarStyles.get_sidebar_controls_style())
-        
+
         # Refresh all nav buttons
         if hasattr(self, 'nav_buttons'):
             for button in self.nav_buttons:
@@ -743,7 +744,7 @@ class Sidebar(ThemeAwareMixin, QWidget):
                 if hasattr(button, 'item_text') and button.item_text == "Custom Resources":
                     custom_resources_button = button
                     break
-            
+
             if custom_resources_button and hasattr(custom_resources_button, 'setup_dropdown'):
                 logging.info("Refreshing Custom Resources dropdown...")
                 # Force recreation of the dropdown
@@ -858,11 +859,11 @@ class Sidebar(ThemeAwareMixin, QWidget):
             controls_layout.setContentsMargins(5, 5, 5, 5)
 
         self.sidebar_animation.start()
-        
+
         # Update all nav buttons
         for btn in self.nav_buttons:
             btn.set_expanded(self.sidebar_expanded)
-    
+
     def refresh_custom_resources_dropdown(self):
         """Refresh the Custom Resources dropdown to include newly loaded CRDs"""
         for button in self.nav_buttons:
