@@ -49,3 +49,6 @@ coverage.xml
 *.cover
 # Claude Code personal configuration
 .claude/
+
+# Kiro IDE configuration and specs
+.kiro/
