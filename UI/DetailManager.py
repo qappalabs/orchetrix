@@ -90,10 +90,10 @@ class DetailManager(QObject):
             'limitranges': 'limitrange',
             'replicationcontrollers': 'replicationcontroller',
         }
-        
-        resource_type_singular = plural_to_singular_mapping.get(resource_type.lower(), 
+
+        resource_type_singular = plural_to_singular_mapping.get(resource_type.lower(),
                                                               resource_type.rstrip('s') if resource_type.endswith('s') else resource_type)
-        
+
         # Ensure detail page is created
         detail_page = self._ensure_detail_page()
 
@@ -116,11 +116,11 @@ class DetailManager(QObject):
         if raw_data:
             # Use generic resource_raw_data for events so DetailPageComponent can
             # distribute it to all sections via _handle_special_resource_data.
-            if resource_type.lower() == "event":
+            if resource_type_singular.lower() == "event":
                 detail_page.resource_raw_data = raw_data
-            elif resource_type.lower() in ["chart", "helmchart"]:
+            elif resource_type_singular.lower() in ["chart", "helmchart"]:
                 detail_page.chart_raw_data = raw_data
-            elif resource_type.lower() in ["helmrelease", "release"]:
+            elif resource_type_singular.lower() in ["helmrelease", "release"]:
                 detail_page.release_raw_data = raw_data
             else:
                 detail_page.resource_raw_data = raw_data
