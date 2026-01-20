@@ -20,6 +20,8 @@ class DetailPageEventsSection(BaseDetailSection):
 
     def __init__(self, kubernetes_client, parent=None):
         super().__init__("Events", kubernetes_client, parent)
+        # Initialize data state explicitly to avoid AttributeError
+        self.current_data = None
         self.setup_events_ui()
         # Note: Theme signals connected via ThemeAwareMixin in BaseDetailSection
 
@@ -52,9 +54,10 @@ class DetailPageEventsSection(BaseDetailSection):
                         # Note: This applies generic styling - specific styles (type badges)
                         # are already theme-aware from their style functions
                         child.setStyleSheet(child.styleSheet())
-    
+
     def set_raw_data(self, raw_data):
         """Set raw data for special resources like charts and releases"""
+        logging.info(f"Events section: Received raw data for {self.resource_type}, keys: {list(raw_data.keys()) if raw_data else 'None'}")
         self.current_data = raw_data
         # For charts and releases, we don't have Kubernetes events
         # Show a message indicating this
@@ -76,8 +79,18 @@ class DetailPageEventsSection(BaseDetailSection):
     def _load_data_async(self):
         """Load overview data using Kubernetes API"""
         try:
+            # CRITICAL FIX: Check if we already have raw_data from the page (e.g., CustomResourcePages, NodesPage)
+            # This prevents unnecessary API calls and empty detail sections
+            if self.current_data is not None:
+                logging.info(f"Events section: Using existing raw_data for {self.resource_type}/{self.resource_name}")
+                # Use the existing data directly instead of making API call
+                self.handle_data_loaded(self.current_data)
+                return
+            
+            # Only make API call if we don't have current_data
+            logging.info(f"Events section: No raw_data available, fetching from API for {self.resource_type}/{self.resource_name}")
             self.connect_api_signals()
-            self.kubernetes_client.get_resource_detail_async(
+            self.kubernetes_client.get_resource_detail(
                 self.resource_type,
                 self.resource_name,
                 self.resource_namespace or "default"
