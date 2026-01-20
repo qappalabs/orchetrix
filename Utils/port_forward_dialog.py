@@ -549,6 +549,153 @@ Automatically finds an available local port if the suggested port is already in 
         """Handle theme changes by refreshing all widget styles"""
         self.apply_styles()
 
+
+class ActivePortForwardsDialog(ThemeAwareMixin, QDialog):
+    """Enhanced dialog showing active port forwards with improved layout"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.port_manager = get_port_forward_manager()
+
+        self.setWindowTitle("Active Port Forwards")
+        self.setModal(True)
+        self.setMinimumSize(700, 500)
+        self.resize(800, 600)
+
+        # Store widget references for theme updates
+        self.status_label = None
+        self.content_area = None
+        self.refresh_button = None
+        self.stop_all_button = None
+        self.close_button = None
+
+        self.setup_ui()
+        self.apply_styles()
+        self.refresh_forwards()
+
+        # Connect to manager signals
+        self.port_manager.port_forwards_updated.connect(self.refresh_forwards)
+
+    def setup_ui(self):
+        """Setup enhanced UI"""
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(25, 25, 25, 25)
+        layout.setSpacing(20)
+
+        # Header
+        header_layout = QHBoxLayout()
+
+        title = QLabel("🚀 Active Port Forwards")
+        title_font = QFont()
+        title_font.setPointSize(16)
+        title_font.setBold(True)
+        title.setFont(title_font)
+        header_layout.addWidget(title)
+
+        header_layout.addStretch()
+
+        # Status indicator
+        self.status_label = QLabel("Loading...")
+        header_layout.addWidget(self.status_label)
+
+        layout.addLayout(header_layout)
+
+        # Content area with scroll and custom scrollbar
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        # Scroll area styling will be applied in apply_styles()
+
+        self.content_area = QTextEdit()
+        self.content_area.setReadOnly(True)
+        scroll_area.setWidget(self.content_area)
+
+        layout.addWidget(scroll_area)
+
+        # Button section
+        button_layout = QHBoxLayout()
+
+        self.refresh_button = QPushButton("🔄 Refresh")
+        self.refresh_button.clicked.connect(self.refresh_forwards)
+
+        self.stop_all_button = QPushButton("🛑 Stop All")
+        self.stop_all_button.clicked.connect(self.stop_all_forwards)
+
+        self.close_button = QPushButton("Close")
+        self.close_button.clicked.connect(self.accept)
+
+        button_layout.addWidget(self.refresh_button)
+        button_layout.addWidget(self.stop_all_button)
+        button_layout.addStretch()
+        button_layout.addWidget(self.close_button)
+
+        layout.addLayout(button_layout)
+
+    def apply_styles(self):
+        """Apply enhanced styling"""
+        self.setStyleSheet(get_active_dialog_style())
+        
+        # Apply status label styling based on current state
+        if self.status_label:
+            if self.status_label.text() == "Loading...":
+                self.status_label.setStyleSheet(get_status_loading_style())
+
+    def _on_theme_changed(self, theme_name):
+        """Handle theme changes by refreshing all widget styles"""
+        self.apply_styles()
+
+    def refresh_forwards(self):
+        """Refresh the list of port forwards with enhanced display"""
+        forwards = self.port_manager.get_port_forwards()
+
+        # Update status
+        if not forwards:
+            self.status_label.setText("No active port forwards")
+            self.status_label.setStyleSheet(get_status_inactive_style())
+        else:
+            active_count = sum(1 for f in forwards if f.status == 'active')
+            self.status_label.setText(f"{active_count}/{len(forwards)} active")
+            self.status_label.setStyleSheet(get_status_active_style())
+
+        if not forwards:
+            self.content_area.setPlainText("No active port forwards\n\nCreate port forwards from the Pods or Services pages using the 'Port Forward' action.")
+            return
+
+        content = "🚀 ACTIVE PORT FORWARDS\n"
+        content += "=" * 60 + "\n\n"
+
+        for i, config in enumerate(forwards, 1):
+            # Status emoji
+            status_emoji = {
+                'active': '🟢',
+                'inactive': '🔴',
+                'starting': '🟡',
+                'error': '❌'
+            }.get(config.status, '⚪')
+
+            content += f"{status_emoji} [{i}] {config.resource_type.upper()}: {config.resource_name}\n"
+            content += f"    📂 Namespace: {config.namespace}\n"
+            content += f"    🌐 Forward: localhost:{config.local_port} ──► {config.target_port}\n"
+            content += f"    📡 Protocol: {config.protocol}\n"
+            content += f"    📊 Status: {config.status.upper()}\n"
+
+            if config.error_message:
+                content += f"    ❌ Error: {config.error_message}\n"
+
+            # Calculate uptime for active forwards
+            if config.status == 'active' and config.created_at:
+                uptime = time.time() - config.created_at
+                hours = int(uptime // 3600)
+                minutes = int((uptime % 3600) // 60)
+                content += f"    ⏱️  Uptime: {hours}h {minutes}m\n"
+
+            content += f"    🔗 Access: http://localhost:{config.local_port}\n"
+
+            if i < len(forwards):
+                content += "\n" + "-" * 50 + "\n\n"
+
+        self.content_area.setPlainText(content)
+
     def stop_all_forwards(self):
         """Stop all port forwards with confirmation"""
         forwards = self.port_manager.get_port_forwards()
