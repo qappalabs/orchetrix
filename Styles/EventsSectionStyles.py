@@ -12,7 +12,8 @@ def _get_theme():
 
 
 def get_events_list_style():
-    """Events list widget style"""
+    """Events list widget style - uses unified AppStyles scrollbar for consistency"""
+    from UI.Styles import AppStyles
     theme = _get_theme()
     return f"""
         QListWidget {{
@@ -27,28 +28,14 @@ def get_events_list_style():
         QListWidget::item:hover {{
             background-color: {theme.colors.HOVER_BG};
         }}
-        QScrollBar:vertical {{
-            background-color: {theme.colors.BG_DARK};
-            width: 8px;
-            border-radius: 4px;
-        }}
-        QScrollBar::handle:vertical {{
-            background-color: {theme.colors.BORDER_COLOR};
-            border-radius: 4px;
-            min-height: 20px;
-        }}
-        QScrollBar::handle:vertical:hover {{
-            background-color: {theme.colors.TEXT_SUBTLE};
-        }}
-        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
-            height: 0px;
-        }}
+        {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
     """
 
 
 def get_no_events_color():
-    """Color for 'no events' message - hardcoded"""
-    return "#888888"
+    """Color for 'no events' message - theme-aware"""
+    theme = _get_theme()
+    return theme.colors.TEXT_SUBTLE
 
 
 def get_no_events_foreground_color():
