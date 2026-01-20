@@ -12,29 +12,15 @@ def _get_theme():
 
 
 def get_scroll_area_style():
-    """Scroll area style"""
+    """Scroll area style - uses unified AppStyles scrollbar for consistency"""
+    from UI.Styles import AppStyles
     theme = _get_theme()
     return f"""
         QScrollArea {{
             background-color: {theme.colors.BG_SIDEBAR};
             border: none;
         }}
-        QScrollBar:vertical {{
-            background-color: {theme.colors.BG_DARK};
-            width: 8px;
-            border-radius: 4px;
-        }}
-        QScrollBar::handle:vertical {{
-            background-color: {theme.colors.BORDER_COLOR};
-            border-radius: 4px;
-            min-height: 20px;
-        }}
-        QScrollBar::handle:vertical:hover {{
-            background-color: {theme.colors.TEXT_SUBTLE};
-        }}
-        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
-            height: 0px;
-        }}
+        {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
     """
 
 
