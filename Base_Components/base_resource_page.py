@@ -8,14 +8,14 @@ from Utils.resource_utils import singularize_resource_type
 
 
 import logging
-import time
+import time  # FIXED: Add missing time import
 from PyQt6.QtWidgets import (
     QMessageBox, QWidget, QVBoxLayout,
     QLabel, QHBoxLayout, QPushButton, QApplication, QTableWidgetItem,
     QAbstractItemView, QStackedWidget, QHeaderView, QProgressDialog, QCheckBox
 )
 from PyQt6.QtGui import QColor
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from typing import List, Dict
 
 # Import optimized unified components
@@ -27,6 +27,7 @@ from UI.Styles import AppStyles, AppColors
 from UI.Icons import resource_path
 from UI.ThemeManager import get_theme_manager
 import Styles.BaseTablePageStyles as BaseTablePageStyles
+import Styles.BaseResourcePageStyles as BaseResourcePageStyles
 from UI.LoadingSpinner import create_loading_overlay
 from Utils.unified_resource_loader import get_unified_resource_loader, LoadResult
 from Utils.error_handler import get_error_handler
@@ -48,11 +49,15 @@ LARGE_DATASET_THRESHOLD = 200
 
 
 class BaseResourcePage(BaseTablePage):
+    # Signals for resource loading
+    all_items_loaded_signal = pyqtSignal()
+    load_more_complete = pyqtSignal()
 
     # Use bounded cache system instead of unbounded class variables
 
     def __init__(self, parent=None):
-
+        super().__init__(parent)
+        
         self.resource_type = None
         self.resources = []
         # Start with default namespace, will be updated when namespaces are loaded
@@ -79,6 +84,9 @@ class BaseResourcePage(BaseTablePage):
         self._total_item_count = 0
         self._loaded_item_count = 0
         self._last_load_time = 0  # FIXED: Track last load time
+        self.is_showing_skeleton = False  # FIXED: Add skeleton loading state
+        self._is_searching = False  # FIXED: Add search state tracking
+        self._current_search_query = None  # FIXED: Add current search query tracking
 
         # Cache system removed
         self._shutting_down = False
@@ -118,14 +126,95 @@ class BaseResourcePage(BaseTablePage):
         self.search_handler = ResourceSearchHandler(self)
 
     def showEvent(self, event):
-
+        """Override showEvent to automatically load data when page becomes visible"""
         super().showEvent(event)
 
         # OPTIMIZED: Load immediately for better performance like AppChart
         # Removed startup delay that was causing slow namespace loading
 
-        # Normal show event handling - load immediately if app is already started
-        self._handle_normal_show_event()
+        # Check if this page has its own loading mechanism (like NodesPage)
+        has_custom_loading = (
+            hasattr(self, 'cluster_connector') or 
+            self.__class__.__name__ in ['NodesPage', 'AppsChart', 'ChartsPage'] or
+            # Check if load_data method is overridden
+            self.__class__.load_data is not BaseResourcePage.load_data
+        )
+        
+        # Most resource pages should load immediately - only defer for very specific cases
+        # The startup deferral was causing "loading resources" issues in PodsPage and others
+        should_defer_startup = (
+            not has_custom_loading and 
+            self._is_app_starting() and
+            # Only defer for pages that explicitly need it (none currently)
+            self.__class__.__name__ in []  # Empty list - no pages need deferral
+        )
+        
+        if has_custom_loading:
+            # Pages with their own loading mechanisms should load immediately
+            self._handle_normal_show_event()
+        elif should_defer_startup:
+            # Only defer for standard resource pages during app startup (currently none)
+            QTimer.singleShot(500, self._deferred_startup_load)
+        else:
+            # Normal show event handling - load immediately (most pages)
+            self._handle_normal_show_event()
+
+    def _is_app_starting(self):
+        """Check if the application is still in startup phase"""
+        try:
+            from PyQt6.QtWidgets import QApplication
+            app = QApplication.instance()
+            if not app:
+                return False
+            
+            # Check if we're still within the first few seconds of app startup
+            if not hasattr(app, '_startup_time'):
+                import time
+                app._startup_time = time.time()
+                return True
+            
+            import time
+            time_since_startup = time.time() - app._startup_time
+            return time_since_startup < 1.5  # Very conservative - only 1.5 seconds
+        except Exception:
+            return False  # If we can't determine, assume app is ready
+
+    def _deferred_startup_load(self):
+        """Perform deferred loading after startup to avoid splash screen lag"""
+        try:
+            # Only proceed if we haven't loaded yet and widget is still visible
+            if self.isVisible() and not hasattr(self, '_startup_load_done'):
+                self._startup_load_done = True
+                
+                # Show a subtle loading indicator
+                self._show_startup_loading_message()
+                
+                # Start the actual loading
+                self._handle_normal_show_event()
+        except Exception as e:
+            logging.debug(f"Error in deferred startup load: {e}")
+
+    def _show_startup_loading_message(self):
+        """Show a subtle message that data is loading"""
+        try:
+            if hasattr(self, 'table') and self.table:
+                # Clear the table completely first to remove any status/action widgets
+                self.clear_table()
+                
+                # Set a loading message in the table temporarily
+                self.table.setRowCount(1)
+                from PyQt6.QtWidgets import QTableWidgetItem
+                from PyQt6.QtCore import Qt
+                
+                item = QTableWidgetItem("🔄 Loading resources...")
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self.table.setItem(0, 0, item)
+                
+                # Span the loading message across all columns
+                if self.table.columnCount() > 0:
+                    self.table.setSpan(0, 0, 1, self.table.columnCount())
+        except Exception as e:
+            logging.debug(f"Error showing startup loading message: {e}")
 
     def _handle_normal_show_event(self):
 
@@ -148,17 +237,16 @@ class BaseResourcePage(BaseTablePage):
             QTimer.singleShot(50, self._auto_load_data)
 
     def _auto_load_data(self):
-
+        """Auto-load data when page is shown - FIXED for large data performance"""
         if hasattr(self, 'resource_type') and self.resource_type and not self.is_loading_initial:
             # FIXED: Check if we have recent data to avoid redundant loads
             if (hasattr(self, '_last_load_time') and self._last_load_time > 0 and
                     time.time() - self._last_load_time < 5.0):  # 5 second throttle
                 logging.debug(
-                    f"Recent data available for {self.__class__.__name__}, skipping auto - load")
+                    f"Recent data available for {self.__class__.__name__}, skipping auto-load")
                 return
 
-            # Reduced to debug
-            logging.debug(f"Auto - loading data for {self.__class__.__name__}")
+            logging.debug(f"Auto-loading data for {self.__class__.__name__}")  # Reduced to debug
             self._initial_load_done = True  # Mark as done to prevent repeated attempts
             self._last_load_time = time.time()  # FIXED: Track load time
             self.load_data()
@@ -350,13 +438,20 @@ class BaseResourcePage(BaseTablePage):
         self._resize_loading_overlay()
 
     def _create_title_and_count(self, layout, title_text):
-
+        """Create title and count labels (theme-aware colors, same sizes)"""
+        theme = get_theme_manager().get_current_theme()
+        
         self.title_label = QLabel(title_text)
+        # Preserve original font size/weight, only make color theme-aware
+        self.title_label.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {theme.colors.TEXT_LIGHT};")
+        
         self.items_count = QLabel("0 items")
+        # Preserve original size/margin, only make color theme-aware
+        self.items_count.setStyleSheet(f"color: {theme.colors.TEXT_SUBTLE}; font-size: 12px; margin-left: 8px;")
+        self.items_count.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        
         layout.addWidget(self.title_label)
         layout.addWidget(self.items_count)
-        
-        self.style_manager.apply_title_style(self.title_label, self.items_count)
 
     def _add_controls_to_header(self, header_layout):
 
@@ -367,16 +462,10 @@ class BaseResourcePage(BaseTablePage):
         self._delete_btn = self._create_delete_selected_button()
         header_layout.addWidget(self._delete_btn)
 
-        refresh_btn = QPushButton("Refresh")
-        refresh_style = getattr(AppStyles, "SECONDARY_BUTTON_STYLE",
-                                """QPushButton { background - color: #2d2d2d; color: #ffffff; border: 1px solid #3d3d3d;
-                                               border - radius: 4px; padding: 5px 10px; }
-                                   QPushButton:hover { background - color: #3d3d3d; }
-                                   QPushButton:pressed { background - color: #1e1e1e; }"""
-                                )
-        refresh_btn.setStyleSheet(refresh_style)
-        refresh_btn.clicked.connect(lambda: self.force_load_data())
-        header_layout.addWidget(refresh_btn)
+        self.refresh_btn = QPushButton("Refresh")
+        self.refresh_btn.setStyleSheet(BaseResourcePageStyles.get_refresh_button_style())
+        self.refresh_btn.clicked.connect(lambda: self.force_load_data())
+        header_layout.addWidget(self.refresh_btn)
 
     def _create_delete_selected_button(self):
 
@@ -1497,24 +1586,13 @@ class BaseResourcePage(BaseTablePage):
             from UI.Styles import AppStyles
             button.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE +
                                  """
-                QToolButton::menu - indicator { image: none; width: 0px; }
+                QToolButton::menu-indicator { image: none; width: 0px; }
                 """
                                  )
         except (ImportError, AttributeError) as e:
             logging.debug(f"Could not load AppStyles for button: {e}")
-            # Fallback styling
-            button.setStyleSheet("""
-                QToolButton {
-                    background - color: transparent;
-                    border: none;
-                    padding: 2px;
-                }
-                QToolButton:hover {
-                    background - color: #3d3d3d;
-                    border - radius: 2px;
-                }
-                QToolButton::menu - indicator { image: none; width: 0px; }
-            """)
+            # Use theme-aware fallback styling
+            button.setStyleSheet(BaseResourcePageStyles.get_action_button_fallback_style())
 
         button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         button.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -1525,22 +1603,8 @@ class BaseResourcePage(BaseTablePage):
             menu.setStyleSheet(BaseTablePageStyles.get_menu_style())
         except (ImportError, AttributeError) as e:
             logging.debug(f"Could not load BaseTablePageStyles for menu: {e}")
-            # Fallback menu styling
-            menu.setStyleSheet("""
-                QMenu {
-                    background - color: #2d2d2d;
-                    border: 1px solid #3d3d3d;
-                    color: white;
-                }
-                QMenu::item {
-                    padding: 10px 24px 10px 36px;
-                    font - size: 13px;
-                    margin: 2px 0px;
-                }
-                QMenu::item:selected {
-                    background - color: #0078d4;
-                }
-            """)
+            # Use theme-aware fallback styling
+            menu.setStyleSheet(BaseResourcePageStyles.get_menu_fallback_style())
 
         # Connect signals to change row appearance when menu opens / closes
         try:
@@ -1661,15 +1725,8 @@ class BaseResourcePage(BaseTablePage):
             container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
         except (ImportError, AttributeError) as e:
             logging.debug(f"Could not load ACTION_CONTAINER_STYLE: {e}")
-            # Fallback styling
-            container.setStyleSheet("""
-                QWidget {
-                    background - color: transparent;
-                    border: none;
-                    margin: 0;
-                    padding: 0;
-                }
-            """)
+            # Use theme-aware fallback styling
+            container.setStyleSheet(BaseResourcePageStyles.get_action_container_fallback_style())
         layout = QHBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1682,16 +1739,16 @@ class BaseResourcePage(BaseTablePage):
         self._highlight_active_row(row, True)
 
     def _highlight_active_row(self, row, highlight):
-
+        """Highlight row when action menu is open using theme-aware colors"""
         try:
             if hasattr(self, 'table') and self.table and row < self.table.rowCount():
                 for col in range(self.table.columnCount()):
                     item = self.table.item(row, col)
                     if item:
                         if highlight:
-                            item.setBackground(QColor(AppColors.HOVER_BG))
+                            item.setBackground(QColor(BaseResourcePageStyles.get_hover_bg_color()))
                         else:
-                            item.setBackground(QColor("transparent"))
+                            item.setBackground(QColor(BaseResourcePageStyles.get_transparent_color()))
         except Exception as e:
             logging.debug(f"Error highlighting row {row}: {e}")
 
@@ -2002,26 +2059,26 @@ class BaseResourcePage(BaseTablePage):
             logging.error(f"Error in BaseResourcePage destructor: {e}")
 
     def _on_theme_changed(self, theme_name):
-
+        """Refresh resource page specific styles when theme changes"""
         # Call parent's theme change handler first
         super()._on_theme_changed(theme_name)
 
         # Get current theme for color updates
         theme = get_theme_manager().get_current_theme()
 
-        # Refresh resource - specific widgets
+        # Refresh resource-specific widgets
         # Note: Most widgets (table, checkboxes, action buttons) are already handled by BaseTablePage
 
-        # Update title label with theme - aware color
+        # Update title label with theme-aware color
         if hasattr(self, 'title_label') and self.title_label:
             self.title_label.setStyleSheet(
-                f"font - size: 20px; font - weight: bold; color: {theme.colors.TEXT_LIGHT};"
+                f"font-size: 20px; font-weight: bold; color: {theme.colors.TEXT_LIGHT};"
             )
 
-        # Update count label with theme - aware color
+        # Update count label with theme-aware color
         if hasattr(self, 'items_count') and self.items_count:
             self.items_count.setStyleSheet(
-                f"color: {theme.colors.TEXT_SUBTLE}; font - size: 12px; margin - left: 8px;"
+                f"color: {theme.colors.TEXT_SUBTLE}; font-size: 12px; margin-left: 8px;"
             )
 
         # Refresh search label if it exists
@@ -2033,6 +2090,22 @@ class BaseResourcePage(BaseTablePage):
         if hasattr(self, 'search_bar') and self.search_bar:
             self.search_bar.setStyleSheet(
                 BaseResourcePageStyles.get_search_input_style())
+
+        # Refresh namespace combo if it exists
+        if hasattr(self, 'namespace_combo') and self.namespace_combo:
+            self.namespace_combo.setStyleSheet(BaseResourcePageStyles.get_namespace_combo_style())
+
+        # Refresh delete button if it exists
+        if hasattr(self, '_delete_btn') and self._delete_btn:
+            self._delete_btn.setStyleSheet(BaseResourcePageStyles.get_delete_button_style())
+
+        # Refresh refresh button if it exists
+        if hasattr(self, 'refresh_btn') and self.refresh_btn:
+            self.refresh_btn.setStyleSheet(BaseResourcePageStyles.get_refresh_button_style())
+
+        # Note: Search/namespace labels and empty state widgets are recreated when shown,
+        # so they will automatically use the current theme
+        logging.debug(f"BaseResourcePage: Theme refresh complete for {theme_name}")
 
         # Refresh namespace label if it exists
         if hasattr(self, 'namespace_label') and self.namespace_label:
