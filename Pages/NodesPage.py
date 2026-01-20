@@ -54,7 +54,8 @@ class CustomHeaderStyle(QProxyStyle):
 class GraphWidget(QFrame):
 
     def __init__(self, title, unit, color, parent=None):
-
+        super().__init__(parent)
+        
         self.title = title
         self.unit = unit
         self.color = color
@@ -452,6 +453,7 @@ class NodesPage(BaseResourcePage):
     """
 
     def __init__(self, parent=None):
+        super().__init__(parent)
 
         self.resource_type = "nodes"
         self.show_namespace_dropdown = False  # Hide namespace dropdown for Nodes page
@@ -468,8 +470,8 @@ class NodesPage(BaseResourcePage):
         # Initialize data structure
         self.nodes_data = []
 
-        # Set up UI
-        self.setup_page_ui()
+        # Defer UI setup to ensure base class is fully initialized
+        QTimer.singleShot(0, self.setup_page_ui)
 
     def setup_page_ui(self):
         headers = ["", "Name", "CPU", "Memory", "Disk", "Taints", "Roles", "Version", "Age", "Conditions", ""]
@@ -508,6 +510,24 @@ class NodesPage(BaseResourcePage):
 
         # Use default blue spinner to match other pages
         self._spinner_type = "circular"
+
+    def _on_theme_changed(self, theme_name):
+        """Handle theme changes - refresh QMenu styling for action buttons"""
+        # Call parent's theme change handler first
+        super()._on_theme_changed(theme_name)
+        
+        # CRITICAL FIX: Update all existing QMenu objects after theme change
+        # QMenu objects retain old styling after theme changes, causing functionality issues
+        if hasattr(self, '_item_widgets') and self._item_widgets:
+            for widget_key, widget in self._item_widgets.items():
+                if widget_key.startswith("action_button_") and isinstance(widget, QToolButton):
+                    menu = widget.menu()
+                    if menu:
+                        # Refresh menu styling with new theme
+                        menu.setStyleSheet(BaseTablePageStyles.get_menu_style())
+                        logging.debug(f"Updated menu styling for {widget_key} after theme change")
+        
+        logging.info(f"NodesPage: Theme changed to {theme_name}, refreshed QMenu styling")
 
     def configure_columns(self):
 
