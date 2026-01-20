@@ -136,7 +136,9 @@ class NamespacesPage(BaseResourcePage):
         self.show_namespace_dropdown = False  # Namespaces are cluster-scoped
         self.kube_client = get_kubernetes_client()
         self.operation_thread = None
-        self.setup_page_ui()
+        
+        # Defer UI setup to ensure base class is fully initialized
+        QTimer.singleShot(0, self.setup_page_ui)
 
     def setup_page_ui(self):
         headers = ["", "Name", "Labels", "Age", "Status", ""]
