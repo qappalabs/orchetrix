@@ -8,10 +8,58 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer
 from typing import Dict, Any
 import logging
+import sys
 
 from .base_detail_section import BaseDetailSection
 import Styles.BaseDetailSectionStyles as BaseDetailSectionStyles
 import Styles.DetailSectionStyles as DetailSectionStyles
+
+
+def _is_too_large(obj, max_items=1000):
+    """
+    Lightweight size heuristic to avoid expensive serialization.
+
+    Checks container sizes without converting to string, using:
+    - len() for dict, list, tuple, set (with capping)
+    - __len__ for other objects that support it
+    - sys.getsizeof() as fallback for other objects
+
+    Args:
+        obj: Object to check size of
+        max_items: Maximum number of items to count before stopping
+
+    Returns:
+        bool: True if object appears too large to display
+    """
+    try:
+        # For container types, use len() with capping
+        if isinstance(obj, (dict, list, tuple, set)):
+            count = 0
+            if isinstance(obj, dict):
+                # Count keys only (shallow)
+                count = len(obj)
+            else:
+                # Count items, but cap at max_items to avoid expensive counting
+                count = min(len(obj), max_items)
+
+            return count >= max_items
+
+        # For objects with __len__, use that
+        elif hasattr(obj, '__len__'):
+            try:
+                length = len(obj)
+                return length >= max_items
+            except (TypeError, AttributeError):
+                pass
+
+        # Fallback: use memory size estimate
+        size_bytes = sys.getsizeof(obj)
+        # Consider "too large" if object uses more than ~1MB
+        return size_bytes > 1024 * 1024
+
+    except Exception:
+        # If anything goes wrong, err on the side of caution
+        return True
 
 
 class DetailPageDetailsSection(BaseDetailSection):
@@ -19,25 +67,28 @@ class DetailPageDetailsSection(BaseDetailSection):
 
     def __init__(self, kubernetes_client, parent=None):
         super().__init__("Details", kubernetes_client, parent)
+        self.current_data = None
         self.setup_details_ui()
 
     def _on_theme_changed(self, theme_name):
         """Refresh styles when theme changes"""
-        # Refresh static container
+        # Refresh static widgets
         if hasattr(self, 'details_content'):
             self.details_content.setStyleSheet(DetailSectionStyles.get_content_style())
-
+        
+        # Refresh scroll area
+        if hasattr(self, 'scroll_area'):
+            self.scroll_area.setStyleSheet(DetailSectionStyles.get_scroll_area_style())
+        
         # Refresh all dynamic widgets by iterating through the layout
         if hasattr(self, 'details_layout'):
             self._refresh_dynamic_widgets_in_layout(self.details_layout)
-
-        # DO NOT call update_ui_with_data() - eliminates race condition
 
     def _refresh_dynamic_widgets_in_layout(self, layout):
         """Recursively iterate through layout and refresh stylesheets of all widgets"""
         if not layout:
             return
-
+        
         for i in range(layout.count()):
             item = layout.itemAt(i)
             if item:
@@ -51,15 +102,19 @@ class DetailPageDetailsSection(BaseDetailSection):
                         if text and text.isupper() and len(text.split()) <= 2:
                             # Section header like "METADATA", "SPEC", "STATUS"
                             widget.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
+                        elif text.endswith(':'):
+                            # Field label (ends with colon)
+                            widget.setStyleSheet(BaseDetailSectionStyles.get_field_label_style())
                         else:
                             # Field value (most common)
                             widget.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
                 elif item.layout():
                     # Recursively refresh nested layouts
                     self._refresh_dynamic_widgets_in_layout(item.layout())
-    
+
     def set_raw_data(self, raw_data):
         """Set raw data for special resources like charts and releases"""
+        logging.info(f"Details section: Received raw data for {self.resource_type}, keys: {list(raw_data.keys()) if raw_data else 'None'}")
         self.current_data = raw_data
         self.update_ui_with_data(raw_data)
 
@@ -86,8 +141,18 @@ class DetailPageDetailsSection(BaseDetailSection):
     def _load_data_async(self):
         """Load overview data using Kubernetes API"""
         try:
+            # CRITICAL FIX: Check if we already have raw_data from the page (e.g., CustomResourcePages, NodesPage)
+            # This prevents unnecessary API calls and empty detail sections
+            if self.current_data is not None:
+                logging.info(f"Details section: Using existing raw_data for {self.resource_type}/{self.resource_name}")
+                # Use the existing data directly instead of making API call
+                self.handle_data_loaded(self.current_data)
+                return
+            
+            # Only make API call if we don't have current_data
+            logging.info(f"Details section: No raw_data available, fetching from API for {self.resource_type}/{self.resource_name}")
             self.connect_api_signals()
-            self.kubernetes_client.get_resource_detail_async(
+            self.kubernetes_client.get_resource_detail(
                 self.resource_type,
                 self.resource_name,
                 self.resource_namespace or "default"
@@ -201,7 +266,7 @@ class DetailPageDetailsSection(BaseDetailSection):
 
     def add_object_fields(self, obj, parent_layout, prefix="", depth=0):
         """Recursively add object fields with better limits"""
-        if depth > 2 or len(str(obj)) > 10000:  # Stricter limits
+        if depth > 2 or _is_too_large(obj):  # Stricter limits
             truncated_label = QLabel("... (data truncated for performance)")
             truncated_label.setStyleSheet(DetailSectionStyles.get_truncated_label_style())
             parent_layout.addWidget(truncated_label)
@@ -251,9 +316,6 @@ class DetailPageDetailsSection(BaseDetailSection):
 
     def clear_content(self):
         """Clear all details content"""
-        # Defensive: Clear cached data
-        self.current_data = None
-
         while self.details_layout.count():
             item = self.details_layout.takeAt(0)
             if item.widget():
