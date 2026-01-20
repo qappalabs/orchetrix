@@ -1828,8 +1828,6 @@ class HighPerformanceResourceLoader(QObject):
                 if object_count > 200000:
                     logging.info("Forcing memory cleanup due to high object count")
                     self._force_memory_cleanup()
-                    # Clear caches more aggressively
-                    self._clear_old_cache_entries(force=True)
 
             # Log memory usage if psutil available
             try:
@@ -2404,27 +2402,6 @@ class HighPerformanceResourceLoader(QObject):
             logging.info(f"Memory usage after cleanup: {memory_mb:.1f} MB")
         except ImportError:
             pass
-
-    def _clear_old_cache_entries(self, force=False):
-        """Clear old cache entries to free memory"""
-        try:
-            current_time = time.time()
-            max_age = 300 if not force else 60  # 5 minutes normal, 1 minute if forced
-
-            with self._cache_lock:
-                keys_to_remove = []
-                for key, (data, timestamp) in self._resource_cache.items():
-                    if current_time - timestamp > max_age:
-                        keys_to_remove.append(key)
-
-                for key in keys_to_remove:
-                    del self._resource_cache[key]
-
-                if keys_to_remove:
-                    logging.info(f"Cleared {len(keys_to_remove)} old cache entries")
-
-        except Exception as e:
-            logging.debug(f"Error clearing old cache entries: {e}")
 
     @staticmethod
     def _format_capacity(raw_value: str) -> str:
