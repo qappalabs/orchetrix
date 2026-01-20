@@ -104,26 +104,28 @@ def get_message_box_style():
 
 
 def get_rollback_button_style():
-    """Rollback button style - hardcoded green (semantic action color)"""
-    return """
-        QPushButton {
-            background-color: #4CAF50;
+    """Rollback button style - theme-aware success color"""
+    theme = _get_theme()
+    return f"""
+        QPushButton {{
+            background-color: {theme.colors.STATUS_ACTIVE};
             color: white;
             border: none;
             padding: 6px 12px;
             font-weight: bold;
-        }
+        }}
     """
 
 
 def get_current_label_style():
-    """Current revision label style - hardcoded green (semantic status color)"""
-    return """
-        QLabel {
-            color: #4CAF50;
+    """Current revision label style - theme-aware success color"""
+    theme = _get_theme()
+    return f"""
+        QLabel {{
+            color: {theme.colors.STATUS_ACTIVE};
             font-weight: bold;
             padding: 6px 12px;
-        }
+        }}
     """
 
 
