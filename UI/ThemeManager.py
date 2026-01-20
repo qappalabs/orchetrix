@@ -3,7 +3,7 @@ from PyQt6.QtCore import QObject, pyqtSignal
 
 class ThemeManager(QObject):
     theme_changed = pyqtSignal(str)
-    
+
     def __init__(self):
         super().__init__()
         self._current_theme = "Light"  # Match preferences dropdown values
@@ -11,41 +11,41 @@ class ThemeManager(QObject):
             "Dark": self._get_dark_theme(),
             "Light": self._get_light_theme()
         }
-    
+
     def get_current_theme(self):
         return self._themes[self._current_theme]
-    
+
     def get_current_theme_name(self) -> str:
         """Return the symbolic name of the active theme (e.g. "Light" or "Dark")."""
         return self._current_theme
-    
+
     def set_theme(self, theme_name: str):
         if theme_name in self._themes and self._current_theme != theme_name:
             self._current_theme = theme_name
             self.theme_changed.emit(theme_name)
-    
+
     def apply_theme_to_widget(self, widget, component_type="default"):
         theme = self.get_current_theme()
         style = theme.get_component_style(component_type)
         if style:
             widget.setStyleSheet(style)
-    
+
     def _get_dark_theme(self):
         return DarkTheme()
-    
+
     def _get_light_theme(self):
         return LightTheme()
-    
+
     def get_available_themes(self):
         return list(self._themes.keys())
 
 
 class BaseTheme:
     """Base theme with shared style templates (structure only, no colors)"""
-    
+
     def get_component_style(self, component_type):
         return getattr(self, f"get_{component_type}_style", lambda: "")()
-    
+
     # Shared style templates - only structure, colors injected by themes
     @staticmethod
     def _button_template(bg_color, text_color, hover_color):
@@ -61,7 +61,7 @@ class BaseTheme:
                 background-color: {hover_color};
             }}
         """
-    
+
     @staticmethod
     def _table_template(bg_color, text_color, border_color, border_light, header_bg, header_text, header_hover_bg):
         return f"""
@@ -83,7 +83,7 @@ class BaseTheme:
                 background-color: {header_hover_bg};
             }}
         """
-    
+
     @staticmethod
     def _widget_template(bg_color, text_color):
         return f"""
@@ -92,7 +92,7 @@ class BaseTheme:
                 color: {text_color};
             }}
         """
-    
+
     @staticmethod
     def _sidebar_template(bg_color, border_color):
         return f"""
@@ -101,7 +101,7 @@ class BaseTheme:
                 border-right: 2px solid {border_color};
             }}
         """
-    
+
     @staticmethod
     def _menu_template(bg_color, border_color, text_color, selected_bg):
         return f"""
@@ -123,7 +123,7 @@ class BaseTheme:
                 color: {text_color};
             }}
         """
-    
+
     @staticmethod
     def _scrollbar_template(handle_color, handle_hover, handle_pressed):
         return f"""
@@ -184,7 +184,7 @@ class BaseTheme:
                 background: none;
             }}
         """
-    
+
     @staticmethod
     def _checkbox_template(border_color, checked_bg, checked_border, hover_border):
         return f"""
@@ -207,7 +207,7 @@ class BaseTheme:
                 border-color: {hover_border};
             }}
         """
-    
+
     @staticmethod
     def _input_template(bg_color, border_color, text_color):
         return f"""
@@ -219,7 +219,7 @@ class BaseTheme:
                 color: {text_color};
             }}
         """
-    
+
     @staticmethod
     def _dropdown_template(bg_color, border_color, text_color, hover_bg):
         return f"""
@@ -239,7 +239,7 @@ class BaseTheme:
                 background-color: {hover_bg};
             }}
         """
-    
+
     @staticmethod
     def _button_secondary_template(bg_color, text_color, border_color, hover_bg):
         return f"""
@@ -254,7 +254,7 @@ class BaseTheme:
                 background-color: {hover_bg};
             }}
         """
-    
+
     @staticmethod
     def _sidebar_button_template(bg_color, text_color, hover_bg, active_bg):
         return f"""
@@ -274,7 +274,7 @@ class BaseTheme:
                 padding-left: 17px;
             }}
         """
-    
+
     @staticmethod
     def _action_button_template(bg_color, hover_bg, pressed_bg):
         return f"""
@@ -295,7 +295,7 @@ class BaseTheme:
                 image: none;
             }}
         """
-    
+
     @staticmethod
     def _panel_template(bg_color, border_color):
         return f"""
@@ -305,7 +305,7 @@ class BaseTheme:
                 border: 1px solid {border_color};
             }}
         """
-    
+
     @staticmethod
     def _header_template(bg_color, border_color):
         return f"""
@@ -314,7 +314,7 @@ class BaseTheme:
                 border-bottom: 1px solid {border_color};
             }}
         """
-    
+
     @staticmethod
     def _progress_bar_template(bg_color, chunk_color):
         return f"""
@@ -329,7 +329,7 @@ class BaseTheme:
                 border-radius: 3px;
             }}
         """
-    
+
     @staticmethod
     def _tooltip_template(bg_color, text_color, border_color):
         return f"""
@@ -342,7 +342,7 @@ class BaseTheme:
                 font-size: 12px;
             }}
         """
-    
+
     @staticmethod
     def _search_bar_template(bg_color, text_color, border_color, focus_border):
         return f"""
@@ -358,7 +358,7 @@ class BaseTheme:
                 background-color: {focus_border};
             }}
         """
-    
+
     @staticmethod
     def _tree_widget_template(bg_color, text_color, border_color, header_bg, hover_bg, selected_bg):
         return f"""
@@ -387,7 +387,7 @@ class BaseTheme:
                 border-bottom: 1px solid {border_color};
             }}
         """
-    
+
     @staticmethod
     def _status_box_template(bg_color, border_color, hover_bg, hover_border):
         return f"""
@@ -401,7 +401,7 @@ class BaseTheme:
                 border: 1px solid {hover_border};
             }}
         """
-    
+
     @staticmethod
     def _title_style_template(text_color, font_size):
         return f"""
@@ -411,7 +411,7 @@ class BaseTheme:
                 color: {text_color};
             }}
         """
-    
+
     @staticmethod
     def _divider_template(bg_color):
         return f"""
@@ -421,7 +421,7 @@ class BaseTheme:
                 margin: 20px 0px;
             }}
         """
-    
+
     @staticmethod
     def _delete_button_template(bg_color, text_color, hover_color):
         return f"""
@@ -435,7 +435,7 @@ class BaseTheme:
                 color: {hover_color};
             }}
         """
-    
+
     @staticmethod
     def _empty_label_template(text_color, bg_color):
         return f"""
@@ -445,7 +445,7 @@ class BaseTheme:
                 background-color: {bg_color};
             }}
         """
-    
+
     @staticmethod
     def _text_style_template(text_color, font_size):
         return f"""
@@ -454,7 +454,7 @@ class BaseTheme:
                 font-size: {font_size};
             }}
         """
-    
+
     @staticmethod
     def _description_style_template(text_color):
         return f"""
@@ -464,7 +464,7 @@ class BaseTheme:
                 padding: 10px 0px;
             }}
         """
-    
+
     @staticmethod
     def _placeholder_template(text_color):
         return f"""
@@ -474,7 +474,7 @@ class BaseTheme:
                 padding: 40px 0px;
             }}
         """
-    
+
     @staticmethod
     def _back_button_template(bg_color, text_color, border_color, hover_bg, hover_text):
         return f"""
@@ -491,7 +491,7 @@ class BaseTheme:
                 color: {hover_text};
             }}
         """
-    
+
     @staticmethod
     def _empty_state_template(bg_color, text_color, border_color):
         return f"""
@@ -500,7 +500,7 @@ class BaseTheme:
             border-radius: 8px;
             border: 1px solid {border_color};
         """
-    
+
     @staticmethod
     def _terminal_textedit_template(bg_color, text_color, selection_bg):
         return f"""
@@ -512,7 +512,7 @@ class BaseTheme:
                 padding: 8px;
             }}
         """
-    
+
     @staticmethod
     def _terminal_wrapper_template(bg_color, border_color):
         return f"""
@@ -522,14 +522,14 @@ class BaseTheme:
                 border-bottom: none;
             }}
         """
-    
+
     @staticmethod
     def _terminal_header_template(bg_color, border_color):
         return f"""
             background-color: {bg_color};
             border-bottom: 1px solid {border_color};
         """
-    
+
     @staticmethod
     def _terminal_tab_button_template(bg_color, border_color, hover_bg, checked_bg, accent_color):
         return f"""
@@ -547,7 +547,7 @@ class BaseTheme:
                 border-bottom: 2px solid {accent_color};
             }}
         """
-    
+
     @staticmethod
     def _graph_frame_template(bg_color, border_color):
         return f"""
@@ -557,7 +557,7 @@ class BaseTheme:
                 border: 1px solid {border_color};
             }}
         """
-    
+
     @staticmethod
     def _content_area_template(bg_color):
         return f"""
@@ -568,7 +568,7 @@ class BaseTheme:
                 margin: 0;
             }}
         """
-    
+
     @staticmethod
     def _top_bar_template(bg_color, border_color):
         return f"""
@@ -577,7 +577,7 @@ class BaseTheme:
                 border-bottom: 1px solid {border_color};
             }}
         """
-    
+
     @staticmethod
     def _focus_style_template(accent_color):
         return f"""
@@ -590,7 +590,7 @@ class BaseTheme:
                 border: none !important;
             }}
         """
-    
+
     @staticmethod
     def _synced_item_template(bg_color, text_color):
         return f"""
@@ -602,7 +602,7 @@ class BaseTheme:
                 border-radius: 4px;
             }}
         """
-    
+
     @staticmethod
     def _status_text_template(text_color, font_size):
         return f"""
@@ -612,21 +612,21 @@ class BaseTheme:
                 margin-right: 10px;
             }}
         """
-    
+
     @staticmethod
     def _detail_page_style_template(bg_color, border_color):
         return f"""
             background-color: {bg_color};
             border-left: 1px solid {border_color};
         """
-    
+
     @staticmethod
     def _detail_page_header_template(bg_color, border_color):
         return f"""
             background-color: {bg_color};
             border-bottom: 1px solid {border_color};
         """
-    
+
     @staticmethod
     def _detail_page_yaml_template(bg_color, text_color):
         return f"""
@@ -639,7 +639,7 @@ class BaseTheme:
                 border: none;
             }}
         """
-    
+
     @staticmethod
     def _nav_menu_dropdown_template(bg_color, border_color, text_color, selected_bg):
         return f"""
@@ -660,7 +660,7 @@ class BaseTheme:
                 background-color: {selected_bg};
             }}
         """
-    
+
     @staticmethod
     def _events_table_template(bg_color, text_color, header_bg, hover_bg, selected_bg):
         return f"""
@@ -682,8 +682,9 @@ class BaseTheme:
             QTableWidget::item:selected {{
                 background-color: {selected_bg};
             }}
+            {ThemeManager._scrollbar_template('#6B7280', '#9CA3AF', '#4B5563')}
         """
-    
+
     @staticmethod
     def _releases_table_template(bg_color, text_color, header_bg, hover_bg, selected_bg, border_color):
         return f"""
@@ -710,8 +711,9 @@ class BaseTheme:
                 font-size: 12px;
                 text-align: center;
             }}
+            {ThemeManager._scrollbar_template('#6B7280', '#9CA3AF', '#4B5563')}
         """
-    
+
     @staticmethod
     def _cluster_status_box_template(bg_color, hover_bg, hover_border):
         return f"""
@@ -725,7 +727,7 @@ class BaseTheme:
                 border: 1px solid {hover_border};
             }}
         """
-    
+
     @staticmethod
     def _cluster_chart_panel_template(bg_color):
         return f"""
@@ -734,7 +736,7 @@ class BaseTheme:
                 border-radius: 4px;
             }}
         """
-    
+
     @staticmethod
     def _items_count_template(text_color):
         return f"""
@@ -745,7 +747,7 @@ class BaseTheme:
                 font-family: 'Segoe UI';
             }}
         """
-    
+
     @staticmethod
     def _section_header_template(text_color):
         return f"""
@@ -756,7 +758,7 @@ class BaseTheme:
                 padding-bottom: 10px;
             }}
         """
-    
+
     @staticmethod
     def _subsection_header_template(text_color):
         return f"""
@@ -769,7 +771,7 @@ class BaseTheme:
                 padding-bottom: 10px;
             }}
         """
-    
+
     @staticmethod
     def _graph_title_template(text_color):
         return f"""
@@ -779,7 +781,7 @@ class BaseTheme:
                 font-weight: bold;
             }}
         """
-    
+
     @staticmethod
     def _detail_page_back_button_template(bg_color, text_color, border_color, hover_bg, hover_text):
         return f"""
@@ -796,7 +798,7 @@ class BaseTheme:
                 color: {hover_text};
             }}
         """
-    
+
     @staticmethod
     def _status_scroll_template(bg_color):
         return f"""
@@ -812,172 +814,177 @@ class DarkTheme(BaseTheme):
         from UI.Styles import AppColors, AppStyles
         self.colors = AppColors
         self.styles = AppStyles
-    
+
     def get_button_style(self):
         # Use existing AppStyles (backward compatibility)
         return self.styles.BUTTON_PRIMARY_STYLE
-    
+
     def get_table_style(self):
         return self.styles.TABLE_STYLE
-    
+
     def get_default_style(self):
         return self.styles.MAIN_STYLE
-    
+
     def get_menu_style(self):
         return self.styles.MENU_STYLE
-    
+
     def get_scrollbar_style(self):
         return self.styles.UNIFIED_SCROLL_BAR_STYLE
-    
+
     def get_checkbox_style(self):
         return self.styles.CHECKBOX_STYLE
-    
+
     def get_input_style(self):
         return self.styles.INPUT_STYLE
-    
+
     def get_dropdown_style(self):
         return self.styles.DROPDOWN_STYLE
-    
+
     def get_button_secondary_style(self):
         return self.styles.BUTTON_SECONDARY_STYLE
-    
+
     def get_action_button_style(self):
         return self.styles.ACTION_BUTTON_STYLE
-    
+
     def get_header_style(self):
         return self.styles.HEADER_STYLE
-    
+
     def get_progress_bar_style(self):
         return self.styles.PROGRESS_BAR_STYLE
-    
+
     def get_tooltip_style(self):
         return self.styles.TOOLTIP_STYLE
-    
+
     def get_search_bar_style(self):
         return self.styles.SEARCH_BAR_STYLE
-    
+
     def get_title_style(self):
         return self.styles.TITLE_STYLE
-    
+
     def get_divider_style(self):
         return self.styles.DIVIDER_STYLE
-    
+
     def get_delete_button_style(self):
         return self.styles.DELETE_BUTTON_STYLE
-    
+
     def get_empty_label_style(self):
         return self.styles.EMPTY_LABEL_STYLE
-    
+
     def get_text_style(self):
         return self.styles.TEXT_STYLE
-    
+
     def get_description_style(self):
         return self.styles.DESCRIPTION_STYLE
-    
+
     def get_placeholder_style(self):
         return self.styles.PLACEHOLDER_STYLE
-    
+
     def get_back_button_style(self):
         return self.styles.BACK_BUTTON_STYLE
-    
+
     def get_empty_state_style(self):
         return self.styles.EMPTY_STATE_STYLE
-    
+
     def get_terminal_textedit_style(self):
         return self.styles.TERMINAL_TEXTEDIT
-    
+
     def get_terminal_wrapper_style(self):
         return self.styles.TERMINAL_WRAPPER
-    
+
     def get_terminal_header_style(self):
         return self.styles.TERMINAL_HEADER_CONTENT
-    
+
     def get_terminal_tab_button_style(self):
         return self.styles.TERMINAL_TAB_BUTTON
-    
+
     def get_graph_frame_style(self):
-        return self.styles.GRAPH_FRAME_STYLE
-    
+        return self._graph_frame_template(
+            bg_color=self.colors.CARD_BG,
+            border_color=self.colors.BORDER_COLOR
+        )
+
     def get_content_area_style(self):
         return self.styles.CONTENT_AREA_STYLE
-    
+
     def get_top_bar_style(self):
         return self.styles.TOP_BAR_STYLE
-    
+
     def get_focus_style(self):
         return self.styles.FOCUS_STYLE
-    
+
     def get_synced_item_style(self):
         return self.styles.SYNCED_ITEM_STYLE
-    
+
     def get_status_text_style(self):
         return self.styles.STATUS_TEXT_STYLE
-    
+
     def get_detail_page_style(self):
         return self.styles.DETAIL_PAGE_STYLE
-    
+
     def get_detail_page_header_style(self):
         return self.styles.DETAIL_PAGE_HEADER_STYLE
-    
+
     def get_detail_page_yaml_style(self):
         return self.styles.DETAIL_PAGE_YAML_TEXT_STYLE
-    
+
     def get_nav_menu_dropdown_style(self):
         return self.styles.NAV_MENU_DROPDOWN_STYLE
-    
+
     def get_events_table_style(self):
         return self.styles.EVENTS_TABLE_STYLE
-    
+
     def get_releases_table_style(self):
         return self.styles.RELEASES_TABLE_STYLE
-    
+
     def get_cluster_status_box_style(self):
         return self.styles.CLUSTER_STATUS_BOX_STYLE
-    
+
     def get_cluster_chart_panel_style(self):
         return self.styles.CLUSTER_CHART_PANEL_STYLE
-    
+
     def get_items_count_style(self):
         return self.styles.ITEMS_COUNT_STYLE
-    
+
     def get_section_header_style(self):
         return self.styles.SECTION_HEADER_STYLE
-    
+
     def get_subsection_header_style(self):
         return self.styles.SUBSECTION_HEADER_STYLE
-    
+
     def get_graph_title_style(self):
-        return self.styles.GRAPH_TITLE_STYLE
-    
+        return self._graph_title_template(
+            text_color=self.colors.TEXT_LIGHT
+        )
+
     def get_detail_page_back_button_style(self):
         return self.styles.DETAIL_PAGE_BACK_BUTTON_STYLE
-    
+
     def get_status_scroll_style(self):
         return self.styles.STATUS_SCROLL_STYLE
-    
+
     def get_placeholder_style(self):
         return self.styles.PLACEHOLDER_STYLE
-    
+
     def get_back_button_style(self):
         return self.styles.BACK_BUTTON_STYLE
-    
+
     def get_empty_state_style(self):
         return self.styles.EMPTY_STATE_STYLE
-    
+
     def get_main_style(self):
         return self.styles.MAIN_STYLE
 
 
 class LightColors:
     # Multi-platform light theme (semantically correct names)
-    
+
     # Base colors - lightest to darkest
     BG_LIGHTEST = "#ffffff"   # Pure white
     BG_LIGHT = "#f8f8f8"      # Light gray
     BG_MEDIUM = "#ffffff"     # Main background
     BG_DARK = "#f1f1f1"       # Darker gray
     BG_DARKER = "#e8e8e8"     # Darkest gray
-    
+
     # Semantic backgrounds
     BG_SIDEBAR = "#F8F8F8"    # Sidebar background
     BG_HEADER = "#F8F8F8"     # Header background
@@ -985,7 +992,7 @@ class LightColors:
     HEADER_BG = "#F8F8F8"     # Header background (alias)
     TAB_INACTIVE = "#E8E8E8"  # Inactive tab background
     TABLE_HEADER = "#E8E8E8"  # Table header background
-    
+
     # Text colors - dark on light backgrounds
     TEXT_DARK = "#24292F"     # Primary dark text
     TEXT_LIGHT = "#24292F"    # Alias for compatibility
@@ -996,26 +1003,33 @@ class LightColors:
     TEXT_TABLE = "#24292F"    # Table text
     TEXT_SUCCESS = "#28A745"  # Success text
     TEXT_WARNING = "#DC3545"  # Warning text
-    
+
     # Orchetrix accent colors (consistent across themes)
     ACCENT_BLUE = "#0095ff"   # Original Orchetrix blue
+    ACCENT_BLUE_HOVER = "#0086e7"
+    ACCENT_BLUE_PRESSED = "#0063b1"
     ACCENT_GREEN = "#4CAF50"  # Material Design green (same as dark theme)
     ACCENT_ORANGE = "#FF5733" # Original orange
     ACCENT_RED = "#DC3545"    # Light-friendly red
     ACCENT_PURPLE = "#8C33FF" # Purple accent
-    
+
     # Borders - light to dark
     BORDER_LIGHT = "#E1E4E8"  # Lightest borders
     BORDER_COLOR = "#D1D5DA"  # Standard borders
     BORDER_DARK = "#C6CBD1"   # Darkest borders
     BORDER_SUBTLE = "#F0F0F0" # Subtle borders (lighter than standard)
-    
+
     # Hover states
     HOVER_BG = "rgba(0, 0, 0, 0.05)"  # Light hover background
     HOVER_BG_DARKER = "rgba(0, 0, 0, 0.1)"  # Darker hover
     SELECTED_BG = "rgba(53, 132, 228, 0.15)"  # Selected background
     DANGER_HOVER_BG = "rgba(220, 53, 69, 0.1)"  # Danger hover
-    
+    DANGER_PRESSED_BG = "#A52A2A"  # Darker red for light theme pressed state
+
+    # Overlay colors
+    OVERLAY_BG_COLOR = "rgba(241, 241, 241, 0.8)"
+    OVERLAY_TEXT_COLOR = "#24292F"
+
     # Status colors
     STATUS_ACTIVE = "#28A745"  # Green
     STATUS_AVAILABLE = "#28A745"  # Green
@@ -1023,21 +1037,22 @@ class LightColors:
     STATUS_PENDING = "#FFA500"  # Orange
     STATUS_WARNING = "#FFC107"  # Warning yellow
     STATUS_PROGRESS = "#0095ff"  # Progress blue
+    STATUS_INFO = "#2196F3"  # Blue - for informational status
     STATUS_ERROR = "#DC3545"  # Error red
 
 
 class LightTheme(BaseTheme):
     def __init__(self):
         self.colors = LightColors
-    
+
     def get_button_style(self):
         # Use shared template, inject light theme colors
         return self._button_template(
             bg_color=self.colors.ACCENT_BLUE,
             text_color=self.colors.BG_LIGHTEST,
-            hover_color="#007ACC"
+            hover_color=self.colors.ACCENT_BLUE_HOVER
         )
-    
+
     def get_table_style(self):
         return self._table_template(
             bg_color=self.colors.CARD_BG,
@@ -1048,14 +1063,14 @@ class LightTheme(BaseTheme):
             header_text=self.colors.TEXT_SECONDARY,
             header_hover_bg=self.colors.BG_MEDIUM
         )
-    
+
     def get_default_style(self):
         # Use shared template, inject light theme colors
         return self._widget_template(
             bg_color=self.colors.BG_MEDIUM,
             text_color=self.colors.TEXT_DARK
         )
-    
+
     def get_menu_style(self):
         # GitHub Light + Modern Light UI
         return self._menu_template(
@@ -1064,15 +1079,15 @@ class LightTheme(BaseTheme):
             text_color=self.colors.TEXT_DARK,
             selected_bg="rgba(53, 132, 228, 0.15)"
         )
-    
+
     def get_scrollbar_style(self):
         # Light theme scrollbar
         return self._scrollbar_template(
-            handle_color="#C1C1C1",
-            handle_hover="#A8A8A8",
-            handle_pressed="#787878"
+            handle_color=self.colors.BORDER_DARK,
+            handle_hover=self.colors.TEXT_SECONDARY,
+            handle_pressed=self.colors.TEXT_DARK
         )
-    
+
     def get_checkbox_style(self):
         # Light theme checkbox
         return self._checkbox_template(
@@ -1081,7 +1096,7 @@ class LightTheme(BaseTheme):
             checked_border=self.colors.ACCENT_BLUE,
             hover_border=self.colors.TEXT_DARK
         )
-    
+
     def get_input_style(self):
         # Light theme input
         return self._input_template(
@@ -1089,7 +1104,7 @@ class LightTheme(BaseTheme):
             border_color=self.colors.BORDER_COLOR,
             text_color=self.colors.TEXT_DARK
         )
-    
+
     def get_dropdown_style(self):
         # Light theme dropdown
         return self._dropdown_template(
@@ -1098,7 +1113,7 @@ class LightTheme(BaseTheme):
             text_color=self.colors.TEXT_DARK,
             hover_bg=self.colors.BG_LIGHT
         )
-    
+
     def get_button_secondary_style(self):
         # Light theme secondary button
         return self._button_secondary_template(
@@ -1107,29 +1122,29 @@ class LightTheme(BaseTheme):
             border_color=self.colors.ACCENT_BLUE,
             hover_bg=self.colors.BG_LIGHT
         )
-    
+
     def get_action_button_style(self):
         # Light theme action button
         return self._action_button_template(
             bg_color="transparent",
-            hover_bg="rgba(0, 0, 0, 0.05)",
-            pressed_bg="rgba(0, 0, 0, 0.1)"
+            hover_bg=self.colors.HOVER_BG,
+            pressed_bg=self.colors.HOVER_BG_DARKER
         )
-    
+
     def get_header_style(self):
         # VS Code Light header
         return self._header_template(
             bg_color=self.colors.BG_HEADER,
             border_color=self.colors.BORDER_COLOR
         )
-    
+
     def get_progress_bar_style(self):
         # Light theme progress bar
         return self._progress_bar_template(
             bg_color=self.colors.BG_DARK,
             chunk_color=self.colors.ACCENT_BLUE
         )
-    
+
     def get_tooltip_style(self):
         # GitHub Light tooltip
         return self._tooltip_template(
@@ -1137,7 +1152,7 @@ class LightTheme(BaseTheme):
             text_color=self.colors.TEXT_DARK,
             border_color=self.colors.BORDER_COLOR
         )
-    
+
     def get_search_bar_style(self):
         # Light theme search bar
         return self._search_bar_template(
@@ -1146,20 +1161,20 @@ class LightTheme(BaseTheme):
             border_color=self.colors.BORDER_COLOR,
             focus_border=self.colors.BG_DARKER
         )
-    
+
     def get_title_style(self):
         # Light theme title
         return self._title_style_template(
             text_color=self.colors.TEXT_DARK,
             font_size="20px"
         )
-    
+
     def get_divider_style(self):
         # Light theme divider
         return self._divider_template(
             bg_color=self.colors.BORDER_COLOR
         )
-    
+
     def get_delete_button_style(self):
         # Light theme delete button
         return self._delete_button_template(
@@ -1167,33 +1182,33 @@ class LightTheme(BaseTheme):
             text_color=self.colors.TEXT_SECONDARY,
             hover_color=self.colors.ACCENT_RED
         )
-    
+
     def get_empty_label_style(self):
         # Light theme empty label
         return self._empty_label_template(
             text_color=self.colors.TEXT_SUBTLE,
             bg_color="transparent"
         )
-    
+
     def get_text_style(self):
         # Light theme text
         return self._text_style_template(
             text_color=self.colors.TEXT_DARK,
             font_size="14px"
         )
-    
+
     def get_description_style(self):
         # Light theme description
         return self._description_style_template(
             text_color=self.colors.TEXT_SUBTLE
         )
-    
+
     def get_placeholder_style(self):
         # Light theme placeholder
         return self._placeholder_template(
             text_color=self.colors.TEXT_SUBTLE
         )
-    
+
     def get_back_button_style(self):
         # Light theme back button
         return self._back_button_template(
@@ -1203,7 +1218,7 @@ class LightTheme(BaseTheme):
             hover_bg=self.colors.BG_DARK,
             hover_text=self.colors.TEXT_DARK
         )
-    
+
     def get_empty_state_style(self):
         # VS Code Light empty state
         return self._empty_state_template(
@@ -1211,130 +1226,130 @@ class LightTheme(BaseTheme):
             text_color=self.colors.TEXT_SECONDARY,
             border_color=self.colors.BORDER_COLOR
         )
-    
+
     def get_terminal_textedit_style(self):
         # Light theme terminal
         return self._terminal_textedit_template(
             bg_color=self.colors.BG_LIGHTEST,
             text_color=self.colors.TEXT_DARK,
-            selection_bg="rgba(53, 132, 228, 0.3)"
+            selection_bg=self.colors.SELECTED_BG
         )
-    
+
     def get_terminal_wrapper_style(self):
         # GitHub Light terminal wrapper
         return self._terminal_wrapper_template(
             bg_color=self.colors.BG_LIGHTEST,
             border_color=self.colors.BORDER_COLOR
         )
-    
+
     def get_terminal_header_style(self):
         # GitHub Light terminal header
         return self._terminal_header_template(
             bg_color=self.colors.BG_LIGHTEST,
             border_color=self.colors.BORDER_COLOR
         )
-    
+
     def get_terminal_tab_button_style(self):
         # Light theme terminal tab button
         return self._terminal_tab_button_template(
             bg_color="transparent",
             border_color=self.colors.BORDER_COLOR,
-            hover_bg="rgba(0, 0, 0, 0.05)",
+            hover_bg=self.colors.HOVER_BG,
             checked_bg=self.colors.BG_LIGHTEST,
             accent_color=self.colors.ACCENT_BLUE
         )
-    
+
     def get_graph_frame_style(self):
         # VS Code Light graph frame
         return self._graph_frame_template(
             bg_color=self.colors.CARD_BG,
             border_color=self.colors.BORDER_COLOR
         )
-    
+
     def get_content_area_style(self):
         # VS Code Light content area
         return self._content_area_template(
             bg_color=self.colors.BG_MEDIUM
         )
-    
+
     def get_top_bar_style(self):
         # VS Code Light top bar
         return self._top_bar_template(
             bg_color=self.colors.BG_MEDIUM,
             border_color=self.colors.BORDER_COLOR
         )
-    
+
     def get_focus_style(self):
         # Light theme focus
         return self._focus_style_template(
             accent_color=self.colors.ACCENT_BLUE
         )
-    
+
     def get_synced_item_style(self):
         # Light theme synced item
         return self._synced_item_template(
             bg_color=self.colors.BG_LIGHT,
             text_color=self.colors.TEXT_DARK
         )
-    
+
     def get_status_text_style(self):
         # Light theme status text
         return self._status_text_template(
             text_color=self.colors.TEXT_SUBTLE,
             font_size="12px"
         )
-    
+
     def get_detail_page_style(self):
         # VS Code Light detail page
         return self._detail_page_style_template(
             bg_color=self.colors.BG_SIDEBAR,
             border_color=self.colors.BORDER_COLOR
         )
-    
+
     def get_detail_page_header_style(self):
         # VS Code Light detail page header
         return self._detail_page_header_template(
             bg_color=self.colors.BG_HEADER,
             border_color=self.colors.BORDER_COLOR
         )
-    
+
     def get_detail_page_yaml_style(self):
         # Light theme YAML editor
         return self._detail_page_yaml_template(
             bg_color=self.colors.BG_SIDEBAR,
             text_color=self.colors.TEXT_DARK
         )
-    
+
     def get_nav_menu_dropdown_style(self):
         # Modern Light nav menu
         return self._nav_menu_dropdown_template(
             bg_color=self.colors.BG_LIGHTEST,
             border_color=self.colors.BORDER_DARK,
             text_color=self.colors.TEXT_DARK,
-            selected_bg="rgba(53, 132, 228, 0.15)"
+            selected_bg=self.colors.SELECTED_BG
         )
-    
+
     def get_events_table_style(self):
         # VS Code Light events table
         return self._events_table_template(
             bg_color=self.colors.CARD_BG,
             text_color=self.colors.TEXT_DARK,
             header_bg=self.colors.BG_LIGHT,
-            hover_bg="rgba(0, 0, 0, 0.05)",
-            selected_bg="rgba(53, 132, 228, 0.15)"
+            hover_bg=self.colors.HOVER_BG,
+            selected_bg=self.colors.SELECTED_BG
         )
-    
+
     def get_releases_table_style(self):
         # VS Code Light releases table
         return self._releases_table_template(
             bg_color=self.colors.CARD_BG,
             text_color=self.colors.TEXT_DARK,
             header_bg=self.colors.BG_LIGHT,
-            hover_bg="rgba(0, 0, 0, 0.05)",
-            selected_bg="rgba(53, 132, 228, 0.15)",
+            hover_bg=self.colors.HOVER_BG,
+            selected_bg=self.colors.SELECTED_BG,
             border_color=self.colors.BORDER_COLOR
         )
-    
+
     def get_cluster_status_box_style(self):
         # Light theme cluster status box
         return self._cluster_status_box_template(
@@ -1342,37 +1357,37 @@ class LightTheme(BaseTheme):
             hover_bg=self.colors.BG_DARK,
             hover_border=self.colors.BORDER_DARK
         )
-    
+
     def get_cluster_chart_panel_style(self):
         # VS Code Light cluster chart panel
         return self._cluster_chart_panel_template(
             bg_color=self.colors.BG_SIDEBAR
         )
-    
+
     def get_items_count_style(self):
         # Light theme items count
         return self._items_count_template(
             text_color=self.colors.TEXT_SUBTLE
         )
-    
+
     def get_section_header_style(self):
         # Light theme section header
         return self._section_header_template(
             text_color=self.colors.TEXT_DARK
         )
-    
+
     def get_subsection_header_style(self):
         # Light theme subsection header
         return self._subsection_header_template(
             text_color=self.colors.TEXT_SUBTLE
         )
-    
+
     def get_graph_title_style(self):
         # Light theme graph title
         return self._graph_title_template(
             text_color=self.colors.TEXT_DARK
         )
-    
+
     def get_detail_page_back_button_style(self):
         # Light theme detail page back button
         return self._detail_page_back_button_template(
@@ -1382,13 +1397,13 @@ class LightTheme(BaseTheme):
             hover_bg=self.colors.BG_DARK,
             hover_text=self.colors.TEXT_DARK
         )
-    
+
     def get_status_scroll_style(self):
         # Light theme status scroll
         return self._status_scroll_template(
             bg_color="transparent"
         )
-    
+
     def get_main_style(self):
         return f"""
             QMainWindow, QWidget {{
