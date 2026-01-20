@@ -3,6 +3,7 @@ Styles for DetailPageYAMLSection component.
 Contains only page-specific unique styles.
 Shared styles (like UNIFIED_SCROLL_BAR_STYLE) should be imported directly from UI.Styles.AppStyles.
 """
+
 from UI.ThemeManager import get_theme_manager
 from UI.Styles import AppStyles
 
