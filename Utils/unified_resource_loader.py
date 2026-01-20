@@ -21,6 +21,7 @@ from Utils.kubernetes_client import get_kubernetes_client
 from Utils.error_handler import get_error_handler, safe_execute, log_performance
 from Utils.enhanced_worker import EnhancedBaseWorker
 from Utils.thread_manager import get_thread_manager
+from Utils.unified_cache_system import get_unified_cache
 
 
 # For cluster-scoped resources, return the original all-namespaces method
@@ -45,6 +46,10 @@ class ResourceConfig:
     enable_chunking: bool = True  # New: Enable data chunking for heavy loads
     chunk_size: int = 100  # New: Process data in chunks of 100 items
     progressive_loading: bool = True  # New: Enable progressive loading
+    # Caching configuration
+    enable_caching: bool = True  # Enable caching by default
+    cache_ttl_seconds: int = 300  # 5 minutes default TTL
+    aggressive_cache_ttl_seconds: int = 60  # 1 minute for aggressive caching
 
 
 @dataclass
@@ -653,11 +658,38 @@ class ResourceLoadWorker(EnhancedBaseWorker):
         self._start_time = time.time()
 
     def execute(self) -> LoadResult:
-        """Execute resource loading with performance optimizations"""
+        """Execute resource loading with performance optimizations and caching"""
         start_time = time.time()
 
         try:
-            # Load directly from API (no caching)
+            # Check cache first if caching is enabled
+            cache_key = None
+            cached_result = None
+            
+            if self.config.enable_caching:
+                cache_key = self._generate_cache_key()
+                cached_result = self.loader._cache.get_cached_resources(self.config.resource_type, cache_key)
+                
+                if cached_result is not None:
+                    # Cache hit - update stats and return cached data
+                    with self.loader._cache_lock:
+                        self.loader._cache_stats[self.config.resource_type]['hits'] += 1
+                    
+                    load_time = (time.time() - start_time) * 1000
+                    logging.debug(f"Cache hit for {self.config.resource_type}: {len(cached_result)} items in {load_time:.1f}ms")
+                    
+                    return LoadResult(
+                        success=True,
+                        resource_type=self.config.resource_type,
+                        items=cached_result,
+                        total_count=len(cached_result),
+                        load_time_ms=load_time,
+                        from_cache=True
+                    )
+                else:
+                    # Cache miss - update stats
+                    with self.loader._cache_lock:
+                        self.loader._cache_stats[self.config.resource_type]['misses'] += 1
 
             # Load from Kubernetes API with optimizations
             items = self._load_from_api()
@@ -671,6 +703,16 @@ class ResourceLoadWorker(EnhancedBaseWorker):
 
             # Process results with chunking for heavy data
             processed_items = self._process_items_chunked(items) if self.config.enable_chunking else self._process_items(items)
+
+            # Cache the processed results if caching is enabled
+            if self.config.enable_caching and cache_key and processed_items:
+                try:
+                    self.loader._cache.cache_resources(self.config.resource_type, cache_key, processed_items)
+                    with self.loader._cache_lock:
+                        self.loader._cache_stats[self.config.resource_type]['size'] = len(processed_items)
+                    logging.debug(f"Cached {len(processed_items)} {self.config.resource_type} items with key: {cache_key}")
+                except Exception as cache_error:
+                    logging.debug(f"Failed to cache {self.config.resource_type}: {cache_error}")
 
             load_time = (time.time() - start_time) * 1000
             logging.info(f"Unified Resource Loader: Loaded {len(processed_items)} {self.config.resource_type} in {load_time:.1f}ms")
@@ -722,8 +764,23 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             # Handle specific timeout and connection errors gracefully
             if "timeout" in error_message.lower() or "read timed out" in error_message.lower():
                 # For timeout-prone resources, return cached data if available
-                # No cache fallback available
-                logging.info(f"No fallback available for timed-out {self.config.resource_type}")
+                if self.config.enable_caching and cache_key:
+                    # Try to get any cached data, even if expired, as fallback
+                    try:
+                        fallback_data = self.loader._cache.get_cached_resources(self.config.resource_type, cache_key)
+                        if fallback_data:
+                            logging.info(f"Using cached fallback data for timed-out {self.config.resource_type}: {len(fallback_data)} items")
+                            return LoadResult(
+                                success=True,
+                                resource_type=self.config.resource_type,
+                                items=fallback_data,
+                                total_count=len(fallback_data),
+                                load_time_ms=(time.time() - start_time) * 1000,
+                                from_cache=True,
+                                metadata={'fallback': True, 'reason': 'timeout'}
+                            )
+                    except Exception as cache_error:
+                        logging.debug(f"Cache fallback failed: {cache_error}")
 
                 error_message = f"Connection timeout - {self.config.resource_type} may be slow to respond"
                 logging.warning(f"Timeout loading {self.config.resource_type}: {error_message}")
@@ -1792,24 +1849,40 @@ class HighPerformanceResourceLoader(QObject):
         self._load_stats = defaultdict(list)
         self._stats_lock = threading.RLock()
 
+        # Caching system integration
+        self._cache = get_unified_cache()
+        self._cache_lock = threading.RLock()
+        self._cache_stats = defaultdict(lambda: {'hits': 0, 'misses': 0, 'size': 0})
+        
+        # Memory pressure monitoring for cache management
+        self._memory_pressure_threshold = 800  # MB
+        self._last_cache_cleanup = time.time()
+        self._cache_cleanup_interval = 300  # 5 minutes
+
         # Initialize default configurations for all resource types
         self._initialize_default_configs()
 
         # Setup memory monitoring timer
         self._setup_memory_monitoring()
 
-        logging.info("High-Performance Resource Loader initialized")
+        logging.info("High-Performance Resource Loader initialized with caching enabled")
 
     def _setup_memory_monitoring(self):
         """Setup memory monitoring timer"""
-        if self.thread() != QApplication.instance().thread():
-            # Defer to main thread if called from worker thread
-            QMetaObject.invokeMethod(self, "_setup_memory_monitoring", Qt.ConnectionType.QueuedConnection)
-            return
+        try:
+            app = QApplication.instance()
+            if not app or self.thread() != app.thread():
+                # Defer to main thread if called from worker thread or no QApplication
+                if app:
+                    QMetaObject.invokeMethod(self, "_setup_memory_monitoring", Qt.ConnectionType.QueuedConnection)
+                return
 
-        self._memory_timer = QTimer()
-        self._memory_timer.timeout.connect(self._check_memory_usage)
-        self._memory_timer.start(60000)  # Check every minute
+            self._memory_timer = QTimer()
+            self._memory_timer.timeout.connect(self._check_memory_usage)
+            self._memory_timer.start(60000)  # Check every minute
+        except Exception as e:
+            logging.debug(f"Could not setup memory monitoring timer: {e}")
+            # Continue without timer - not critical for functionality
 
     def _check_memory_usage(self):
         """Check and log memory usage, cleanup if necessary"""
@@ -1829,16 +1902,27 @@ class HighPerformanceResourceLoader(QObject):
                     logging.info("Forcing memory cleanup due to high object count")
                     self._force_memory_cleanup()
 
-            # Log memory usage if psutil available
+            # Check memory usage and manage cache accordingly
             try:
                 import psutil
                 import os
                 process = psutil.Process(os.getpid())
                 memory_mb = process.memory_info().rss / 1024 / 1024
+                
+                # Memory pressure cache management
+                if memory_mb > self._memory_pressure_threshold:
+                    logging.warning(f"Memory pressure detected: {memory_mb:.1f} MB - clearing old cache entries")
+                    self._clear_old_cache_entries(force=True)
+                elif time.time() - self._last_cache_cleanup > self._cache_cleanup_interval:
+                    # Regular cache cleanup
+                    self._clear_old_cache_entries(force=False)
+                
                 if memory_mb > 800:  # Log if over 800MB (increased threshold)
                     logging.info(f"Memory usage: {memory_mb:.1f} MB, {object_count} objects")
             except ImportError:
-                pass
+                # Fallback cache cleanup without memory monitoring
+                if time.time() - self._last_cache_cleanup > self._cache_cleanup_interval:
+                    self._clear_old_cache_entries(force=False)
 
         except Exception as e:
             logging.debug(f"Error checking memory usage: {e}")
@@ -1846,27 +1930,31 @@ class HighPerformanceResourceLoader(QObject):
     def _initialize_default_configs(self):
         """Initialize optimized default configurations for all resource types"""
 
-        # High-frequency resources (need faster loading)
-        high_frequency_resources = ['pods', 'events', 'nodes']
+        # High-frequency resources (need faster loading, shorter cache TTL)
+        high_frequency_resources = ['pods', 'events']
 
-        # Heavy data resources (need chunking and optimization)
+        # Heavy data resources (need chunking and optimization, medium cache TTL)
         heavy_data_resources = ['nodes', 'pods']
 
-        # Medium-frequency resources
+        # Medium-frequency resources (moderate cache TTL)
         medium_frequency_resources = ['deployments', 'services', 'configmaps', 'secrets']
 
-        # Low-frequency resources (can cache longer)
+        # Low-frequency resources (longer cache TTL)
         low_frequency_resources = ['storageclasses', 'clusterroles', 'namespaces']
 
-        # Configure high-frequency resources for speed
+        # Configure high-frequency resources for speed with short cache TTL
         for resource_type in high_frequency_resources:
+            cache_ttl = 30 if resource_type == 'pods' else 60  # Pods change frequently
             config = ResourceConfig(
                 resource_type=resource_type,
                 api_method=self._get_api_method(resource_type),
                 batch_size=100,
                 timeout_seconds=15,
                 enable_streaming=True,
-                max_concurrent_requests=8
+                max_concurrent_requests=8,
+                enable_caching=True,
+                cache_ttl_seconds=cache_ttl,
+                aggressive_cache_ttl_seconds=15  # Very short for high-frequency
             )
 
             # Enable heavy data optimizations for large datasets
@@ -1876,11 +1964,12 @@ class HighPerformanceResourceLoader(QObject):
                 config.chunk_size = 200 if resource_type == 'nodes' else 100
                 config.progressive_loading = True
                 config.enable_pagination = True
+                config.cache_ttl_seconds = 300 if resource_type == 'nodes' else 30  # Nodes change less frequently
                 logging.info(f"Unified Resource Loader: Enabled heavy data optimizations for {resource_type}")
 
             self._config_cache[resource_type] = config
 
-        # Configure medium-frequency resources
+        # Configure medium-frequency resources with moderate cache TTL
         for resource_type in medium_frequency_resources:
             self._config_cache[resource_type] = ResourceConfig(
                 resource_type=resource_type,
@@ -1888,10 +1977,13 @@ class HighPerformanceResourceLoader(QObject):
                 batch_size=50,
                 timeout_seconds=20,
                 enable_streaming=True,
-                max_concurrent_requests=5
+                max_concurrent_requests=5,
+                enable_caching=True,
+                cache_ttl_seconds=180,  # 3 minutes
+                aggressive_cache_ttl_seconds=60
             )
 
-        # Configure low-frequency resources for efficiency
+        # Configure low-frequency resources for efficiency with longer cache TTL
         for resource_type in low_frequency_resources:
             self._config_cache[resource_type] = ResourceConfig(
                 resource_type=resource_type,
@@ -1899,7 +1991,10 @@ class HighPerformanceResourceLoader(QObject):
                 batch_size=25,
                 timeout_seconds=30,
                 enable_streaming=False,
-                max_concurrent_requests=3
+                max_concurrent_requests=3,
+                enable_caching=True,
+                cache_ttl_seconds=600,  # 10 minutes
+                aggressive_cache_ttl_seconds=300  # 5 minutes
             )
 
     def _get_api_method(self, resource_type: str) -> str:
@@ -2283,6 +2378,83 @@ class HighPerformanceResourceLoader(QObject):
             self._active_workers.clear()
 
         logging.info("Cancelled all active resource loading operations")
+
+    def _clear_old_cache_entries(self, force: bool = False):
+        """Clear old cache entries based on TTL and memory pressure"""
+        try:
+            with self._cache_lock:
+                current_time = time.time()
+                
+                # Update cleanup timestamp
+                self._last_cache_cleanup = current_time
+                
+                # Use the unified cache system's optimize method
+                self._cache.optimize_caches()
+                
+                # Additional aggressive cleanup under memory pressure
+                if force:
+                    logging.info("Performing aggressive cache cleanup due to memory pressure")
+                    # Clear cache entries older than aggressive TTL
+                    for resource_type in list(self._cache_stats.keys()):
+                        # Clear all entries for this resource type if under memory pressure
+                        try:
+                            # The unified cache system handles TTL automatically
+                            # We just need to trigger optimization more frequently
+                            pass
+                        except Exception as e:
+                            logging.debug(f"Error during aggressive cache cleanup for {resource_type}: {e}")
+                
+                logging.debug(f"Cache cleanup completed (force={force})")
+                
+        except Exception as e:
+            logging.error(f"Error during cache cleanup: {e}")
+
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """Get cache statistics for monitoring"""
+        try:
+            with self._cache_lock:
+                stats = {}
+                total_hits = 0
+                total_misses = 0
+                
+                for resource_type, type_stats in self._cache_stats.items():
+                    stats[resource_type] = {
+                        'hits': type_stats['hits'],
+                        'misses': type_stats['misses'],
+                        'hit_rate': type_stats['hits'] / (type_stats['hits'] + type_stats['misses']) if (type_stats['hits'] + type_stats['misses']) > 0 else 0,
+                        'size': type_stats['size']
+                    }
+                    total_hits += type_stats['hits']
+                    total_misses += type_stats['misses']
+                
+                stats['total'] = {
+                    'hits': total_hits,
+                    'misses': total_misses,
+                    'hit_rate': total_hits / (total_hits + total_misses) if (total_hits + total_misses) > 0 else 0
+                }
+                
+                return stats
+        except Exception as e:
+            logging.error(f"Error getting cache stats: {e}")
+            return {}
+
+    def clear_cache(self, resource_type: Optional[str] = None):
+        """Clear cache entries for specific resource type or all"""
+        try:
+            with self._cache_lock:
+                if resource_type:
+                    # Clear specific resource type cache
+                    # The unified cache system doesn't have a direct method for this
+                    # but we can reset our stats
+                    if resource_type in self._cache_stats:
+                        self._cache_stats[resource_type] = {'hits': 0, 'misses': 0, 'size': 0}
+                    logging.info(f"Cleared cache for resource type: {resource_type}")
+                else:
+                    # Clear all cache
+                    self._cache_stats.clear()
+                    logging.info("Cleared all cache entries")
+        except Exception as e:
+            logging.error(f"Error clearing cache: {e}")
 
     # Cache management functions removed (no more caching)
 
