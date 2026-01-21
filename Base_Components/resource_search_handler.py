@@ -81,7 +81,9 @@ class ResourceSearchHandler:
         
         # Expose widgets to page if needed (BaseResourcePage expects them)
         self.page.search_bar = self.search_bar
+        self.page.search_label = self.search_label
         self.page.namespace_combo = self.namespace_combo
+        self.page.namespace_label = self.namespace_label
 
     def on_search_text_changed(self, text):
         """Schedule search via page's debouncer."""
