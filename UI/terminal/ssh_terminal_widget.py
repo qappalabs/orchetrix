@@ -7,18 +7,19 @@ specialized terminal functionality for SSH connections to pods.
 
 import re
 import logging
-from datetime import datetime
 from PyQt6.QtGui import QColor, QTextCharFormat, QKeySequence
 from PyQt6.QtCore import Qt
 
 from Utils.kubernetes_client import KubernetesPodSSH
+from UI.ThemeAwarePage import ThemeAwareMixin
 from .terminal_widget import UnifiedTerminalWidget
+from .terminal_constants import StyleConstants
 
 
-class SSHTerminalWidget(UnifiedTerminalWidget):
+class SSHTerminalWidget(UnifiedTerminalWidget, ThemeAwareMixin):
     """
     Specialized terminal widget for SSH sessions with improved command handling.
-    
+
     This widget extends UnifiedTerminalWidget to provide SSH-specific functionality
     including connection management, command execution, and proper input/output handling
     for remote shell sessions.
@@ -27,7 +28,7 @@ class SSHTerminalWidget(UnifiedTerminalWidget):
     def __init__(self, pod_name, namespace, parent=None):
         """
         Initialize SSH terminal widget.
-        
+
         Args:
             pod_name (str): Name of the Kubernetes pod to connect to
             namespace (str): Kubernetes namespace containing the pod
@@ -52,10 +53,15 @@ class SSHTerminalWidget(UnifiedTerminalWidget):
         # Initialize SSH session
         self.init_ssh_session()
 
+    def _on_theme_changed(self, theme_name):
+        """Handle theme changes - SSH terminal colors are intentionally fixed for consistency"""
+        # SSH terminal uses fixed colors for status messages to maintain consistency
+        # across themes, but we still call parent to handle search highlights
+        super()._on_theme_changed(theme_name)
+
     def init_ssh_session(self):
         """Initialize the SSH session to the pod."""
         try:
-
             self.ssh_session = KubernetesPodSSH(self.pod_name, self.namespace)
 
             # Connect signals
@@ -66,21 +72,30 @@ class SSHTerminalWidget(UnifiedTerminalWidget):
 
             # Start connection
             if self.ssh_session.connect_to_pod():
-                self.append_output(f"🔄 Establishing SSH connection to {self.pod_name}...\n", "#4CAF50")
+                self.append_output(
+                    f"🔄 Establishing SSH connection to {self.pod_name}...\n",
+                    StyleConstants.get_ssh_success_color(),
+                )
             else:
-                self.append_output(f"❌ Failed to connect to {self.pod_name}\n", "#FF6B68")
+                self.append_output(
+                    f"❌ Failed to connect to {self.pod_name}\n",
+                    StyleConstants.get_ssh_error_color(),
+                )
 
         except Exception as e:
             logging.error(f"Error initializing SSH session: {e}")
-            self.append_output(f"SSH initialization error: {str(e)}\n", "#FF6B68")
+            self.append_output(
+                f"SSH initialization error: {str(e)}\n",
+                StyleConstants.get_ssh_error_color(),
+            )
 
     def clean_terminal_output(self, data):
         """
         Clean terminal output by removing escape sequences and control characters.
-        
+
         Args:
             data (str): Raw terminal data
-            
+
         Returns:
             str: Cleaned terminal data
         """
@@ -89,31 +104,31 @@ class SSHTerminalWidget(UnifiedTerminalWidget):
 
         # Remove ANSI escape sequences but preserve content
         # Remove cursor movement and color codes
-        data = re.sub(r'\x1b\[[0-9;]*[mK]', '', data)
-        data = re.sub(r'\x1b\[[0-9;]*[ABCDEFGH]', '', data)
+        data = re.sub(r"\x1b\[[0-9;]*[mK]", "", data)
+        data = re.sub(r"\x1b\[[0-9;]*[ABCDEFGH]", "", data)
 
         # Remove bracketed paste mode sequences
-        data = re.sub(r'\x1b\[?\?2004[hl]', '', data)
+        data = re.sub(r"\x1b\[?\?2004[hl]", "", data)
 
         # Remove other escape sequences
-        data = re.sub(r'\x1b\][^\x07]*\x07', '', data)
-        data = re.sub(r'\x1b[PX^_].*?\x1b\\', '', data)
+        data = re.sub(r"\x1b\][^\x07]*\x07", "", data)
+        data = re.sub(r"\x1b[PX^_].*?\x1b\\", "", data)
 
         # Remove most control characters but keep newlines and tabs
-        data = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', data)
+        data = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "", data)
 
         # Normalize line endings
-        data = data.replace('\r\n', '\n').replace('\r', '\n')
+        data = data.replace("\r\n", "\n").replace("\r", "\n")
 
         return data
 
     def is_shell_prompt(self, data):
         """
         Check if data contains a shell prompt.
-        
+
         Args:
             data (str): Terminal data to check
-            
+
         Returns:
             bool: True if data contains a shell prompt
         """
@@ -122,13 +137,13 @@ class SSHTerminalWidget(UnifiedTerminalWidget):
 
         # Look for common prompt patterns
         prompt_patterns = [
-            r'.*[$#%>]\s*$',  # Ends with shell prompt characters
-            r'.*@.*:.*[$#]\s*$',  # user@host:path$ format
-            r'.*have no name.*[$#]\s*$',  # "I have no name" prompt
+            r".*[$#%>]\s*$",  # Ends with shell prompt characters
+            r".*@.*:.*[$#]\s*$",  # user@host:path$ format
+            r".*have no name.*[$#]\s*$",  # "I have no name" prompt
         ]
 
-        lines = data.strip().split('\n')
-        last_line = lines[-1] if lines else ''
+        lines = data.strip().split("\n")
+        last_line = lines[-1] if lines else ""
 
         for pattern in prompt_patterns:
             if re.match(pattern, last_line.strip()):
@@ -139,7 +154,7 @@ class SSHTerminalWidget(UnifiedTerminalWidget):
     def handle_ssh_data(self, data):
         """
         Handle data received from SSH session.
-        
+
         Args:
             data (str): Data received from the SSH session
         """
@@ -147,11 +162,11 @@ class SSHTerminalWidget(UnifiedTerminalWidget):
             return
 
         # Check for ANSI clear screen sequences before any other processing
-        if '\x1b[2J' in data or '\x1b[3J' in data:
+        if "\x1b[2J" in data or "\x1b[3J" in data:
             self.clear_output()
             # Remove the clear codes from the data string
             # so we can still process the prompt that might be attached
-            data = re.sub(r'\x1b\[[23]J', '', data)
+            data = re.sub(r"\x1b\[[23]J", "", data)
 
         # Clean the rest of the data
         clean_data = self.clean_terminal_output(data)
@@ -160,7 +175,11 @@ class SSHTerminalWidget(UnifiedTerminalWidget):
             return
 
         # Show welcome message only once when we get the first prompt
-        if not self.welcome_shown and self.is_ssh_connected and self.is_shell_prompt(clean_data):
+        if (
+            not self.welcome_shown
+            and self.is_ssh_connected
+            and self.is_shell_prompt(clean_data)
+        ):
             if not self.initial_prompt_received:
                 self._show_ssh_welcome()
                 self.welcome_shown = True
@@ -171,7 +190,7 @@ class SSHTerminalWidget(UnifiedTerminalWidget):
             self._clear_pending_input_display()
 
         # Display the output
-        self.append_output(clean_data, "#E0E0E0")
+        self.append_output(clean_data, StyleConstants.get_ssh_text_color())
 
         # Update positions
         cursor = self.textCursor()
@@ -213,7 +232,7 @@ class SSHTerminalWidget(UnifiedTerminalWidget):
 
         # Insert the pending input with proper formatting
         char_format = QTextCharFormat()
-        char_format.setForeground(QColor("#E0E0E0"))
+        char_format.setForeground(QColor(StyleConstants.get_ssh_text_color()))
         char_format.setBackground(self.terminal_bg_color)
         cursor.setCharFormat(char_format)
         cursor.insertText(self.pending_input)
@@ -225,24 +244,29 @@ class SSHTerminalWidget(UnifiedTerminalWidget):
     def handle_ssh_error(self, error_message):
         """
         Handle SSH session errors.
-        
+
         Args:
             error_message (str): Error message from SSH session
         """
         if self.is_valid:
-            self.append_output(f"\n❌ SSH Error: {error_message}\n", "#FF6B68")
+            self.append_output(
+                f"\n❌ SSH Error: {error_message}\n",
+                StyleConstants.get_ssh_error_color(),
+            )
 
     def handle_ssh_status(self, status_message):
         """
         Handle SSH session status updates.
-        
+
         Args:
             status_message (str): Status message from SSH session
         """
         if self.is_valid:
             if "Connected" in status_message:
                 self.is_ssh_connected = True
-                self.append_output(f"✅ {status_message}\n", "#4CAF50")
+                self.append_output(
+                    f"✅ {status_message}\n", StyleConstants.get_ssh_success_color()
+                )
 
                 # Set initial positions
                 cursor = self.textCursor()
@@ -250,39 +274,51 @@ class SSHTerminalWidget(UnifiedTerminalWidget):
                 self.last_output_position = cursor.position()
                 self.input_start_position = cursor.position()
             elif "Establishing" in status_message or "Failed" in status_message:
-                self.append_output(f"{status_message}\n", "#4CAF50" if "Establishing" in status_message else "#FF6B68")
+                self.append_output(
+                    f"{status_message}\n",
+                    StyleConstants.get_ssh_success_color()
+                    if "Establishing" in status_message
+                    else StyleConstants.get_ssh_error_color(),
+                )
 
     def handle_ssh_closed(self):
         """Handle SSH session closure."""
         if self.is_valid:
             self.is_ssh_connected = False
-            self.append_output("\n🔴 SSH session closed\n", "#FFA500")
-            self.append_output("Connection to pod terminated.\n", "#9ca3af")
+            self.append_output(
+                "\n🔴 SSH session closed\n", StyleConstants.get_ssh_warning_color()
+            )
+            self.append_output(
+                "Connection to pod terminated.\n", StyleConstants.get_ssh_info_color()
+            )
 
     def execute_ssh_command(self, command):
         """
         Execute command in SSH session.
-        
+
         Args:
             command (str): Command to execute
         """
         if not self.ssh_session or not self.is_ssh_connected:
-            self.append_output("❌ Not connected to pod. Please check connection.\n", "#FF6B68")
+            self.append_output(
+                "❌ Not connected to pod. Please check connection.\n",
+                StyleConstants.get_ssh_error_color(),
+            )
             return
 
         # Handle local exit commands
         command_lower = command.strip().lower()
-        if command_lower in ['exit', 'logout', 'quit']:
+        if command_lower in ["exit", "logout", "quit"]:
             self.ssh_session.disconnect()
             return
 
         # Handle clear command - use alternative if clear doesn't exist
-        if command_lower == 'clear':
+        if command_lower == "clear":
             # Try multiple clear methods
-            commands_to_try = ['clear', 'printf "\\033c"', 'tput clear', 'reset']
+            commands_to_try = ["clear", 'printf "\\033c"', "tput clear", "reset"]
             for cmd in commands_to_try:
                 try:
-                    success = self.ssh_session.send_command(cmd + '\n')
+                    success = self.ssh_session.send_command(cmd + "\n")
                     if success:
                         self.waiting_for_output = True
                         return
@@ -298,22 +334,30 @@ class SSHTerminalWidget(UnifiedTerminalWidget):
 
         try:
             if command.strip():
-                success = self.ssh_session.send_command(command + '\n')
+                success = self.ssh_session.send_command(command + "\n")
             else:
-                success = self.ssh_session.send_command('\n')
+                success = self.ssh_session.send_command("\n")
 
             if not success:
-                self.append_output("❌ Failed to send command to pod.\n", "#FF6B68")
+                self.append_output(
+                    "❌ Failed to send command to pod.\n",
+                    StyleConstants.get_ssh_error_color(),
+                )
                 self.waiting_for_output = False
         except Exception as e:
-            self.append_output(f"❌ Error sending command: {str(e)}\n", "#FF6B68")
+            self.append_output(
+                f"❌ Error sending command: {str(e)}\n",
+                StyleConstants.get_ssh_error_color(),
+            )
             self.waiting_for_output = False
 
     def keyPressEvent(self, event):
         """Handle key events for SSH terminal."""
         if not self.is_ssh_connected:
             # Still allow copy/paste even if not connected
-            if event.matches(QKeySequence.StandardKey.Copy) or event.matches(QKeySequence.StandardKey.Paste):
+            if event.matches(QKeySequence.StandardKey.Copy) or event.matches(
+                QKeySequence.StandardKey.Paste
+            ):
                 super().keyPressEvent(event)
             else:
                 event.accept()
@@ -322,7 +366,9 @@ class SSHTerminalWidget(UnifiedTerminalWidget):
         key = event.key()
 
         # Allow copy/paste shortcuts to be handled by the parent
-        if event.matches(QKeySequence.StandardKey.Copy) or event.matches(QKeySequence.StandardKey.Paste):
+        if event.matches(QKeySequence.StandardKey.Copy) or event.matches(
+            QKeySequence.StandardKey.Paste
+        ):
             super().keyPressEvent(event)
             return
 
@@ -331,7 +377,7 @@ class SSHTerminalWidget(UnifiedTerminalWidget):
             if key == Qt.Key.Key_C:
                 try:
                     if self.ssh_session:
-                        self.ssh_session.send_command('\x03')
+                        self.ssh_session.send_command("\x03")
                         self.waiting_for_output = False
                 except Exception as e:
                     logging.debug(f"Error sending Ctrl+C: {e}")
@@ -341,7 +387,7 @@ class SSHTerminalWidget(UnifiedTerminalWidget):
             elif key == Qt.Key.Key_D:
                 try:
                     if self.ssh_session:
-                        self.ssh_session.send_command('\x04')
+                        self.ssh_session.send_command("\x04")
                 except Exception as e:
                     logging.debug(f"Error sending Ctrl+D: {e}")
                 self._clear_all_pending_input()
@@ -349,9 +395,12 @@ class SSHTerminalWidget(UnifiedTerminalWidget):
                 return
 
         # Handle Enter key
-        if key == Qt.Key.Key_Return and not event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+        if (
+            key == Qt.Key.Key_Return
+            and not event.modifiers() & Qt.KeyboardModifier.ShiftModifier
+        ):
             command_to_send = self.pending_input
-            self.append_output(f"\n")
+            self.append_output("\n")
 
             # Add to history if not empty
             if command_to_send.strip():
@@ -390,7 +439,7 @@ class SSHTerminalWidget(UnifiedTerminalWidget):
         if key == Qt.Key.Key_Tab:
             try:
                 if self.ssh_session:
-                    self.ssh_session.send_command('\t')
+                    self.ssh_session.send_command("\t")
             except Exception as e:
                 logging.debug(f"Error sending tab: {e}")
             event.accept()
@@ -415,7 +464,7 @@ class SSHTerminalWidget(UnifiedTerminalWidget):
             self.setTextCursor(cursor)
 
             char_format = QTextCharFormat()
-            char_format.setForeground(QColor("#E0E0E0"))
+            char_format.setForeground(QColor(StyleConstants.get_ssh_text_color()))
             char_format.setBackground(self.terminal_bg_color)
             cursor.setCharFormat(char_format)
             cursor.insertText(self.pending_input)
@@ -445,7 +494,7 @@ class SSHTerminalWidget(UnifiedTerminalWidget):
             "✅ Shell session active. Type 'exit' to disconnect.\n"
             "💡 Note: Some containers may show 'I have no name' - this is normal.\n\n"
         )
-        self.append_output(welcome_msg, "#4CAF50")
+        self.append_output(welcome_msg, StyleConstants.get_ssh_success_color())
 
         # Update positions after welcome
         cursor = self.textCursor()
@@ -499,13 +548,18 @@ class SSHTerminalWidget(UnifiedTerminalWidget):
             self.search_highlights.clear()
 
             if self.is_ssh_connected:
-                self.append_output("🧹 Terminal cleared\n", "#4CAF50")
+                self.append_output(
+                    "🧹 Terminal cleared\n", StyleConstants.get_ssh_success_color()
+                )
                 cursor = self.textCursor()
                 self.input_start_position = cursor.position()
                 self.input_position = cursor.position()
                 self.last_output_position = cursor.position()
             else:
-                self.append_output(f"🔄 Connecting to {self.pod_name}...\n", "#4CAF50")
+                self.append_output(
+                    f"🔄 Connecting to {self.pod_name}...\n",
+                    StyleConstants.get_ssh_success_color(),
+                )
 
         except RuntimeError:
             self.is_valid = False
