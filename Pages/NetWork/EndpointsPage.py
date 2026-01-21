@@ -8,8 +8,6 @@ from PyQt6.QtGui import QColor
 
 from Base_Components.base_components import SortableTableWidgetItem
 from Base_Components.base_resource_page import BaseResourcePage
-from UI.Styles import AppStyles, AppConstants
-import Styles.EndpointsPageStyles as EndpointsPageStyles
 
 
 class EndpointsPage(BaseResourcePage):
@@ -121,19 +119,9 @@ class EndpointsPage(BaseResourcePage):
             # Add item to table
             self.table.setItem(row, cell_col, item)
 
-        # Create and add action button using base class method with proper styling
-        action_button = self._create_action_button(row, resource["name"])
-        action_button.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE + EndpointsPageStyles.ACTION_BUTTON_MENU_INDICATOR_STYLE)
-
-        # Create action container with proper styling
-        action_container = QWidget()
-        action_container.setFixedWidth(AppConstants.SIZES["ACTION_WIDTH"])
-        action_layout = QHBoxLayout(action_container)
-        action_layout.setContentsMargins(0, 0, 0, 0)
-        action_layout.setSpacing(0)
-        action_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        action_layout.addWidget(action_button)
-
+        # Create and add action button using base class method (handles styling automatically)
+        action_button = self._create_action_button(row, resource["name"], resource["namespace"])
+        action_container = self._create_action_container(row, action_button)
         self.table.setCellWidget(row, len(columns) + 1, action_container)
 
     def handle_row_click(self, row, column):
