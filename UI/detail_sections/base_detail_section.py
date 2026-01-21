@@ -159,7 +159,7 @@ class BaseDetailSection(ThemeAwareMixin, QWidget, metaclass=QWidgetMeta):
         self.show_error(error_message)
         logging.error(f"{self.section_name} error: {error_message}")
 
-    def _on_theme_changed(self):
+    def _on_theme_changed(self, theme_name):
         """Handle theme changes - update error widget styling"""
         if self.error_widget.isVisible():
             # Re-apply the current error style with new theme

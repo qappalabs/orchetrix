@@ -791,7 +791,7 @@ class UnifiedTerminalWidget(QTextEdit, ThemeAwareMixin):
             cursor.setPosition(min(max(cursor_pos, self.edit_start_pos), self.edit_end_pos))
             self.setTextCursor(cursor)
 
-    def _on_theme_changed(self):
+    def _on_theme_changed(self, theme_name):
         """Handle theme changes - refresh search highlights with new colors"""
         if not self.is_valid:
             return

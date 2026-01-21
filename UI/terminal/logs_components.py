@@ -180,9 +180,9 @@ class LogsHeaderWidget(QWidget, ThemeAwareMixin):
             font-weight: bold;
         """
 
-    def _on_theme_changed(self):
+    def _on_theme_changed(self, theme_name):
         """Handle theme changes by updating stylesheets."""
-        super()._on_theme_changed()
+        super()._on_theme_changed(theme_name)
         self.setStyleSheet(self._get_header_style())
         self.pod_info.setStyleSheet(self._get_pod_info_style())
         self.container_combo.setStyleSheet(self._get_combo_style())
@@ -485,9 +485,9 @@ class EnhancedLogsViewer(QWidget, ThemeAwareMixin):
             }}
         """
 
-    def _on_theme_changed(self):
+    def _on_theme_changed(self, theme_name):
         """Handle theme changes by updating stylesheets."""
-        super()._on_theme_changed()
+        super()._on_theme_changed(theme_name)
         self.logs_display.setStyleSheet(self._get_logs_display_style())
         # Status indicator style will be updated when next shown
 

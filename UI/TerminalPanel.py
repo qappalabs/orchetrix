@@ -106,9 +106,9 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
 
         self.unified_header.resize_handle.installEventFilter(self)
 
-    def _on_theme_changed(self):
+    def _on_theme_changed(self, theme_name):
         """Handle theme changes by updating any dynamic styling."""
-        super()._on_theme_changed()
+        super()._on_theme_changed(theme_name)
         # Terminal panel uses mostly centralized styles, so minimal updates needed
         # The terminal wrapper already uses AppStyles which are theme-aware
 
