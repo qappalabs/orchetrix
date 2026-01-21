@@ -24,6 +24,8 @@ class AppColors:
 
     # Accent colors
     ACCENT_BLUE = "#0095ff"
+    ACCENT_BLUE_HOVER = "#0086e7"
+    ACCENT_BLUE_PRESSED = "#0063b1"
     ACCENT_GREEN = "#4CAF50"
     ACCENT_ORANGE = "#FF5733"
     ACCENT_RED = "#E81123"
@@ -70,6 +72,16 @@ class AppColors:
     STATUS_PROGRESS = "#969efa"
     STATUS_INFO = "#2196F3"      # Blue - for informational status
     STATUS_ERROR = STATUS_DISCONNECTED
+
+    # Text on accent colors
+    TEXT_ON_ACCENT = "#ffffff"  # White text on accent backgrounds
+
+    # Button colors
+    BUTTON_BG = "#2d2d2d"  # Dark button background
+    BUTTON_TEXT = "#ffffff"  # Light text on dark buttons
+    BUTTON_HOVER_BG = "#3d3d3d"  # Dark hover background
+    BUTTON_DISABLED_BG = "#1a1a1a"  # Disabled button background
+    BUTTON_DISABLED_TEXT = "#888888"  # Disabled button text
 
     SEARCH_BAR_HEIGHT = 30
     SEARCH_BAR_MIN_WIDTH = 200
@@ -1205,7 +1217,7 @@ class AppStyles:
 
     # Deprecated terminal styles - kept for backwards compatibility
     TERMINAL_OUTPUT_STYLE = TERMINAL_TEXTEDIT
-    TERMINAL_INPUT_STYLE = f"""
+    TERMINAL_INPUT_STYLE = """
         QTextEdit {{
             background-color: #252525;
             color: #E0E0E0;
@@ -1328,7 +1340,7 @@ class AppStyles:
     """
 
     # Sidebar-specific styles
-    NAV_MENU_DROPDOWN_STYLE = f"""
+    NAV_MENU_DROPDOWN_STYLE = """
         QMenu {{
             background-color: #2d2d2d;
             border: 1px solid #444444;
@@ -1360,7 +1372,7 @@ class AppStyles:
         }}
     """
 
-    SIDEBAR_TOGGLE_BUTTON_STYLE = f"""
+    SIDEBAR_TOGGLE_BUTTON_STYLE = """
         QToolButton {{
             background-color: transparent;
             border-top: none;
@@ -1419,7 +1431,7 @@ class AppStyles:
 
     SIDEBAR_BORDER_STYLE = "color: #444444;"
 
-    SIDEBAR_CONTROLS_STYLE = f"""
+    SIDEBAR_CONTROLS_STYLE = """
         QWidget#sidebar_controls {{
         }}
     """
@@ -1605,7 +1617,7 @@ class AppStyles:
         font-weight: bold;
         color: {AppColors.STATUS_WARNING};
     """
-    DETAIL_PAGE_STATUS_VALUE_SUCCEEDED_STYLE = f"""
+    DETAIL_PAGE_STATUS_VALUE_SUCCEEDED_STYLE = """
         font-size: 14px;
         font-weight: bold;
         color: #2196F3;
@@ -1689,14 +1701,14 @@ class AppStyles:
         color: {AppColors.STATUS_WARNING};
         font-weight: bold;
     """
-    DETAIL_PAGE_EVENT_REASON_STYLE = f"""
+    DETAIL_PAGE_EVENT_REASON_STYLE = """
         color: #4A9EFF;
         font-weight: bold;
     """
     DETAIL_PAGE_EVENT_AGE_STYLE = f"""
         color: {AppColors.TEXT_SUBTLE};
     """
-    DETAIL_PAGE_EVENT_MESSAGE_STYLE = f"""
+    DETAIL_PAGE_EVENT_MESSAGE_STYLE = """
         color: #E0E0E0;
     """
 
@@ -1765,7 +1777,7 @@ class AppStyles:
         except Exception:
             return AppStyles.COMBO_BOX_STYLE
 
-    COMBO_BOX_STYLE = f"""
+    COMBO_BOX_STYLE = """
         QComboBox {{
             background-color: #2d2d2d;
             color: #ffffff;
