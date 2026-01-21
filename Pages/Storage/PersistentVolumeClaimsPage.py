@@ -15,18 +15,18 @@ class PersistentVolumeClaimsPage(BaseResourcePage):
     """
     Displays Kubernetes persistent volume claims with live data and resource operations.
     """
-    
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.resource_type = "persistentvolumeclaims"  # Set resource type for kubectl
         self.setup_page_ui()
-        
+
     def setup_page_ui(self):
         """Set up the main UI elements for the Persistent Volume Claims page"""
         # Define headers and sortable columns - KEEP ORIGINAL
         headers = ["", "Name", "Namespace", "Storage Class", "Size", "Pods", "Age", "Status", ""]
         sortable_columns = {1, 2, 3, 4, 5, 6, 7}
-        
+
         # Set up the base UI components with styles
         layout = super().setup_ui("Persistent Volume Claims", headers, sortable_columns)
 
@@ -34,16 +34,16 @@ class PersistentVolumeClaimsPage(BaseResourcePage):
 
         # Configure column widths
         self.configure_columns()
-        
+
         # Add delete selected button
 
     def configure_columns(self):
         """Configure column widths for full screen utilization"""
         if not self.table:
             return
-        
+
         header = self.table.horizontalHeader()
-        
+
         # Column specifications with optimized default widths
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
@@ -56,7 +56,7 @@ class PersistentVolumeClaimsPage(BaseResourcePage):
             (7, 80, "stretch"),      # Status - stretch to fill remaining space
             (8, 40, "fixed")        # Actions
         ]
-        
+
         # Apply column configuration
         for col_index, default_width, resize_type in column_specs:
             if col_index < self.table.columnCount():
@@ -69,7 +69,7 @@ class PersistentVolumeClaimsPage(BaseResourcePage):
                 elif resize_type == "stretch":
                     header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Stretch)
                     self.table.setColumnWidth(col_index, default_width)
-        
+
         # Ensure full width utilization after configuration
         QTimer.singleShot(100, self._ensure_full_width_utilization)
 
@@ -79,38 +79,38 @@ class PersistentVolumeClaimsPage(BaseResourcePage):
         """
         # Set row height once
         self.table.setRowHeight(row, 40)
-        
+
         # Create checkbox for row selection
         resource_name = resource["name"]
         # Checkbox styling handled by BaseResourcePage
         checkbox_container = self._create_checkbox_container(row, resource_name)
         self.table.setCellWidget(row, 0, checkbox_container)
-        
+
         # Extract data from raw_data
         raw_data = resource.get("raw_data", {})
         spec = raw_data.get("spec", {})
         status = raw_data.get("status", {})
         metadata = raw_data.get("metadata", {})
-        
+
         # Get storage class
         storage_class = spec.get("storageClassName", "<none>")
         if not storage_class:
             storage_class = "<none>"
-        
+
         # Get size
         size = "<none>"
         if status.get("capacity") and status["capacity"].get("storage"):
             size = status["capacity"]["storage"]
         elif spec.get("resources") and spec["resources"].get("requests") and spec["resources"]["requests"].get("storage"):
             size = spec["resources"]["requests"]["storage"]
-        
+
         # Get pods using this PVC - show placeholder to avoid blocking API calls
         # This information would require additional API calls which can block the UI
         pods = "<none>"
-        
+
         # Get status
         pvc_status = status.get("phase", "Unknown")
-        
+
         # Prepare data columns - MATCH ORIGINAL HEADERS
         columns = [
             resource["name"],        # Name
@@ -121,11 +121,11 @@ class PersistentVolumeClaimsPage(BaseResourcePage):
             resource["age"]         # Age
             # Status is handled separately as StatusLabel widget
         ]
-        
+
         # Add columns to table
         for col, value in enumerate(columns):
             cell_col = col + 1  # Adjust for checkbox column
-            
+
             # Handle numeric columns for sorting
             if col == 5:  # Age column
                 try:
@@ -160,38 +160,38 @@ class PersistentVolumeClaimsPage(BaseResourcePage):
                 item = SortableTableWidgetItem(value, num)
             else:
                 item = SortableTableWidgetItem(value)
-            
+
             # Set text alignment
             if col == 0:  # Name column
                 item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             else:
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            
+
             # Set default text color for all non-status columns
             item.setForeground(QColor(AppColors.TEXT_TABLE))
-            
+
             # Make cells non-editable
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            
+
             # Add the item to the table
             self.table.setItem(row, cell_col, item)
-        
+
         # Create status widget with proper color for PVCs (column 7 - Status)
         status_col = 7  # Status column index
         status_text = pvc_status
-        
+
         # Pick the right color
         if status_text == "Bound":
             color = AppColors.STATUS_ACTIVE
         else:
             color = AppColors.STATUS_WARNING
-        
+
         # Create status widget with proper color
         status_widget = StatusLabel(status_text, color)
         # Connect click event to select the row
         status_widget.clicked.connect(lambda: self.table.selectRow(row))
         self.table.setCellWidget(row, status_col, status_widget)
-        
+
         # Create and add action button
         # Action button styling handled by BaseResourcePage
         action_button = self._create_action_button(row, resource["name"], resource["namespace"])
@@ -202,27 +202,27 @@ class PersistentVolumeClaimsPage(BaseResourcePage):
         if column != self.table.columnCount() - 1:  # Skip action column
             # Select the row
             self.table.selectRow(row)
-            
+
             # Get resource details
             resource_name = None
             namespace = None
-            
+
             # Get the resource name
             if self.table.item(row, 1) is not None:
                 resource_name = self.table.item(row, 1).text()
-            
+
             # Get namespace if applicable
             if self.table.item(row, 2) is not None:
                 namespace = self.table.item(row, 2).text()
-            
+
             # Show detail view
             if resource_name:
                 # Find the ClusterView instance
                 parent = self.parent()
                 while parent and not hasattr(parent, 'detail_manager'):
                     parent = parent.parent()
-                
+
                 if parent and hasattr(parent, 'detail_manager'):
                     parent.detail_manager.show_detail("persistentvolumeclaim", resource_name, namespace)
-    
+
     # Removed _get_pods_using_pvc method to prevent blocking API calls on UI thread
