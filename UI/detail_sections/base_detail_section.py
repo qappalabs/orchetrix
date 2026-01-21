@@ -2,22 +2,22 @@
 Base class for all detail page sections with common functionality
 """
 
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QFrame
-from PyQt6.QtCore import QObject, pyqtSignal, QTimer
-from PyQt6.QtGui import QColor
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel
+from PyQt6.QtCore import pyqtSignal, QTimer
 from abc import ABCMeta, abstractmethod
 from typing import Optional, Dict, Any
 import logging
 
 from Styles.BaseDetailSectionStyles import (
     get_error_widget_error_style,
-    get_error_widget_info_style
+    get_error_widget_info_style,
 )
 from UI.ThemeAwarePage import ThemeAwareMixin
 
 
 class QWidgetMeta(type(QWidget), ABCMeta):
     """Metaclass that combines QWidget's metaclass with ABCMeta"""
+
     pass
 
 
@@ -78,19 +78,23 @@ class BaseDetailSection(ThemeAwareMixin, QWidget, metaclass=QWidgetMeta):
     def show_error(self, error_message: str):
         """Show error message only for real errors, not missing resources"""
         self.hide_loading()
-        
+
         # Don't show error for resources that don't exist in cluster
-        if ("not found" in error_message.lower() or 
-            "404" in error_message or
-            "not available in this cluster" in error_message.lower()):
+        if (
+            "not found" in error_message.lower()
+            or "404" in error_message
+            or "not available in this cluster" in error_message.lower()
+        ):
             # Just show that resource is not available
-            self.error_widget.setText(f"{self.section_name}: Resource not available in this cluster")
+            self.error_widget.setText(
+                f"{self.section_name}: Resource not available in this cluster"
+            )
             self.error_widget.setStyleSheet(get_error_widget_info_style())
         else:
             # Show actual errors in red
             self.error_widget.setText(f"Error in {self.section_name}: {error_message}")
             self.error_widget.setStyleSheet(get_error_widget_error_style())
-        
+
         self.error_widget.show()
         self.error_occurred.emit(self.section_name, error_message)
 
@@ -98,7 +102,9 @@ class BaseDetailSection(ThemeAwareMixin, QWidget, metaclass=QWidgetMeta):
         """Clear error message"""
         self.error_widget.hide()
 
-    def set_resource(self, resource_type: str, resource_name: str, namespace: Optional[str] = None):
+    def set_resource(
+        self, resource_type: str, resource_name: str, namespace: Optional[str] = None
+    ):
         """Set the resource information"""
         self.resource_type = resource_type
         self.resource_name = resource_name
@@ -131,6 +137,16 @@ class BaseDetailSection(ThemeAwareMixin, QWidget, metaclass=QWidgetMeta):
         """Abstract method for clearing section content - implement in subclasses"""
         pass
 
+    @abstractmethod
+    def handle_api_data_loaded(self, data: Dict[str, Any]):
+        """Abstract method for handling API data loaded - implement in subclasses"""
+        pass
+
+    @abstractmethod
+    def handle_api_error(self, error_message: str):
+        """Abstract method for handling API errors - implement in subclasses"""
+        pass
+
     def handle_data_loaded(self, data: Dict[str, Any]):
         """Handle successful data loading"""
         self.current_data = data
@@ -143,10 +159,22 @@ class BaseDetailSection(ThemeAwareMixin, QWidget, metaclass=QWidgetMeta):
         self.show_error(error_message)
         logging.error(f"{self.section_name} error: {error_message}")
 
+    def _on_theme_changed(self):
+        """Handle theme changes - update error widget styling"""
+        if self.error_widget.isVisible():
+            # Re-apply the current error style with new theme
+            current_text = self.error_widget.text()
+            if "not available in this cluster" in current_text:
+                self.error_widget.setStyleSheet(get_error_widget_info_style())
+            else:
+                self.error_widget.setStyleSheet(get_error_widget_error_style())
+
     def connect_api_signals(self):
         """Safely connect to API signals"""
         if not self._signals_connected:
-            self.kubernetes_client.resource_detail_loaded.connect(self.handle_api_data_loaded)
+            self.kubernetes_client.resource_detail_loaded.connect(
+                self.handle_api_data_loaded
+            )
             self.kubernetes_client.error_occurred.connect(self.handle_api_error)
             self._signals_connected = True
 
@@ -156,9 +184,11 @@ class BaseDetailSection(ThemeAwareMixin, QWidget, metaclass=QWidgetMeta):
             return
 
         try:
-            if hasattr(self.kubernetes_client, 'resource_detail_loaded'):
-                self.kubernetes_client.resource_detail_loaded.disconnect(self.handle_api_data_loaded)
-            if hasattr(self.kubernetes_client, 'error_occurred'):
+            if hasattr(self.kubernetes_client, "resource_detail_loaded"):
+                self.kubernetes_client.resource_detail_loaded.disconnect(
+                    self.handle_api_data_loaded
+                )
+            if hasattr(self.kubernetes_client, "error_occurred"):
                 self.kubernetes_client.error_occurred.disconnect(self.handle_api_error)
         except Exception as e:
             # ← IMPROVED ERROR HANDLING
