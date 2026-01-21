@@ -26,6 +26,6 @@ requests-oauthlib==2.0.0
 rsa==4.9.1
 setuptools==80.9.0
 six==1.17.0
-urllib3==2.5.0
+urllib3==2.6.3
 websocket-client==1.8.0
 wheel==0.45.1
