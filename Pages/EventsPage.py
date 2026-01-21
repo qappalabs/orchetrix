@@ -21,6 +21,7 @@ class EventsPage(BaseResourcePage):
     """
 
     def __init__(self, parent=None):
+        super().__init__(parent)
 
         self.resource_type = "events"
 
@@ -28,7 +29,8 @@ class EventsPage(BaseResourcePage):
         self.items_per_page = 100  # Load 100 events at a time
         self.all_data_loaded = False
 
-        self.setup_page_ui()
+        # Defer UI setup to ensure base class is fully initialized
+        QTimer.singleShot(0, self.setup_page_ui)
 
     def setup_page_ui(self):
 
