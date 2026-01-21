@@ -1,21 +1,34 @@
 """
-ServicesPage-specific styles
-Contains styles that are unique to ServicesPage and defined inline in the page.
+Theme-aware styles for ServicesPage components.
+Contains styles that are unique to ServicesPage.
+Shared styles (like TABLE_STYLE) should be imported directly from UI.Styles.AppStyles.
 """
 
-# Style for Port Forwards button
-PORT_FORWARD_BUTTON_STYLE = """
-            QPushButton {
-                background-color: #1976D2;
-                color: #ffffff;
-                border: none;
-                border-radius: 4px;
-                padding: 5px 10px;
-            }
-            QPushButton:hover {
-                background-color: #1565C0;
-            }
-            QPushButton:pressed {
-                background-color: #0D47A1;
-            }
-        """
+from UI.ThemeManager import get_theme_manager
+
+
+def _get_theme():
+    """Get current theme"""
+    return get_theme_manager().get_current_theme()
+
+
+def get_port_forward_button_style():
+    """Port Forward management button style - theme-aware"""
+    theme = _get_theme()
+    return f"""
+        QPushButton {{
+            background-color: {theme.colors.ACCENT_BLUE};
+            color: {theme.colors.TEXT_LIGHT};
+            border: none;
+            border-radius: 4px;
+            padding: 5px 10px;
+            font-size: 12px;
+            font-weight: bold;
+        }}
+        QPushButton:hover {{
+            background-color: {theme.colors.ACCENT_BLUE_HOVER};
+        }}
+        QPushButton:pressed {{
+            background-color: {theme.colors.ACCENT_BLUE_PRESSED};
+        }}
+    """
