@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import QApplication
 
 from kubernetes.client.rest import ApiException
 from Utils.kubernetes_client import get_kubernetes_client
+from Services.kubernetes.api_config import APIClientConfig
 from Utils.error_handler import get_error_handler, safe_execute, log_performance
 from Utils.enhanced_worker import EnhancedBaseWorker
 from Utils.thread_manager import get_thread_manager
@@ -39,7 +40,7 @@ class ResourceConfig:
     api_method: str
     namespace: Optional[str] = None
     batch_size: int = 50  # Increased for heavy data handling
-    timeout_seconds: int = 45  # Longer timeout for heavy data
+    timeout_seconds: int = APIClientConfig.REQUEST_TIMEOUT  # Use centralized timeout
     enable_streaming: bool = False  # Keep disabled for stability
     enable_pagination: bool = True  # Enable for heavy data handling
     max_concurrent_requests: int = 3  # Slightly increased for heavy data
@@ -199,8 +200,8 @@ class SearchResourceLoadWorker(EnhancedBaseWorker):
                 api_method = getattr(api_client, cluster_method_name)
 
                 kwargs = {
-                    'timeout_seconds': 30,
-                    '_request_timeout': 35,
+                    'timeout_seconds': APIClientConfig.REQUEST_TIMEOUT,
+                    '_request_timeout': APIClientConfig.REQUEST_TIMEOUT + 5,
                     'limit': 100
                 }
 
@@ -225,8 +226,8 @@ class SearchResourceLoadWorker(EnhancedBaseWorker):
                 try:
                     kwargs = {
                         'namespace': namespace,
-                        'timeout_seconds': 30,
-                        '_request_timeout': 35,
+                        'timeout_seconds': APIClientConfig.REQUEST_TIMEOUT,
+                        '_request_timeout': APIClientConfig.REQUEST_TIMEOUT + 5,
                         'limit': 100
                     }
 
@@ -1956,7 +1957,7 @@ class HighPerformanceResourceLoader(QObject):
                 resource_type=resource_type,
                 api_method=self._get_api_method(resource_type),
                 batch_size=100,
-                timeout_seconds=15,
+                timeout_seconds=APIClientConfig.RESOURCE_LIST_TIMEOUT,
                 enable_streaming=True,
                 max_concurrent_requests=8,
                 enable_caching=True,
@@ -1966,7 +1967,7 @@ class HighPerformanceResourceLoader(QObject):
 
             # Enable heavy data optimizations for large datasets
             if resource_type in heavy_data_resources:
-                config.timeout_seconds = 60  # Longer timeout for heavy data
+                config.timeout_seconds = APIClientConfig.BATCH_OPERATION_TIMEOUT  # Longer timeout for heavy data
                 config.enable_chunking = True
                 config.chunk_size = 200 if resource_type == 'nodes' else 100
                 config.progressive_loading = True
@@ -1982,7 +1983,7 @@ class HighPerformanceResourceLoader(QObject):
                 resource_type=resource_type,
                 api_method=self._get_api_method(resource_type),
                 batch_size=50,
-                timeout_seconds=20,
+                timeout_seconds=APIClientConfig.HEAVY_LOAD_TIMEOUT,
                 enable_streaming=True,
                 max_concurrent_requests=5,
                 enable_caching=True,
@@ -1996,7 +1997,7 @@ class HighPerformanceResourceLoader(QObject):
                 resource_type=resource_type,
                 api_method=self._get_api_method(resource_type),
                 batch_size=25,
-                timeout_seconds=30,
+                timeout_seconds=APIClientConfig.REQUEST_TIMEOUT,
                 enable_streaming=False,
                 max_concurrent_requests=3,
                 enable_caching=True,
@@ -2136,7 +2137,7 @@ class HighPerformanceResourceLoader(QObject):
             api_method=self._get_api_method(resource_type),
             namespace=namespace,
             batch_size=50,  # Larger batch for search
-            timeout_seconds=45,  # Longer timeout for search
+            timeout_seconds=APIClientConfig.BATCH_OPERATION_TIMEOUT,  # Longer timeout for search
             enable_pagination=True,  # Enable pagination for comprehensive search
             max_concurrent_requests=3  # More requests for search
         )

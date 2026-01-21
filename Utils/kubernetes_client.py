@@ -12,6 +12,7 @@ from PyQt6.QtCore import QObject, pyqtSignal as Signal, QProcess
 
 # Import the new service architecture
 from Services.kubernetes.kubernetes_service import get_kubernetes_service, KubeCluster
+from Services.kubernetes.api_config import APIClientConfig
 from Utils.enhanced_worker import EnhancedBaseWorker
 from Utils.thread_manager import get_thread_manager
 
@@ -1074,13 +1075,13 @@ class KubernetesClient(QObject):
             deployment = self.apps_v1.read_namespaced_deployment(
                 name=deployment_name,
                 namespace=namespace,
-                _request_timeout=10.0
+                _request_timeout=APIClientConfig.DEPLOYMENT_OPERATION_TIMEOUT
             )
 
             # Get all ReplicaSets in the namespace first
             all_replica_sets = self.apps_v1.list_namespaced_replica_set(
                 namespace=namespace,
-                _request_timeout=10.0
+                _request_timeout=APIClientConfig.DEPLOYMENT_OPERATION_TIMEOUT
             )
 
             # Filter ReplicaSets owned by this deployment
@@ -1175,7 +1176,7 @@ class KubernetesClient(QObject):
             deployment = self.apps_v1.read_namespaced_deployment(
                 name=deployment_name,
                 namespace=namespace,
-                _request_timeout=10.0
+                _request_timeout=APIClientConfig.DEPLOYMENT_OPERATION_TIMEOUT
             )
 
             original_template_hash = deployment.spec.template.metadata.labels.get(
@@ -1200,7 +1201,7 @@ class KubernetesClient(QObject):
                     replica_sets = self.apps_v1.list_namespaced_replica_set(
                         namespace=namespace,
                         label_selector=selector,
-                        _request_timeout=10.0
+                        _request_timeout=APIClientConfig.DEPLOYMENT_OPERATION_TIMEOUT
                     )
 
                     for rs in replica_sets.items:
@@ -1272,7 +1273,7 @@ class KubernetesClient(QObject):
                         name=deployment_name,
                         namespace=namespace,
                         body=rollback_deployment,
-                        _request_timeout=15.0
+                        _request_timeout=APIClientConfig.ROLLBACK_OPERATION_TIMEOUT
                     )
 
                     logging.info(
