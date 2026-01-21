@@ -669,15 +669,18 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             if self.config.enable_caching:
                 cache_key = self._generate_cache_key()
                 cached_result = self.loader._cache.get_cached_resources(self.config.resource_type, cache_key)
-                
-                if cached_result is not None:
-                    # Cache hit - update stats and return cached data
+
+                # Treat empty cached data as a cache miss for ALL resource types
+                # Empty cache could be from transient errors (cluster disconnect, API timeout, etc.)
+                # A legitimate "no resources" scenario is rare and worth re-verifying from API
+                if cached_result is not None and cached_result:
+                    # Cache hit with actual data - update stats and return
                     with self.loader._cache_lock:
                         self.loader._cache_stats[self.config.resource_type]['hits'] += 1
-                    
+
                     load_time = (time.time() - start_time) * 1000
                     logging.debug(f"Cache hit for {self.config.resource_type}: {len(cached_result)} items in {load_time:.1f}ms")
-                    
+
                     return LoadResult(
                         success=True,
                         resource_type=self.config.resource_type,
@@ -687,9 +690,13 @@ class ResourceLoadWorker(EnhancedBaseWorker):
                         from_cache=True
                     )
                 else:
-                    # Cache miss - update stats
+                    # Cache miss or empty cache - update stats and refetch
                     with self.loader._cache_lock:
                         self.loader._cache_stats[self.config.resource_type]['misses'] += 1
+                    # Clear empty cache entries to prevent stale empty results
+                    if cached_result is not None and not cached_result:
+                        logging.debug(f"Clearing empty cache entry for {self.config.resource_type}")
+                        self.loader._cache.clear_resource_cache(self.config.resource_type, cache_key)
 
             # Load from Kubernetes API with optimizations
             items = self._load_from_api()
