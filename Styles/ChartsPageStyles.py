@@ -3,88 +3,111 @@ ChartsPage-specific styles
 Contains styles that are unique to ChartsPage and defined inline in the page.
 """
 
-from UI.Styles import AppColors
+from UI.ThemeManager import get_theme_manager
 
 
-# Repository label style
-REPOSITORY_LABEL_STYLE = "color: #ffffff; font-size: 12px; font-weight: normal;"
+def _get_theme():
+    """Get current theme"""
+    return get_theme_manager().get_current_theme()
 
 
-# Loading progress bar style
-LOADING_BAR_STYLE = """
-            QProgressBar {
-                border: 1px solid #3d3d3d;
-                border-radius: 2px;
-                background-color: #1e1e1e;
-                height: 10px;
-            }
-            QProgressBar::chunk {
-                background-color: #0078d7;
-            }
-        """
+def get_repository_label_style():
+    """Style for repository label"""
+    theme = _get_theme()
+    return f"color: {theme.colors.TEXT_LIGHT}; font-size: 12px; font-weight: normal;"
 
 
-# Loading text style
-LOADING_TEXT_STYLE = "color: #aaaaaa; font-size: 12px;"
-
-
-# Icon label default style (for chart icons)
-ICON_LABEL_DEFAULT_STYLE = """
-            QLabel {
-                border-radius: 3px;
-                background-color: rgba(255, 255, 255, 0.05);
-                border: none;
-                padding: 0px;
-                margin: 0px;
-            }
-        """
-
-
-# Icon label style with emoji fallback
-ICON_LABEL_EMOJI_STYLE = """
-                        QLabel {
-                            color: #4CAF50;
-                            font-size: 14px;
-                            border-radius: 3px;
-                            background-color: rgba(255, 255, 255, 0.05);
-                            border: none;
-                            padding: 0px;
-                            margin: 0px;
-                        }
-                    """
-
-
-def get_chart_detail_dialog_style():
-    """Style for chart detail dialog window"""
+def get_loading_bar_style():
+    """Style for loading progress bar"""
+    theme = _get_theme()
     return f"""
-            QDialog {{
-                background-color: {AppColors.BG_DARK};
-                color: {AppColors.TEXT_LIGHT};
-                border: 1px solid {AppColors.BORDER_COLOR};
-                border-radius: 8px;
-            }}
-            QGroupBox {{
-                font-weight: bold;
-                border: 1px solid {AppColors.BORDER_COLOR};
-                border-radius: 5px;
-                margin-top: 10px;
-                padding-top: 10px;
-            }}
-            QGroupBox::title {{
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px 0 5px;
-            }}
-        """
+        QProgressBar {{
+            border: 1px solid {theme.colors.BORDER_COLOR};
+            border-radius: 2px;
+            background-color: {theme.colors.BG_DARKER};
+            height: 10px;
+        }}
+        QProgressBar::chunk {{
+            background-color: {theme.colors.ACCENT_BLUE};
+        }}
+    """
 
 
-# Icon label style in detail dialog
-DETAIL_ICON_LABEL_STYLE = "border: 1px solid #ddd; border-radius: 8px;"
+def get_loading_text_style():
+    """Style for loading text"""
+    theme = _get_theme()
+    return f"color: {theme.colors.TEXT_SUBTLE}; font-size: 12px;"
 
 
-# Chart name label style in detail dialog
-CHART_NAME_LABEL_STYLE = "color: #2196F3; margin-bottom: 5px;"
+def get_icon_label_default_style():
+    """Default style for icon labels (chart icons)"""
+    theme = _get_theme()
+    return f"""
+        QLabel {{
+            border-radius: 3px;
+            background-color: {theme.colors.HOVER_BG};
+            border: none;
+            padding: 0px;
+            margin: 0px;
+        }}
+    """
 
 
-# Description text edit style
-DESCRIPTION_TEXT_STYLE = "QTextEdit { background-color: #f5f5f5; border: 1px solid #ddd; }"
+def get_icon_label_emoji_style():
+    """Style for icon label with emoji fallback"""
+    theme = _get_theme()
+    return f"""
+        QLabel {{
+            color: {theme.colors.STATUS_ACTIVE};
+            font-size: 14px;
+            border-radius: 3px;
+            background-color: {theme.colors.HOVER_BG};
+            border: none;
+            padding: 0px;
+            margin: 0px;
+        }}
+    """
+
+
+def get_chart_detail_dialog_style() -> str:
+    """Style for chart detail dialog window"""
+    theme = _get_theme()
+    return f"""
+        QDialog {{
+            background-color: {theme.colors.BG_DARK};
+            color: {theme.colors.TEXT_LIGHT};
+            border: 1px solid {theme.colors.BORDER_COLOR};
+            border-radius: 8px;
+        }}
+        QGroupBox {{
+            font-weight: bold;
+            border: 1px solid {theme.colors.BORDER_COLOR};
+            border-radius: 5px;
+            margin-top: 10px;
+            padding-top: 10px;
+            color: {theme.colors.TEXT_LIGHT};
+        }}
+        QGroupBox::title {{
+            subcontrol-origin: margin;
+            left: 10px;
+            padding: 0 5px 0 5px;
+        }}
+    """
+
+
+def get_detail_icon_label_style() -> str:
+    """Style for icon label in detail dialog"""
+    theme = _get_theme()
+    return f"border: 1px solid {theme.colors.BORDER_COLOR}; border-radius: 8px;"
+
+
+def get_chart_name_label_style() -> str:
+    """Style for chart name label in detail dialog"""
+    theme = _get_theme()
+    return f"color: {theme.colors.ACCENT_BLUE}; margin-bottom: 5px;"
+
+
+def get_description_text_style() -> str:
+    """Style for description text edit"""
+    theme = _get_theme()
+    return f"QTextEdit {{ background-color: {theme.colors.BG_MEDIUM}; border: 1px solid {theme.colors.BORDER_COLOR}; color: {theme.colors.TEXT_LIGHT}; }}"
