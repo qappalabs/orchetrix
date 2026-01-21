@@ -3,7 +3,7 @@ OverviewPage-specific styles
 Contains styles that are unique to OverviewPage and defined inline in the page.
 """
 
-from UI.Styles import AppStyles, AppColors
+from UI.Styles import AppStyles
 
 
 def _get_theme():
@@ -61,29 +61,18 @@ def get_metric_card_error_style():
     """Metric card style for error state"""
     theme = _get_theme()
     return f"""
-                QFrame#metricCard {{
-                    background-color: {theme.colors.BG_SIDEBAR};
-                    border: 1px solid {theme.colors.TEXT_DANGER};
-                    border-radius: 8px;
-                    padding: 0px;
-                }}
-            """
+            QFrame#metricCard {{
+                background-color: {theme.colors.BG_SIDEBAR};
+                border: 1px solid {theme.colors.TEXT_DANGER};
+                border-radius: 8px;
+                padding: 0px;
+            }}
+        """
 
 
 def get_metric_card_normal_style():
     """Metric card style for normal data display"""
-    theme = _get_theme()
-    return f"""
-                QFrame#metricCard {{
-                    background-color: {theme.colors.BG_SIDEBAR};
-                    border: 1px solid {theme.colors.BORDER_COLOR};
-                    border-radius: 8px;
-                    padding: 0px;
-                }}
-                QFrame#metricCard:hover {{
-                    border-color: {theme.colors.ACCENT_BLUE};
-                }}
-            """
+    return get_metric_card_style()
 
 
 def get_title_label_style():
