@@ -58,9 +58,9 @@ class PulsatingSpinner(QWidget, ThemeAwareMixin):
         self.timer.timeout.connect(self.update_animation)
         self.timer.start(16)  # ~60fps
 
-    def _on_theme_changed(self):
+    def _on_theme_changed(self, theme_name):
         """Handle theme changes - spinner colors remain consistent for brand identity"""
-        super()._on_theme_changed()
+        super()._on_theme_changed(theme_name)
         # Brand colors remain fixed, but we could add theme-specific adjustments here if needed
         # For now, splash screen maintains brand consistency across themes
 
@@ -152,9 +152,9 @@ class SplashScreen(QWidget, ThemeAwareMixin):
 
         self.setup_ui()
 
-    def _on_theme_changed(self):
+    def _on_theme_changed(self, theme_name):
         """Handle theme changes - splash screen maintains brand consistency"""
-        super()._on_theme_changed()
+        super()._on_theme_changed(theme_name)
         # Splash screen uses mostly fixed brand colors and AppStyles
         # The background image and brand colors remain consistent across themes
 

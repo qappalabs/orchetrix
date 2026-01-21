@@ -6,11 +6,11 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QSpinBox,
     QPushButton, QComboBox, QLineEdit, QFormLayout, QGroupBox,
     QMessageBox, QCheckBox, QTextEdit, QFrame, QScrollArea,
-    QSizePolicy, QWidget
+    QWidget
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer
-from PyQt6.QtGui import QFont, QPixmap, QPalette
-from typing import Optional, Dict, List
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QFont
+from typing import List
 
 from UI.ThemeAwarePage import ThemeAwareMixin
 from Styles.PortForwardDialogStyles import (
@@ -21,7 +21,7 @@ from Styles.PortForwardDialogStyles import (
     get_secondary_button_style, get_active_dialog_style, get_status_loading_style,
     get_status_inactive_style, get_status_active_style
 )
-from Utils.port_forward_manager import get_port_forward_manager, PortForwardConfig
+from Utils.port_forward_manager import get_port_forward_manager
 import time
 
 class PortForwardDialog(ThemeAwareMixin, QDialog):
@@ -38,7 +38,7 @@ class PortForwardDialog(ThemeAwareMixin, QDialog):
         self.available_ports = available_ports or []
         self.port_manager = get_port_forward_manager()
 
-        self.setWindowTitle(f"Create Port Forward")
+        self.setWindowTitle("Create Port Forward")
         self.setModal(True)
         self.setMinimumSize(450, 500)
         self.setMaximumSize(550, 650)
@@ -78,7 +78,8 @@ class PortForwardDialog(ThemeAwareMixin, QDialog):
         scroll_area.setWidgetResizable(True)
         scroll_area.setFrameShape(QFrame.Shape.NoFrame)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        # Scroll area styling will be applied in apply_styles()
+        # Store reference for styling
+        self.main_scroll_area = scroll_area
 
         # Content widget inside scroll area
         content_widget = QWidget()
@@ -486,6 +487,11 @@ Automatically finds an available local port if the suggested port is already in 
         """Apply comprehensive styling to the dialog"""
         self.setStyleSheet(get_dialog_style())
         
+        # Apply main scroll area styling
+        if hasattr(self, 'main_scroll_area'):
+            from UI.Styles import AppStyles
+            self.main_scroll_area.setStyleSheet(AppStyles.UNIFIED_SCROLL_BAR_STYLE)
+        
         # Apply styles to stored widget references
         if self.header_frame:
             self.header_frame.setStyleSheet(get_header_frame_style())
@@ -604,7 +610,8 @@ class ActivePortForwardsDialog(ThemeAwareMixin, QDialog):
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setFrameShape(QFrame.Shape.NoFrame)
-        # Scroll area styling will be applied in apply_styles()
+        # Store reference for styling
+        self.active_scroll_area = scroll_area
 
         self.content_area = QTextEdit()
         self.content_area.setReadOnly(True)
@@ -634,6 +641,11 @@ class ActivePortForwardsDialog(ThemeAwareMixin, QDialog):
     def apply_styles(self):
         """Apply enhanced styling"""
         self.setStyleSheet(get_active_dialog_style())
+        
+        # Apply scroll area styling
+        if hasattr(self, 'active_scroll_area'):
+            from UI.Styles import AppStyles
+            self.active_scroll_area.setStyleSheet(AppStyles.UNIFIED_SCROLL_BAR_STYLE)
         
         # Apply status label styling based on current state
         if self.status_label:
