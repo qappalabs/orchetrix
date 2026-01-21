@@ -21,7 +21,8 @@ class CustomResourceInstancePage(BaseResourcePage):
     """
 
     def __init__(self, crd_name, crd_spec, parent=None):
-
+        super().__init__(parent)
+        
         self.crd_name = crd_name
         self.crd_spec = crd_spec
 
@@ -234,7 +235,7 @@ class CustomResourceInstancePage(BaseResourcePage):
             if parent and hasattr(parent, 'detail_manager'):
                 # FIXED: Get raw_data from resources list and pass it to detail view
                 # This fixes the issue where detail sections couldn't load data
-                # because get_resource_detail_async doesn't handle custom resource instances
+                # because get_resource_detail doesn't handle custom resource instances
                 raw_data = self.get_raw_data_for_row(row)
 
                 # Use the plural name as resource type for detail view
@@ -244,7 +245,7 @@ class CustomResourceInstancePage(BaseResourcePage):
     def get_raw_data_for_row(self, row):
         """
         This method is used to pass raw_data to the detail view, which is necessary
-        because get_resource_detail_async doesn't have handlers for custom resource instances.
+        because get_resource_detail doesn't have handlers for custom resource instances.
         Uses resource name and namespace lookup (not row index) to handle sorted / filtered tables correctly.
         """
         try:
@@ -385,6 +386,9 @@ class CustomResourceInstancePage(BaseResourcePage):
         # Show loading indicator
         self.show_loading_indicator("Loading custom resource instances...")
 
+        # Backup existing resources before loading - will restore if load returns empty
+        self._backup_resources = list(self.resources) if self.resources else []
+
         # Load custom resource instances directly
         self._load_custom_resource_instances()
 
@@ -432,6 +436,18 @@ class CustomResourceInstancePage(BaseResourcePage):
 
         formatted_resources = [self._format_resource_instance(
             instance) for instance in instances]
+
+        # If result is empty but we have backup data, restore it
+        # This preserves visible data during transient failures (cluster disconnect, theme change, etc.)
+        if not formatted_resources and hasattr(self, '_backup_resources') and self._backup_resources:
+            logging.warning(
+                f"Empty {self.plural} result - restoring {len(self._backup_resources)} backed up items")
+            formatted_resources = self._backup_resources
+            self._backup_resources = []
+
+        # Clear backup on successful non-empty load
+        if formatted_resources and hasattr(self, '_backup_resources'):
+            self._backup_resources = []
 
         # Store resources and update display
         self.resources = formatted_resources
