@@ -2,6 +2,8 @@
 Theme-aware styles for BaseTablePage component.
 Contains shared styles for all resource pages (Pods, Deployments, Services, etc.).
 """
+import os
+
 from UI.ThemeManager import get_theme_manager
 
 
@@ -14,7 +16,12 @@ def _get_theme():
 
 def get_table_style():
     """Theme-aware table style for resource pages"""
+    from UI.Styles import AppStyles
     theme = _get_theme()
+    # Get selection/hover colors from theme with fallbacks
+    selection_bg = getattr(theme.colors, 'SELECTED_BG', 'rgba(53, 132, 228, 0.15)')
+    hover_highlight = getattr(theme.colors, 'HOVER_HIGHLIGHT', 'rgba(53, 132, 228, 0.10)')
+    selection_hover = getattr(theme.colors, 'SELECTION_HOVER', 'rgba(53, 132, 228, 0.20)')
     return f"""
         QTableWidget {{
             background-color: {theme.colors.CARD_BG};
@@ -22,7 +29,7 @@ def get_table_style():
             gridline-color: transparent;
             outline: none;
             color: {theme.colors.TEXT_TABLE};
-            selection-background-color: rgba(53, 132, 228, 0.15);
+            selection-background-color: {selection_bg};
             alternate-background-color: transparent;
         }}
 
@@ -35,17 +42,17 @@ def get_table_style():
         }}
 
         QTableWidget::item:hover {{
-            background-color: rgba(53, 132, 228, 0.10);
+            background-color: {hover_highlight};
         }}
 
         QTableWidget::item:selected {{
-            background-color: rgba(53, 132, 228, 0.15);
+            background-color: {selection_bg};
             color: {theme.colors.TEXT_LIGHT};
             border: none;
         }}
 
         QTableWidget::item:selected:hover {{
-            background-color: rgba(53, 132, 228, 0.20);
+            background-color: {selection_hover};
         }}
 
         QHeaderView::section {{
@@ -69,32 +76,7 @@ def get_table_style():
             height: 0px;
             border: none;
         }}
-        QScrollBar:vertical {{
-            background: {theme.colors.BG_DARK};
-            width: 12px;
-            border: none;
-        }}
-        QScrollBar::handle:vertical {{
-            background: {theme.colors.BG_MEDIUM};
-            border-radius: 6px;
-            min-height: 20px;
-        }}
-        QScrollBar::handle:vertical:hover {{
-            background: {theme.colors.BORDER_LIGHT};
-        }}
-        QScrollBar:horizontal {{
-            background: {theme.colors.BG_DARK};
-            height: 12px;
-            border: none;
-        }}
-        QScrollBar::handle:horizontal {{
-            background: {theme.colors.BG_MEDIUM};
-            border-radius: 6px;
-            min-width: 20px;
-        }}
-        QScrollBar::handle:horizontal:hover {{
-            background: {theme.colors.BORDER_LIGHT};
-        }}
+        {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
     """
 
 
@@ -132,8 +114,6 @@ def get_count_style():
 def get_checkbox_style():
     """Theme-aware checkbox style with icon paths from current theme folder"""
     from UI.Icons import Icons
-    from UI.ThemeManager import get_theme_manager
-    import os
 
     # Get current theme and load theme-specific icon paths
     theme_name = get_theme_manager().get_current_theme_name() or "Dark"
@@ -169,10 +149,10 @@ def get_checkbox_style():
             image: url({checked_icon.replace(os.sep, '/')});
         }}
         QCheckBox::indicator:unchecked:hover {{
-            opacity: 0.8;
+            background-color: rgba(53, 132, 228, 0.15);
         }}
         QCheckBox::indicator:checked:hover {{
-            opacity: 0.8;
+            background-color: rgba(53, 132, 228, 0.15);
         }}
     """
 

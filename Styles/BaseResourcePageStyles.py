@@ -45,13 +45,13 @@ def get_error_label_style():
 
 def get_checkbox_style(unchecked_path, checked_path):
     """Style for checkboxes (select all and row checkboxes)
-    
+
     Args:
         unchecked_path: Path to unchecked icon SVG
         checked_path: Path to checked icon SVG
-    
-    Note: This style is meant to be applied to the QCheckBox widget directly.
-    For the container widget, use get_checkbox_container_style() separately.
+
+    Note: Container background should be set separately using get_checkbox_container_style()
+    on the parent widget to avoid broad QWidget selector overrides.
     """
     theme = _get_theme()
     return f"""
@@ -88,10 +88,9 @@ def get_checkbox_container_style():
 
 
 def get_delete_button_style():
-    """Style for delete selected button - red for semantic meaning, theme-aware disabled state"""
-    theme = _get_theme()
-    return f"""
-        QPushButton#deleteSelectedBtn {{
+    """Style for delete selected button - hardcoded red for semantic meaning"""
+    return """
+        QPushButton#deleteSelectedBtn {
             background-color: #d32f2f;
             color: #ffffff;
             border: none;
@@ -99,17 +98,17 @@ def get_delete_button_style():
             padding: 5px 16px;
             font-size: 13px;
             margin-right: 8px;
-        }}
-        QPushButton#deleteSelectedBtn:hover {{
+        }
+        QPushButton#deleteSelectedBtn:hover {
             background-color: #b71c1c;
-        }}
-        QPushButton#deleteSelectedBtn:pressed {{
+        }
+        QPushButton#deleteSelectedBtn:pressed {
             background-color: #8d1e1e;
-        }}
-        QPushButton#deleteSelectedBtn:disabled {{
-            background-color: {theme.colors.BG_MEDIUM};
-            color: {theme.colors.TEXT_SUBTLE};
-        }}
+        }
+        QPushButton#deleteSelectedBtn:disabled {
+            background-color: #cccccc;
+            color: #666666;
+        }
     """
 
 
@@ -156,7 +155,7 @@ def get_namespace_combo_style():
     """Style for namespace dropdown"""
     theme = _get_theme()
     down_arrow_icon = resource_path("Icons/down_btn.svg")
-    
+
     return f"""
         QComboBox {{
             background-color: {theme.colors.BG_MEDIUM};
@@ -209,3 +208,55 @@ def get_hover_bg_color():
 def get_transparent_color():
     """Get transparent color string"""
     return "transparent"
+
+
+def get_action_button_fallback_style():
+    """Fallback style for action button when AppStyles not available"""
+    theme = _get_theme()
+    return f"""
+        QToolButton {{
+            background-color: transparent;
+            border: none;
+            padding: 2px;
+        }}
+        QToolButton:hover {{
+            background-color: {theme.colors.HOVER_BG};
+            border-radius: 2px;
+        }}
+        QToolButton::menu-indicator {{ 
+            image: none; 
+            width: 0px; 
+        }}
+    """
+
+
+def get_menu_fallback_style():
+    """Fallback style for menu when BaseTablePageStyles not available"""
+    theme = _get_theme()
+    return f"""
+        QMenu {{
+            background-color: {theme.colors.BG_MEDIUM};
+            border: 1px solid {theme.colors.BORDER_COLOR};
+            color: {theme.colors.TEXT_LIGHT};
+        }}
+        QMenu::item {{
+            padding: 10px 24px 10px 36px;
+            font-size: 13px;
+            margin: 2px 0px;
+        }}
+        QMenu::item:selected {{
+            background-color: {theme.colors.ACCENT_BLUE};
+        }}
+    """
+
+
+def get_action_container_fallback_style():
+    """Fallback style for action container when AppStyles not available"""
+    return """
+        QWidget {
+            background-color: transparent;
+            border: none;
+            margin: 0;
+            padding: 0;
+        }
+    """

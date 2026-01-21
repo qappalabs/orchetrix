@@ -684,12 +684,12 @@ class BaseResourcePage(BaseTablePage):
         # Update namespace filter BEFORE clearing resources
         self.namespace_filter = namespace
 
-        # FIXED: Clear current resource data to prevent showing stale data
-        self.resources.clear()
+        # Reset pagination state
         self.current_continue_token = None
         self.all_data_loaded = False
 
-        # FIXED: Force immediate reload with new namespace
+        # NOTE: Don't clear resources here - let force_load_data handle backup and clearing
+        # This ensures we can restore old data if the load fails (e.g., cluster disconnected)
         self.force_load_data()
 
     def _load_more_data_batch(self):
@@ -800,6 +800,18 @@ class BaseResourcePage(BaseTablePage):
             # Process the optimized result format
             resources = result.items or []
 
+            # If result is empty but we have backup data, restore it
+            # This preserves visible data during transient failures (cluster disconnect, theme change, etc.)
+            if not resources and hasattr(self, '_backup_resources') and self._backup_resources:
+                logging.warning(
+                    f"Empty {resource_type} result - restoring {len(self._backup_resources)} backed up items")
+                resources = self._backup_resources
+                self._backup_resources = []  # Clear backup after restore
+
+            # Clear backup on successful non-empty load
+            if resources and hasattr(self, '_backup_resources'):
+                self._backup_resources = []
+
             # Check if we have a large dataset
             self._total_item_count = len(resources)
             self._large_dataset_mode = self._total_item_count > LARGE_DATASET_THRESHOLD
@@ -853,13 +865,22 @@ class BaseResourcePage(BaseTablePage):
         # Hide loading indicator on error
         self.hide_loading_indicator()
 
-        # Use centralized error handling
-        error_handler = get_error_handler()
-        error_handler.handle_error(
-            Exception(error_message),
-            f"loading {resource_type}",
-            show_dialog=True
-        )
+        # Restore backup data if available - preserves visible data during transient failures
+        if hasattr(self, '_backup_resources') and self._backup_resources:
+            logging.warning(
+                f"Loading error for {resource_type} - restoring {len(self._backup_resources)} backed up items")
+            self.resources = self._backup_resources
+            self._backup_resources = []
+            self._display_resources(self.resources)
+            self._update_items_count()
+        else:
+            # Only show error if we have no data to display
+            error_handler = get_error_handler()
+            error_handler.handle_error(
+                Exception(error_message),
+                f"loading {resource_type}",
+                show_dialog=True
+            )
 
         self.load_more_complete.emit()
 
@@ -1085,6 +1106,10 @@ class BaseResourcePage(BaseTablePage):
 
         # Show loading indicator
         self.show_loading_indicator("Refreshing data...")
+
+        # Backup existing resources before clearing - will restore if load returns empty
+        # This preserves visible data during transient failures (cluster disconnect, theme change, etc.)
+        self._backup_resources = list(self.resources) if self.resources else []
 
         self._clear_resources()  # Use new method to clear resources properly
         self.current_continue_token = None
