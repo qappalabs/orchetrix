@@ -2,11 +2,9 @@ from UI.ThemeManager import get_theme_manager
 from PyQt6.QtGui import QFont
 from UI.Styles import AppConstants
 
-
 def _get_theme():
     """Get current theme"""
     return get_theme_manager().get_current_theme()
-
 
 # Theme-aware style functions using direct pattern
 def get_sidebar_button_style():
@@ -63,27 +61,22 @@ def get_tree_widget_style():
             selection-background-color: rgba(53, 132, 228, 0.15);
             alternate-background-color: transparent;
         }}
-        
         QTreeWidget::item {{
             padding: 6px 4px;
             background-color: transparent;
             border: none;
             outline: none;
         }}
-        
         QTreeWidget::item:hover {{
             background-color: rgba(53, 132, 228, 0.10);
         }}
-        
         QTreeWidget::item:selected {{
             background-color: rgba(53, 132, 228, 0.15);
             color: {theme.colors.TEXT_LIGHT};
         }}
-        
         QTreeWidget::item:selected:hover {{
             background-color: rgba(53, 132, 228, 0.20);
         }}
-        
         QHeaderView::section {{
             background-color: {theme.colors.TABLE_HEADER};
             color: {theme.colors.TEXT_LIGHT};
@@ -95,11 +88,9 @@ def get_tree_widget_style():
             text-align: left;
             font-weight: bold;
         }}
-        
         QHeaderView::section:first {{
             border-left: 1px solid {theme.colors.BORDER_DARK};
         }}
-        
         QHeaderView::section:last {{
             padding: 0;
             text-align: center;
@@ -107,11 +98,9 @@ def get_tree_widget_style():
             max-width: {AppConstants.SIZES["ACTION_WIDTH"]}px;
             min-width: {AppConstants.SIZES["ACTION_WIDTH"]}px;
         }}
-        
         QHeaderView::section:hover {{
             background-color: {theme.colors.BG_MEDIUM};
         }}
-        
         QHeaderView::down-arrow, QHeaderView::up-arrow {{
             image: none;
             width: 0px;
@@ -120,7 +109,6 @@ def get_tree_widget_style():
             subcontrol-origin: content;
             subcontrol-position: right;
         }}
-        
         QTreeWidget::branch {{
             border: none;
             border-image: none;
@@ -247,18 +235,15 @@ def get_pin_button_style():
         QPushButton:hover {{ background: {theme.colors.HOVER_BG}; }}
     """
 
-
 def get_status_label_style(color):
     """Get status label style with dynamic color"""
     return f"color: {color}; background: transparent;"
-
 
 def get_cell_font():
     """Get reusable font for table cells"""
     font = QFont("Segoe UI", 10)
     font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
     return font
-
 
 # Theme-neutral constants (no colors)
 TRANSPARENT_WIDGET = "background: transparent; padding: 0px; margin: 0px;"

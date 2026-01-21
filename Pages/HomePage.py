@@ -1,9 +1,9 @@
-from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
                              QLabel, QPushButton, QLineEdit, QTreeWidget,
                              QTreeWidgetItem, QFrame, QMenu, QHeaderView, QApplication,
                              QMessageBox, QToolButton)
 from PyQt6.QtCore import Qt, QObject, pyqtSignal, QPoint, QSize, QTimer
-from PyQt6.QtGui import QColor, QPainter, QIcon, QMouseEvent, QFont, QPixmap
+from PyQt6.QtGui import QColor, QPainter, QIcon, QFont, QPixmap
 
 from UI.Styles import AppConstants
 import Styles.HomePageStyles as HomePageStyles
@@ -14,7 +14,7 @@ from Utils.cluster_connector import get_cluster_connector
 from Utils.pin_storage import get_pin_storage_manager
 import logging
 from collections import defaultdict
-from log_handler import method_logger, class_logger
+from log_handler import class_logger
 import webbrowser  # Added for opening URLs
 import os  # Added for os.path.basename
 
@@ -511,7 +511,6 @@ class OrchestrixGUI(ThemeAwareMainWindow):
     def on_clusters_loaded(self, clusters):
         """Handle loaded clusters with batch updates"""
         logging.info(f"HomePage: Received {len(clusters)} clusters from kubernetes client")
-        updates = []
 
         for cluster in clusters:
             logging.debug(f"HomePage: Processing cluster {cluster.name} with status {cluster.status}")
@@ -878,10 +877,14 @@ class OrchestrixGUI(ThemeAwareMainWindow):
                 status_label.setStyleSheet(HomePageStyles.get_status_label_style(status_color))
                 status_layout.addWidget(status_label)
             else:
-                if status == "available": status_text = "Available"
-                elif status in ["active", "connected"]: status_text = "Connected"
-                elif status == "disconnect": status_text = "Disconnected"
-                else: status_text = status.capitalize()
+                if status == "available":
+                    status_text = "Available"
+                elif status in ["active", "connected"]:
+                    status_text = "Connected"
+                elif status == "disconnect":
+                    status_text = "Disconnected"
+                else:
+                    status_text = status.capitalize()
                 status_label = QLabel(status_text)
                 status_color = HomePageStyles.get_status_color(status)
                 status_label.setStyleSheet(HomePageStyles.get_status_label_style(status_color))
@@ -926,7 +929,8 @@ class OrchestrixGUI(ThemeAwareMainWindow):
                 delete_action = menu.addAction("Delete")
             elif status in ["active", "connected"]:
                 open_action = menu.addAction("Open")
-                if is_cluster: disconnect_action = menu.addAction("Disconnect")
+                if is_cluster:
+                    disconnect_action = menu.addAction("Disconnect")
                 delete_action = menu.addAction("Delete")
             elif status == "disconnect" and is_cluster:
                 connect_action = menu.addAction("Connect")
@@ -938,21 +942,32 @@ class OrchestrixGUI(ThemeAwareMainWindow):
             def show_menu():
                 pos = menu_btn.mapToGlobal(QPoint(0, menu_btn.height()))
                 action = menu.exec(pos)
-                if action is None: return
+                if action is None:
+                    return
                 if status == "available" and is_cluster:
-                    if action == open_action: self.handle_open_item(item)
-                    elif action == connect_action: self.handle_connect_item(item)
-                    elif action == delete_action: self.handle_delete_item(item)
+                    if action == open_action:
+                        self.handle_open_item(item)
+                    elif action == connect_action:
+                        self.handle_connect_item(item)
+                    elif action == delete_action:
+                        self.handle_delete_item(item)
                 elif status in ["active", "connected"]:
-                    if action == open_action: self.handle_open_item(item)
-                    elif is_cluster and 'disconnect_action' in locals() and action == disconnect_action: self.handle_disconnect_item(item)
-                    elif action == delete_action: self.handle_delete_item(item)
+                    if action == open_action:
+                        self.handle_open_item(item)
+                    elif is_cluster and 'disconnect_action' in locals() and action == disconnect_action:
+                        self.handle_disconnect_item(item)
+                    elif action == delete_action:
+                        self.handle_delete_item(item)
                 elif status == "disconnect" and is_cluster:
-                    if action == connect_action: self.handle_connect_item(item)
-                    elif action == delete_action: self.handle_delete_item(item)
+                    if action == connect_action:
+                        self.handle_connect_item(item)
+                    elif action == delete_action:
+                        self.handle_delete_item(item)
                 else:
-                    if action == open_action: self.handle_open_item(item)
-                    elif action == delete_action: self.handle_delete_item(item)
+                    if action == open_action:
+                        self.handle_open_item(item)
+                    elif action == delete_action:
+                        self.handle_delete_item(item)
             menu_btn.clicked.connect(show_menu)
         action_layout.addWidget(menu_btn)
         self.tree_widget.setItemWidget(item, 5, action_widget)
@@ -1042,12 +1057,15 @@ class OrchestrixGUI(ThemeAwareMainWindow):
             self.all_data[view_name] = [item for item in self.all_data["Browse All"] if filter_func(item)]
 
     def handle_item_single_click(self, item, column):
-        original_name = item.data(0, Qt.ItemDataRole.UserRole)
+        item.data(0, Qt.ItemDataRole.UserRole)
         original_data = item.data(0, Qt.ItemDataRole.UserRole + 1)
-        if not original_data: return
-        if "Cluster" in original_data.get("kind", ""): self.navigate_to_cluster(original_data)
+        if not original_data:
+            return
+        if "Cluster" in original_data.get("kind", ""):
+            self.navigate_to_cluster(original_data)
         else:
-            if original_data.get("action"): original_data["action"](original_data)
+            if original_data.get("action"):
+                original_data["action"](original_data)
 
     def create_table_widget(self):
         tree_widget = QTreeWidget()
@@ -1055,10 +1073,12 @@ class OrchestrixGUI(ThemeAwareMainWindow):
         tree_widget.setHeaderLabels(["Name", "Kind", "Source", "Label", "Status", ""])
         tree_widget.setHeaderHidden(False)
         column_widths = [300, 180, 150, 120, 120, AppConstants.SIZES["ACTION_WIDTH"]]
-        for i, width in enumerate(column_widths): tree_widget.setColumnWidth(i, width)
+        for i, width in enumerate(column_widths):
+            tree_widget.setColumnWidth(i, width)
         header = tree_widget.header()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for i in range(1, len(column_widths)): header.setSectionResizeMode(i, QHeaderView.ResizeMode.Fixed)
+        for i in range(1, len(column_widths)):
+            header.setSectionResizeMode(i, QHeaderView.ResizeMode.Fixed)
         header.resizeSection(5, AppConstants.SIZES["ACTION_WIDTH"])
         font = QFont("Segoe UI", 13)
         font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
@@ -1076,13 +1096,15 @@ class OrchestrixGUI(ThemeAwareMainWindow):
 
     def _find_data_item(self, view, original_name):
         for data_item in self.all_data[view]:
-            if data_item["name"] == original_name: return data_item
+            if data_item["name"] == original_name:
+                return data_item
         return None
 
     def handle_open_item(self, item):
-        original_name = item.data(0, Qt.ItemDataRole.UserRole)
+        item.data(0, Qt.ItemDataRole.UserRole)
         original_data = item.data(0, Qt.ItemDataRole.UserRole + 1)
-        if original_data and original_data["action"]: original_data["action"](original_data)
+        if original_data and original_data["action"]:
+            original_data["action"](original_data)
 
     def handle_connect_item(self, item):
         original_name = item.data(0, Qt.ItemDataRole.UserRole)
@@ -1091,7 +1113,8 @@ class OrchestrixGUI(ThemeAwareMainWindow):
             # Update UI to show connecting state
             for view_type in self.all_data:
                 for d_item in self.all_data[view_type]: # renamed item to d_item to avoid conflict
-                    if d_item["name"] == original_name: d_item["status"] = "connecting"
+                    if d_item["name"] == original_name:
+                        d_item["status"] = "connecting"
             self.connecting_clusters.add(original_name)
             self.update_content_view(self.current_view)
 
@@ -1326,7 +1349,8 @@ class OrchestrixGUI(ThemeAwareMainWindow):
         self.content_layout.addWidget(self.main_content)
 
     def fix_action_column_width(self):
-        if not hasattr(self, 'tree_widget') or self.tree_widget is None: return
+        if not hasattr(self, 'tree_widget') or self.tree_widget is None:
+            return
         header = self.tree_widget.header()
         header.setStretchLastSection(False)
         action_column_width = AppConstants.SIZES["ACTION_WIDTH"]
