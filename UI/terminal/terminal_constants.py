@@ -73,6 +73,38 @@ class StyleConstants:
         """Get error message color - always red for negative feedback"""
         return StyleConstants._ERROR_COLOR
 
+    # SSH-specific status colors - intentionally hardcoded for consistent SSH feedback
+    _SSH_SUCCESS_COLOR = "#4CAF50"  # Green for SSH success messages
+    _SSH_ERROR_COLOR = "#FF6B68"  # Red for SSH error messages
+    _SSH_WARNING_COLOR = "#FFA500"  # Orange for SSH warnings
+    _SSH_INFO_COLOR = "#9ca3af"  # Gray for SSH info messages
+    _SSH_TEXT_COLOR = "#E0E0E0"  # Light gray for SSH terminal text
+
+    @staticmethod
+    def get_ssh_success_color():
+        """Get SSH success message color - always green for positive feedback"""
+        return StyleConstants._SSH_SUCCESS_COLOR
+
+    @staticmethod
+    def get_ssh_error_color():
+        """Get SSH error message color - always red for negative feedback"""
+        return StyleConstants._SSH_ERROR_COLOR
+
+    @staticmethod
+    def get_ssh_warning_color():
+        """Get SSH warning message color - always orange for warning feedback"""
+        return StyleConstants._SSH_WARNING_COLOR
+
+    @staticmethod
+    def get_ssh_info_color():
+        """Get SSH info message color - always gray for informational feedback"""
+        return StyleConstants._SSH_INFO_COLOR
+
+    @staticmethod
+    def get_ssh_text_color():
+        """Get SSH terminal text color - always light gray for readability"""
+        return StyleConstants._SSH_TEXT_COLOR
+
     # Non-terminal UI elements - use theme-aware AppColors for proper theme switching
     TERMINAL_WRAPPER = f"""
         QWidget#terminal_wrapper {{
