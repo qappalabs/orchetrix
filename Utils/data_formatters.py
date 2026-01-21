@@ -25,40 +25,20 @@ class HighPerformanceFormatters:
     """High-performance formatters with caching and optimization"""
 
     # Pre-compiled regex patterns for performance
-    _MEMORY_PATTERN = re.compile(r'^(\d+(?:\.\d+)?)([KMGTPE]?i?)$')
-    
+    # Pattern requires: number, then optional (letter from KMGTPE optionally followed by 'i')
+    # This ensures 'i' is never matched alone
+    _MEMORY_PATTERN = re.compile(r'^(\d+(?:\.\d+)?)([KMGTPE]i?)?$')
+
     @staticmethod
-    def format_age(timestamp_str: str) -> str:
-        """Format age for display"""
+    def _format_age_from_timedelta(age_delta: timedelta) -> str:
+        """Format age from timedelta - eliminates datetime string conversion overhead"""
         try:
-            # Handle various timestamp formats
-            if not timestamp_str or timestamp_str == 'Unknown':
-                return 'Unknown'
-            
-            # Parse timestamp
-            if isinstance(timestamp_str, str):
-                # ISO format timestamp
-                if 'T' in timestamp_str:
-                    created = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
-                else:
-                    created = datetime.fromtimestamp(float(timestamp_str), tz=timezone.utc)
-            else:
-                created = timestamp_str
-            
-            # Ensure timezone aware
-            if created.tzinfo is None:
-                created = created.replace(tzinfo=timezone.utc)
-            
-            # Calculate age
-            now = datetime.now(timezone.utc)
-            age_delta = now - created
-            
-            # Format efficiently
+            # Format efficiently from timedelta
             days = age_delta.days
             hours = age_delta.seconds // 3600
             minutes = (age_delta.seconds % 3600) // 60
             seconds = age_delta.seconds % 60
-            
+
             # Return most significant unit
             if days > 365:
                 years = days // 365
@@ -74,33 +54,70 @@ class HighPerformanceFormatters:
                 return f"{minutes}m"
             else:
                 return f"{seconds}s"
-                
+        except Exception as e:
+            logging.debug(f"Error formatting age from timedelta: {e}")
+            return 'Unknown'
+
+    @staticmethod
+    def format_age(timestamp_str: str) -> str:
+        """Format age for display"""
+        try:
+            # Handle various timestamp formats
+            if not timestamp_str or timestamp_str == 'Unknown':
+                return 'Unknown'
+
+            # Parse timestamp
+            if isinstance(timestamp_str, str):
+                # ISO format timestamp
+                if 'T' in timestamp_str:
+                    created = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                else:
+                    created = datetime.fromtimestamp(float(timestamp_str), tz=timezone.utc)
+            else:
+                created = timestamp_str
+
+            # Ensure timezone aware
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+
+            # Calculate age and format
+            now = datetime.now(timezone.utc)
+            age_delta = now - created
+
+            return HighPerformanceFormatters._format_age_from_timedelta(age_delta)
+
         except Exception as e:
             logging.debug(f"Error formatting age for '{timestamp_str}': {e}")
             return 'Unknown'
-    
+
     @staticmethod
     def format_age_from_datetime(dt: Optional[datetime]) -> str:
-        """Format age from datetime object with performance optimization"""
+        """Format age from datetime object - direct computation without string conversion"""
         if not dt:
             return 'Unknown'
-        
-        # Convert to string for caching
-        if hasattr(dt, 'timestamp'):
-            timestamp_str = str(dt.timestamp())
-        else:
-            timestamp_str = dt.isoformat()
-        
-        return HighPerformanceFormatters.format_age(timestamp_str)
+
+        try:
+            # Ensure timezone aware
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+
+            # Compute age directly as timedelta, bypassing string conversion
+            now = datetime.now(timezone.utc)
+            age_delta = now - dt
+
+            return HighPerformanceFormatters._format_age_from_timedelta(age_delta)
+        except Exception as e:
+            logging.debug(f"Error formatting age from datetime: {e}")
+            return 'Unknown'
 
     @staticmethod
     def parse_memory_value(memory_str: str) -> ResourceUsage:
         """Parse memory values"""
         if not memory_str or not isinstance(memory_str, str):
             return ResourceUsage(0, 'bytes', memory_str or '0', formatted='0 B')
-        
+
         memory_str = memory_str.strip()
-        
+
         try:
             match = HighPerformanceFormatters._MEMORY_PATTERN.match(memory_str)
             if not match:
@@ -110,10 +127,14 @@ class HighPerformanceFormatters:
                     return HighPerformanceFormatters._format_memory_bytes(value, memory_str)
                 except ValueError:
                     return ResourceUsage(0, 'bytes', memory_str, formatted='0 B')
-            
+
             value_str, unit = match.groups()
             value = float(value_str)
-            
+
+            # Normalize unit: None (no unit captured) becomes empty string for lookup
+            if unit is None:
+                unit = ''
+
             # Memory unit multipliers (binary)
             multipliers = {
                 '': 1,
@@ -131,24 +152,24 @@ class HighPerformanceFormatters:
                 'P': 1000**5,
                 'E': 1000**6,
             }
-            
+
             multiplier = multipliers.get(unit, 1)
             bytes_value = int(value * multiplier)
-            
+
             return HighPerformanceFormatters._format_memory_bytes(bytes_value, memory_str)
-            
+
         except (ValueError, AttributeError) as e:
             logging.debug(f"Error parsing memory value '{memory_str}': {e}")
             return ResourceUsage(0, 'bytes', memory_str, formatted='0 B')
-    
+
     @staticmethod
     def _format_memory_bytes(bytes_value: float, original_str: str) -> ResourceUsage:
         """Format bytes value into human-readable format"""
-        
+
         # Choose best unit for display
         if bytes_value >= 1024**4:  # TB
             formatted = f"{bytes_value / (1024**4):.1f} TB"
-        elif bytes_value >= 1024**3:  # GB  
+        elif bytes_value >= 1024**3:  # GB
             formatted = f"{bytes_value / (1024**3):.1f} GB"
         elif bytes_value >= 1024**2:  # MB
             formatted = f"{bytes_value / (1024**2):.1f} MB"
@@ -156,14 +177,14 @@ class HighPerformanceFormatters:
             formatted = f"{bytes_value / 1024:.1f} KB"
         else:  # Bytes
             formatted = f"{int(bytes_value)} B"
-        
+
         return ResourceUsage(
             value=bytes_value,
             unit='bytes',
             raw_value=original_str,
             formatted=formatted
         )
-    
+
     @staticmethod
     def format_percentage(value: Optional[float], precision: int = 1) -> str:
         """Format percentage with consistent precision"""
@@ -185,6 +206,11 @@ class HighPerformanceFormatters:
         """Truncate string with performance optimization"""
         if not text or len(text) <= max_length:
             return text
+
+        # Guard against negative slice index: if suffix is too long for max_length,
+        # return truncated suffix instead
+        if max_length <= len(suffix):
+            return suffix[:max_length]
 
         return text[:max_length - len(suffix)] + suffix
 
