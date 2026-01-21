@@ -7,48 +7,56 @@ from UI.Styles import AppStyles
 from UI.ThemeManager import get_theme_manager
 
 
-# Edit button style (used for both left and right)
-def get_edit_btn_style():
-    """Edit button style using current theme"""
-    theme = get_theme_manager().get_current_theme()
-    return f"""
+def _build_button_style(theme, padding: str = "5px 10px", include_pressed: bool = False) -> str:
+    """
+    Helper to build theme-aware button styles with common properties.
+
+    Args:
+        theme: The current theme object
+        padding: CSS padding value for the button
+        include_pressed: Whether to include QPushButton:pressed state
+    """
+    style = f"""
             QPushButton {{
                 background-color: {theme.colors.BG_DARKER};
                 color: {theme.colors.TEXT_LIGHT};
                 border: 1px solid {theme.colors.BORDER_COLOR};
                 border-radius: 4px;
-                padding: 5px 15px;
+                padding: {padding};
             }}
             QPushButton:hover {{
                 background-color: {theme.colors.BG_MEDIUM};
-            }}
-        """
+            }}"""
+    if include_pressed:
+        style += f"""
+            QPushButton:pressed {{
+                background-color: {theme.colors.BG_DARK};
+            }}"""
+    return style
+
+
+# Edit button style (used for both left and right)
+def get_edit_btn_style():
+    """Edit button style using current theme"""
+    theme = get_theme_manager().get_current_theme()
+    return _build_button_style(theme, padding="5px 15px", include_pressed=False)
 
 
 # Save button style (used for both left and right)
 def get_save_btn_style():
     """Save button style using current theme"""
     theme = get_theme_manager().get_current_theme()
-    return f"""
-            QPushButton {{
-                background-color: {theme.colors.BG_DARKER};
-                color: {theme.colors.TEXT_LIGHT};
-                border: 1px solid {theme.colors.BORDER_COLOR};
-                border-radius: 4px;
-                padding: 5px 10px;
-            }}
-            QPushButton:hover {{
-                background-color: {theme.colors.BG_MEDIUM};
-            }}
-            QPushButton:pressed {{
-                background-color: {theme.colors.BG_DARK};
-            }}
-        """
+    return _build_button_style(theme, padding="5px 10px", include_pressed=True)
 
 
 # Deploy button style (used for both left and right) - Uses semantic success color
 def get_deploy_btn_style():
-    """Deploy button style with success color"""
+    """Deploy button style with success color.
+
+    Note: The green colors (#4CAF50, #45a049) are intentionally hardcoded
+    to represent semantic "success" actions. These should be updated centrally
+    here if the app's semantic color scheme changes.
+    """
     return """
             QPushButton {
                 background-color: #4CAF50;
@@ -65,7 +73,12 @@ def get_deploy_btn_style():
 
 # Cancel button style (used for both left and right) - Uses semantic error color
 def get_cancel_btn_style():
-    """Cancel button style with error color"""
+    """Cancel button style with error color.
+
+    Note: The red colors (#f44336, #d32f2f) are intentionally hardcoded
+    to represent semantic "error/cancel" actions. These should be updated
+    centrally here if the app's semantic color scheme changes.
+    """
     return """
             QPushButton {
                 background-color: #f44336;

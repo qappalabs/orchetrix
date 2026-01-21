@@ -25,6 +25,7 @@ from UI.Styles import AppStyles
 from UI.ThemeManager import get_theme_manager
 from UI.ThemeAwarePage import ThemeAwareMixin
 import Styles.ComparePageStyles as ComparePageStyles
+import Styles.BaseResourcePageStyles as BaseResourcePageStyles
 
 LOG = logging.getLogger(__name__)
 
@@ -411,9 +412,9 @@ class ComparePage(ThemeAwareMixin, QWidget):
         if hasattr(self, 'right_resource_label'):
             self.right_resource_label.setStyleSheet(f"color: {theme.colors.TEXT_LIGHT}; font-size: 14px;")
 
-        # Refresh dropdowns (they use AppStyles which is already theme-aware, but re-apply)
+        # Refresh dropdowns with theme-aware styling
         for combo in self.findChildren(QComboBox):
-            combo.setStyleSheet(AppStyles.get_dropdown_style_with_icon())
+            combo.setStyleSheet(BaseResourcePageStyles.get_namespace_combo_style())
 
         # Refresh Compare button
         if hasattr(self, 'compare_btn'):
@@ -526,8 +527,8 @@ class ComparePage(ThemeAwareMixin, QWidget):
             combo.setMinimumContentsLength(1)
             combo.addItem(placeholder)
 
-            # Match other pages: keep same dropdown geometry, but colors theme-aware
-            combo.setStyleSheet(AppStyles.get_dropdown_style_with_icon())
+            # Use existing theme-aware dropdown style from BaseResourcePageStyles
+            combo.setStyleSheet(BaseResourcePageStyles.get_namespace_combo_style())
 
             # Configure dropdown behavior to match other pages
             view = QListView()
@@ -1488,7 +1489,7 @@ class ComparePage(ThemeAwareMixin, QWidget):
             from Utils.kubernetes_client import get_kubernetes_client
             kube = get_kubernetes_client()
             resource_type = self._map_kind_to_resource_type(rt)
-            obj = kube.get_resource_detail_async(resource_type, name, namespace)
+            obj = kube.get_resource_detail(resource_type, name, namespace)
 
             if obj is None:
                 return f"# Unable to read resource {kind}/{name} in {namespace}"
@@ -1516,7 +1517,7 @@ class ComparePage(ThemeAwareMixin, QWidget):
             return f"# Error fetching {kind}/{name} in {namespace}"
 
     def _map_kind_to_resource_type(self, rt: str) -> str:
-        """Map a kind (lowercase) to a resource_type for get_resource_detail_async"""
+        """Map a kind (lowercase) to a resource_type for get_resource_detail"""
         # Simple mapping of our internal kind to resource types
         if "pod" in rt:
             return "pod"
@@ -2067,7 +2068,7 @@ class ComparePage(ThemeAwareMixin, QWidget):
         combo.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         combo.setMinimumContentsLength(1)
-        combo.setStyleSheet(AppStyles.get_dropdown_style_with_icon())
+        combo.setStyleSheet(BaseResourcePageStyles.get_namespace_combo_style())
 
         view = QListView()
         combo.setView(view)
