@@ -293,14 +293,19 @@ class EnhancedClusterConnector(QObject):
 
                 logging.info(f"Received {len(nodes_data)} processed nodes from unified loader")
 
-                # Emit the processed data directly
-                # Cache the nodes data first to ensure consistency with get_cached_data
-                if self.current_cluster:
-                    cache_key = f"{self.current_cluster}:nodes"
-                    self._cache.cache_resources('cluster_data', cache_key, nodes_data)
+                # Only cache and emit non-empty node data
+                # Empty results could be from transient issues (cluster disconnect, API error)
+                # and we don't want to overwrite valid cached data with empty results
+                if nodes_data:
+                    # Cache the nodes data first to ensure consistency with get_cached_data
+                    if self.current_cluster:
+                        cache_key = f"{self.current_cluster}:nodes"
+                        self._cache.cache_resources('cluster_data', cache_key, nodes_data)
 
-                self.node_data_loaded.emit(nodes_data)
-                logging.info(f"Emitted {len(nodes_data)} processed nodes to UI")
+                    self.node_data_loaded.emit(nodes_data)
+                    logging.info(f"Emitted {len(nodes_data)} processed nodes to UI")
+                else:
+                    logging.warning("Received empty nodes data from unified loader - not caching or emitting")
 
         except Exception as e:
             logging.error(f"Error handling resource loading completion: {e}")
@@ -874,14 +879,17 @@ class EnhancedClusterConnector(QObject):
                 return "disconnected"
 
     def set_current_cluster(self, cluster_name: str) -> None:
-        """Set the current cluster (called from ClusterView)"""
+        """Set the current cluster (called from ClusterView or cluster_state_manager)"""
         with self._state_lock:
             if cluster_name != self._current_cluster:
                 logging.info(f"Setting current cluster to {cluster_name}")
                 self._current_cluster = cluster_name
 
-                if cluster_name in self._connection_states:
-                    self._connection_states[cluster_name].update_state(connected=True)
+                # Create connection state if it doesn't exist, then mark as connected
+                # This ensures pages checking get_connection_state() see the correct state
+                if cluster_name not in self._connection_states:
+                    self._connection_states[cluster_name] = ConnectionState(cluster_name)
+                self._connection_states[cluster_name].update_state(connected=True)
 
     def cleanup(self) -> None:
         """Cleanup all resources"""
