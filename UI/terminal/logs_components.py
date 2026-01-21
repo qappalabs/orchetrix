@@ -109,76 +109,30 @@ class LogsHeaderWidget(QWidget, ThemeAwareMixin):
 
     def _get_header_style(self):
         """Get header widget stylesheet."""
-        return f"""
-            QWidget {{
-                background-color: {StyleConstants.get_logs_header_bg()};
-                border-bottom: 1px solid {StyleConstants.get_logs_header_border()};
-            }}
-        """
+        from Styles.logs_componentsStyles import get_logs_header_widget_style
+        return get_logs_header_widget_style()
 
     def _get_pod_info_style(self):
         """Get pod info label stylesheet."""
-        return f"""
-            font-weight: bold; 
-            color: {StyleConstants.get_logs_info_color()}; 
-            font-size: 11px;
-        """
+        from Styles.logs_componentsStyles import get_pod_info_label_style
+        return get_pod_info_label_style()
 
     def _get_combo_style(self):
         """Get combo box stylesheet."""
-        return f"""
-            QComboBox {{
-                background-color: {StyleConstants.get_logs_combo_bg()};
-                border: 1px solid {StyleConstants.get_logs_combo_border()};
-                border-radius: 4px;
-                padding: 4px 8px;
-                color: white;
-                font-size: 12px;
-                min-width: 80px;
-                max-height: 24px;
-            }}
-            QComboBox::drop-down {{
-                border: none;
-                width: 20px;
-            }}
-            QComboBox::down-arrow {{
-                image: none;
-            }}
-            QComboBox QAbstractItemView {{
-                background-color: {StyleConstants.get_logs_header_bg()};
-                color: white;
-                selection-background-color: #2196F3;
-            }}
-        """
+        # Use the header widget style which includes combo styling
+        from Styles.logs_componentsStyles import get_logs_header_widget_style
+        return get_logs_header_widget_style()
 
     def _get_checkbox_style(self):
         """Get checkbox stylesheet."""
-        return """
-            QCheckBox {
-                color: white;
-                font-size: 12px;
-                padding: 2px;
-            }
-            QCheckBox::indicator {
-                width: 16px;
-                height: 16px;
-                border: 2px solid #666;
-                border-radius: 3px;
-                background: transparent;
-            }
-            QCheckBox::indicator:checked {
-                background-color: #2196F3;
-                border-color: #2196F3;
-            }
-        """
+        # Use the header widget style which includes checkbox styling
+        from Styles.logs_componentsStyles import get_logs_header_widget_style
+        return get_logs_header_widget_style()
 
     def _get_search_results_style(self):
         """Get search results label stylesheet."""
-        return f"""
-            color: {StyleConstants.get_logs_info_color()}; 
-            font-size: 10px; 
-            font-weight: bold;
-        """
+        from Styles.logs_componentsStyles import get_search_results_label_style
+        return get_search_results_label_style()
 
     def _on_theme_changed(self, theme_name):
         """Handle theme changes by updating stylesheets."""
@@ -457,33 +411,17 @@ class EnhancedLogsViewer(QWidget, ThemeAwareMixin):
 
     def _get_logs_display_style(self):
         """Get logs display stylesheet."""
-        return f"""
-            QTextEdit {{
-                background-color: {StyleConstants.get_terminal_background_color()};
-                color: {StyleConstants.get_logs_default_color()};
-                border: none;
-                selection-background-color: #264F78;
-                padding: 8px;
-            }}
-            {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
-        """
+        from Styles.logs_componentsStyles import get_logs_display_style
+        return get_logs_display_style()
 
     def _get_status_indicator_style(self, color=None):
         """Get status indicator stylesheet."""
+        from Styles.logs_componentsStyles import get_status_indicator_style_with_color, get_status_indicator_style
+        
         if color is None:
-            color = StyleConstants.get_logs_info_color()
-
-        return f"""
-            QLabel {{
-                background-color: {StyleConstants.get_logs_status_bg()};
-                color: {color};
-                font-size: 11px;
-                font-weight: bold;
-                padding: 4px 8px;
-                border-radius: 4px;
-                margin: 4px;
-            }}
-        """
+            return get_status_indicator_style()
+        else:
+            return get_status_indicator_style_with_color(color)
 
     def _on_theme_changed(self, theme_name):
         """Handle theme changes by updating stylesheets."""
