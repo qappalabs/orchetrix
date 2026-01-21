@@ -15,6 +15,7 @@ from UI.Styles import AppStyles, AppColors
 from UI.ThemeManager import get_theme_manager
 from Styles.NamespacesPageStyles import get_add_namespace_button_style
 from Utils.kubernetes_client import get_kubernetes_client
+from Services.kubernetes.api_config import APIClientConfig
 from kubernetes.client.rest import ApiException
 from kubernetes import client
 import datetime
@@ -73,7 +74,7 @@ class NamespaceOperationThread(QThread):
                 return
 
             # Create the namespace with timeout
-            self.kube_client.v1.create_namespace(body=namespace_body, _request_timeout=10)
+            self.kube_client.v1.create_namespace(body=namespace_body, _request_timeout=APIClientConfig.NAMESPACE_OPERATION_TIMEOUT)
             
             # Check for interruption after API call
             if self._stop_requested or self.isInterruptionRequested():
@@ -107,7 +108,7 @@ class NamespaceOperationThread(QThread):
                 return
 
             # Delete the namespace with timeout
-            self.kube_client.v1.delete_namespace(name=self.namespace_name, _request_timeout=10)
+            self.kube_client.v1.delete_namespace(name=self.namespace_name, _request_timeout=APIClientConfig.NAMESPACE_OPERATION_TIMEOUT)
             
             # Check for interruption after API call
             if self._stop_requested or self.isInterruptionRequested():
