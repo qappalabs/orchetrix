@@ -16,6 +16,7 @@ The analyzer discovers and maps relationships between:
 
 from PyQt6.QtCore import QThread, pyqtSignal
 from Utils.kubernetes_client import get_kubernetes_client
+from Services.kubernetes.api_config import APIClientConfig
 from kubernetes.client.rest import ApiException
 import logging
 from Utils.thread_manager import is_shutdown_requested
@@ -128,21 +129,21 @@ class AppFlowAnalyzer(QThread):
         """Find the namespace where the resource exists when 'All Namespaces' is selected"""
         try:
             if self.workload_type == "deployments":
-                resources = self.kube_client.apps_v1.list_deployment_for_all_namespaces(_request_timeout=10)
+                resources = self.kube_client.apps_v1.list_deployment_for_all_namespaces(_request_timeout=APIClientConfig.RESOURCE_LIST_TIMEOUT)
             elif self.workload_type == "statefulsets":
-                resources = self.kube_client.apps_v1.list_stateful_set_for_all_namespaces(_request_timeout=10)
+                resources = self.kube_client.apps_v1.list_stateful_set_for_all_namespaces(_request_timeout=APIClientConfig.RESOURCE_LIST_TIMEOUT)
             elif self.workload_type == "daemonsets":
-                resources = self.kube_client.apps_v1.list_daemon_set_for_all_namespaces(_request_timeout=10)
+                resources = self.kube_client.apps_v1.list_daemon_set_for_all_namespaces(_request_timeout=APIClientConfig.RESOURCE_LIST_TIMEOUT)
             elif self.workload_type == "pods":
-                resources = self.kube_client.v1.list_pod_for_all_namespaces(_request_timeout=10)
+                resources = self.kube_client.v1.list_pod_for_all_namespaces(_request_timeout=APIClientConfig.RESOURCE_LIST_TIMEOUT)
             elif self.workload_type == "replicasets":
-                resources = self.kube_client.apps_v1.list_replica_set_for_all_namespaces(_request_timeout=10)
+                resources = self.kube_client.apps_v1.list_replica_set_for_all_namespaces(_request_timeout=APIClientConfig.RESOURCE_LIST_TIMEOUT)
             elif self.workload_type == "jobs":
-                resources = self.kube_client.batch_v1.list_job_for_all_namespaces(_request_timeout=10)
+                resources = self.kube_client.batch_v1.list_job_for_all_namespaces(_request_timeout=APIClientConfig.RESOURCE_LIST_TIMEOUT)
             elif self.workload_type == "cronjobs":
-                resources = self.kube_client.batch_v1.list_cron_job_for_all_namespaces(_request_timeout=10)
+                resources = self.kube_client.batch_v1.list_cron_job_for_all_namespaces(_request_timeout=APIClientConfig.RESOURCE_LIST_TIMEOUT)
             elif self.workload_type == "replicationcontrollers":
-                resources = self.kube_client.v1.list_replication_controller_for_all_namespaces(_request_timeout=10)
+                resources = self.kube_client.v1.list_replication_controller_for_all_namespaces(_request_timeout=APIClientConfig.RESOURCE_LIST_TIMEOUT)
             else:
                 logging.error(f"Unsupported workload type for namespace search: {self.workload_type}")
                 return None
@@ -170,28 +171,28 @@ class AppFlowAnalyzer(QThread):
 
             if self.workload_type == "deployments":
                 return self.kube_client.apps_v1.read_namespaced_deployment(
-                    name=self.resource_name, namespace=self.namespace, _request_timeout=10)
+                    name=self.resource_name, namespace=self.namespace, _request_timeout=APIClientConfig.RESOURCE_LIST_TIMEOUT)
             elif self.workload_type == "statefulsets":
                 return self.kube_client.apps_v1.read_namespaced_stateful_set(
-                    name=self.resource_name, namespace=self.namespace, _request_timeout=10)
+                    name=self.resource_name, namespace=self.namespace, _request_timeout=APIClientConfig.RESOURCE_LIST_TIMEOUT)
             elif self.workload_type == "daemonsets":
                 return self.kube_client.apps_v1.read_namespaced_daemon_set(
-                    name=self.resource_name, namespace=self.namespace, _request_timeout=10)
+                    name=self.resource_name, namespace=self.namespace, _request_timeout=APIClientConfig.RESOURCE_LIST_TIMEOUT)
             elif self.workload_type == "pods":
                 return self.kube_client.v1.read_namespaced_pod(
-                    name=self.resource_name, namespace=self.namespace, _request_timeout=10)
+                    name=self.resource_name, namespace=self.namespace, _request_timeout=APIClientConfig.RESOURCE_LIST_TIMEOUT)
             elif self.workload_type == "replicasets":
                 return self.kube_client.apps_v1.read_namespaced_replica_set(
-                    name=self.resource_name, namespace=self.namespace, _request_timeout=10)
+                    name=self.resource_name, namespace=self.namespace, _request_timeout=APIClientConfig.RESOURCE_LIST_TIMEOUT)
             elif self.workload_type == "jobs":
                 return self.kube_client.batch_v1.read_namespaced_job(
-                    name=self.resource_name, namespace=self.namespace, _request_timeout=10)
+                    name=self.resource_name, namespace=self.namespace, _request_timeout=APIClientConfig.RESOURCE_LIST_TIMEOUT)
             elif self.workload_type == "cronjobs":
                 return self.kube_client.batch_v1.read_namespaced_cron_job(
-                    name=self.resource_name, namespace=self.namespace, _request_timeout=10)
+                    name=self.resource_name, namespace=self.namespace, _request_timeout=APIClientConfig.RESOURCE_LIST_TIMEOUT)
             elif self.workload_type == "replicationcontrollers":
                 return self.kube_client.v1.read_namespaced_replication_controller(
-                    name=self.resource_name, namespace=self.namespace, _request_timeout=10)
+                    name=self.resource_name, namespace=self.namespace, _request_timeout=APIClientConfig.RESOURCE_LIST_TIMEOUT)
             else:
                 logging.error(f"Unsupported workload type: {self.workload_type}")
                 return None
@@ -364,7 +365,7 @@ class AppFlowAnalyzer(QThread):
             if self.is_interrupted():
                 return services
             
-            svc_list = self.kube_client.v1.list_namespaced_service(namespace=self.namespace, _request_timeout=10)
+            svc_list = self.kube_client.v1.list_namespaced_service(namespace=self.namespace, _request_timeout=APIClientConfig.SERVICE_DISCOVERY_TIMEOUT)
             workload_labels = workload.spec.selector.match_labels if hasattr(workload.spec, 'selector') else {}
 
 
@@ -406,7 +407,7 @@ class AppFlowAnalyzer(QThread):
             if self.is_interrupted():
                 return ingresses
             
-            ing_list = self.kube_client.networking_v1.list_namespaced_ingress(namespace=self.namespace, _request_timeout=10)
+            ing_list = self.kube_client.networking_v1.list_namespaced_ingress(namespace=self.namespace, _request_timeout=APIClientConfig.SERVICE_DISCOVERY_TIMEOUT)
             service_names = [svc["name"] for svc in services]
 
             for ingress in ing_list.items:
@@ -437,7 +438,7 @@ class AppFlowAnalyzer(QThread):
             if self.is_interrupted():
                 return ingresses
             
-            ing_list = self.kube_client.networking_v1.list_namespaced_ingress(namespace=self.namespace, _request_timeout=10)
+            ing_list = self.kube_client.networking_v1.list_namespaced_ingress(namespace=self.namespace, _request_timeout=APIClientConfig.SERVICE_DISCOVERY_TIMEOUT)
 
             for ingress in ing_list.items:
                 if self.is_interrupted():
@@ -485,7 +486,7 @@ class AppFlowAnalyzer(QThread):
             if self.is_interrupted():
                 return pods
             
-            pod_list = self.kube_client.v1.list_namespaced_pod(namespace=self.namespace, _request_timeout=10)
+            pod_list = self.kube_client.v1.list_namespaced_pod(namespace=self.namespace, _request_timeout=APIClientConfig.SERVICE_DISCOVERY_TIMEOUT)
             workload_labels = workload.spec.selector.match_labels if hasattr(workload.spec, 'selector') else {}
 
             for pod in pod_list.items:
@@ -566,7 +567,7 @@ class AppFlowAnalyzer(QThread):
                 if self.is_interrupted():
                     return configs
                 
-                cm_list = self.kube_client.v1.list_namespaced_config_map(namespace=self.namespace, _request_timeout=10)
+                cm_list = self.kube_client.v1.list_namespaced_config_map(namespace=self.namespace, _request_timeout=APIClientConfig.SERVICE_DISCOVERY_TIMEOUT)
                 for cm in cm_list.items:
                     if self.is_interrupted():
                         break
@@ -585,7 +586,7 @@ class AppFlowAnalyzer(QThread):
                 if self.is_interrupted():
                     return configs
                 
-                secret_list = self.kube_client.v1.list_namespaced_secret(namespace=self.namespace, _request_timeout=10)
+                secret_list = self.kube_client.v1.list_namespaced_secret(namespace=self.namespace, _request_timeout=APIClientConfig.SERVICE_DISCOVERY_TIMEOUT)
                 for secret in secret_list.items:
                     if self.is_interrupted():
                         break
@@ -606,7 +607,7 @@ class AppFlowAnalyzer(QThread):
                 if self.is_interrupted():
                     return configs
                 
-                pvc_list = self.kube_client.v1.list_namespaced_persistent_volume_claim(namespace=self.namespace, _request_timeout=10)
+                pvc_list = self.kube_client.v1.list_namespaced_persistent_volume_claim(namespace=self.namespace, _request_timeout=APIClientConfig.SERVICE_DISCOVERY_TIMEOUT)
                 for pvc in pvc_list.items:
                     if self.is_interrupted():
                         break
@@ -641,7 +642,7 @@ class AppFlowAnalyzer(QThread):
             if self.is_interrupted():
                 return services
             
-            svc_list = self.kube_client.v1.list_namespaced_service(namespace=self.namespace, _request_timeout=10)
+            svc_list = self.kube_client.v1.list_namespaced_service(namespace=self.namespace, _request_timeout=APIClientConfig.SERVICE_DISCOVERY_TIMEOUT)
             pod_labels = pod.metadata.labels or {}
 
             for service in svc_list.items:
