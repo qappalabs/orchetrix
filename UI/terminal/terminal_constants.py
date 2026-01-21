@@ -105,6 +105,78 @@ class StyleConstants:
         """Get SSH terminal text color - always light gray for readability"""
         return StyleConstants._SSH_TEXT_COLOR
 
+    # Logs-specific colors - intentionally hardcoded for consistent log feedback
+    _LOGS_ERROR_COLOR = "#FF6B68"  # Red for error logs
+    _LOGS_WARNING_COLOR = "#FFA500"  # Orange for warning logs
+    _LOGS_INFO_COLOR = "#4CAF50"  # Green for info logs
+    _LOGS_DEBUG_COLOR = "#9CA3AF"  # Gray for debug logs
+    _LOGS_DEFAULT_COLOR = "#E0E0E0"  # Default log text color
+    _LOGS_HEADER_BG = "#2D2D2D"  # Dark background for logs header
+    _LOGS_HEADER_BORDER = "#3D3D3D"  # Border color for logs header
+    _LOGS_COMBO_BG = "#1E1E1E"  # Combo box background
+    _LOGS_COMBO_BORDER = "#555555"  # Combo box border
+    _LOGS_STATUS_BG = "rgba(45, 45, 45, 0.8)"  # Semi-transparent status background
+    _LOGS_HIGHLIGHT_BG = "#FFFF00"  # Yellow highlight background
+    _LOGS_HIGHLIGHT_TEXT = "#000000"  # Black highlight text
+
+    @staticmethod
+    def get_logs_error_color():
+        """Get logs error color - always red for error messages"""
+        return StyleConstants._LOGS_ERROR_COLOR
+
+    @staticmethod
+    def get_logs_warning_color():
+        """Get logs warning color - always orange for warning messages"""
+        return StyleConstants._LOGS_WARNING_COLOR
+
+    @staticmethod
+    def get_logs_info_color():
+        """Get logs info color - always green for info messages"""
+        return StyleConstants._LOGS_INFO_COLOR
+
+    @staticmethod
+    def get_logs_debug_color():
+        """Get logs debug color - always gray for debug messages"""
+        return StyleConstants._LOGS_DEBUG_COLOR
+
+    @staticmethod
+    def get_logs_default_color():
+        """Get logs default text color - always light gray for readability"""
+        return StyleConstants._LOGS_DEFAULT_COLOR
+
+    @staticmethod
+    def get_logs_header_bg():
+        """Get logs header background color"""
+        return StyleConstants._LOGS_HEADER_BG
+
+    @staticmethod
+    def get_logs_header_border():
+        """Get logs header border color"""
+        return StyleConstants._LOGS_HEADER_BORDER
+
+    @staticmethod
+    def get_logs_combo_bg():
+        """Get logs combo box background color"""
+        return StyleConstants._LOGS_COMBO_BG
+
+    @staticmethod
+    def get_logs_combo_border():
+        """Get logs combo box border color"""
+        return StyleConstants._LOGS_COMBO_BORDER
+
+    @staticmethod
+    def get_logs_status_bg():
+        """Get logs status background color"""
+        return StyleConstants._LOGS_STATUS_BG
+
+    @staticmethod
+    def get_logs_highlight_colors():
+        """Get logs search highlight colors"""
+        return {
+            "background": StyleConstants._LOGS_HIGHLIGHT_BG,
+            "foreground": StyleConstants._LOGS_HIGHLIGHT_TEXT,
+        }
+
     # Non-terminal UI elements - use theme-aware AppColors for proper theme switching
     TERMINAL_WRAPPER = f"""
         QWidget#terminal_wrapper {{
