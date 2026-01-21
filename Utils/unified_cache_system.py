@@ -54,7 +54,7 @@ class UnifiedCache:
         expired_keys = []
 
         for resource_type, cache_data in self._cache.items():
-            for cache_key in cache_data.keys():
+            for cache_key in list(cache_data.keys()):  # Use list() to allow modification during iteration
                 if (resource_type in self._metadata and
                     cache_key in self._metadata[resource_type]):
                     metadata = self._metadata[resource_type][cache_key]
@@ -68,6 +68,28 @@ class UnifiedCache:
 
         if expired_keys:
             logging.debug(f"Cleaned up {len(expired_keys)} expired cache entries")
+
+    def clear_empty_entries(self) -> int:
+        """Clear all empty cache entries - call on startup or theme change to remove stale data"""
+        empty_keys = []
+
+        for resource_type, cache_data in self._cache.items():
+            for cache_key, data in list(cache_data.items()):
+                # Check if data is empty (None, empty list, empty dict)
+                if data is None or (isinstance(data, (list, dict)) and not data):
+                    empty_keys.append((resource_type, cache_key))
+
+        # Remove empty entries
+        for resource_type, cache_key in empty_keys:
+            if resource_type in self._cache and cache_key in self._cache[resource_type]:
+                del self._cache[resource_type][cache_key]
+            if resource_type in self._metadata and cache_key in self._metadata[resource_type]:
+                del self._metadata[resource_type][cache_key]
+
+        if empty_keys:
+            logging.info(f"Cleared {len(empty_keys)} empty cache entries: {[f'{rt}:{ck}' for rt, ck in empty_keys[:5]]}{'...' if len(empty_keys) > 5 else ''}")
+
+        return len(empty_keys)
 
 
 # Global cache instance
