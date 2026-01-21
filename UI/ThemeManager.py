@@ -9,7 +9,7 @@ class ThemeManager(QObject):
         self._current_theme = "Light"  # Match preferences dropdown values
         self._themes = {
             "Dark": self._get_dark_theme(),
-            "Light": self._get_light_theme()
+            "Light": self._get_light_theme(),
         }
 
     def get_current_theme(self):
@@ -22,6 +22,27 @@ class ThemeManager(QObject):
     def set_theme(self, theme_name: str):
         if theme_name in self._themes and self._current_theme != theme_name:
             self._current_theme = theme_name
+
+            # Clear empty cache entries on theme change to prevent stale data issues
+            # This fixes the bug where theme change could cause pages to show empty data
+            try:
+                from Utils.unified_cache_system import get_unified_cache
+
+                cache = get_unified_cache()
+                cleared = cache.clear_empty_entries()
+                if cleared > 0:
+                    import logging
+
+                    logging.debug(
+                        f"ThemeManager: Cleared {cleared} empty cache entries on theme change"
+                    )
+            except Exception as e:
+                import logging
+
+                logging.debug(
+                    f"ThemeManager: Could not clear cache on theme change: {e}"
+                )
+
             self.theme_changed.emit(theme_name)
 
     def apply_theme_to_widget(self, widget, component_type="default"):
@@ -63,7 +84,16 @@ class BaseTheme:
         """
 
     @staticmethod
-    def _table_template(bg_color, text_color, border_color, border_light, header_bg, header_text, header_hover_bg):
+    def _table_template(
+        bg_color,
+        text_color,
+        border_color,
+        border_light,
+        header_bg,
+        header_text,
+        header_hover_bg,
+        hover_bg_color,
+    ):
         return f"""
             QTableWidget {{
                 background-color: {bg_color};
@@ -72,7 +102,7 @@ class BaseTheme:
                 gridline-color: {border_light};
             }}
             QTableWidget::item:hover {{
-                background-color: rgba(53, 132, 228, 0.10);
+                background-color: {hover_bg_color};
             }}
             QHeaderView::section {{
                 background-color: {header_bg};
@@ -360,7 +390,9 @@ class BaseTheme:
         """
 
     @staticmethod
-    def _tree_widget_template(bg_color, text_color, border_color, header_bg, hover_bg, selected_bg):
+    def _tree_widget_template(
+        bg_color, text_color, border_color, header_bg, hover_bg, selected_bg
+    ):
         return f"""
             QTreeWidget {{
                 background-color: {bg_color};
@@ -531,7 +563,9 @@ class BaseTheme:
         """
 
     @staticmethod
-    def _terminal_tab_button_template(bg_color, border_color, hover_bg, checked_bg, accent_color):
+    def _terminal_tab_button_template(
+        bg_color, border_color, hover_bg, checked_bg, accent_color
+    ):
         return f"""
             QPushButton {{
                 background-color: {bg_color};
@@ -662,7 +696,16 @@ class BaseTheme:
         """
 
     @staticmethod
-    def _events_table_template(bg_color, text_color, header_bg, hover_bg, selected_bg):
+    def _events_table_template(
+        bg_color,
+        text_color,
+        header_bg,
+        hover_bg,
+        selected_bg,
+        scrollbar_handle,
+        scrollbar_hover,
+        scrollbar_pressed,
+    ):
         return f"""
             QTableWidget {{
                 background-color: {bg_color};
@@ -682,11 +725,76 @@ class BaseTheme:
             QTableWidget::item:selected {{
                 background-color: {selected_bg};
             }}
-            {ThemeManager._scrollbar_template('#6B7280', '#9CA3AF', '#4B5563')}
+            QScrollBar:vertical {{
+                background-color: transparent;
+                width: 12px;
+                margin: 0px;
+                border-radius: 4px;
+            }}
+            QScrollBar::handle:vertical {{
+                background-color: {scrollbar_handle};
+                min-height: 30px;
+                border-radius: 4px;
+                margin: 2px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background-color: {scrollbar_hover};
+            }}
+            QScrollBar::handle:vertical:pressed {{
+                background-color: {scrollbar_pressed};
+            }}
+            QScrollBar::add-line:vertical,
+            QScrollBar::sub-line:vertical {{
+                height: 0px;
+                width: 0px;
+                background: none;
+            }}
+            QScrollBar::add-page:vertical,
+            QScrollBar::sub-page:vertical {{
+                background: none;
+            }}
+            QScrollBar:horizontal {{
+                background-color: transparent;
+                height: 12px;
+                margin: 0px;
+                border-radius: 4px;
+            }}
+            QScrollBar::handle:horizontal {{
+                background-color: {scrollbar_handle};
+                min-width: 30px;
+                border-radius: 4px;
+                margin: 2px;
+            }}
+            QScrollBar::handle:horizontal:hover {{
+                background-color: {scrollbar_hover};
+            }}
+            QScrollBar::handle:horizontal:pressed {{
+                background-color: {scrollbar_pressed};
+            }}
+            QScrollBar::add-line:horizontal,
+            QScrollBar::sub-line:horizontal {{
+                height: 0px;
+                width: 0px;
+                background: none;
+            }}
+            QScrollBar::add-page:horizontal,
+            QScrollBar::sub-page:horizontal {{
+                background: none;
+            }}
         """
 
     @staticmethod
-    def _releases_table_template(bg_color, text_color, header_bg, hover_bg, selected_bg, border_color):
+    def _releases_table_template(
+        bg_color,
+        text_color,
+        header_bg,
+        hover_bg,
+        selected_bg,
+        border_color,
+        scrollbar_handle,
+        scrollbar_hover,
+        scrollbar_pressed,
+    ):
         return f"""
             QTableWidget {{
                 background-color: {bg_color};
@@ -711,7 +819,62 @@ class BaseTheme:
                 font-size: 12px;
                 text-align: center;
             }}
-            {ThemeManager._scrollbar_template('#6B7280', '#9CA3AF', '#4B5563')}
+            QScrollBar:vertical {{
+                background-color: transparent;
+                width: 12px;
+                margin: 0px;
+                border-radius: 4px;
+            }}
+            QScrollBar::handle:vertical {{
+                background-color: {scrollbar_handle};
+                min-height: 30px;
+                border-radius: 4px;
+                margin: 2px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background-color: {scrollbar_hover};
+            }}
+            QScrollBar::handle:vertical:pressed {{
+                background-color: {scrollbar_pressed};
+            }}
+            QScrollBar::add-line:vertical,
+            QScrollBar::sub-line:vertical {{
+                height: 0px;
+                width: 0px;
+                background: none;
+            }}
+            QScrollBar::add-page:vertical,
+            QScrollBar::sub-page:vertical {{
+                background: none;
+            }}
+            QScrollBar:horizontal {{
+                background-color: transparent;
+                height: 12px;
+                margin: 0px;
+                border-radius: 4px;
+            }}
+            QScrollBar::handle:horizontal {{
+                background-color: {scrollbar_handle};
+                min-width: 30px;
+                border-radius: 4px;
+                margin: 2px;
+            }}
+            QScrollBar::handle:horizontal:hover {{
+                background-color: {scrollbar_hover};
+            }}
+            QScrollBar::handle:horizontal:pressed {{
+                background-color: {scrollbar_pressed};
+            }}
+            QScrollBar::add-line:horizontal,
+            QScrollBar::sub-line:horizontal {{
+                height: 0px;
+                width: 0px;
+                background: none;
+            }}
+            QScrollBar::add-page:horizontal,
+            QScrollBar::sub-page:horizontal {{
+                background: none;
+            }}
         """
 
     @staticmethod
@@ -783,7 +946,9 @@ class BaseTheme:
         """
 
     @staticmethod
-    def _detail_page_back_button_template(bg_color, text_color, border_color, hover_bg, hover_text):
+    def _detail_page_back_button_template(
+        bg_color, text_color, border_color, hover_bg, hover_text
+    ):
         return f"""
             QPushButton {{
                 background-color: {bg_color};
@@ -812,6 +977,7 @@ class BaseTheme:
 class DarkTheme(BaseTheme):
     def __init__(self):
         from UI.Styles import AppColors, AppStyles
+
         self.colors = AppColors
         self.styles = AppStyles
 
@@ -899,8 +1065,7 @@ class DarkTheme(BaseTheme):
 
     def get_graph_frame_style(self):
         return self._graph_frame_template(
-            bg_color=self.colors.CARD_BG,
-            border_color=self.colors.BORDER_COLOR
+            bg_color=self.colors.CARD_BG, border_color=self.colors.BORDER_COLOR
         )
 
     def get_content_area_style(self):
@@ -952,24 +1117,13 @@ class DarkTheme(BaseTheme):
         return self.styles.SUBSECTION_HEADER_STYLE
 
     def get_graph_title_style(self):
-        return self._graph_title_template(
-            text_color=self.colors.TEXT_LIGHT
-        )
+        return self._graph_title_template(text_color=self.colors.TEXT_LIGHT)
 
     def get_detail_page_back_button_style(self):
         return self.styles.DETAIL_PAGE_BACK_BUTTON_STYLE
 
     def get_status_scroll_style(self):
         return self.styles.STATUS_SCROLL_STYLE
-
-    def get_placeholder_style(self):
-        return self.styles.PLACEHOLDER_STYLE
-
-    def get_back_button_style(self):
-        return self.styles.BACK_BUTTON_STYLE
-
-    def get_empty_state_style(self):
-        return self.styles.EMPTY_STATE_STYLE
 
     def get_main_style(self):
         return self.styles.MAIN_STYLE
@@ -979,45 +1133,45 @@ class LightColors:
     # Multi-platform light theme (semantically correct names)
 
     # Base colors - lightest to darkest
-    BG_LIGHTEST = "#ffffff"   # Pure white
-    BG_LIGHT = "#f8f8f8"      # Light gray
-    BG_MEDIUM = "#ffffff"     # Main background
-    BG_DARK = "#f1f1f1"       # Darker gray
-    BG_DARKER = "#e8e8e8"     # Darkest gray
+    BG_LIGHTEST = "#ffffff"  # Pure white
+    BG_LIGHT = "#f8f8f8"  # Light gray
+    BG_MEDIUM = "#ffffff"  # Main background
+    BG_DARK = "#f1f1f1"  # Darker gray
+    BG_DARKER = "#e8e8e8"  # Darkest gray
 
     # Semantic backgrounds
-    BG_SIDEBAR = "#F8F8F8"    # Sidebar background
-    BG_HEADER = "#F8F8F8"     # Header background
-    CARD_BG = "#F8F8F8"       # Card/Panel backgrounds
-    HEADER_BG = "#F8F8F8"     # Header background (alias)
+    BG_SIDEBAR = "#F8F8F8"  # Sidebar background
+    BG_HEADER = "#F8F8F8"  # Header background
+    CARD_BG = "#F8F8F8"  # Card/Panel backgrounds
+    HEADER_BG = "#F8F8F8"  # Header background (alias)
     TAB_INACTIVE = "#E8E8E8"  # Inactive tab background
     TABLE_HEADER = "#E8E8E8"  # Table header background
 
     # Text colors - dark on light backgrounds
-    TEXT_DARK = "#24292F"     # Primary dark text
-    TEXT_LIGHT = "#24292F"    # Alias for compatibility
-    TEXT_SECONDARY = "#656D76" # Muted text
-    TEXT_SUBTLE = "#8B949E"   # Very muted text
-    TEXT_LINK = "#0366D6"     # Link text
-    TEXT_DANGER = "#DC3545"   # Danger text
-    TEXT_TABLE = "#24292F"    # Table text
+    TEXT_DARK = "#24292F"  # Primary dark text
+    TEXT_LIGHT = "#24292F"  # Alias for compatibility
+    TEXT_SECONDARY = "#656D76"  # Muted text
+    TEXT_SUBTLE = "#8B949E"  # Very muted text
+    TEXT_LINK = "#0366D6"  # Link text
+    TEXT_DANGER = "#DC3545"  # Danger text
+    TEXT_TABLE = "#24292F"  # Table text
     TEXT_SUCCESS = "#28A745"  # Success text
     TEXT_WARNING = "#DC3545"  # Warning text
 
     # Orchetrix accent colors (consistent across themes)
-    ACCENT_BLUE = "#0095ff"   # Original Orchetrix blue
+    ACCENT_BLUE = "#0095ff"  # Original Orchetrix blue
     ACCENT_BLUE_HOVER = "#0086e7"
     ACCENT_BLUE_PRESSED = "#0063b1"
     ACCENT_GREEN = "#4CAF50"  # Material Design green (same as dark theme)
-    ACCENT_ORANGE = "#FF5733" # Original orange
-    ACCENT_RED = "#DC3545"    # Light-friendly red
-    ACCENT_PURPLE = "#8C33FF" # Purple accent
+    ACCENT_ORANGE = "#FF5733"  # Original orange
+    ACCENT_RED = "#DC3545"  # Light-friendly red
+    ACCENT_PURPLE = "#8C33FF"  # Purple accent
 
     # Borders - light to dark
     BORDER_LIGHT = "#E1E4E8"  # Lightest borders
     BORDER_COLOR = "#D1D5DA"  # Standard borders
-    BORDER_DARK = "#C6CBD1"   # Darkest borders
-    BORDER_SUBTLE = "#F0F0F0" # Subtle borders (lighter than standard)
+    BORDER_DARK = "#C6CBD1"  # Darkest borders
+    BORDER_SUBTLE = "#F0F0F0"  # Subtle borders (lighter than standard)
 
     # Hover states
     HOVER_BG = "rgba(0, 0, 0, 0.05)"  # Light hover background
@@ -1040,6 +1194,21 @@ class LightColors:
     STATUS_INFO = "#2196F3"  # Blue - for informational status
     STATUS_ERROR = "#DC3545"  # Error red
 
+    # Text on accent colors
+    TEXT_ON_ACCENT = "#ffffff"  # White text on accent backgrounds
+
+    # Button colors
+    BUTTON_BG = "#F8F8F8"  # Light button background
+    BUTTON_TEXT = "#24292F"  # Dark text on light buttons
+    BUTTON_HOVER_BG = "#E1E4E8"  # Light hover background
+    BUTTON_DISABLED_BG = "#F1F1F1"  # Disabled button background
+    BUTTON_DISABLED_TEXT = "#8B949E"  # Disabled button text
+
+    # Scrollbar colors
+    SCROLLBAR_HANDLE = "#C6CBD1"  # Scrollbar handle color
+    SCROLLBAR_HOVER = "#656D76"  # Scrollbar hover color
+    SCROLLBAR_PRESSED = "#24292F"  # Scrollbar pressed color
+
 
 class LightTheme(BaseTheme):
     def __init__(self):
@@ -1050,7 +1219,7 @@ class LightTheme(BaseTheme):
         return self._button_template(
             bg_color=self.colors.ACCENT_BLUE,
             text_color=self.colors.BG_LIGHTEST,
-            hover_color=self.colors.ACCENT_BLUE_HOVER
+            hover_color=self.colors.ACCENT_BLUE_HOVER,
         )
 
     def get_table_style(self):
@@ -1061,14 +1230,14 @@ class LightTheme(BaseTheme):
             border_light=self.colors.BORDER_LIGHT,
             header_bg=self.colors.TABLE_HEADER,
             header_text=self.colors.TEXT_SECONDARY,
-            header_hover_bg=self.colors.BG_MEDIUM
+            header_hover_bg=self.colors.BG_MEDIUM,
+            hover_bg_color=self.colors.HOVER_BG,
         )
 
     def get_default_style(self):
         # Use shared template, inject light theme colors
         return self._widget_template(
-            bg_color=self.colors.BG_MEDIUM,
-            text_color=self.colors.TEXT_DARK
+            bg_color=self.colors.BG_MEDIUM, text_color=self.colors.TEXT_DARK
         )
 
     def get_menu_style(self):
@@ -1077,7 +1246,7 @@ class LightTheme(BaseTheme):
             bg_color=self.colors.BG_LIGHTEST,
             border_color=self.colors.BORDER_COLOR,
             text_color=self.colors.TEXT_DARK,
-            selected_bg="rgba(53, 132, 228, 0.15)"
+            selected_bg=self.colors.SELECTED_BG,
         )
 
     def get_scrollbar_style(self):
@@ -1085,7 +1254,7 @@ class LightTheme(BaseTheme):
         return self._scrollbar_template(
             handle_color=self.colors.BORDER_DARK,
             handle_hover=self.colors.TEXT_SECONDARY,
-            handle_pressed=self.colors.TEXT_DARK
+            handle_pressed=self.colors.TEXT_DARK,
         )
 
     def get_checkbox_style(self):
@@ -1094,7 +1263,7 @@ class LightTheme(BaseTheme):
             border_color=self.colors.TEXT_SECONDARY,
             checked_bg=self.colors.ACCENT_BLUE,
             checked_border=self.colors.ACCENT_BLUE,
-            hover_border=self.colors.TEXT_DARK
+            hover_border=self.colors.TEXT_DARK,
         )
 
     def get_input_style(self):
@@ -1102,7 +1271,7 @@ class LightTheme(BaseTheme):
         return self._input_template(
             bg_color=self.colors.BG_LIGHTEST,
             border_color=self.colors.BORDER_COLOR,
-            text_color=self.colors.TEXT_DARK
+            text_color=self.colors.TEXT_DARK,
         )
 
     def get_dropdown_style(self):
@@ -1111,7 +1280,7 @@ class LightTheme(BaseTheme):
             bg_color=self.colors.BG_LIGHTEST,
             border_color=self.colors.BORDER_COLOR,
             text_color=self.colors.TEXT_DARK,
-            hover_bg=self.colors.BG_LIGHT
+            hover_bg=self.colors.BG_LIGHT,
         )
 
     def get_button_secondary_style(self):
@@ -1120,7 +1289,7 @@ class LightTheme(BaseTheme):
             bg_color=self.colors.BG_LIGHTEST,
             text_color=self.colors.TEXT_SECONDARY,
             border_color=self.colors.ACCENT_BLUE,
-            hover_bg=self.colors.BG_LIGHT
+            hover_bg=self.colors.BG_LIGHT,
         )
 
     def get_action_button_style(self):
@@ -1128,21 +1297,19 @@ class LightTheme(BaseTheme):
         return self._action_button_template(
             bg_color="transparent",
             hover_bg=self.colors.HOVER_BG,
-            pressed_bg=self.colors.HOVER_BG_DARKER
+            pressed_bg=self.colors.HOVER_BG_DARKER,
         )
 
     def get_header_style(self):
         # VS Code Light header
         return self._header_template(
-            bg_color=self.colors.BG_HEADER,
-            border_color=self.colors.BORDER_COLOR
+            bg_color=self.colors.BG_HEADER, border_color=self.colors.BORDER_COLOR
         )
 
     def get_progress_bar_style(self):
         # Light theme progress bar
         return self._progress_bar_template(
-            bg_color=self.colors.BG_DARK,
-            chunk_color=self.colors.ACCENT_BLUE
+            bg_color=self.colors.BG_DARK, chunk_color=self.colors.ACCENT_BLUE
         )
 
     def get_tooltip_style(self):
@@ -1150,7 +1317,7 @@ class LightTheme(BaseTheme):
         return self._tooltip_template(
             bg_color=self.colors.BG_LIGHTEST,
             text_color=self.colors.TEXT_DARK,
-            border_color=self.colors.BORDER_COLOR
+            border_color=self.colors.BORDER_COLOR,
         )
 
     def get_search_bar_style(self):
@@ -1159,55 +1326,46 @@ class LightTheme(BaseTheme):
             bg_color=self.colors.BG_DARK,
             text_color=self.colors.TEXT_DARK,
             border_color=self.colors.BORDER_COLOR,
-            focus_border=self.colors.BG_DARKER
+            focus_border=self.colors.BG_DARKER,
         )
 
     def get_title_style(self):
         # Light theme title
         return self._title_style_template(
-            text_color=self.colors.TEXT_DARK,
-            font_size="20px"
+            text_color=self.colors.TEXT_DARK, font_size="20px"
         )
 
     def get_divider_style(self):
         # Light theme divider
-        return self._divider_template(
-            bg_color=self.colors.BORDER_COLOR
-        )
+        return self._divider_template(bg_color=self.colors.BORDER_COLOR)
 
     def get_delete_button_style(self):
         # Light theme delete button
         return self._delete_button_template(
             bg_color="transparent",
             text_color=self.colors.TEXT_SECONDARY,
-            hover_color=self.colors.ACCENT_RED
+            hover_color=self.colors.ACCENT_RED,
         )
 
     def get_empty_label_style(self):
         # Light theme empty label
         return self._empty_label_template(
-            text_color=self.colors.TEXT_SUBTLE,
-            bg_color="transparent"
+            text_color=self.colors.TEXT_SUBTLE, bg_color="transparent"
         )
 
     def get_text_style(self):
         # Light theme text
         return self._text_style_template(
-            text_color=self.colors.TEXT_DARK,
-            font_size="14px"
+            text_color=self.colors.TEXT_DARK, font_size="14px"
         )
 
     def get_description_style(self):
         # Light theme description
-        return self._description_style_template(
-            text_color=self.colors.TEXT_SUBTLE
-        )
+        return self._description_style_template(text_color=self.colors.TEXT_SUBTLE)
 
     def get_placeholder_style(self):
         # Light theme placeholder
-        return self._placeholder_template(
-            text_color=self.colors.TEXT_SUBTLE
-        )
+        return self._placeholder_template(text_color=self.colors.TEXT_SUBTLE)
 
     def get_back_button_style(self):
         # Light theme back button
@@ -1216,7 +1374,7 @@ class LightTheme(BaseTheme):
             text_color=self.colors.TEXT_SECONDARY,
             border_color=self.colors.BORDER_COLOR,
             hover_bg=self.colors.BG_DARK,
-            hover_text=self.colors.TEXT_DARK
+            hover_text=self.colors.TEXT_DARK,
         )
 
     def get_empty_state_style(self):
@@ -1224,7 +1382,7 @@ class LightTheme(BaseTheme):
         return self._empty_state_template(
             bg_color=self.colors.CARD_BG,
             text_color=self.colors.TEXT_SECONDARY,
-            border_color=self.colors.BORDER_COLOR
+            border_color=self.colors.BORDER_COLOR,
         )
 
     def get_terminal_textedit_style(self):
@@ -1232,21 +1390,19 @@ class LightTheme(BaseTheme):
         return self._terminal_textedit_template(
             bg_color=self.colors.BG_LIGHTEST,
             text_color=self.colors.TEXT_DARK,
-            selection_bg=self.colors.SELECTED_BG
+            selection_bg=self.colors.SELECTED_BG,
         )
 
     def get_terminal_wrapper_style(self):
         # GitHub Light terminal wrapper
         return self._terminal_wrapper_template(
-            bg_color=self.colors.BG_LIGHTEST,
-            border_color=self.colors.BORDER_COLOR
+            bg_color=self.colors.BG_LIGHTEST, border_color=self.colors.BORDER_COLOR
         )
 
     def get_terminal_header_style(self):
         # GitHub Light terminal header
         return self._terminal_header_template(
-            bg_color=self.colors.BG_LIGHTEST,
-            border_color=self.colors.BORDER_COLOR
+            bg_color=self.colors.BG_LIGHTEST, border_color=self.colors.BORDER_COLOR
         )
 
     def get_terminal_tab_button_style(self):
@@ -1256,68 +1412,57 @@ class LightTheme(BaseTheme):
             border_color=self.colors.BORDER_COLOR,
             hover_bg=self.colors.HOVER_BG,
             checked_bg=self.colors.BG_LIGHTEST,
-            accent_color=self.colors.ACCENT_BLUE
+            accent_color=self.colors.ACCENT_BLUE,
         )
 
     def get_graph_frame_style(self):
         # VS Code Light graph frame
         return self._graph_frame_template(
-            bg_color=self.colors.CARD_BG,
-            border_color=self.colors.BORDER_COLOR
+            bg_color=self.colors.CARD_BG, border_color=self.colors.BORDER_COLOR
         )
 
     def get_content_area_style(self):
         # VS Code Light content area
-        return self._content_area_template(
-            bg_color=self.colors.BG_MEDIUM
-        )
+        return self._content_area_template(bg_color=self.colors.BG_MEDIUM)
 
     def get_top_bar_style(self):
         # VS Code Light top bar
         return self._top_bar_template(
-            bg_color=self.colors.BG_MEDIUM,
-            border_color=self.colors.BORDER_COLOR
+            bg_color=self.colors.BG_MEDIUM, border_color=self.colors.BORDER_COLOR
         )
 
     def get_focus_style(self):
         # Light theme focus
-        return self._focus_style_template(
-            accent_color=self.colors.ACCENT_BLUE
-        )
+        return self._focus_style_template(accent_color=self.colors.ACCENT_BLUE)
 
     def get_synced_item_style(self):
         # Light theme synced item
         return self._synced_item_template(
-            bg_color=self.colors.BG_LIGHT,
-            text_color=self.colors.TEXT_DARK
+            bg_color=self.colors.BG_LIGHT, text_color=self.colors.TEXT_DARK
         )
 
     def get_status_text_style(self):
         # Light theme status text
         return self._status_text_template(
-            text_color=self.colors.TEXT_SUBTLE,
-            font_size="12px"
+            text_color=self.colors.TEXT_SUBTLE, font_size="12px"
         )
 
     def get_detail_page_style(self):
         # VS Code Light detail page
         return self._detail_page_style_template(
-            bg_color=self.colors.BG_SIDEBAR,
-            border_color=self.colors.BORDER_COLOR
+            bg_color=self.colors.BG_SIDEBAR, border_color=self.colors.BORDER_COLOR
         )
 
     def get_detail_page_header_style(self):
         # VS Code Light detail page header
         return self._detail_page_header_template(
-            bg_color=self.colors.BG_HEADER,
-            border_color=self.colors.BORDER_COLOR
+            bg_color=self.colors.BG_HEADER, border_color=self.colors.BORDER_COLOR
         )
 
     def get_detail_page_yaml_style(self):
         # Light theme YAML editor
         return self._detail_page_yaml_template(
-            bg_color=self.colors.BG_SIDEBAR,
-            text_color=self.colors.TEXT_DARK
+            bg_color=self.colors.BG_SIDEBAR, text_color=self.colors.TEXT_DARK
         )
 
     def get_nav_menu_dropdown_style(self):
@@ -1326,7 +1471,7 @@ class LightTheme(BaseTheme):
             bg_color=self.colors.BG_LIGHTEST,
             border_color=self.colors.BORDER_DARK,
             text_color=self.colors.TEXT_DARK,
-            selected_bg=self.colors.SELECTED_BG
+            selected_bg=self.colors.SELECTED_BG,
         )
 
     def get_events_table_style(self):
@@ -1336,7 +1481,10 @@ class LightTheme(BaseTheme):
             text_color=self.colors.TEXT_DARK,
             header_bg=self.colors.BG_LIGHT,
             hover_bg=self.colors.HOVER_BG,
-            selected_bg=self.colors.SELECTED_BG
+            selected_bg=self.colors.SELECTED_BG,
+            scrollbar_handle=self.colors.SCROLLBAR_HANDLE,
+            scrollbar_hover=self.colors.SCROLLBAR_HOVER,
+            scrollbar_pressed=self.colors.SCROLLBAR_PRESSED,
         )
 
     def get_releases_table_style(self):
@@ -1347,7 +1495,10 @@ class LightTheme(BaseTheme):
             header_bg=self.colors.BG_LIGHT,
             hover_bg=self.colors.HOVER_BG,
             selected_bg=self.colors.SELECTED_BG,
-            border_color=self.colors.BORDER_COLOR
+            border_color=self.colors.BORDER_COLOR,
+            scrollbar_handle=self.colors.SCROLLBAR_HANDLE,
+            scrollbar_hover=self.colors.SCROLLBAR_HOVER,
+            scrollbar_pressed=self.colors.SCROLLBAR_PRESSED,
         )
 
     def get_cluster_status_box_style(self):
@@ -1355,38 +1506,28 @@ class LightTheme(BaseTheme):
         return self._cluster_status_box_template(
             bg_color=self.colors.BG_LIGHT,
             hover_bg=self.colors.BG_DARK,
-            hover_border=self.colors.BORDER_DARK
+            hover_border=self.colors.BORDER_DARK,
         )
 
     def get_cluster_chart_panel_style(self):
         # VS Code Light cluster chart panel
-        return self._cluster_chart_panel_template(
-            bg_color=self.colors.BG_SIDEBAR
-        )
+        return self._cluster_chart_panel_template(bg_color=self.colors.BG_SIDEBAR)
 
     def get_items_count_style(self):
         # Light theme items count
-        return self._items_count_template(
-            text_color=self.colors.TEXT_SUBTLE
-        )
+        return self._items_count_template(text_color=self.colors.TEXT_SUBTLE)
 
     def get_section_header_style(self):
         # Light theme section header
-        return self._section_header_template(
-            text_color=self.colors.TEXT_DARK
-        )
+        return self._section_header_template(text_color=self.colors.TEXT_DARK)
 
     def get_subsection_header_style(self):
         # Light theme subsection header
-        return self._subsection_header_template(
-            text_color=self.colors.TEXT_SUBTLE
-        )
+        return self._subsection_header_template(text_color=self.colors.TEXT_SUBTLE)
 
     def get_graph_title_style(self):
         # Light theme graph title
-        return self._graph_title_template(
-            text_color=self.colors.TEXT_DARK
-        )
+        return self._graph_title_template(text_color=self.colors.TEXT_DARK)
 
     def get_detail_page_back_button_style(self):
         # Light theme detail page back button
@@ -1395,14 +1536,12 @@ class LightTheme(BaseTheme):
             text_color=self.colors.TEXT_SECONDARY,
             border_color=self.colors.BORDER_DARK,
             hover_bg=self.colors.BG_DARK,
-            hover_text=self.colors.TEXT_DARK
+            hover_text=self.colors.TEXT_DARK,
         )
 
     def get_status_scroll_style(self):
         # Light theme status scroll
-        return self._status_scroll_template(
-            bg_color="transparent"
-        )
+        return self._status_scroll_template(bg_color="transparent")
 
     def get_main_style(self):
         return f"""
@@ -1436,6 +1575,7 @@ class LightTheme(BaseTheme):
 
 # Global instance
 _theme_manager = None
+
 
 def get_theme_manager():
     global _theme_manager
