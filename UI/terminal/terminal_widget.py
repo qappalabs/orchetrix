@@ -14,7 +14,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from UI.Styles import AppStyles
 from Utils.kubernetes_client import get_kubernetes_client
 from .terminal_constants import StyleConstants, CommandConstants
-from UI.ThemeManager import ThemeAwareMixin
+from UI.ThemeAwarePage import ThemeAwareMixin
 
 
 class UnifiedTerminalWidget(QTextEdit, ThemeAwareMixin):
