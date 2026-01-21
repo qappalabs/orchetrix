@@ -305,6 +305,16 @@ class ClusterStateManager(QObject):
                 self.cluster_data[cluster_name] = result
                 self.pending_switch = None
 
+                # CRITICAL: Synchronize with cluster_connector so pages using it see connected state
+                # This fixes the issue where NodesPage checks cluster_connector but state is managed here
+                try:
+                    from Utils.cluster_connector import get_cluster_connector
+                    connector = get_cluster_connector()
+                    connector.set_current_cluster(cluster_name)
+                    logging.debug(f"Synchronized cluster_connector with connected state for {cluster_name}")
+                except Exception as sync_error:
+                    logging.warning(f"Failed to sync cluster_connector state: {sync_error}")
+
                 self.state_changed.emit(cluster_name, ClusterState.CONNECTED)
                 self.switch_completed.emit(cluster_name, True)
 
@@ -389,6 +399,15 @@ class ClusterStateManager(QObject):
                         logging.info(f"Reset kubernetes client current_cluster for {cluster_name}")
                 except Exception as e:
                     logging.warning(f"Failed to reset kubernetes client for {cluster_name}: {e}")
+
+                # Synchronize with cluster_connector
+                try:
+                    from Utils.cluster_connector import get_cluster_connector
+                    connector = get_cluster_connector()
+                    connector.disconnect_cluster(cluster_name)
+                    logging.debug(f"Synchronized cluster_connector disconnect for {cluster_name}")
+                except Exception as sync_error:
+                    logging.warning(f"Failed to sync cluster_connector disconnect: {sync_error}")
 
                 logging.info(f"Successfully disconnected cluster: {cluster_name}")
 
