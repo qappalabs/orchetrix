@@ -1,7 +1,7 @@
 """
 Logs components - Split from TerminalPanel.py
 
-This module contains the LogsHeaderWidget, LogsStreamWorker, and EnhancedLogsViewer 
+This module contains the LogsHeaderWidget, LogsStreamWorker, and EnhancedLogsViewer
 classes which provide comprehensive log viewing functionality for Kubernetes pods.
 """
 
@@ -10,19 +10,26 @@ from datetime import datetime
 from kubernetes import watch
 from kubernetes.client.rest import ApiException
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QComboBox, 
-    QCheckBox, QLabel
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QTextEdit,
+    QComboBox,
+    QCheckBox,
+    QLabel,
 )
 from PyQt6.QtGui import QFont, QColor, QTextCharFormat, QTextCursor
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 
 from UI.Styles import AppStyles
+from UI.ThemeAwarePage import ThemeAwareMixin
+from .terminal_constants import StyleConstants
 
 
-class LogsHeaderWidget(QWidget):
+class LogsHeaderWidget(QWidget, ThemeAwareMixin):
     """
     Simplified header widget for logs viewer.
-    
+
     This widget provides controls for log viewing including container selection,
     tail lines configuration, follow mode toggle, and search results display.
     """
@@ -43,33 +50,110 @@ class LogsHeaderWidget(QWidget):
     def setup_ui(self):
         """Setup the simplified header UI components with fixed layout."""
         self.setFixedHeight(50)
-        self.setStyleSheet("""
-            QWidget {
-                background-color: #2d2d2d;
-                border-bottom: 1px solid #3d3d3d;
-            }
-            QComboBox {
-                background-color: #1e1e1e;
-                border: 1px solid #555;
+        self.setStyleSheet(self._get_header_style())
+
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(10, 8, 10, 8)
+        main_layout.setSpacing(8)
+
+        # Single row with all controls
+        controls_row = QHBoxLayout()
+        controls_row.setSpacing(12)
+
+        # Pod info - compact
+        self.pod_info = QLabel(f"📋 {self._truncate_name(self.pod_name, 20)}")
+        self.pod_info.setStyleSheet(self._get_pod_info_style())
+        self.pod_info.setToolTip(f"Pod: {self.pod_name}\nNamespace: {self.namespace}")
+        controls_row.addWidget(self.pod_info)
+
+        controls_row.addStretch()
+
+        # Container selection
+        container_label = QLabel("📦")
+        container_label.setFixedSize(20, 20)
+        self.container_combo = QComboBox()
+        self.container_combo.setFixedHeight(24)
+        self.container_combo.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.container_combo.setStyleSheet(self._get_combo_style())
+        self.container_combo.currentTextChanged.connect(self.container_changed.emit)
+        controls_row.addWidget(container_label)
+        controls_row.addWidget(self.container_combo)
+
+        # Tail lines selection
+        lines_label = QLabel("📜")
+        lines_label.setFixedSize(20, 20)
+        self.lines_combo = QComboBox()
+        self.lines_combo.setFixedHeight(24)
+        self.lines_combo.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.lines_combo.setStyleSheet(self._get_combo_style())
+        self.lines_combo.addItems(["50", "100", "200", "500", "1000", "All"])
+        self.lines_combo.setCurrentText("200")
+        self.lines_combo.currentTextChanged.connect(self._on_lines_changed)
+        controls_row.addWidget(lines_label)
+        controls_row.addWidget(self.lines_combo)
+
+        # Follow logs checkbox
+        self.follow_checkbox = QCheckBox("Follow")
+        self.follow_checkbox.setChecked(True)
+        self.follow_checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.follow_checkbox.setStyleSheet(self._get_checkbox_style())
+        self.follow_checkbox.toggled.connect(self.follow_toggled.emit)
+        controls_row.addWidget(self.follow_checkbox)
+
+        # Search results label (updated by terminal header search)
+        self.search_results_label = QLabel("")
+        self.search_results_label.setStyleSheet(self._get_search_results_style())
+        controls_row.addWidget(self.search_results_label)
+
+        main_layout.addLayout(controls_row)
+
+    def _get_header_style(self):
+        """Get header widget stylesheet."""
+        return f"""
+            QWidget {{
+                background-color: {StyleConstants.get_logs_header_bg()};
+                border-bottom: 1px solid {StyleConstants.get_logs_header_border()};
+            }}
+        """
+
+    def _get_pod_info_style(self):
+        """Get pod info label stylesheet."""
+        return f"""
+            font-weight: bold; 
+            color: {StyleConstants.get_logs_info_color()}; 
+            font-size: 11px;
+        """
+
+    def _get_combo_style(self):
+        """Get combo box stylesheet."""
+        return f"""
+            QComboBox {{
+                background-color: {StyleConstants.get_logs_combo_bg()};
+                border: 1px solid {StyleConstants.get_logs_combo_border()};
                 border-radius: 4px;
                 padding: 4px 8px;
                 color: white;
                 font-size: 12px;
                 min-width: 80px;
                 max-height: 24px;
-            }
-            QComboBox::drop-down {
+            }}
+            QComboBox::drop-down {{
                 border: none;
                 width: 20px;
-            }
-            QComboBox::down-arrow {
+            }}
+            QComboBox::down-arrow {{
                 image: none;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #2d2d2d;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: {StyleConstants.get_logs_header_bg()};
                 color: white;
                 selection-background-color: #2196F3;
-            }
+            }}
+        """
+
+    def _get_checkbox_style(self):
+        """Get checkbox stylesheet."""
+        return """
             QCheckBox {
                 color: white;
                 font-size: 12px;
@@ -86,78 +170,43 @@ class LogsHeaderWidget(QWidget):
                 background-color: #2196F3;
                 border-color: #2196F3;
             }
-            QLabel {
-                color: white;
-                font-size: 12px;
-            }
-        """)
+        """
 
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(10, 8, 10, 8)
-        main_layout.setSpacing(8)
+    def _get_search_results_style(self):
+        """Get search results label stylesheet."""
+        return f"""
+            color: {StyleConstants.get_logs_info_color()}; 
+            font-size: 10px; 
+            font-weight: bold;
+        """
 
-        # Single row with all controls
-        controls_row = QHBoxLayout()
-        controls_row.setSpacing(12)
-
-        # Pod info - compact
-        self.pod_info = QLabel(f"📋 {self._truncate_name(self.pod_name, 20)}")
-        self.pod_info.setStyleSheet("font-weight: bold; color: #4CAF50; font-size: 11px;")
-        self.pod_info.setToolTip(f"Pod: {self.pod_name}\nNamespace: {self.namespace}")
-        controls_row.addWidget(self.pod_info)
-
-        controls_row.addStretch()
-
-        # Container selection
-        container_label = QLabel("📦")
-        container_label.setFixedSize(20, 20)
-        self.container_combo = QComboBox()
-        self.container_combo.setFixedHeight(24)
-        self.container_combo.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.container_combo.currentTextChanged.connect(self.container_changed.emit)
-        controls_row.addWidget(container_label)
-        controls_row.addWidget(self.container_combo)
-
-        # Tail lines selection
-        lines_label = QLabel("📜")
-        lines_label.setFixedSize(20, 20)
-        self.lines_combo = QComboBox()
-        self.lines_combo.setFixedHeight(24)
-        self.lines_combo.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.lines_combo.addItems(["50", "100", "200", "500", "1000", "All"])
-        self.lines_combo.setCurrentText("200")
-        self.lines_combo.currentTextChanged.connect(self._on_lines_changed)
-        controls_row.addWidget(lines_label)
-        controls_row.addWidget(self.lines_combo)
-
-        # Follow logs checkbox
-        self.follow_checkbox = QCheckBox("Follow")
-        self.follow_checkbox.setChecked(True)
-        self.follow_checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.follow_checkbox.toggled.connect(self.follow_toggled.emit)
-        controls_row.addWidget(self.follow_checkbox)
-
-        # Search results label (updated by terminal header search)
-        self.search_results_label = QLabel("")
-        self.search_results_label.setStyleSheet("color: #4CAF50; font-size: 10px; font-weight: bold;")
-        controls_row.addWidget(self.search_results_label)
-
-        main_layout.addLayout(controls_row)
+    def _on_theme_changed(self):
+        """Handle theme changes by updating stylesheets."""
+        super()._on_theme_changed()
+        self.setStyleSheet(self._get_header_style())
+        self.pod_info.setStyleSheet(self._get_pod_info_style())
+        self.container_combo.setStyleSheet(self._get_combo_style())
+        self.lines_combo.setStyleSheet(self._get_combo_style())
+        self.follow_checkbox.setStyleSheet(self._get_checkbox_style())
+        self.search_results_label.setStyleSheet(self._get_search_results_style())
 
     def _truncate_name(self, name, max_length):
         """Truncate name if it's too long."""
         if len(name) <= max_length:
             return name
-        return name[:max_length-3] + "..."
+        return name[: max_length - 3] + "..."
 
     def load_containers(self):
         """Load available containers for the pod."""
         try:
             from Utils.kubernetes_client import get_kubernetes_client
+
             kube_client = get_kubernetes_client()
 
             if kube_client and kube_client.v1:
-                pod = kube_client.v1.read_namespaced_pod(name=self.pod_name, namespace=self.namespace)
+                pod = kube_client.v1.read_namespaced_pod(
+                    name=self.pod_name, namespace=self.namespace
+                )
                 if pod.spec and pod.spec.containers:
                     self.containers = [c.name for c in pod.spec.containers]
                     self.container_combo.clear()
@@ -195,7 +244,7 @@ class LogsHeaderWidget(QWidget):
 class LogsStreamWorker(QThread):
     """
     Worker thread for streaming logs from Kubernetes API.
-    
+
     This thread handles the continuous streaming of pod logs from the Kubernetes API,
     processing both initial logs and real-time updates when follow mode is enabled.
     """
@@ -204,7 +253,9 @@ class LogsStreamWorker(QThread):
     error_occurred = pyqtSignal(str)
     connection_status = pyqtSignal(str)  # status message
 
-    def __init__(self, pod_name, namespace, container=None, follow=True, tail_lines=200):
+    def __init__(
+        self, pod_name, namespace, container=None, follow=True, tail_lines=200
+    ):
         super().__init__()
         self.pod_name = pod_name
         self.namespace = namespace
@@ -223,6 +274,7 @@ class LogsStreamWorker(QThread):
         """Run the log streaming."""
         try:
             from Utils.kubernetes_client import get_kubernetes_client
+
             self._kube_client = get_kubernetes_client()
 
             if not self._kube_client or not self._kube_client.v1:
@@ -259,7 +311,7 @@ class LogsStreamWorker(QThread):
                 container=self.container,
                 follow=True,
                 timestamps=True,
-                since_seconds=1  # Only get very recent logs for streaming
+                since_seconds=1,  # Only get very recent logs for streaming
             )
 
             for event in stream:
@@ -272,11 +324,11 @@ class LogsStreamWorker(QThread):
                 timestamp = datetime.now().strftime("%H:%M:%S")
 
                 # Extract timestamp if present
-                if log_line and ' ' in log_line and log_line.startswith('20'):
-                    parts = log_line.split(' ', 1)
+                if log_line and " " in log_line and log_line.startswith("20"):
+                    parts = log_line.split(" ", 1)
                     if len(parts) == 2:
                         try:
-                            timestamp = parts[0].split('T')[1][:8]  # Extract time part
+                            timestamp = parts[0].split("T")[1][:8]  # Extract time part
                             log_line = parts[1]
                         except (IndexError, ValueError) as e:
                             logging.debug(f"Error parsing log timestamp: {e}")
@@ -294,21 +346,21 @@ class LogsStreamWorker(QThread):
         """Fetch initial logs before starting stream."""
         try:
             kwargs = {
-                'name': self.pod_name,
-                'namespace': self.namespace,
-                'timestamps': True
+                "name": self.pod_name,
+                "namespace": self.namespace,
+                "timestamps": True,
             }
 
             if self.container:
-                kwargs['container'] = self.container
+                kwargs["container"] = self.container
 
             if self.tail_lines and self.tail_lines > 0:
-                kwargs['tail_lines'] = self.tail_lines
+                kwargs["tail_lines"] = self.tail_lines
 
             logs = self._kube_client.v1.read_namespaced_pod_log(**kwargs)
 
             if logs:
-                for line in logs.strip().split('\n'):
+                for line in logs.strip().split("\n"):
                     if self._stop_requested:
                         break
 
@@ -317,11 +369,11 @@ class LogsStreamWorker(QThread):
                         log_line = line
 
                         # Extract timestamp if present
-                        if ' ' in line and line.startswith('20'):
-                            parts = line.split(' ', 1)
+                        if " " in line and line.startswith("20"):
+                            parts = line.split(" ", 1)
                             if len(parts) == 2:
                                 try:
-                                    timestamp = parts[0].split('T')[1][:8]
+                                    timestamp = parts[0].split("T")[1][:8]
                                     log_line = parts[1]
                                 except (IndexError, ValueError) as e:
                                     logging.debug(f"Error parsing log timestamp: {e}")
@@ -337,12 +389,12 @@ class LogsStreamWorker(QThread):
         self.connection_status.emit("📋 Static logs loaded")
 
 
-class EnhancedLogsViewer(QWidget):
+class EnhancedLogsViewer(QWidget, ThemeAwareMixin):
     """
     Enhanced logs viewer with search highlighting and improved functionality.
-    
+
     This widget provides a comprehensive log viewing experience with features like
-    real-time streaming, search and highlighting, container selection, and 
+    real-time streaming, search and highlighting, container selection, and
     configurable display options.
     """
 
@@ -390,37 +442,54 @@ class EnhancedLogsViewer(QWidget):
         # Set font for logs
         font = QFont("Consolas", 9)
         self.logs_display.setFont(font)
-        self.logs_display.setStyleSheet(f"""
-            QTextEdit {{
-                background-color: #1e1e1e;
-                color: #e0e0e0;
-                border: none;
-                selection-background-color: #264F78;
-                padding: 8px;
-            }}
-            {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
-        """)
+        self.logs_display.setStyleSheet(self._get_logs_display_style())
 
         content_layout.addWidget(self.logs_display)
 
         # Status indicator at bottom with transparent background
         self.status_indicator = QLabel()
         self.status_indicator.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.status_indicator.setStyleSheet("""
-            QLabel {
-                background-color: rgba(45, 45, 45, 0.8);
-                color: #4CAF50;
+        self.status_indicator.setStyleSheet(self._get_status_indicator_style())
+        self.status_indicator.setVisible(False)
+        content_layout.addWidget(self.status_indicator)
+
+        layout.addWidget(content_area)
+
+    def _get_logs_display_style(self):
+        """Get logs display stylesheet."""
+        return f"""
+            QTextEdit {{
+                background-color: {StyleConstants.get_terminal_background_color()};
+                color: {StyleConstants.get_logs_default_color()};
+                border: none;
+                selection-background-color: #264F78;
+                padding: 8px;
+            }}
+            {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
+        """
+
+    def _get_status_indicator_style(self, color=None):
+        """Get status indicator stylesheet."""
+        if color is None:
+            color = StyleConstants.get_logs_info_color()
+
+        return f"""
+            QLabel {{
+                background-color: {StyleConstants.get_logs_status_bg()};
+                color: {color};
                 font-size: 11px;
                 font-weight: bold;
                 padding: 4px 8px;
                 border-radius: 4px;
                 margin: 4px;
-            }
-        """)
-        self.status_indicator.setVisible(False)
-        content_layout.addWidget(self.status_indicator)
+            }}
+        """
 
-        layout.addWidget(content_area)
+    def _on_theme_changed(self):
+        """Handle theme changes by updating stylesheets."""
+        super()._on_theme_changed()
+        self.logs_display.setStyleSheet(self._get_logs_display_style())
+        # Status indicator style will be updated when next shown
 
     def connect_signals(self):
         """Connect header signals to handlers."""
@@ -438,7 +507,7 @@ class EnhancedLogsViewer(QWidget):
             self.namespace,
             self.current_container,
             self.follow_enabled,
-            self.tail_lines
+            self.tail_lines,
         )
 
         self.stream_worker.log_received.connect(self.add_log_line)
@@ -462,9 +531,9 @@ class EnhancedLogsViewer(QWidget):
 
         # Store the original log
         log_entry = {
-            'timestamp': timestamp,
-            'line': log_line,
-            'original': f"[{timestamp}] {log_line}"
+            "timestamp": timestamp,
+            "line": log_line,
+            "original": f"[{timestamp}] {log_line}",
         }
         self.all_logs.append(log_entry)
 
@@ -486,19 +555,24 @@ class EnhancedLogsViewer(QWidget):
         cursor = self.logs_display.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
 
-        line_text = log_entry['original']
+        line_text = log_entry["original"]
 
         # Check if this line should be displayed based on search
-        if self.search_text and self.search_text.lower() not in log_entry['line'].lower():
+        if (
+            self.search_text
+            and self.search_text.lower() not in log_entry["line"].lower()
+        ):
             return  # Skip lines that don't match search
 
         # Determine base color based on log content
-        line_lower = log_entry['line'].lower()
+        line_lower = log_entry["line"].lower()
         base_color = self.get_log_color(line_lower)
 
         # If there's search text, highlight it
         if self.search_text and self.search_text.lower() in line_text.lower():
-            self.insert_highlighted_text(cursor, line_text, self.search_text, base_color)
+            self.insert_highlighted_text(
+                cursor, line_text, self.search_text, base_color
+            )
         else:
             # Insert without highlighting
             char_format = QTextCharFormat()
@@ -518,6 +592,7 @@ class EnhancedLogsViewer(QWidget):
 
         # Find all occurrences of search term
         start_pos = 0
+        highlight_colors = StyleConstants.get_logs_highlight_colors()
 
         while True:
             found_pos = text_lower.find(search_lower, start_pos)
@@ -538,10 +613,10 @@ class EnhancedLogsViewer(QWidget):
                 cursor.insertText(text[start_pos:found_pos])
 
             # Insert highlighted match
-            match_text = text[found_pos:found_pos + len(search_term)]
+            match_text = text[found_pos : found_pos + len(search_term)]
             highlight_format = QTextCharFormat()
-            highlight_format.setForeground(QColor("#000000"))  # Black text
-            highlight_format.setBackground(QColor("#FFFF00"))  # Yellow background
+            highlight_format.setForeground(QColor(highlight_colors["foreground"]))
+            highlight_format.setBackground(QColor(highlight_colors["background"]))
             highlight_format.setFontWeight(QFont.Weight.Bold)
             cursor.setCharFormat(highlight_format)
             cursor.insertText(match_text)
@@ -557,16 +632,19 @@ class EnhancedLogsViewer(QWidget):
 
     def get_log_color(self, line):
         """Get color for log line based on content."""
-        if any(keyword in line for keyword in ['error', 'err', 'exception', 'failed', 'fatal']):
-            return "#ff6b68"  # Red for errors
-        elif any(keyword in line for keyword in ['warn', 'warning']):
-            return "#ffa500"  # Orange for warnings
-        elif any(keyword in line for keyword in ['info', 'information']):
-            return "#4caf50"  # Green for info
-        elif any(keyword in line for keyword in ['debug', 'trace']):
-            return "#9ca3af"  # Gray for debug
+        if any(
+            keyword in line
+            for keyword in ["error", "err", "exception", "failed", "fatal"]
+        ):
+            return StyleConstants.get_logs_error_color()
+        elif any(keyword in line for keyword in ["warn", "warning"]):
+            return StyleConstants.get_logs_warning_color()
+        elif any(keyword in line for keyword in ["info", "information"]):
+            return StyleConstants.get_logs_info_color()
+        elif any(keyword in line for keyword in ["debug", "trace"]):
+            return StyleConstants.get_logs_debug_color()
         else:
-            return "#e0e0e0"  # Default white
+            return StyleConstants.get_logs_default_color()
 
     def set_search_filter(self, search_text):
         """Set search filter and refresh display with highlighting."""
@@ -580,7 +658,7 @@ class EnhancedLogsViewer(QWidget):
             # Count matches in current logs
             matches = 0
             for log_entry in self.all_logs:
-                if self.search_text.lower() in log_entry['line'].lower():
+                if self.search_text.lower() in log_entry["line"].lower():
                     matches += 1
 
             self.search_matches = matches
@@ -608,25 +686,19 @@ class EnhancedLogsViewer(QWidget):
         self.follow_enabled = follow
         if not follow:
             self.update_status("📋 Static mode - logs will not update automatically")
-            self.show_status_indicator("📋 Static Mode", "#9ca3af")
+            self.show_status_indicator(
+                "📋 Static Mode", StyleConstants.get_logs_debug_color()
+            )
         else:
             self.update_status("🔴 Live mode - following new logs")
-            self.show_status_indicator("🔴 Live Mode", "#4CAF50")
+            self.show_status_indicator(
+                "🔴 Live Mode", StyleConstants.get_logs_info_color()
+            )
 
     def show_status_indicator(self, text, color):
         """Show status indicator at bottom."""
         self.status_indicator.setText(text)
-        self.status_indicator.setStyleSheet(f"""
-            QLabel {{
-                background-color: rgba(45, 45, 45, 0.8);
-                color: {color};
-                font-size: 11px;
-                font-weight: bold;
-                padding: 4px 8px;
-                border-radius: 4px;
-                margin: 4px;
-            }}
-        """)
+        self.status_indicator.setStyleSheet(self._get_status_indicator_style(color))
         self.status_indicator.setVisible(True)
 
         # Hide after 3 seconds
@@ -653,7 +725,7 @@ class EnhancedLogsViewer(QWidget):
         for log_entry in self.all_logs:
             # Apply search filter
             if self.search_text:
-                if self.search_text.lower() not in log_entry['line'].lower():
+                if self.search_text.lower() not in log_entry["line"].lower():
                     continue
 
             self.display_log_line(log_entry)
@@ -667,7 +739,7 @@ class EnhancedLogsViewer(QWidget):
     def handle_stream_error(self, error_message):
         """Handle streaming errors."""
         self.header.update_status(f"❌ Error: {error_message}")
-        self.show_status_indicator("❌ Error", "#ff6b68")
+        self.show_status_indicator("❌ Error", StyleConstants.get_logs_error_color())
         logging.error(f"Log stream error: {error_message}")
 
     def update_status(self, message):
