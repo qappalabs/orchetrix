@@ -1218,23 +1218,32 @@ class NodesPage(BaseResourcePage):
                         logging.warning(
                             f"Cluster not connected (state: {state}), cannot load nodes")
                         self.is_loading = False
-                        self.show_no_data_message()
+                        # Only show no data message if we have no existing data
+                        # This preserves cached/existing nodes when cluster temporarily disconnects
+                        if not self.nodes_data:
+                            self.show_no_data_message()
                         self.hide_loading_indicator()
                 else:
                     logging.warning("No current cluster selected")
                     self.is_loading = False
-                    self.show_no_data_message()
+                    # Only show no data message if we have no existing data
+                    if not self.nodes_data:
+                        self.show_no_data_message()
                     self.hide_loading_indicator()
             else:
                 logging.error("No cluster connector available")
                 self.is_loading = False
-                self.show_no_data_message()
+                # Only show no data message if we have no existing data
+                if not self.nodes_data:
+                    self.show_no_data_message()
                 self.hide_loading_indicator()
         except Exception as e:
             logging.error(f"Error loading node data: {e}")
             logging.debug("Node data loading error details", exc_info=True)
             self.is_loading = False
-            self.show_no_data_message()
+            # Only show no data message if we have no existing data
+            if not self.nodes_data:
+                self.show_no_data_message()
             self.hide_loading_indicator()
 
     def validate_data_format(self, nodes_data):
