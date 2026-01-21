@@ -13,7 +13,7 @@ MULTI_STATUS_WIDGET_BACKGROUND_STYLE = "background-color: transparent;"
 
 def get_empty_status_style():
     """Style for empty/none status label"""
-    return f"color: {QColor(AppColors.TEXT_TABLE).name()};"
+    return get_default_status_style()
 
 
 def get_available_status_style():
