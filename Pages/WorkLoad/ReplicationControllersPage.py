@@ -2,13 +2,45 @@
 Dynamic implementation of the ReplicationControllers page with live Kubernetes data and resource operations.
 """
 
-from PyQt6.QtWidgets import QHeaderView, QPushButton
+from PyQt6.QtWidgets import QHeaderView
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor
 
 from Base_Components.base_components import SortableTableWidgetItem
 from Base_Components.base_resource_page import BaseResourcePage
-from UI.Styles import AppColors, AppStyles
+from UI.Styles import AppColors
+
+
+def singularize_resource_type(resource_type: str) -> str:
+    """
+    Convert plural resource type to singular form.
+    Handles known irregulars and falls back to removing trailing 's'.
+    """
+    # Map of known irregular plurals to singulars
+    irregular_map = {
+        'ingresses': 'ingress',
+        'replicationcontrollers': 'replicationcontroller',
+        'endpoints': 'endpoint',
+        'priorityclasses': 'priorityclass',
+        'runtimeclasses': 'runtimeclass',
+        'mutatingwebhookconfigurations': 'mutatingwebhookconfiguration',
+        'validatingwebhookconfigurations': 'validatingwebhookconfiguration',
+        'customresourcedefinitions': 'customresourcedefinition',
+        'horizontalpodautoscalers': 'horizontalpodautoscaler',
+        'poddisruptionbudgets': 'poddisruptionbudget',
+        'resourcequotas': 'resourcequota',
+        'limitranges': 'limitrange',
+    }
+
+    resource_lower = resource_type.lower()
+    if resource_lower in irregular_map:
+        return irregular_map[resource_lower]
+
+    # Default: remove trailing 's' if present
+    if resource_type.endswith('s'):
+        return resource_type[:-1]
+
+    return resource_type
 
 class ReplicaControllersPage(BaseResourcePage):
     """
@@ -20,18 +52,18 @@ class ReplicaControllersPage(BaseResourcePage):
     3. Deleting ReplicationControllers (individual and batch)
     4. Resource details viewer
     """
-    
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.resource_type = "replicationcontrollers"
         self.setup_page_ui()
-        
+
     def setup_page_ui(self):
         """Set up the main UI elements for the ReplicationControllers page"""
         # Define headers and sortable columns
         headers = ["", "Name", "Namespace", "Replicas", "Desired Replicas", "Selector", ""]
         sortable_columns = {1, 2, 3, 4, 5}
-        
+
         # Set up the base UI components with styles
         layout = super().setup_ui("Replication Controllers", headers, sortable_columns)
 
@@ -39,16 +71,14 @@ class ReplicaControllersPage(BaseResourcePage):
 
         # Configure column widths
         self.configure_columns()
-        
-        # Add delete selected button
 
     def configure_columns(self):
         """Configure column widths for full screen utilization"""
         if not self.table:
             return
-        
+
         header = self.table.horizontalHeader()
-        
+
         # Column specifications with optimized default widths
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
@@ -59,7 +89,7 @@ class ReplicaControllersPage(BaseResourcePage):
             (5, 80, "stretch"),      # Selector - stretch to fill remaining space
             (6, 40, "fixed")        # Actions
         ]
-        
+
         # Apply column configuration
         for col_index, default_width, resize_type in column_specs:
             if col_index < self.table.columnCount():
@@ -72,7 +102,7 @@ class ReplicaControllersPage(BaseResourcePage):
                 elif resize_type == "stretch":
                     header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Stretch)
                     self.table.setColumnWidth(col_index, default_width)
-        
+
         # Ensure full width utilization after configuration
         QTimer.singleShot(100, self._ensure_full_width_utilization)
 
@@ -82,33 +112,33 @@ class ReplicaControllersPage(BaseResourcePage):
         """
         # Set row height
         self.table.setRowHeight(row, 40)
-        
+
         # Create checkbox for row selection - styling handled by BaseResourcePage
         resource_name = resource["name"]
         checkbox_container = self._create_checkbox_container(row, resource_name)
         self.table.setCellWidget(row, 0, checkbox_container)
-        
+
         # Extract additional data from the raw_data field if available
         raw_data = resource.get("raw_data", {})
-        
+
         # Get replicas info
         replicas = "0"
         desired_replicas = "0"
         selector = ""
-        
+
         if raw_data:
             spec = raw_data.get("spec", {})
             status = raw_data.get("status", {})
-            
+
             replicas = str(status.get("replicas", 0))
             desired_replicas = str(spec.get("replicas", 0))
-            
+
             # Get selector as string
             selectors = spec.get("selector", {})
             selector = ", ".join([f"{k}={v}" for k, v in selectors.items()])
             if not selector:
                 selector = "<none>"
-        
+
         # Prepare data columns
         columns = [
             resource["name"],
@@ -117,11 +147,11 @@ class ReplicaControllersPage(BaseResourcePage):
             desired_replicas,
             selector
         ]
-        
+
         # Add columns to table
         for col, value in enumerate(columns):
             cell_col = col + 1  # Adjust for checkbox column
-            
+
             # Handle numeric columns for sorting
             if col == 2 or col == 3:  # Replicas, DesiredReplicas columns
                 try:
@@ -131,22 +161,22 @@ class ReplicaControllersPage(BaseResourcePage):
                 item = SortableTableWidgetItem(value, num)
             else:
                 item = SortableTableWidgetItem(value)
-            
+
             # Set text alignment
-            if col in (1, 2, 3):  # Replicas, DesiredReplicas
+            if col in (1, 2, 3):  # Namespace, Replicas, DesiredReplicas
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             else:
                 item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-            
+
             # Make cells non-editable
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            
+
             # Set default text color
             item.setForeground(QColor(AppColors.TEXT_TABLE))
-            
+
             # Add the item to the table
             self.table.setItem(row, cell_col, item)
-        
+
         # Create and add action button - styling handled by BaseResourcePage
         action_button = self._create_action_button(row, resource_name, resource["namespace"])
         action_container = self._create_action_container(row, action_button)
@@ -156,30 +186,28 @@ class ReplicaControllersPage(BaseResourcePage):
         if column != self.table.columnCount() - 1:  # Skip action column
             # Select the row
             self.table.selectRow(row)
-            
+
             # Get resource details
             resource_name = None
             namespace = None
-            
+
             # Get the resource name
             if self.table.item(row, 1) is not None:
                 resource_name = self.table.item(row, 1).text()
-            
+
             # Get namespace if applicable
             if self.table.item(row, 2) is not None:
                 namespace = self.table.item(row, 2).text()
-            
+
             # Show detail view
             if resource_name:
                 # Find the ClusterView instance
                 parent = self.parent()
                 while parent and not hasattr(parent, 'detail_manager'):
                     parent = parent.parent()
-                
+
                 if parent and hasattr(parent, 'detail_manager'):
-                    # Get singular resource type
-                    resource_type = self.resource_type
-                    if resource_type.endswith('s'):
-                        resource_type = resource_type[:-1]
-                    
-                    parent.detail_manager.show_detail(resource_type, resource_name, namespace)
+                    # Get singular resource type using helper function
+                    singular_type = singularize_resource_type(self.resource_type)
+                    parent.detail_manager.show_detail(singular_type, resource_name, namespace)
+
