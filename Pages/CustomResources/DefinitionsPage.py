@@ -151,17 +151,32 @@ class DefinitionsPage(BaseResourcePage):
             # Select the row
             self.table.selectRow(row)
 
-            # Get resource details
+            # Get resource details - FIXED: Get actual resource name from checkbox
             resource_name = None
             namespace = None
 
-            # Get the resource name
-            if self.table.item(row, 1) is not None:
-                resource_name = self.table.item(row, 1).text()
+            # Get the actual resource name from the checkbox (which has the full CRD name)
+            checkbox_container = self.table.cellWidget(row, 0)
+            if checkbox_container:
+                # Find the checkbox widget inside the container
+                checkbox = checkbox_container.findChild(checkbox_container.__class__.__bases__[0])
+                if not checkbox:
+                    # Try to find QCheckBox specifically
+                    from PyQt6.QtWidgets import QCheckBox
+                    checkbox = checkbox_container.findChild(QCheckBox)
+                
+                if checkbox:
+                    resource_name = checkbox.property("resource_name")
 
-            # Get namespace if applicable
-            if self.table.item(row, 2) is not None:
-                namespace = self.table.item(row, 2).text()
+            # Fallback: try to find by plural name if checkbox method failed
+            if not resource_name:
+                if self.table.item(row, 1) is not None:
+                    plural_name = self.table.item(row, 1).text()
+                    # Find the actual resource name by plural name
+                    resource_name = self.get_resource_name_by_plural(plural_name)
+
+            # Get namespace if applicable (for CRDs this is usually None)
+            namespace = None  # CRDs are cluster-scoped
 
             # Show detail view
             if resource_name:
@@ -178,14 +193,32 @@ class DefinitionsPage(BaseResourcePage):
 
                     # Get raw_data from resources list and pass it to detail view
                     raw_data = self.get_raw_data_for_row(resource_name)
+                    logging.info(f"DefinitionsPage: Passing raw_data for {resource_name}, keys: {list(raw_data.keys()) if raw_data else 'None'}")
                     parent.detail_manager.show_detail(resource_type, resource_name, namespace, raw_data)
+
+    def get_resource_name_by_plural(self, plural_name):
+        """Get the actual resource name (full CRD name) by plural name.
+        
+        This is needed because the table displays plural names but we need
+        the full CRD name to find the raw_data.
+        """
+        try:
+            for resource in self.resources:
+                raw_data = resource.get("raw_data", {})
+                spec = raw_data.get("spec", {})
+                names = spec.get("names", {})
+                if names.get("plural") == plural_name:
+                    return resource.get("name")
+        except Exception as e:
+            logging.error(f"Error finding resource name for plural '{plural_name}': {e}")
+        return plural_name  # Fallback to plural name
 
     def get_raw_data_for_row(self, resource_name):
         """Get raw data for a specific resource by name.
         
         Uses resource name lookup (not row index) to handle sorted/filtered tables correctly.
         This ensures detail sections can load data directly without relying on
-        get_resource_detail_async API calls.
+        get_resource_detail API calls.
         """
         try:
             # Find resource by name to handle sorting/filtering correctly
