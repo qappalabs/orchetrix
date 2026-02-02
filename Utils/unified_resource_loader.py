@@ -10,7 +10,7 @@ import threading
 # Use unified thread manager instead of separate ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any, Callable, Set
+from typing import Dict, List, Optional, Any, Callable
 from collections import defaultdict
 
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer, Qt, QMetaObject
@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import QApplication
 from kubernetes.client.rest import ApiException
 from Utils.kubernetes_client import get_kubernetes_client
 from Services.kubernetes.api_config import APIClientConfig
-from Utils.error_handler import get_error_handler, safe_execute, log_performance
+from Utils.error_handler import get_error_handler, log_performance
 from Utils.enhanced_worker import EnhancedBaseWorker
 from Utils.thread_manager import get_thread_manager
 from Utils.unified_cache_system import get_unified_cache
@@ -47,10 +47,7 @@ class ResourceConfig:
     enable_chunking: bool = True  # New: Enable data chunking for heavy loads
     chunk_size: int = 100  # New: Process data in chunks of 100 items
     progressive_loading: bool = True  # New: Enable progressive loading
-    # Caching configuration
     enable_caching: bool = True  # Enable caching by default
-    cache_ttl_seconds: int = 300  # 5 minutes default TTL
-    aggressive_cache_ttl_seconds: int = 60  # 1 minute for aggressive caching
 
 
 @dataclass
@@ -862,7 +859,6 @@ class ResourceLoadWorker(EnhancedBaseWorker):
 
     def _execute_with_retry(self, api_method, max_retries=3, **kwargs):
         """Execute API call with exponential backoff retry logic"""
-        import time
         import random
 
         last_exception = None
@@ -1056,7 +1052,6 @@ class ResourceLoadWorker(EnhancedBaseWorker):
         batch_size = min(self.config.batch_size, len(items))
 
         # Use smaller batches for stability
-        import math
         optimal_batch_size = max(25, batch_size // 2)
 
         # Process batches sequentially to avoid per-call executor overhead
@@ -1773,7 +1768,7 @@ class ResourceLoadWorker(EnhancedBaseWorker):
         try:
             kube_client = get_kubernetes_client()
             cluster_name = kube_client.current_cluster if kube_client else 'unknown-cluster'
-        except:
+        except Exception:
             cluster_name = 'unknown-cluster'
 
         key_parts = [
@@ -1813,7 +1808,7 @@ class ResourceLoadWorker(EnhancedBaseWorker):
                 total_count=0,
                 from_cache=False,
                 load_time_ms=0,
-                error_message=f"Timeout - returning empty result to avoid blocking UI"
+                error_message="Timeout - returning empty result to avoid blocking UI"
             )
 
         except Exception as e:
@@ -1896,7 +1891,6 @@ class HighPerformanceResourceLoader(QObject):
         """Check and log memory usage, cleanup if necessary"""
         try:
             import gc
-            import sys
 
             # Get object count
             object_count = len(gc.get_objects())
@@ -1950,9 +1944,8 @@ class HighPerformanceResourceLoader(QObject):
         # Low-frequency resources (longer cache TTL)
         low_frequency_resources = ['storageclasses', 'clusterroles', 'namespaces']
 
-        # Configure high-frequency resources for speed with short cache TTL
+        # Configure high-frequency resources for speed
         for resource_type in high_frequency_resources:
-            cache_ttl = 30 if resource_type == 'pods' else 60  # Pods change frequently
             config = ResourceConfig(
                 resource_type=resource_type,
                 api_method=self._get_api_method(resource_type),
@@ -1960,9 +1953,7 @@ class HighPerformanceResourceLoader(QObject):
                 timeout_seconds=APIClientConfig.RESOURCE_LIST_TIMEOUT,
                 enable_streaming=True,
                 max_concurrent_requests=8,
-                enable_caching=True,
-                cache_ttl_seconds=cache_ttl,
-                aggressive_cache_ttl_seconds=15  # Very short for high-frequency
+                enable_caching=True
             )
 
             # Enable heavy data optimizations for large datasets
@@ -1972,12 +1963,11 @@ class HighPerformanceResourceLoader(QObject):
                 config.chunk_size = 200 if resource_type == 'nodes' else 100
                 config.progressive_loading = True
                 config.enable_pagination = True
-                config.cache_ttl_seconds = 300 if resource_type == 'nodes' else 30  # Nodes change less frequently
                 logging.info(f"Unified Resource Loader: Enabled heavy data optimizations for {resource_type}")
 
             self._config_cache[resource_type] = config
 
-        # Configure medium-frequency resources with moderate cache TTL
+        # Configure medium-frequency resources
         for resource_type in medium_frequency_resources:
             self._config_cache[resource_type] = ResourceConfig(
                 resource_type=resource_type,
@@ -1986,12 +1976,10 @@ class HighPerformanceResourceLoader(QObject):
                 timeout_seconds=APIClientConfig.HEAVY_LOAD_TIMEOUT,
                 enable_streaming=True,
                 max_concurrent_requests=5,
-                enable_caching=True,
-                cache_ttl_seconds=180,  # 3 minutes
-                aggressive_cache_ttl_seconds=60
+                enable_caching=True
             )
 
-        # Configure low-frequency resources for efficiency with longer cache TTL
+        # Configure low-frequency resources for efficiency
         for resource_type in low_frequency_resources:
             self._config_cache[resource_type] = ResourceConfig(
                 resource_type=resource_type,
@@ -2000,9 +1988,7 @@ class HighPerformanceResourceLoader(QObject):
                 timeout_seconds=APIClientConfig.REQUEST_TIMEOUT,
                 enable_streaming=False,
                 max_concurrent_requests=3,
-                enable_caching=True,
-                cache_ttl_seconds=600,  # 10 minutes
-                aggressive_cache_ttl_seconds=300  # 5 minutes
+                enable_caching=True
             )
 
     def _get_api_method(self, resource_type: str) -> str:
@@ -2155,15 +2141,22 @@ class HighPerformanceResourceLoader(QObject):
 
         # Track the worker
         with self._worker_lock:
-            worker_key = f"{resource_type}_{namespace or 'all'}"
+            # Use cluster-aware key for worker tracking
+            try:
+                kube_client = get_kubernetes_client()
+                cluster_name = kube_client.current_cluster if kube_client else 'unknown'
+            except Exception:
+                cluster_name = 'unknown'
+                
+            worker_key = self._generate_operation_key(resource_type, namespace, cluster_name)
             self._active_workers[worker_key] = worker
 
         # Connect worker signals for completion handling
         worker.signals.finished.connect(
-            lambda result: self._handle_load_completion_success(result, resource_type, namespace, operation_id)
+            lambda result: self._handle_load_completion_success(result, resource_type, namespace, operation_id, cluster_name)
         )
         worker.signals.error.connect(
-            lambda error: self._handle_load_completion_error(error, resource_type, namespace, operation_id)
+            lambda error: self._handle_load_completion_error(error, resource_type, namespace, operation_id, cluster_name)
         )
 
         # Submit to thread manager
@@ -2183,10 +2176,17 @@ class HighPerformanceResourceLoader(QObject):
         Load Kubernetes resources asynchronously with high performance and deduplication.
         Returns operation ID for tracking.
         """
-        logging.info(f"Unified Resource Loader: Starting async load for resource_type='{resource_type}', namespace='{namespace or 'all'}'")
+        # Get current cluster name for scoped deduplication
+        try:
+            kube_client = get_kubernetes_client()
+            cluster_name = kube_client.current_cluster if kube_client else 'unknown'
+        except Exception:
+            cluster_name = 'unknown'
 
-        # Generate operation key for deduplication
-        operation_key = f"{resource_type}_{namespace or 'all'}"
+        logging.info(f"Unified Resource Loader: Starting async load for resource_type='{resource_type}', namespace='{namespace or 'all'}' (cluster: {cluster_name})")
+
+        # Generate operation key for deduplication - NOW CLUSTER-AWARE
+        operation_key = self._generate_operation_key(resource_type, namespace, cluster_name)
 
         # Check for duplicate request and deduplicate if necessary
         with self._dedup_lock:
@@ -2220,16 +2220,18 @@ class HighPerformanceResourceLoader(QObject):
 
         # Track the worker
         with self._worker_lock:
-            worker_key = f"{resource_type}_{namespace or 'all'}"
+            # Use cluster-aware key for worker tracking
+            worker_key = self._generate_operation_key(resource_type, namespace, cluster_name)
             self._active_workers[worker_key] = worker
             logging.debug(f"Unified Resource Loader: Tracking worker with key: {worker_key}")
 
         # Connect worker signals for completion handling
+        # Connect worker signals for completion handling
         worker.signals.finished.connect(
-            lambda result: self._handle_load_completion_success(result, resource_type, namespace, operation_id)
+            lambda result: self._handle_load_completion_success(result, resource_type, namespace, operation_id, cluster_name)
         )
         worker.signals.error.connect(
-            lambda error: self._handle_load_completion_error(error, resource_type, namespace, operation_id)
+            lambda error: self._handle_load_completion_error(error, resource_type, namespace, operation_id, cluster_name)
         )
         logging.debug(f"Unified Resource Loader: Connected worker signals for {resource_type}")
 
@@ -2270,24 +2272,58 @@ class HighPerformanceResourceLoader(QObject):
 
         return base_config
 
+    def _generate_operation_key(self, resource_type: str, namespace: Optional[str], cluster_name: str = 'unknown') -> str:
+        """Generate a consistent operation key for deduplication and worker tracking"""
+        return f"{cluster_name}_{resource_type}_{namespace or 'all'}"
+
     def _cancel_existing_load(self, resource_type: str, namespace: Optional[str]):
         """Cancel any existing load operation for the same resource"""
-        worker_key = f"{resource_type}_{namespace or 'all'}"
+        try:
+            kube_client = get_kubernetes_client()
+            cluster_name = kube_client.current_cluster if kube_client else 'unknown'
+        except Exception:
+            cluster_name = 'unknown'
+            
+        # Use cluster-aware key
+        worker_key = self._generate_operation_key(resource_type, namespace, cluster_name)
 
         with self._worker_lock:
             if worker_key in self._active_workers:
                 existing_worker = self._active_workers[worker_key]
                 existing_worker.cancel()
-                logging.debug(f"Cancelled existing load for {resource_type}")
+                logging.debug(f"Cancelled existing load for {resource_type} (key: {worker_key})")
+
+    def clear_all_pending_operations(self):
+        """Clear all pending operations and cache - used when switching clusters"""
+        logging.info("Unified Resource Loader: Clearing all pending operations and worker state")
+        
+        # 1. Clear pending operations map
+        with self._dedup_lock:
+            self._pending_operations.clear()
+            self._operation_callbacks.clear()
+            
+        # 2. Cancel all active workers
+        with self._worker_lock:
+            for key, worker in list(self._active_workers.items()):
+                try:
+                    worker.cancel()
+                    logging.debug(f"Cancelled active worker: {key}")
+                except Exception as e:
+                    logging.error(f"Error cancelling worker {key}: {e}")
+            self._active_workers.clear()
+            
+        # 3. Clear result cache to prevent stale data
+        # Note: We don't clear the config cache as that's reusable
+        
+        logging.info("Unified Resource Loader: State cleared successfully")
 
 # Method removed - monitoring is now handled by EnhancedBaseWorker signals
 
-    def _handle_load_completion_success(self, result: LoadResult, resource_type: str, namespace: Optional[str], operation_id: str):
+    def _handle_load_completion_success(self, result: LoadResult, resource_type: str, namespace: Optional[str], operation_id: str, cluster_name: str = 'unknown'):
         """Handle successful load completion"""
         logging.info(f"Unified Resource Loader: Load completed successfully for {resource_type} (operation_id: {operation_id})")
         try:
             if resource_type == 'nodes':
-                import time
                 from Utils import get_timestamp_with_ms
                 logging.info(f"🚀 [UI EMIT] {get_timestamp_with_ms()} - Unified Resource Loader: Emitting node data to UI - {result.total_count} nodes loaded in {result.load_time_ms:.1f}ms")
                 # Log sample of node data being sent to UI
@@ -2304,18 +2340,18 @@ class HighPerformanceResourceLoader(QObject):
             )
         except Exception as e:
             logging.error(f"Unified Resource Loader: Error emitting load completion signal for {resource_type}: {e}")
-            logging.debug(f"Unified Resource Loader: Load completion error details", exc_info=True)
+            logging.debug("Unified Resource Loader: Load completion error details", exc_info=True)
         finally:
             # Cleanup worker reference and pending operation
-            self._cleanup_worker(resource_type, namespace)
-            self._cleanup_pending_operation(resource_type, namespace)
+            self._cleanup_worker(resource_type, namespace, cluster_name)
+            self._cleanup_pending_operation(resource_type, namespace, cluster_name)
 
-    def _handle_load_completion_error(self, error_message: str, resource_type: str, namespace: Optional[str], operation_id: str):
+    def _handle_load_completion_error(self, error_message: str, resource_type: str, namespace: Optional[str], operation_id: str, cluster_name: str = 'unknown'):
         """Handle error in load completion"""
         logging.error(f"Unified Resource Loader: Load failed for {resource_type} (operation_id: {operation_id}): {error_message}")
         try:
             if resource_type == 'nodes':
-                logging.error(f"Unified Resource Loader: Node loading failed - UI will not receive node data")
+                logging.error("Unified Resource Loader: Node loading failed - UI will not receive node data")
 
             self.loading_error.emit(resource_type, error_message)
             logging.error(f"Unified Resource Loader: Failed to load {resource_type}: {error_message}")
@@ -2323,18 +2359,18 @@ class HighPerformanceResourceLoader(QObject):
             logging.error(f"Unified Resource Loader: Error emitting load error signal for {resource_type}: {e}")
         finally:
             # Cleanup worker reference and pending operation
-            self._cleanup_worker(resource_type, namespace)
-            self._cleanup_pending_operation(resource_type, namespace)
+            self._cleanup_worker(resource_type, namespace, cluster_name)
+            self._cleanup_pending_operation(resource_type, namespace, cluster_name)
 
-    def _cleanup_worker(self, resource_type: str, namespace: Optional[str]):
+    def _cleanup_worker(self, resource_type: str, namespace: Optional[str], cluster_name: str = 'unknown'):
         """Cleanup worker reference"""
-        worker_key = f"{resource_type}_{namespace or 'all'}"
+        worker_key = self._generate_operation_key(resource_type, namespace, cluster_name)
         with self._worker_lock:
             self._active_workers.pop(worker_key, None)
 
-    def _cleanup_pending_operation(self, resource_type: str, namespace: Optional[str]):
+    def _cleanup_pending_operation(self, resource_type: str, namespace: Optional[str], cluster_name: str = 'unknown'):
         """Cleanup pending operation to allow future requests"""
-        operation_key = f"{resource_type}_{namespace or 'all'}"
+        operation_key = self._generate_operation_key(resource_type, namespace, cluster_name)
         with self._dedup_lock:
             self._pending_operations.pop(operation_key, None)
             logging.debug(f"Cleaned up pending operation for {operation_key}")
@@ -2399,19 +2435,9 @@ class HighPerformanceResourceLoader(QObject):
                 # Use the unified cache system's optimize method
                 self._cache.optimize_caches()
                 
-                # Additional aggressive cleanup under memory pressure
                 if force:
-                    logging.info("Performing aggressive cache cleanup due to memory pressure")
-                    # Clear cache entries older than aggressive TTL
-                    for resource_type in list(self._cache_stats.keys()):
-                        # Clear all entries for this resource type if under memory pressure
-                        try:
-                            # The unified cache system handles TTL automatically
-                            # We just need to trigger optimization more frequently
-                            pass
-                        except Exception as e:
-                            logging.debug(f"Error during aggressive cache cleanup for {resource_type}: {e}")
-                
+                    logging.info("Aggressive cache cleanup triggered - unified cache optimization applied")
+
                 logging.debug(f"Cache cleanup completed (force={force})")
                 
         except Exception as e:
@@ -2463,8 +2489,6 @@ class HighPerformanceResourceLoader(QObject):
                     logging.info("Cleared all cache entries")
         except Exception as e:
             logging.error(f"Error clearing cache: {e}")
-
-    # Cache management functions removed (no more caching)
 
     def _get_api_client(self, kube_client, resource_type=None):
         """Get the appropriate API client for the resource type"""
