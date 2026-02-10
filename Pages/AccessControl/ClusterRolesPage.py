@@ -2,13 +2,14 @@
 Dynamic implementation of the Cluster Roles page with live Kubernetes data.
 """
 
-from PyQt6.QtWidgets import (QHeaderView, QWidget, QLabel)
+from PyQt6.QtWidgets import QHeaderView
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor
 
 from Base_Components.base_components import SortableTableWidgetItem
 from Base_Components.base_resource_page import BaseResourcePage
-from UI.Styles import AppStyles, AppColors
+from UI.Styles import AppColors
+from Utils.data_formatters import parse_age_to_seconds
 from Utils.resource_utils import singularize_resource_type
 
 
@@ -25,18 +26,16 @@ class ClusterRolesPage(BaseResourcePage):
         self.setup_page_ui()
 
     def setup_page_ui(self):
+        """Set up the main UI elements for the Cluster Roles page"""
+        headers = ["", "Name", "Age", ""]
+        sortable_columns = {1, 2}
 
-        # Define headers and sortable columns
-
-        # Set up the base UI components
-
-        # Apply table style
-        # Table styling is already handled by BaseResourcePage
+        # Set up the base UI components - creates self.table
+        # Table styling is handled by BaseResourcePage
+        super().setup_ui("Cluster Roles", headers, sortable_columns)
 
         # Configure column widths
         self.configure_columns()
-
-        # Add delete selected button
 
     def configure_columns(self):
 
@@ -97,11 +96,7 @@ class ClusterRolesPage(BaseResourcePage):
 
             # Handle numeric columns for sorting
             if col == 1:  # Age column
-                try:
-                    num = int(value.replace('d', ''))
-                except ValueError:
-                    num = 0
-                item = SortableTableWidgetItem(value, num)
+                item = SortableTableWidgetItem(value, parse_age_to_seconds(value))
             else:
                 item = SortableTableWidgetItem(value)
 
