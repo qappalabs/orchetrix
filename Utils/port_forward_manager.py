@@ -213,10 +213,10 @@ class KubernetesPortForwarder:
                 return False
 
             return True
-        except subprocess.TimeoutExpired as e:
+        except subprocess.TimeoutExpired:
             logging.error("kubectl commands timed out")
             return False
-        except FileNotFoundError as e:
+        except FileNotFoundError:
             logging.error("kubectl binary not found")
             return False
         except Exception as e:
