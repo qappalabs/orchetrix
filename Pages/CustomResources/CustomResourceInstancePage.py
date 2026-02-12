@@ -4,13 +4,14 @@ Similar to how OpenLens displays custom resource instances when clicking on a CR
 """
 
 import logging
-from PyQt6.QtWidgets import QHeaderView
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtWidgets import QHeaderView, QApplication
+from PyQt6.QtCore import Qt, QTimer, QEventLoop
 from PyQt6.QtGui import QColor
 
 from Base_Components.base_components import SortableTableWidgetItem
 from Base_Components.base_resource_page import BaseResourcePage
 from UI.Styles import AppColors
+from Utils.data_formatters import parse_age_to_seconds
 import Styles.CustomResourceInstancePageStyles as CustomResourceInstancePageStyles
 
 
@@ -38,9 +39,41 @@ class CustomResourceInstancePage(BaseResourcePage):
 
         self.api_group = crd_spec.get("group", "")
         versions = crd_spec.get("versions", [])
-        self.api_version = versions[0].get("name", "") if versions else ""
+        # Find the served version (preferably the storage version)
+        # CRDs can have multiple versions where some are only for migration
+        self.api_version = self._get_served_version(versions)
         self.plural = crd_spec.get("names", {}).get("plural", "")
         self.scope = crd_spec.get("scope", "Namespaced")
+
+        # Log version selection for debugging multi-version CRDs
+        version_names = [v.get("name", "?") for v in versions]
+        if len(versions) > 1:
+            logging.info(f"CRD {self.plural}: selected version '{self.api_version}' from {version_names}")
+
+    def _get_served_version(self, versions: list) -> str:
+        """Find the API version that is actually served by the cluster.
+
+        CRDs can have multiple versions where:
+        - served: true = available via API
+        - storage: true = the canonical stored version
+
+        Prefer: storage version > any served version > first version
+        """
+        if not versions:
+            return ""
+
+        # First, try to find the storage version (which is always served)
+        for v in versions:
+            if v.get("storage", False) and v.get("served", True):
+                return v.get("name", "")
+
+        # Fall back to any served version
+        for v in versions:
+            if v.get("served", True):  # Default to True if not specified
+                return v.get("name", "")
+
+        # Last resort: first version
+        return versions[0].get("name", "") if versions else ""
 
     def _get_column_config(self) -> dict:
 
@@ -73,6 +106,13 @@ class CustomResourceInstancePage(BaseResourcePage):
     def setup_page_ui(self):
         config = self._get_column_config()
 
+        # CRITICAL: Set namespace dropdown visibility based on CRD scope
+        # This was accidentally removed during refactoring
+        if self.scope == "Cluster":
+            self.show_namespace_dropdown = False
+        else:
+            self.show_namespace_dropdown = True
+
         # Set up the base UI components with dynamic title
         crd_display_name = self.crd_spec.get(
             "names", {}).get("kind", self.crd_name)
@@ -104,11 +144,8 @@ class CustomResourceInstancePage(BaseResourcePage):
 
         for col_index, default_width, resize_type in column_specs:
             if col_index < self.table.columnCount():
-                resize_mode = getattr(
-                    QHeaderView.ResizeMode, resize_type.title())
-                if resize_type == "stretch":
-                    resize_mode = QHeaderView.ResizeMode.Stretch
-
+                # .title() converts "fixed"/"interactive"/"stretch" to "Fixed"/"Interactive"/"Stretch"
+                resize_mode = getattr(QHeaderView.ResizeMode, resize_type.title())
                 header.setSectionResizeMode(col_index, resize_mode)
                 self.table.setColumnWidth(col_index, default_width)
 
@@ -168,8 +205,7 @@ class CustomResourceInstancePage(BaseResourcePage):
 
             # Handle numeric columns for sorting (age)
             if (self.scope == "Cluster" and col == 2) or (self.scope == "Namespaced" and col == 3):
-                # Age column - convert to minutes for proper sorting
-                num = self._parse_age_to_minutes(value)
+                num = parse_age_to_seconds(value)
                 item = SortableTableWidgetItem(value, num)
             else:
                 item = SortableTableWidgetItem(value)
@@ -272,17 +308,165 @@ class CustomResourceInstancePage(BaseResourcePage):
                 # Get resource namespace from raw_data.metadata (correct path for resource structure)
                 resource_namespace = resource.get("raw_data", {}).get("metadata", {}).get("namespace")
 
-                # If both have namespaces, match both; otherwise match by name only
+                # Explicit three-way namespace matching to prevent cross-namespace errors
                 if resource_namespace and table_namespace:
+                    # Both have namespaces - must match exactly
                     if resource_namespace == table_namespace:
                         return resource.get("raw_data", {})
-                else:
-                    # Cluster-scoped or no namespace, match by name only
+                elif not resource_namespace and not table_namespace:
+                    # Both are None/missing - cluster-scoped resource, match by name only
                     return resource.get("raw_data", {})
+                # else: One has namespace, other doesn't - inconsistent, skip to next resource
 
         except Exception as e:
             logging.error(f"Error getting raw data for row {row}: {e}")
         return {}
+
+    def _handle_edit_resource(self, resource_name, resource_namespace, resource):
+        """Override to handle edit for custom resource instances.
+
+        CustomResourceInstancePage sets resource_type=None to disable unified loader,
+        but the base class _handle_edit_resource expects a valid resource_type.
+        We use self.plural instead.
+        """
+        try:
+            from PyQt6.QtCore import QTimer
+
+            # Find the ClusterView that contains the detail manager
+            parent = self.parent()
+            cluster_view = None
+
+            # Walk up the parent tree to find ClusterView
+            while parent:
+                if parent.__class__.__name__ == 'ClusterView' or hasattr(parent, 'detail_manager'):
+                    cluster_view = parent
+                    break
+                parent = parent.parent()
+
+            if cluster_view and hasattr(cluster_view, 'detail_manager'):
+                # Use self.plural for custom resources (e.g., "certificaterequests")
+                resource_type = self.plural
+
+                # Extract raw_data from resource if available
+                raw_data = resource.get("raw_data", {}) if resource else {}
+
+                # Show the detail page first with raw_data
+                cluster_view.detail_manager.show_detail(
+                    resource_type, resource_name, resource_namespace, raw_data)
+
+                # After showing detail page, trigger edit mode
+                QTimer.singleShot(500, lambda: self._trigger_edit_mode(cluster_view))
+
+                logging.info(f"Opening {self.plural}/{resource_name} in edit mode")
+            else:
+                # Fallback: show error if detail manager not found
+                from PyQt6.QtWidgets import QMessageBox
+                QMessageBox.information(
+                    self, "Edit Resource",
+                    f"Cannot edit {self.plural}/{resource_name}: Detail panel not available"
+                )
+                logging.warning(f"Detail manager not found for editing {resource_name}")
+
+        except Exception as e:
+            logging.error(f"Failed to open {resource_name} for editing: {e}")
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.critical(
+                self, "Error",
+                f"Failed to open {resource_name} for editing: {str(e)}"
+            )
+
+    def _perform_deletion_without_confirmation(self):
+        """Perform custom resource deletion without confirmation dialog.
+        
+        Called by ResourceDeletionManager after confirmation has already been shown.
+        Uses the Custom Objects API since resource_type is None for CRD instances.
+        """
+        from PyQt6.QtWidgets import QMessageBox, QProgressDialog, QApplication
+        from PyQt6.QtCore import Qt
+        from Utils.kubernetes_client import get_kubernetes_client
+
+        if not self.selected_items:
+            return
+
+        # Copy to list to avoid set modification during iteration
+        items_to_delete = list(self.selected_items)
+        
+        success_count = 0
+        error_list = []
+        total = len(items_to_delete)
+
+        # Create progress dialog
+        progress = QProgressDialog(f"Deleting {total} {self.plural}...", "Cancel", 0, total, self)
+        progress.setWindowTitle("Deleting Resources")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+        progress.show()
+
+        try:
+            kubernetes_client = get_kubernetes_client()
+            if not kubernetes_client:
+                QMessageBox.critical(self, "Error", "Kubernetes client not available")
+                return
+
+            for i, (resource_name, namespace) in enumerate(items_to_delete):
+                if progress.wasCanceled():
+                    break
+
+                progress.setValue(i)
+                progress.setLabelText(f"Deleting {resource_name}...")
+                QApplication.processEvents()
+
+                try:
+                    # Use Custom Objects API for CRD deletion
+                    if self.scope == "Namespaced" and namespace:
+                        kubernetes_client.custom_objects_api.delete_namespaced_custom_object(
+                            group=self.api_group,
+                            version=self.api_version,
+                            namespace=namespace,
+                            plural=self.plural,
+                            name=resource_name
+                        )
+                    else:
+                        kubernetes_client.custom_objects_api.delete_cluster_custom_object(
+                            group=self.api_group,
+                            version=self.api_version,
+                            plural=self.plural,
+                            name=resource_name
+                        )
+                    success_count += 1
+                    logging.info(f"Deleted {self.plural}/{resource_name}")
+                except Exception as e:
+                    error_msg = str(e)
+                    error_list.append((resource_name, error_msg))
+                    logging.error(f"Failed to delete {self.plural}/{resource_name}: {e}")
+
+            progress.setValue(total)
+
+        except Exception as e:
+            logging.error(f"Error during batch delete of {self.plural}: {e}")
+            error_list.append(("batch", str(e)))
+        finally:
+            progress.close()
+
+        # Show results
+        crd_name = self.crd_spec.get("names", {}).get("kind", self.plural)
+        if error_list:
+            error_details = "\n".join([f"- {name}: {err}" for name, err in error_list])
+            QMessageBox.warning(
+                self, "Deletion Results",
+                f"Deleted {success_count} of {total} {crd_name}.\n\n"
+                f"Failed to delete {len(error_list)} resources:\n{error_details}"
+            )
+        elif success_count > 0:
+            QMessageBox.information(
+                self, "Deletion Complete",
+                f"Successfully deleted {success_count} {crd_name}."
+            )
+
+        # Clear selections and refresh
+        self.selected_items.clear()
+        self.force_load_data()
 
     def _perform_global_search(self, search_text):
 
@@ -358,11 +542,35 @@ class CustomResourceInstancePage(BaseResourcePage):
             self._show_search_empty_state(search_text)
 
     def _populate_table_with_resources(self, resources):
-
+        """Populate table with resources using batched processing (like NodesPage)"""
         self.clear_table()
-        for row, resource in enumerate(resources):
-            self.table.insertRow(row)
-            self.populate_resource_row(row, resource)
+        
+        if not resources:
+            return
+        
+        total = len(resources)
+        self.table.setRowCount(total)
+        self.table.setSortingEnabled(False)
+        
+        # Process resources in batches to keep UI responsive (like NodesPage)
+        batch_size = 25  # Process 25 resources at a time
+        for i in range(0, total, batch_size):
+            batch_end = min(i + batch_size, total)
+            
+            # Populate this batch
+            for row in range(i, batch_end):
+                try:
+                    self.populate_resource_row(row, resources[row])
+                except Exception as e:
+                    logging.warning(f"Failed to populate row {row}: {e}")
+                    continue
+            
+            # Process UI events every batch to keep responsive (like NodesPage)
+            QApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
+        
+        # Re-enable sorting after all rows are populated
+        self.table.setSortingEnabled(True)
+        logging.info(f"Successfully populated {total} CRD instance rows")
 
     def _clear_search_and_reload(self):
 
@@ -380,6 +588,31 @@ class CustomResourceInstancePage(BaseResourcePage):
 
         search_message = f"No results found for '{search_query}'"
         self._create_empty_overlay(search_message, "search_empty_state_label")
+
+    def _on_namespace_changed(self, namespace):
+        """Override to ensure namespace changes are properly handled for CRD instances"""
+
+        if namespace == "Loading namespaces...":
+            return  # Ignore the loading placeholder
+
+        old_namespace = getattr(self, 'namespace_filter', 'default')
+
+        # Only proceed if namespace actually changed
+        if old_namespace == namespace:
+            logging.debug(f"Namespace unchanged ({namespace}), skipping reload")
+            return
+
+        logging.info(f"CRD instance page: Namespace changed from '{old_namespace}' to '{namespace}'")
+
+        # Update namespace filter BEFORE loading data
+        self.namespace_filter = namespace
+
+        # Reset any search state
+        self._is_searching = False
+        self._current_search_query = None
+
+        # Reload data with new namespace
+        self.force_load_data()
 
     def force_load_data(self):
 
@@ -411,22 +644,50 @@ class CustomResourceInstancePage(BaseResourcePage):
         except Exception as e:
             logging.error(
                 f"Error loading custom resource instances for {self.crd_name}: {e}")
-            self._process_custom_resource_instances([])
+            # Restore backup on error (like BaseResourcePage pattern)
+            if hasattr(self, '_backup_resources') and self._backup_resources:
+                logging.warning(
+                    f"Restoring {len(self._backup_resources)} backed up {self.plural} items after error")
+                self.resources = self._backup_resources
+                self._backup_resources = []
+                self._hide_empty_state()
+                self._populate_table_with_resources(self.resources)
+            else:
+                # No backup available - show empty state
+                self._process_custom_resource_instances([])
         finally:
             self.hide_loading_indicator()
 
     def _fetch_crd_instances(self, kubernetes_client):
 
         try:
-            scope_text = "namespaced" if self.scope == "Namespaced" else "cluster-scoped"
-            logging.info(f"Loading {scope_text} {self.plural} instances...")
+            current_namespace_filter = getattr(self, 'namespace_filter', None)
 
-            # Both namespaced and cluster-scoped use the same API call
-            return kubernetes_client.custom_objects_api.list_cluster_custom_object(
-                group=self.api_group,
-                version=self.api_version,
-                plural=self.plural
+            # Check if we need to filter by namespace
+            # For namespaced resources with a specific namespace selected, use namespaced API
+            use_namespaced_api = (
+                self.scope == "Namespaced" and
+                current_namespace_filter is not None and
+                current_namespace_filter and
+                current_namespace_filter != "All Namespaces"
             )
+
+            if use_namespaced_api:
+                logging.info(f"Loading namespaced {self.plural} instances in namespace: {current_namespace_filter}")
+                return kubernetes_client.custom_objects_api.list_namespaced_custom_object(
+                    group=self.api_group,
+                    version=self.api_version,
+                    namespace=current_namespace_filter,
+                    plural=self.plural
+                )
+            else:
+                scope_text = "namespaced (all)" if self.scope == "Namespaced" else "cluster-scoped"
+                logging.info(f"Loading {scope_text} {self.plural} instances...")
+                return kubernetes_client.custom_objects_api.list_cluster_custom_object(
+                    group=self.api_group,
+                    version=self.api_version,
+                    plural=self.plural
+                )
         except Exception as api_error:
             logging.warning(
                 f"Failed to load {self.plural} instances: {api_error}")
@@ -437,16 +698,9 @@ class CustomResourceInstancePage(BaseResourcePage):
         formatted_resources = [self._format_resource_instance(
             instance) for instance in instances]
 
-        # If result is empty but we have backup data, restore it
-        # This preserves visible data during transient failures (cluster disconnect, theme change, etc.)
-        if not formatted_resources and hasattr(self, '_backup_resources') and self._backup_resources:
-            logging.warning(
-                f"Empty {self.plural} result - restoring {len(self._backup_resources)} backed up items")
-            formatted_resources = self._backup_resources
-            self._backup_resources = []
-
-        # Clear backup on successful non-empty load
-        if formatted_resources and hasattr(self, '_backup_resources'):
+        # Clear backup on successful load (even if empty - that's a legitimate empty state)
+        # Backup restoration happens only on ERRORS in _load_custom_resource_instances()
+        if hasattr(self, '_backup_resources'):
             self._backup_resources = []
 
         # Store resources and update display
@@ -463,6 +717,10 @@ class CustomResourceInstancePage(BaseResourcePage):
             logging.info(
                 f"Displaying empty state for {self.plural} - no instances found")
 
+        # Update items count in header
+        if hasattr(self, 'items_count') and self.items_count:
+            self.items_count.setText(f"{len(formatted_resources)} items")
+
         # Update status bar if available
         if hasattr(self, '_update_status_bar'):
             self._update_status_bar(
@@ -472,10 +730,12 @@ class CustomResourceInstancePage(BaseResourcePage):
 
         metadata = instance.get("metadata", {})
         name = metadata.get("name", "Unknown")
+        namespace = metadata.get("namespace", "")  # Extract namespace for selection
         age = self._calculate_age(metadata.get("creationTimestamp", ""))
 
         return {
             "name": name,
+            "namespace": namespace,  # Add namespace for checkbox selection
             "age": age,
             "raw_data": instance
         }
@@ -504,37 +764,8 @@ class CustomResourceInstancePage(BaseResourcePage):
             else:
                 return f"{minutes}m"
         except Exception as e:
+            logging.debug(f"Failed to parse timestamp '{creation_timestamp}': {e}")
             return "Unknown"
-
-    def _parse_age_to_minutes(self, age_str: str) -> int:
-        """
-        Convert age string (e.g., '5d', '3h', '30m', '45s', 'Unknown') to minutes
-        for proper sorting across different time units.
-        """
-        if not age_str or age_str == "Unknown":
-            return 0
-
-        try:
-            age_str = age_str.strip()
-
-            if age_str.endswith('d'):
-                # Days to minutes
-                return int(age_str[:-1]) * 24 * 60
-            elif age_str.endswith('h'):
-                # Hours to minutes
-                return int(age_str[:-1]) * 60
-            elif age_str.endswith('m'):
-                # Already in minutes
-                return int(age_str[:-1])
-            elif age_str.endswith('s'):
-                # Seconds to minutes (minimum 1 minute for non-zero seconds)
-                seconds = int(age_str[:-1])
-                return max(1, seconds // 60) if seconds > 0 else 0
-            else:
-                # Try to parse as plain number (assume minutes)
-                return int(age_str)
-        except (ValueError, AttributeError):
-            return 0
 
     def _show_empty_state(self):
 
@@ -605,3 +836,8 @@ class CustomResourceInstancePage(BaseResourcePage):
                 logging.info("Empty state overlay hidden")
         except Exception as e:
             logging.error(f"Error hiding empty state: {e}")
+
+    def resizeEvent(self, event):
+        """Re-center the empty state overlay when the widget is resized."""
+        super().resizeEvent(event)
+        self._position_empty_overlay()
