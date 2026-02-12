@@ -1,12 +1,14 @@
 from PyQt6.QtWidgets import (
-    QHeaderView, QPushButton, QLabel, QVBoxLayout, QWidget, QHBoxLayout
+    QHeaderView
 )
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor
 
 from Base_Components.base_components import SortableTableWidgetItem
 from Base_Components.base_resource_page import BaseResourcePage
-from UI.Styles import AppStyles, AppColors
+from UI.Styles import AppColors
+from Utils.data_formatters import parse_age_to_seconds
+from Utils.resource_utils import singularize_resource_type
 
 class IngressesPage(BaseResourcePage):
     """
@@ -31,14 +33,12 @@ class IngressesPage(BaseResourcePage):
         sortable_columns = {1, 2, 5}
 
         # Set up the base UI components
-        layout = super().setup_ui("Ingresses", headers, sortable_columns)
+        super().setup_ui("Ingresses", headers, sortable_columns)
 
         # Table styling is already handled by BaseResourcePage
 
         # Configure column widths
         self.configure_columns()
-
-        # Add delete selected button
 
     def configure_columns(self):
         """Configure column widths for full screen utilization"""
@@ -69,7 +69,6 @@ class IngressesPage(BaseResourcePage):
                     self.table.setColumnWidth(col_index, default_width)
                 elif resize_type == "stretch":
                     header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Stretch)
-                    self.table.setColumnWidth(col_index, default_width)
 
         # Ensure full width utilization after configuration
         QTimer.singleShot(100, self._ensure_full_width_utilization)
@@ -110,11 +109,7 @@ class IngressesPage(BaseResourcePage):
 
             # Handle numeric columns for sorting
             if col == 4:  # Age column
-                try:
-                    num = int(value.replace('d', ''))
-                except ValueError:
-                    num = 0
-                item = SortableTableWidgetItem(value, num)
+                item = SortableTableWidgetItem(value, parse_age_to_seconds(value))
             else:
                 item = SortableTableWidgetItem(value)
 
@@ -138,12 +133,6 @@ class IngressesPage(BaseResourcePage):
         action_button = self._create_action_button(row, resource["name"], resource["namespace"])
         action_container = self._create_action_container(row, action_button)
         self.table.setCellWidget(row, len(columns) + 1, action_container)
-
-    # def handle_row_click(self, row, column):
-    #     """Handle row selection when a table cell is clicked"""
-    #     if column != self.table.columnCount() - 1:  # Skip action column
-    #         # Select the row
-    #         self.table.selectRow(row)
 
     def handle_row_click(self, row, column):
         if column != self.table.columnCount() - 1:  # Skip action column
@@ -171,8 +160,6 @@ class IngressesPage(BaseResourcePage):
 
                 if parent and hasattr(parent, 'detail_manager'):
                     # Get singular resource type
-                    resource_type = self.resource_type
-                    if resource_type.endswith('s'):
-                        resource_type = resource_type[:-1]
+                    resource_type = singularize_resource_type(self.resource_type)
 
                     parent.detail_manager.show_detail(resource_type, resource_name, namespace)
