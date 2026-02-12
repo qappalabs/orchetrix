@@ -3,7 +3,7 @@ Enhanced YAML section for DetailPage component - with actual deployment capabili
 """
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QScrollArea, QTextEdit, QLabel,
+    QWidget, QHBoxLayout, QPushButton, QTextEdit, QLabel,
     QLineEdit, QFrame
 )
 from PyQt6.QtCore import Qt, QTimer, QSize, QRect, pyqtSignal
@@ -17,7 +17,7 @@ import logging
 import re
 
 from .base_detail_section import BaseDetailSection
-from UI.Styles import AppStyles, AppColors
+from UI.Styles import AppColors
 from UI.Icons import resource_path
 import Styles.YamlSectionStyles as YAMLSectionStyles
 
@@ -101,7 +101,6 @@ class YamlHighlighter(QSyntaxHighlighter):
         colon_match = re.search(r'^\s*(\w+):([\w-]+)', text)
         if colon_match:
             # Found key:value without space after colon
-            key = colon_match.group(1)
             value = colon_match.group(2)
             colon_pos = text.find(':')
             
@@ -371,8 +370,6 @@ class YamlEditorWithLineNumbers(QTextEdit):
             return
 
         # Find all occurrences
-        flags = QTextDocument.FindFlag.FindBackward if not case_sensitive else QTextDocument.FindFlag.FindBackward | QTextDocument.FindFlag.FindCaseSensitively
-
         cursor = self.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
 
