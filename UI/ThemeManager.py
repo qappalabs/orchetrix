@@ -1143,15 +1143,15 @@ class LightColors:
     BG_SIDEBAR = "#F8F8F8"  # Sidebar background
     BG_HEADER = "#F8F8F8"  # Header background
     CARD_BG = "#F8F8F8"  # Card/Panel backgrounds
-    HEADER_BG = "#F8F8F8"  # Header background (alias)
+    HEADER_BG = "#F8F8F8"  # Header background (general UI elements)
     TAB_INACTIVE = "#E8E8E8"  # Inactive tab background
-    TABLE_HEADER = "#E8E8E8"  # Table header background
+    TABLE_HEADER = "#F5964E"  # Table header background (orange)
 
     # Text colors - dark on light backgrounds
     TEXT_DARK = "#24292F"  # Primary dark text
     TEXT_LIGHT = "#24292F"  # Alias for compatibility
     TEXT_SECONDARY = "#656D76"  # Muted text
-    TEXT_SUBTLE = "#8B949E"  # Very muted text
+    TEXT_SUBTLE = "#4D5561"  # Muted text (darkened for readability)
     TEXT_LINK = "#0366D6"  # Link text
     TEXT_DANGER = "#DC3545"  # Danger text
     TEXT_TABLE = "#24292F"  # Table text
@@ -1176,9 +1176,14 @@ class LightColors:
     # Hover states
     HOVER_BG = "rgba(0, 0, 0, 0.05)"  # Light hover background
     HOVER_BG_DARKER = "rgba(0, 0, 0, 0.1)"  # Darker hover
-    SELECTED_BG = "rgba(53, 132, 228, 0.15)"  # Selected background
+    SELECTED_BG = "rgba(245, 150, 78, 0.10)"  # Selected background (orange tint)
+    SIDEBAR_ACTIVE_BG = HOVER_BG  # Same as hover - subtle gray selection background
+    SIDEBAR_ACTIVE_TEXT = "#F5964E"  # Sidebar active text color (orange)
+    SIDEBAR_HOVER_BG = "rgba(245, 150, 78, 0.15)"  # Sidebar hover (orange tint)
     DANGER_HOVER_BG = "rgba(220, 53, 69, 0.1)"  # Danger hover
     DANGER_PRESSED_BG = "#A52A2A"  # Darker red for light theme pressed state
+    SUCCESS_HOVER_BG = "#218838"  # Darker green for hover state
+    SUCCESS_PRESSED_BG = "#1E7E34"  # Even darker green for pressed state
 
     # Overlay colors
     OVERLAY_BG_COLOR = "rgba(241, 241, 241, 0.8)"
@@ -1229,7 +1234,7 @@ class LightTheme(BaseTheme):
             border_color=self.colors.BORDER_COLOR,
             border_light=self.colors.BORDER_LIGHT,
             header_bg=self.colors.TABLE_HEADER,
-            header_text=self.colors.TEXT_SECONDARY,
+            header_text=self.colors.TEXT_LIGHT,
             header_hover_bg=self.colors.BG_MEDIUM,
             hover_bg_color=self.colors.HOVER_BG,
         )
