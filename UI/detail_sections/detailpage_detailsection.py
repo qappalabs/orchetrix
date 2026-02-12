@@ -5,7 +5,7 @@ Details section for DetailPage component
 from PyQt6.QtWidgets import (
     QScrollArea, QWidget, QVBoxLayout, QHBoxLayout, QLabel
 )
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt
 from typing import Dict, Any
 import logging
 import sys
