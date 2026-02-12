@@ -67,15 +67,15 @@ class ResourceProcessingWorker(QThread):
 
             # Process in batches to allow for progress updates and cancellation
             for batch_start in range(0, total_items, self.batch_size):
-                if self._cancelled.is_set():
+                if self.is_cancelled():
                     logging.info(f"Processing cancelled at item {batch_start}")
                     return
 
                 # Wait if paused
-                while self._paused.is_set() and not self._cancelled.is_set():
+                while self._paused.is_set() and not self.is_cancelled():
                     self.msleep(100)
 
-                if self._cancelled.is_set():
+                if self.is_cancelled():
                     return
 
                 # Process batch
@@ -98,7 +98,7 @@ class ResourceProcessingWorker(QThread):
                 # Small delay to prevent overwhelming the UI thread
                 self.msleep(1)
 
-            if not self._cancelled.is_set():
+            if not self.is_cancelled():
                 self.end_time = time.time()
                 processing_time = self.end_time - self.start_time
 
@@ -119,7 +119,7 @@ class ResourceProcessingWorker(QThread):
         processed_batch = []
 
         for i, resource in enumerate(batch):
-            if self._cancelled.is_set():
+            if self.is_cancelled():
                 break
 
             try:
@@ -187,6 +187,46 @@ class ResourceProcessingWorker(QThread):
             'is_cancelled': self.is_cancelled(),
             'is_paused': self.is_paused()
         }
+
+    def _calculate_age(self, creation_timestamp) -> str:
+        """Calculate age from creation timestamp."""
+        try:
+            if not creation_timestamp:
+                return "Unknown"
+
+            # Parse timestamp
+            if isinstance(creation_timestamp, str):
+                # Parse ISO format
+                if creation_timestamp.endswith('Z'):
+                    created = datetime.fromisoformat(
+                        creation_timestamp.replace('Z', '+00:00'))
+                else:
+                    created = datetime.fromisoformat(creation_timestamp)
+            else:
+                # Assume it's already a datetime object
+                created = creation_timestamp
+
+            # Ensure timezone aware
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+
+            now = datetime.now(timezone.utc)
+            age_delta = now - created
+
+            days = age_delta.days
+            hours = age_delta.seconds // 3600
+            minutes = (age_delta.seconds % 3600) // 60
+
+            if days > 0:
+                return f"{days}d"
+            elif hours > 0:
+                return f"{hours}h"
+            else:
+                return f"{minutes}m"
+
+        except Exception as e:
+            logging.debug(f"Error calculating age: {e}")
+            return "Unknown"
 
 
 class PodProcessingWorker(ResourceProcessingWorker):
@@ -278,7 +318,7 @@ class PodProcessingWorker(ResourceProcessingWorker):
         try:
             container_statuses = status.get("containerStatuses", [])
             if not container_statuses:
-                return "0 / 0"
+                return "0/0"
 
             ready_count = sum(
                 1 for cs in container_statuses if cs.get("ready", False))
@@ -287,10 +327,10 @@ class PodProcessingWorker(ResourceProcessingWorker):
             return f"{ready_count}/{total_count}"
         except (KeyError, TypeError, AttributeError) as e:
             logging.debug(f"Could not calculate ready status: {e}")
-            return "0 / 0"
+            return "0/0"
         except Exception as e:
             logging.error(f"Unexpected error calculating ready status: {e}")
-            return "0 / 0"
+            return "0/0"
 
     def _calculate_restarts(self, status: Dict) -> int:
         """Calculate total restart count."""
@@ -333,7 +373,10 @@ class PodProcessingWorker(ResourceProcessingWorker):
                 cpu_request = requests.get("cpu", "0")
 
                 # Parse CPU value
-                if cpu_request.endswith("m"):
+                if cpu_request.endswith("n"):
+                    # Nanocores: 1 millicore = 1,000,000 nanocores
+                    total_cpu_millicores += int(cpu_request[:-1]) // 1_000_000
+                elif cpu_request.endswith("m"):
                     total_cpu_millicores += int(cpu_request[:-1])
                 else:
                     total_cpu_millicores += int(float(cpu_request) * 1000)
@@ -390,46 +433,6 @@ class PodProcessingWorker(ResourceProcessingWorker):
         except Exception as e:
             logging.error(f"Unexpected error calculating memory requests: {e}")
             return "0"
-
-    def _calculate_age(self, creation_timestamp) -> str:
-        """Calculate age from creation timestamp."""
-        try:
-            if not creation_timestamp:
-                return "Unknown"
-
-            # Parse timestamp
-            if isinstance(creation_timestamp, str):
-                # Parse ISO format
-                if creation_timestamp.endswith('Z'):
-                    created = datetime.fromisoformat(
-                        creation_timestamp.replace('Z', '+00:00'))
-                else:
-                    created = datetime.fromisoformat(creation_timestamp)
-            else:
-                # Assume it's already a datetime object
-                created = creation_timestamp
-
-            # Ensure timezone aware
-            if created.tzinfo is None:
-                created = created.replace(tzinfo=timezone.utc)
-
-            now = datetime.now(timezone.utc)
-            age_delta = now - created
-
-            days = age_delta.days
-            hours = age_delta.seconds // 3600
-            minutes = (age_delta.seconds % 3600) // 60
-
-            if days > 0:
-                return f"{days}d"
-            elif hours > 0:
-                return f"{hours}h"
-            else:
-                return f"{minutes}m"
-
-        except Exception as e:
-            logging.debug(f"Error calculating age: {e}")
-            return "Unknown"
 
 
 class EventProcessingWorker(ResourceProcessingWorker):
@@ -565,11 +568,11 @@ class DeploymentProcessingWorker(ResourceProcessingWorker):
             return f"{ready}/{desired}"
         except (KeyError, TypeError, AttributeError) as e:
             logging.debug(f"Could not calculate deployment replicas: {e}")
-            return "0 / 0"
+            return "0/0"
         except Exception as e:
             logging.error(
                 f"Unexpected error calculating deployment replicas: {e}")
-            return "0 / 0"
+            return "0/0"
 
     def _get_strategy(self, spec: Dict) -> str:
         """Get deployment strategy."""
