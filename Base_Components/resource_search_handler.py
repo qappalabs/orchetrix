@@ -1,5 +1,4 @@
 import logging
-import os
 from PyQt6.QtWidgets import QHBoxLayout, QLineEdit, QComboBox, QLabel, QTableWidgetItem
 from PyQt6.QtCore import Qt
 
@@ -25,7 +24,6 @@ class ResourceSearchHandler:
         self._is_searching = False
         self._current_search_query = None
         self._search_signals_connected = False
-        self._namespace_signals_connected = False
 
     def add_filter_controls(self, header_layout):
         """Creates and adds filter controls (Search, Namespace) to the header."""
@@ -182,7 +180,13 @@ class ResourceSearchHandler:
             self.filter_resources_linear(search_text)
 
     def on_search_results_loaded(self, resource_type, result):
-        """Handle search results."""
+        """Handle search results.
+
+        NOTE: Unlike other signal handlers, we intentionally do NOT add an isVisible()
+        check here. Search is user-initiated, and discarding results when the user
+        briefly navigates away would be a UX regression. The _is_searching flag
+        already provides sufficient protection against unwanted signal processing.
+        """
         try:
             if (resource_type != self.page.resource_type or 
                 not self._is_searching):
@@ -201,7 +205,7 @@ class ResourceSearchHandler:
             if search_results:
                 logging.info(f"Search found {len(search_results)} {resource_type} items.")
             else:
-                logging.info(f"Search found no items.")
+                logging.info(f"Search found no {resource_type} items.")
 
         except Exception as e:
             logging.error(f"Error processing search results: {e}")
