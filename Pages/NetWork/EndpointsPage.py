@@ -2,12 +2,12 @@
 Dynamic implementation of the Endpoints page with live Kubernetes data.
 """
 
-from PyQt6.QtWidgets import QHeaderView, QPushButton, QWidget, QHBoxLayout
+from PyQt6.QtWidgets import QHeaderView
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QColor
 
 from Base_Components.base_components import SortableTableWidgetItem
 from Base_Components.base_resource_page import BaseResourcePage
+from Utils.data_formatters import parse_age_to_seconds
 
 
 class EndpointsPage(BaseResourcePage):
@@ -33,7 +33,7 @@ class EndpointsPage(BaseResourcePage):
         sortable_columns = {1, 2, 3, 4}
 
         # Set up the base UI components
-        layout = super().setup_ui("Endpoints", headers, sortable_columns)
+        super().setup_ui("Endpoints", headers, sortable_columns)
 
         # Configure column widths
         self.configure_columns()
@@ -99,11 +99,7 @@ class EndpointsPage(BaseResourcePage):
 
             # Handle numeric columns for sorting
             if col == 3:  # Age column
-                try:
-                    num = int(value.replace('d', ''))
-                except ValueError:
-                    num = 0
-                item = SortableTableWidgetItem(value, num)
+                item = SortableTableWidgetItem(value, parse_age_to_seconds(value))
             else:
                 item = SortableTableWidgetItem(value)
 
