@@ -20,6 +20,7 @@ from urllib.parse import urljoin
 
 from Base_Components.base_components import SortableTableWidgetItem
 from Base_Components.base_resource_page import BaseResourcePage
+from Base_Components.resource_page_style_manager import ResourcePageStyleManager
 from UI.Styles import AppColors, AppStyles
 
 
@@ -364,6 +365,41 @@ class ChartsPage(BaseResourcePage):
         # Mark initialization as complete
         self._is_initializing = False
     
+    def _on_theme_changed(self, theme_name):
+        """Refresh Helm Charts page specific styles when theme changes"""
+        # Call parent's theme change handler first
+        super()._on_theme_changed(theme_name)
+        
+        # Refresh repository label if it exists
+        if hasattr(self, 'repository_combo') and self.repository_combo:
+            # Find and update the repository label in the filter controls
+            for i in range(self.layout().count()):
+                item = self.layout().itemAt(i)
+                if item.layout():
+                    for j in range(item.layout().count()):
+                        widget = item.layout().itemAt(j).widget()
+                        if isinstance(widget, QWidget):
+                            # Search for the repository label in the additional filters container
+                            for child in widget.children():
+                                if isinstance(child, QHBoxLayout):
+                                    for k in range(child.count()):
+                                        label_widget = child.itemAt(k).widget()
+                                        if (isinstance(label_widget, QLabel) and 
+                                            label_widget.text() == "Repository:"):
+                                            label_widget.setStyleSheet(
+                                                ResourcePageStyleManager.get_namespace_label_style())
+                                            break
+        
+        # Refresh repository dropdown if it exists
+        if hasattr(self, 'repository_combo') and self.repository_combo:
+            ResourcePageStyleManager.apply_namespace_combo_style(self.repository_combo)
+        
+        # Refresh action buttons in table rows
+        # Note: Action button styling is handled automatically by BaseTablePage._on_theme_changed()
+        # No need to manually update styles here - this matches PodsPage pattern
+        
+        logging.debug(f"ChartsPage: Theme refresh complete for {theme_name}")
+    
     def _ensure_ui_state(self):
         """Ensure proper UI state without triggering data loads"""
         if hasattr(self, 'table'):
@@ -459,7 +495,7 @@ class ChartsPage(BaseResourcePage):
         
         # Repository filter
         repo_label = QLabel("Repository:")
-        repo_label.setStyleSheet("color: #ffffff; font-size: 12px; font-weight: normal;")
+        repo_label.setStyleSheet(ResourcePageStyleManager.get_namespace_label_style())
         repo_label.setMinimumWidth(70)
         
         self.repository_combo = QComboBox()
@@ -468,7 +504,7 @@ class ChartsPage(BaseResourcePage):
             "grafana", "jetstack", "ingress-nginx", "elastic", "hashicorp"
         ])
         self.repository_combo.setCurrentText(self.current_repository)
-        self.repository_combo.setStyleSheet(AppStyles.get_dropdown_style_with_icon())
+        ResourcePageStyleManager.apply_namespace_combo_style(self.repository_combo)
         self.repository_combo.currentTextChanged.connect(self.on_repository_changed)
         self.repository_combo.setFixedWidth(150)
         self.repository_combo.setFixedHeight(32)
@@ -1073,24 +1109,20 @@ class ChartsPage(BaseResourcePage):
         
         # Create and add action button
         action_button = self._create_action_button(row, chart_name)
-        action_button.setStyleSheet(AppStyles.ACTION_BUTTON_STYLE)
         action_container = self._create_action_container(row, action_button)
-        action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
         self.table.setCellWidget(row, len(columns) + 1, action_container)
    
     def _create_action_button(self, row, chart_name):
         """Create a standard more action button following the app's pattern"""
-        from PyQt6.QtGui import QIcon
         from PyQt6.QtCore import QSize
-        from UI.Icons import resource_path
         from UI.Styles import AppConstants
+        from Base_Components.base_components import BaseTablePageStyles
         from functools import partial
         
         button = QToolButton()
 
-        # Use custom SVG icon instead of text
-        icon = resource_path("Icons/Moreaction_Button.svg")
-        button.setIcon(QIcon(icon))
+        # Use pre-loaded theme-aware icon from parent class
+        button.setIcon(self.action_button_icon)
         button.setIconSize(QSize(AppConstants.SIZES["ICON_SIZE"], AppConstants.SIZES["ICON_SIZE"]))
 
         # Remove text and change to icon-only style
@@ -1101,9 +1133,22 @@ class ChartsPage(BaseResourcePage):
         button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         button.setCursor(Qt.CursorShape.PointingHandCursor)
 
-        # Create menu
+        # Apply theme-aware action button styling (same as BaseTablePage)
+        button.setStyleSheet(BaseTablePageStyles.get_action_button_style())
+
+        # Create menu using base class method
+        self._create_action_menu(button, row)
+        
+        return button
+    
+    def _create_action_menu(self, button, row):
+        """Override to create Helm Charts specific action menu"""
+        from Base_Components.base_components import BaseTablePageStyles
+        from functools import partial
+        
+        # Create menu with button as parent for proper Qt ownership
         menu = QMenu(button)
-        menu.setStyleSheet(AppStyles.MENU_STYLE)
+        menu.setStyleSheet(BaseTablePageStyles.get_menu_style())
 
         # Connect signals to change row appearance when menu opens/closes
         menu.aboutToShow.connect(lambda: self._highlight_active_row(row, True))
@@ -1119,6 +1164,8 @@ class ChartsPage(BaseResourcePage):
             action = menu.addAction(action_info["text"])
             if "icon" in action_info:
                 try:
+                    from UI.Icons import resource_path
+                    from PyQt6.QtGui import QIcon
                     action.setIcon(QIcon(resource_path(action_info["icon"])))
                 except Exception:
                     pass  # Icon loading failed, continue without icon
@@ -1129,7 +1176,7 @@ class ChartsPage(BaseResourcePage):
             )
 
         button.setMenu(menu)
-        return button
+        return menu
     
     def _handle_install_chart(self, row):
         """Handle chart installation with duplicate prevention"""
