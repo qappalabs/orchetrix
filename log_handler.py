@@ -150,13 +150,8 @@ def method_logger(
             logger = logging.getLogger(func.__module__)
             func_name = f"{func.__qualname__}"
 
-            # Generate unique call ID for tracking
-            call_id = f"{func_name}_{int(time.time() * 1000000) % 1000000}"
-
             # Log method entry
             start_time = time.time()
-            from Utils import get_full_timestamp_with_ms
-            start_datetime = get_full_timestamp_with_ms()
 
             # Prepare input logging
             input_info = ""
@@ -219,7 +214,6 @@ def method_logger(
                 # Calculate execution time for failed calls
                 end_time = time.time()
                 execution_time = (end_time - start_time) * 1000
-                end_datetime = get_full_timestamp_with_ms()
 
                 # Log exception (always log exceptions)
                 if log_exceptions:
@@ -271,7 +265,11 @@ def class_logger(
 
     def decorator(cls):
         for attr_name in dir(cls):
-            attr = getattr(cls, attr_name)
+            try:
+                attr = getattr(cls, attr_name)
+            except Exception as e:
+                logging.debug(f"Skipping attribute {attr_name}: could not access via getattr: {e}")
+                continue
 
             # Skip if not callable
             if not callable(attr):
