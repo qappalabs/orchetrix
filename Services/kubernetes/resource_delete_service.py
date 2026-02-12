@@ -5,7 +5,7 @@ Handles all delete operations for Kubernetes resources following MVC architectur
 
 import logging
 import time
-from typing import List, Dict, Optional, Tuple
+from typing import Dict, Optional
 from dataclasses import dataclass
 from kubernetes import client
 from kubernetes.client.rest import ApiException
