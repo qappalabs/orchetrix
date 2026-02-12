@@ -7,7 +7,7 @@ import gc
 import logging
 from collections import defaultdict, deque
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer, QThread
 from kubernetes import watch
 from kubernetes.client.rest import ApiException
