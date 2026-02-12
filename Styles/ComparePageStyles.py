@@ -68,6 +68,9 @@ def get_deploy_btn_style():
             QPushButton:hover {
                 background-color: #45a049;
             }
+            QPushButton:pressed {
+                background-color: #3d8b40;
+            }
         """
 
 
@@ -89,6 +92,9 @@ def get_cancel_btn_style():
             }
             QPushButton:hover {
                 background-color: #d32f2f;
+            }
+            QPushButton:pressed {
+                background-color: #b71c1c;
             }
         """
 
