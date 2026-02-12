@@ -7,7 +7,7 @@ Designed for maximum performance and consistent formatting across the app.
 import re
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import Union, Optional, Dict, Any, List
+from typing import Union, Optional
 from dataclasses import dataclass
 
 
@@ -244,3 +244,36 @@ def format_percentage(value: Optional[float], precision: int = 1) -> str:
 def truncate_string(text: str, max_length: int = 50, suffix: str = '...') -> str:
     """Truncate string efficiently"""
     return _formatter_instance.truncate_string(text, max_length, suffix)
+
+
+# Pre-compiled pattern for age parsing - matches number+suffix pairs
+_AGE_PATTERN = re.compile(r'(\d+)(mo|[ydhms])')
+
+
+def parse_age_to_seconds(age_str: str) -> int:
+    """Parse a Kubernetes age string to total seconds for sorting.
+
+    Handles single-unit ('5d', '12h') and compound ('5d2h30m') formats,
+    plus 'y' (years) and 'mo' (months) produced by format_age().
+    Returns 0 for invalid or empty input.
+    """
+    if not age_str or not isinstance(age_str, str):
+        return 0
+
+    multipliers = {
+        'y': 365 * 86400,
+        'mo': 30 * 86400,
+        'd': 86400,
+        'h': 3600,
+        'm': 60,
+        's': 1,
+    }
+
+    total = 0
+    for value_str, unit in _AGE_PATTERN.findall(age_str):
+        try:
+            total += int(value_str) * multipliers.get(unit, 0)
+        except ValueError:
+            continue
+
+    return total
