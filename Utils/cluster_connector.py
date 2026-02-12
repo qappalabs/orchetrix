@@ -6,19 +6,20 @@ Replaces the complex monolithic cluster_connector.py with a clean, maintainable 
 import logging
 import threading
 import time
-from collections import defaultdict, deque
+from collections import defaultdict
 from typing import Dict, List, Optional, Tuple, Any, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer, Qt
+from enum import Enum
 
 from Utils.kubernetes_client import get_kubernetes_client
 from Utils.enhanced_worker import EnhancedBaseWorker
 from Utils.thread_manager import get_thread_manager
 from Utils.unified_resource_loader import get_unified_resource_loader
 from Utils.unified_cache_system import get_unified_cache
-from log_handler import method_logger, class_logger
+from log_handler import class_logger
 
 
 @dataclass
@@ -58,6 +59,7 @@ class ConnectionState:
     is_connecting: bool = False
     last_error: Optional[str] = None
     connected_at: Optional[float] = None
+    health_status: 'ClusterHealthStatus' = field(default_factory=lambda: ClusterHealthStatus.UNKNOWN)
 
     def __post_init__(self):
         self._lock = threading.RLock()
@@ -72,6 +74,72 @@ class ConnectionState:
             if connected:
                 self.connected_at = time.time()
                 self.last_error = None
+                self.health_status = ClusterHealthStatus.HEALTHY
+
+
+class ClusterHealthStatus(Enum):
+    HEALTHY = "healthy"
+    UNHEALTHY = "unhealthy"
+    UNKNOWN = "unknown"
+
+
+class ClusterHealthMonitor:
+    """
+    Monitors cluster health and implements Circuit Breaker pattern.
+    Prevents retry storms by blocking connections to known-bad clusters.
+    """
+    def __init__(self, recovery_timeout: int = 30):
+        self._health_states: Dict[str, ClusterHealthStatus] = defaultdict(lambda: ClusterHealthStatus.UNKNOWN)
+        self._last_failure_times: Dict[str, float] = {}
+        self._recovery_timeout = recovery_timeout
+        self._lock = threading.RLock()
+
+    def report_success(self, cluster_name: str):
+        """Report a successful operation"""
+        with self._lock:
+            if self._health_states[cluster_name] != ClusterHealthStatus.HEALTHY:
+                logging.info(f"Cluster {cluster_name} recovered and is now HEALTHY")
+            self._health_states[cluster_name] = ClusterHealthStatus.HEALTHY
+            if cluster_name in self._last_failure_times:
+                del self._last_failure_times[cluster_name]
+
+    def report_failure(self, cluster_name: str, error: str):
+        """Report a failure (opens circuit if critical)"""
+        if not error:
+            return
+            
+        # Only trigger for connection refusal type errors
+        critical_errors = ["connection refused", "target machine actively refused", "10061", "timeout"]
+        is_critical = any(c in str(error).lower() for c in critical_errors)
+        
+        if is_critical:
+            with self._lock:
+                if self._health_states[cluster_name] != ClusterHealthStatus.UNHEALTHY:
+                    logging.warning(f"Marking cluster {cluster_name} as UNHEALTHY (Circuit Open) due to: {error}")
+                self._health_states[cluster_name] = ClusterHealthStatus.UNHEALTHY
+                self._last_failure_times[cluster_name] = time.time()
+
+    def is_healthy(self, cluster_name: str) -> bool:
+        """Check if cluster is healthy or ready for retry (auto-recovery)"""
+        with self._lock:
+            state = self._health_states[cluster_name]
+            
+            if state == ClusterHealthStatus.HEALTHY or state == ClusterHealthStatus.UNKNOWN:
+                return True
+                
+            # If UNHEALTHY, check for auto-recovery timeout
+            last_fail = self._last_failure_times.get(cluster_name, 0)
+            if time.time() - last_fail > self._recovery_timeout:
+                logging.info(f"Auto-recovering cluster {cluster_name} for health check (Circuit Half-Open)")
+                # Tentatively set to UNKNOWN to allow one retry
+                self._health_states[cluster_name] = ClusterHealthStatus.UNKNOWN
+                return True
+                
+            return False
+
+    def get_status(self, cluster_name: str) -> ClusterHealthStatus:
+        with self._lock:
+            return self._health_states[cluster_name]
 
 
 # DataCache class replaced by unified cache system
@@ -206,6 +274,9 @@ class EnhancedClusterConnector(QObject):
             "heavy": {"metrics": 60000, "issues": 120000},    # 60s/120s for heavy load
             "critical": {"metrics": 120000, "issues": 300000} # 120s/300s for critical load
         }
+
+        # Health Monitor (Circuit Breaker)
+        self.health_monitor = ClusterHealthMonitor(recovery_timeout=30)  # 30s auto-recovery
 
         # Polling recovery state
         self._metrics_default_interval = 30000
@@ -348,6 +419,19 @@ class EnhancedClusterConnector(QObject):
             # Update state and start connection
             connection_state.update_state(connected=False, connecting=True)
 
+        # CHECK HEALTH (Circuit Breaker)
+        if not self.health_monitor.is_healthy(cluster_name):
+            logging.warning(f"Connection blocked to unhealthy cluster {cluster_name} (Circuit Open)")
+            # Emit error immediately without attempting connection
+            self.connection_complete.emit(cluster_name, False, "Cluster is unhealthy/unreachable (Circuit Open)")
+            self.error_occurred.emit("connection", f"Connection to {cluster_name} blocked due to recent failures")
+            
+            # Reset connecting state
+            with self._state_lock:
+                 if cluster_name in self._connection_states:
+                    self._connection_states[cluster_name].update_state(connected=False, connecting=False)
+            return
+
         self.connection_started.emit(cluster_name)
         self._start_connection_worker(cluster_name)
 
@@ -387,9 +471,14 @@ class EnhancedClusterConnector(QObject):
         self.connection_complete.emit(cluster_name, success, message)
 
         # Start data loading and polling if successful
+        # Report success to health monitor
         if success:
+            self.health_monitor.report_success(cluster_name)
             self._start_data_loading(cluster_name)
             self._start_polling()
+        else:
+            # Report failure (managed in _handle_connection_error but added here for completeness)
+            self.health_monitor.report_failure(cluster_name, message)
 
     def _handle_connection_error(self, cluster_name: str, error_message: str) -> None:
         """Handle connection errors"""
