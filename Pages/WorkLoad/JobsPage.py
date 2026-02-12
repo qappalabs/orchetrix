@@ -9,6 +9,7 @@ from PyQt6.QtGui import QColor
 from Base_Components.base_components import SortableTableWidgetItem
 from Base_Components.base_resource_page import BaseResourcePage
 from UI.Styles import AppColors
+from Utils.data_formatters import parse_age_to_seconds
 
 class JobsPage(BaseResourcePage):
     """
@@ -33,7 +34,7 @@ class JobsPage(BaseResourcePage):
         sortable_columns = {1, 2, 3, 4, 5}
 
         # Set up the base UI components with styles
-        layout = super().setup_ui("Jobs", headers, sortable_columns)
+        super().setup_ui("Jobs", headers, sortable_columns)
 
         # Table styling is already handled by BaseResourcePage
         # Configure column widths
@@ -133,21 +134,7 @@ class JobsPage(BaseResourcePage):
                     completion_value = 0
                 item = SortableTableWidgetItem(value, completion_value)
             elif col == 3:  # Age column
-                try:
-                    # Convert age string (like "5d", "2h", "30s") to minutes for sorting
-                    if 'd' in value:
-                        age_value = int(value.replace('d', '')) * 1440  # days to minutes
-                    elif 'h' in value:
-                        age_value = int(value.replace('h', '')) * 60  # hours to minutes
-                    elif 'm' in value:
-                        age_value = int(value.replace('m', ''))  # minutes
-                    elif 's' in value:
-                        age_value = int(value.replace('s', '')) / 60.0  # seconds to minutes
-                    else:
-                        age_value = 0
-                except ValueError:
-                    age_value = 0
-                item = SortableTableWidgetItem(value, age_value)
+                item = SortableTableWidgetItem(value, parse_age_to_seconds(value))
             else:
                 item = SortableTableWidgetItem(value)
 
