@@ -251,9 +251,16 @@ class ClusterStateManager(QObject):
             logging.error(f"Error cancelling current switch: {e}")
 
     def _initiate_cluster_switch(self, cluster_name: str):
-        """Initiate cluster switch with better error handling and cache clearing"""
+        """Initiate cluster switch with better error handling"""
         try:
-            # Cache system removed - no cache clearing needed
+            # Clear pending operations in unified resource loader to prevent stale data
+            try:
+                from Utils.unified_resource_loader import get_unified_resource_loader
+                loader = get_unified_resource_loader()
+                loader.clear_all_pending_operations()
+                logging.info(f"Cleared all pending resource loader operations before switching to {cluster_name}")
+            except Exception as loader_error:
+                logging.warning(f"Failed to clear pending operations: {loader_error}")
 
             self.cluster_states[cluster_name] = ClusterState.CONNECTING
             self.state_changed.emit(cluster_name, ClusterState.CONNECTING)
@@ -430,6 +437,16 @@ class ClusterStateManager(QObject):
             # Cancel any pending switch to prevent orphaned workers, mirroring disconnect_cluster behavior
             if self.pending_switch == cluster_name:
                 self.pending_switch = None
+
+            # Synchronize with cluster_connector (same as disconnect_cluster)
+            try:
+                from Utils.cluster_connector import get_cluster_connector
+                connector = get_cluster_connector()
+                connector.disconnect_cluster(cluster_name)
+                logging.debug(f"Synchronized cluster_connector reset for {cluster_name}")
+            except Exception as sync_error:
+                logging.warning(f"Failed to sync cluster_connector reset: {sync_error}")
+
             self.state_changed.emit(cluster_name, ClusterState.DISCONNECTED)
 
 _cluster_state_manager_instance = None
