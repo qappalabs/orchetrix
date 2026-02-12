@@ -57,7 +57,13 @@ class AppColors:
     HOVER_BG = "rgba(255, 255, 255, 0.1)"
     HOVER_BG_DARKER = "rgba(255, 255, 255, 0.05)"
     SELECTED_BG = "rgba(33, 150, 243, 0.2)"
+    SIDEBAR_ACTIVE_BG = HOVER_BG  # Alias - dark theme keeps existing behavior
+    SIDEBAR_ACTIVE_TEXT = TEXT_LIGHT  # Alias - dark theme active text stays white
+    SIDEBAR_HOVER_BG = HOVER_BG  # Alias - dark theme hover stays the same
     DANGER_HOVER_BG = "rgba(255, 68, 68, 0.1)"
+    DANGER_PRESSED_BG = "#C41019"  # Darker red for pressed state
+    SUCCESS_HOVER_BG = "#43A047"  # Darker green for hover state
+    SUCCESS_PRESSED_BG = "#388E3C"  # Even darker green for pressed state
 
     # Overlay colors
     OVERLAY_BG_COLOR = "rgba(0, 0, 0, 0.7)"
@@ -156,19 +162,17 @@ class AppStyles:
 
     CLUSTER_DISABLED_BTN_STYLE = """
         QPushButton {
-            background-color: #2a2a2a;
-            color: #666666;
-            border: 1px solid #444444;
+            background-color: rgba(42, 42, 42, 0.6);
+            color: rgba(102, 102, 102, 0.6);
+            border: 1px solid rgba(68, 68, 68, 0.6);
             border-radius: 4px;
             padding: 8px 16px;
             font-weight: normal;
-            opacity: 0.6;
         }
         QPushButton:disabled {
-            background-color: #2a2a2a;
-            color: #555555;
-            border: 1px solid #333333;
-            opacity: 0.5;
+            background-color: rgba(42, 42, 42, 0.5);
+            color: rgba(85, 85, 85, 0.5);
+            border: 1px solid rgba(51, 51, 51, 0.5);
         }
     """
 
@@ -498,7 +502,7 @@ class AppStyles:
         
         QHeaderView::section {{
             background-color: {AppColors.HEADER_BG};
-            color: {AppColors.TEXT_SECONDARY};
+            color: {AppColors.TEXT_LIGHT};
             padding: 10px 8px;
             border: none;
             border-bottom: 1px solid {AppColors.BORDER_COLOR};
@@ -539,7 +543,7 @@ class AppStyles:
     CUSTOM_HEADER_STYLE = f"""
         QHeaderView::section {{
             background-color: {AppColors.HEADER_BG};
-            color: {AppColors.TEXT_SECONDARY};
+            color: {AppColors.TEXT_LIGHT};
             padding: 8px;
             border: none;
             border-bottom: 1px solid {AppColors.BORDER_COLOR};
@@ -749,7 +753,7 @@ class AppStyles:
         /* Force consistent header styling */
         QHeaderView::section {{
             background-color: {AppColors.HEADER_BG} !important;
-            color: {AppColors.TEXT_SECONDARY} !important;
+            color: {AppColors.TEXT_LIGHT} !important;
             border: none !important;
             border-bottom: 1px solid {AppColors.BORDER_COLOR} !important;
             padding: 8px !important;
@@ -1774,8 +1778,53 @@ class AppStyles:
                 background-color: #2d2d2d;
             }}
             """
-        except Exception:
+        except (ImportError, FileNotFoundError, OSError, AttributeError):
             return AppStyles.COMBO_BOX_STYLE
+
+    @staticmethod
+    def get_input_field_style():
+        """Generate input field style for QLineEdit and QSpinBox"""
+        return f"""
+            QLineEdit, QSpinBox {{
+                background-color: {AppColors.HEADER_BG};
+                border: 1px solid {AppColors.BORDER_DARK};
+                border-radius: 4px;
+                padding: 8px 12px;
+                color: {AppColors.TEXT_LIGHT};
+                font-size: 13px;
+            }}
+            QLineEdit:focus, QSpinBox:focus {{
+                border: 1px solid {AppColors.ACCENT_BLUE};
+            }}
+            QLineEdit:hover, QSpinBox:hover {{
+                border: 1px solid #555555;
+            }}
+            QLineEdit:disabled, QSpinBox:disabled {{
+                background-color: {AppColors.BG_DARK};
+                color: {AppColors.TEXT_SUBTLE};
+            }}
+        """
+
+    @staticmethod
+    def get_text_edit_style():
+        """Generate text edit style for QTextEdit"""
+        return f"""
+            QTextEdit {{
+                background-color: {AppColors.HEADER_BG};
+                border: 1px solid {AppColors.BORDER_DARK};
+                border-radius: 4px;
+                padding: 8px;
+                color: {AppColors.TEXT_LIGHT};
+                font-size: 13px;
+                font-family: 'Consolas', 'Monaco', monospace;
+            }}
+            QTextEdit:focus {{
+                border: 1px solid {AppColors.ACCENT_BLUE};
+            }}
+            QTextEdit:hover {{
+                border: 1px solid #555555;
+            }}
+        """
 
     COMBO_BOX_STYLE = """
         QComboBox {{
@@ -1862,7 +1911,7 @@ class AppStyles:
                 opacity: 0.8;
             }}
             """
-        except Exception:
+        except (ImportError, FileNotFoundError, OSError, AttributeError):
             return f"""
             QCheckBox {{
                 margin: 0px;
@@ -2103,7 +2152,7 @@ def get_custom_header_style():
     return f"""
         QHeaderView::section {{
             background-color: {theme.colors.TABLE_HEADER};
-            color: {theme.colors.TEXT_SECONDARY};
+            color: {theme.colors.TEXT_LIGHT};
             padding: 8px;
             border: none;
             border-bottom: 1px solid {theme.colors.BORDER_COLOR};
