@@ -8,12 +8,11 @@ moved to error_handler.py. Kept for potential future performance optimization wo
 """
 
 import gc
-import sys
 import time
 import logging
 import psutil
 import threading
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from functools import wraps
 from PyQt6.QtCore import QTimer, QObject, pyqtSignal, Qt
 
