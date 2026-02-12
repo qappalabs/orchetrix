@@ -4,9 +4,9 @@ with proper threading for operations to prevent UI freezing and automatic refres
 """
 
 from PyQt6.QtWidgets import (
-    QLabel, QHeaderView, QWidget, QToolButton, QHBoxLayout, QVBoxLayout,
-    QMessageBox, QProgressBar, QApplication, QDialog, QFormLayout,
-    QComboBox, QTextEdit, QDialogButtonBox, QProgressDialog, QMenu, QCheckBox, QLineEdit, QPushButton
+    QHeaderView, QToolButton, QHBoxLayout, QVBoxLayout,
+    QMessageBox, QApplication, QDialog, QFormLayout,
+    QTextEdit, QProgressDialog, QMenu, QCheckBox, QLineEdit, QPushButton
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QSize
 from PyQt6.QtGui import QColor, QIcon
@@ -18,7 +18,6 @@ import os
 import platform
 import shutil
 import tempfile
-import time
 import logging
 import sys
 from Utils.thread_manager import is_shutdown_requested
@@ -32,8 +31,6 @@ else:
 from Base_Components.base_resource_page import BaseResourcePage
 from Base_Components.base_components import SortableTableWidgetItem
 from UI.Styles import AppColors, AppStyles, AppConstants
-from UI.Icons import resource_path
-from UI.ThemeManager import get_theme_manager
 from Styles.ReleasesPageStyles import (
     get_upgrade_dialog_style,
     get_chart_input_style,
@@ -41,12 +38,7 @@ from Styles.ReleasesPageStyles import (
     get_values_editor_style,
     get_atomic_checkbox_style,
     get_cancel_button_style,
-    get_upgrade_button_style,
-    get_loading_bar_style,
-    get_loading_text_style,
-    get_empty_overlay_style,
-    get_action_container_style,
-    get_menu_style
+    get_upgrade_button_style
 )
 
 
@@ -91,7 +83,7 @@ class HelmOperationThread(QThread):
         """Delete a single release with improved error handling and monitoring"""
         release_name, namespace = self.args
 
-        self.progress_update.emit(f"Locating Helm executable...")
+        self.progress_update.emit("Locating Helm executable...")
         self.progress_percentage.emit(10)
 
         helm_path = find_helm_executable()
@@ -384,9 +376,10 @@ class HelmReleasesLoader(QThread):
     releases_loaded = pyqtSignal(list, str)
     error_occurred = pyqtSignal(str)
 
-    def __init__(self, namespace=None):
+    def __init__(self, namespace=None, kube_context=None):
         super().__init__()
         self.namespace = namespace
+        self.kube_context = kube_context
 
     def run(self):
         """Execute the Helm list command and emit results"""
@@ -408,6 +401,10 @@ class HelmReleasesLoader(QThread):
                 cmd.append("--all-namespaces")
 
             # Execute the command
+            # FIXED: Add kube-context to ensure we target the correct cluster
+            if hasattr(self, 'kube_context') and self.kube_context:
+                cmd.extend(["--kube-context", self.kube_context])
+
             result = subprocess.run(
                 cmd,
                 capture_output=True,
@@ -904,36 +901,24 @@ class ReleasesPage(BaseResourcePage):
         self.table.setRowCount(0)
         self.table.setSortingEnabled(False)
 
-        # Show loading indicator
-        loading_row = self.table.rowCount()
-        self.table.setRowCount(loading_row + 1)
-        self.table.setSpan(loading_row, 0, 1, self.table.columnCount())
+        # Show loading indicator using base class method for consistent styling
+        self.show_loading_indicator("Loading Helm releases...")
 
-        loading_widget = QWidget()
-        loading_layout = QVBoxLayout(loading_widget)
-        loading_layout.setContentsMargins(20, 20, 20, 20)
-
-        loading_bar = QProgressBar()
-        loading_bar.setRange(0, 0)
-        loading_bar.setTextVisible(False)
-        loading_bar.setStyleSheet(get_loading_bar_style())
-
-        loading_text = QLabel(f"Loading Helm releases...")
-        loading_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        loading_text.setStyleSheet(get_loading_text_style())
-
-        loading_layout.addWidget(loading_text)
-        loading_layout.addWidget(loading_bar)
-
-        self.table.setCellWidget(loading_row, 0, loading_widget)
-
-        # Get namespace filter value if it exists
-        namespace_filter = None
-        if hasattr(self, 'namespace_combo') and self.namespace_combo.currentText() != "All Namespaces":
-            namespace_filter = self.namespace_combo.currentText()
+        # Get namespace filter value using managed class attribute (consistent with base class)
+        namespace_filter = None if self.namespace_filter == "All Namespaces" else self.namespace_filter
+            
+        # Get current cluster context
+        kube_context = None
+        try:
+            from Services.kubernetes.kubernetes_service import get_kubernetes_service
+            service = get_kubernetes_service()
+            if service and service.current_cluster:
+                kube_context = service.current_cluster
+        except Exception as e:
+            logging.warning(f"Failed to get current cluster context: {e}")
 
         # Start loading thread
-        self.loading_thread = HelmReleasesLoader(namespace_filter)
+        self.loading_thread = HelmReleasesLoader(namespace_filter, kube_context)
         self.loading_thread.releases_loaded.connect(self.on_resources_loaded)
         self.loading_thread.error_occurred.connect(self.on_load_error)
         self.loading_thread.start()
@@ -942,6 +927,7 @@ class ReleasesPage(BaseResourcePage):
         """Handle loaded resources with improved focus handling"""
         # Clear loading state
         self.is_loading = False
+        self.hide_loading_indicator()
 
         # Store the resources
         self.resources = resources
@@ -951,10 +937,6 @@ class ReleasesPage(BaseResourcePage):
         self.table.setRowCount(0)
         self.table.setSortingEnabled(False)
 
-        # Hide any existing empty overlay
-        if hasattr(self, 'empty_overlay') and self.empty_overlay:
-            self.empty_overlay.hide()
-
         # Populate table with resources
         if resources:
             for i, resource in enumerate(resources):
@@ -962,14 +944,17 @@ class ReleasesPage(BaseResourcePage):
                 self.populate_resource_row(i, resource)
 
             self.table.setSortingEnabled(True)
-            self.table.show()
             self.table.setEnabled(True)
+
+            # Ensure table is visible (switch from message container if needed)
+            if hasattr(self, '_table_stack'):
+                self._table_stack.setCurrentWidget(self.table)
 
             # Update count
             self.items_count.setText(f"{len(resources)} items")
         else:
-            # Show empty state
-            self.table.setEnabled(True)
+            # Use base class empty message for consistent styling
+            self._show_empty_message()
             self.items_count.setText("0 items")
 
         # If we need to focus on a specific release, check if it's in the resources
@@ -1089,38 +1074,10 @@ class ReleasesPage(BaseResourcePage):
         return False
 
     def on_load_error(self, error_message):
-        """Handle loading errors with better empty state presentation"""
+        """Handle loading errors using base class error message for consistent styling"""
         self.is_loading = False
-
-        # Clear loading indicator and show error message directly in the table
-        self.table.setRowCount(0)
-
-        # Create overlay for error message if it doesn't exist
-        if not hasattr(self, 'empty_overlay'):
-            self.empty_overlay = QLabel()
-            self.empty_overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.empty_overlay.setStyleSheet(get_empty_overlay_style())
-            self.empty_overlay.setParent(self.table)
-            self.empty_overlay.setWordWrap(True)
-
-        # Set error message
-        self.empty_overlay.setText(error_message)
-
-        # Position the overlay relative to the table
-        header_height = self.table.horizontalHeader().height()
-        table_visible_height = self.table.height() - header_height
-
-        # Set the geometry relative to the table
-        self.empty_overlay.setGeometry(
-            0,  # X position relative to table
-            header_height,  # Y position just below header
-            self.table.width(),  # Full table width
-            table_visible_height  # Remaining table height
-        )
-
-        # Make sure the overlay is visible and on top
-        self.empty_overlay.show()
-        self.empty_overlay.raise_()
+        self.hide_loading_indicator()
+        self._show_error_message(error_message)
 
     def populate_resource_row(self, row, resource):
         """Populate a row with improved status indication for failed/partial installations"""
@@ -1202,19 +1159,15 @@ class ReleasesPage(BaseResourcePage):
             # Add the item to the table
             self.table.setItem(row, cell_col, item)
 
-        # Create action button
+        # Create action button and container using base class method for consistent styling
         action_button = self._create_action_button(row, resource["name"], resource["namespace"])
-
-        action_container = QWidget()
-        action_layout = QHBoxLayout(action_container)
-        action_layout.setContentsMargins(0, 0, 0, 0)
-        action_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        action_layout.addWidget(action_button)
-        action_container.setStyleSheet(get_action_container_style())
+        action_container = self._create_action_container(row, action_button)
         self.table.setCellWidget(row, len(columns) + 1, action_container)
 
     def _create_action_button(self, row, resource_name, resource_namespace):
         """Create an action button with enhanced upgrade and delete options"""
+        from Styles.BaseTablePageStyles import get_menu_style
+
         button = QToolButton()
 
         # Use theme-aware icon from parent class (cached and updates with theme)
@@ -1226,11 +1179,15 @@ class ReleasesPage(BaseResourcePage):
         button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
 
         button.setFixedWidth(30)
-        button.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE)
+        button.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE +
+                             """
+                QToolButton::menu-indicator { image: none; width: 0px; }
+                """
+                             )
         button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         button.setCursor(Qt.CursorShape.PointingHandCursor)
 
-        # Create menu
+        # Create menu with standard styling from BaseTablePageStyles
         menu = QMenu(button)
         menu.setStyleSheet(get_menu_style())
 
@@ -1466,6 +1423,22 @@ class ReleasesPage(BaseResourcePage):
         if result != QMessageBox.StandardButton.Yes:
             return
 
+        self._perform_deletion_without_confirmation()
+
+    def _perform_deletion_without_confirmation(self):
+        """Perform Helm release deletion without confirmation dialog.
+        
+        Called by ResourceDeletionManager after confirmation has already been shown.
+        """
+        # Check if there's already an active operation
+        if self.active_operation and self.active_operation.isRunning():
+            QMessageBox.warning(self, "Operation in Progress", "Another operation is currently in progress. Please wait for it to complete.")
+            return
+
+        if not self.selected_items:
+            return
+
+        count = len(self.selected_items)
         resources_list = list(self.selected_items)
 
         # Create and show progress dialog
@@ -1993,24 +1966,6 @@ class ReleasesPage(BaseResourcePage):
         except Exception as e:
             logging.error(f"Error getting release resources for detail view: {e}")
             return []
-
-    def resizeEvent(self, event):
-        """Handle resizing to ensure empty overlay is properly positioned"""
-        super().resizeEvent(event)
-
-        # If empty overlay is visible, update its position
-        if hasattr(self, 'empty_overlay') and self.empty_overlay.isVisible():
-            if hasattr(self, 'table'):
-                header_height = self.table.horizontalHeader().height()
-                table_visible_height = self.table.height() - header_height
-
-                # Set the geometry relative to the table
-                self.empty_overlay.setGeometry(
-                    0,  # X position relative to table
-                    header_height,  # Y position just below header
-                    self.table.width(),  # Full table width
-                    table_visible_height  # Remaining table height
-                )
 
     def force_load_data(self):
         """Force reload data with special handling for focusing on a specific release"""
