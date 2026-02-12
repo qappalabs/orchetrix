@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
                              QLabel, QPushButton, QLineEdit, QTreeWidget,
                              QTreeWidgetItem, QFrame, QMenu, QHeaderView, QApplication,
-                             QMessageBox, QToolButton)
+                             QMessageBox, QToolButton, QGraphicsOpacityEffect)
 from PyQt6.QtCore import Qt, QObject, pyqtSignal, QPoint, QSize, QTimer
 from PyQt6.QtGui import QColor, QPainter, QIcon, QFont, QPixmap
 
@@ -30,6 +30,7 @@ class HomePageSignals(QObject):
     open_cluster_signal = pyqtSignal(str)
     open_preferences_signal = pyqtSignal()
     update_pinned_items_signal = pyqtSignal(list)  # Signal for pinned items
+    cluster_deleted_signal = pyqtSignal(str)  # Signal when a cluster is deleted externally
 
 class CircularCheckmark(QLabel):
     """Visual indicator for active/successful status"""
@@ -511,6 +512,27 @@ class OrchestrixGUI(ThemeAwareMainWindow):
     def on_clusters_loaded(self, clusters):
         """Handle loaded clusters with batch updates"""
         logging.info(f"HomePage: Received {len(clusters)} clusters from kubernetes client")
+        
+        # Get list of new cluster names
+        new_cluster_names = {c.name for c in clusters}
+        
+        # Identify and remove deleted clusters
+        for view_type in self.all_data:
+            view_items = self.all_data[view_type]
+            # Iterate copy to allow modification
+            for item in view_items[:]: 
+                name = item.get("name")
+                kind = item.get("kind")
+                if kind == "Kubernetes Cluster" and name not in new_cluster_names:
+                    logging.info(f"HomePage: Cluster {name} was deleted/removed from config")
+                    view_items.remove(item)
+                    
+                    # If this was the waiting cluster, clear it
+                    if self.waiting_for_cluster_load == name:
+                        self.waiting_for_cluster_load = None
+                        
+                    # Emit signal so main.py can redirect if needed
+                    self.signals.cluster_deleted_signal.emit(name)
 
         for cluster in clusters:
             logging.debug(f"HomePage: Processing cluster {cluster.name} with status {cluster.status}")
@@ -919,7 +941,9 @@ class OrchestrixGUI(ThemeAwareMainWindow):
 
         if status in ["connecting", "loading"] and (name in self.connecting_clusters or self.waiting_for_cluster_load == name):
             menu_btn.setEnabled(False)
-            menu_btn.setStyleSheet(HomePageStyles.get_home_action_button_disabled_style())
+            opacity_effect = QGraphicsOpacityEffect(menu_btn)
+            opacity_effect.setOpacity(0.5)
+            menu_btn.setGraphicsEffect(opacity_effect)
         else:
             menu = QMenu(action_widget)
             menu.setStyleSheet(HomePageStyles.get_menu_style())
