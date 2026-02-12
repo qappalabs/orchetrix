@@ -2,12 +2,12 @@
 Dynamic implementation of the PriorityClasses page with live Kubernetes data.
 """
 
-from PyQt6.QtWidgets import QHeaderView, QPushButton
+from PyQt6.QtWidgets import QHeaderView
 from PyQt6.QtCore import Qt, QTimer
 
 from Base_Components.base_components import SortableTableWidgetItem
 from Base_Components.base_resource_page import BaseResourcePage
-from UI.Styles import AppStyles
+from Utils.data_formatters import parse_age_to_seconds
 
 class PriorityClassesPage(BaseResourcePage):
     """
@@ -33,7 +33,7 @@ class PriorityClassesPage(BaseResourcePage):
         sortable_columns = {1, 2, 3, 4}
 
         # Set up the base UI components
-        layout = super().setup_ui("Priority Classes", headers, sortable_columns)
+        super().setup_ui("Priority Classes", headers, sortable_columns)
 
         # Configure column widths
         self.configure_columns()
@@ -105,21 +105,7 @@ class PriorityClassesPage(BaseResourcePage):
                     num = 0
                 item = SortableTableWidgetItem(value, num)
             elif col == 3:  # Age column
-                try:
-                    # Parse age with support for d, h, m, s suffixes
-                    age_str = str(value)
-                    if age_str and age_str[-1] in 'dhms':
-                        unit = age_str[-1]
-                        numeric_part = age_str[:-1]
-                        # Convert to seconds for consistent sorting
-                        unit_multipliers = {'d': 86400, 'h': 3600, 'm': 60, 's': 1}
-                        num = int(float(numeric_part) * unit_multipliers.get(unit, 1))
-                    else:
-                        # No suffix, try to parse as integer
-                        num = int(float(age_str)) if age_str else 0
-                except (ValueError, TypeError):
-                    num = 0
-                item = SortableTableWidgetItem(value, num)
+                item = SortableTableWidgetItem(value, parse_age_to_seconds(value))
             else:
                 item = SortableTableWidgetItem(value)
 
