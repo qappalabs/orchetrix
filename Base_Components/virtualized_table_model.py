@@ -5,7 +5,7 @@ This replaces QTableWidget with QAbstractTableModel for better performance
 
 from PyQt6.QtCore import QAbstractTableModel, Qt, QModelIndex, pyqtSignal
 from PyQt6.QtGui import QColor, QFont
-from typing import List, Dict, Any, Optional, Callable
+from typing import List, Dict, Optional, Callable
 import logging
 import warnings
 
@@ -241,6 +241,6 @@ class VirtualizedResourceModel(QAbstractTableModel):
     def __del__(self):
         """Cleanup when model is destroyed"""
         try:
-            logging.debug(f"VirtualizedResourceModel destroyed")
+            logging.debug("VirtualizedResourceModel destroyed")
         except Exception as e:
             logging.debug(f"Error during VirtualizedResourceModel cleanup: {e}")
