@@ -139,6 +139,7 @@ class PulsatingSpinner(QWidget, ThemeAwareMixin):
 class SplashScreen(QWidget, ThemeAwareMixin):
     # Signal to notify when loading is complete
     finished = pyqtSignal()
+    loading_finished = pyqtSignal()  # Alias used by main.py for splash-to-window handshake
 
     def __init__(self):
         super().__init__()
@@ -219,16 +220,30 @@ class SplashScreen(QWidget, ThemeAwareMixin):
         self.close_timer.timeout.connect(self.update_timer)
         self.close_timer.start(30)  # Update every 30ms for a total of about 3 seconds
 
+    def start_loading_simulation(self, duration_ms=3000):
+        """Start loading simulation with specified duration.
+        
+        Called by main.py to initiate the timed splash screen sequence.
+        Resets and reconfigures the close timer for the requested duration.
+        """
+        # Reset counter and recalculate interval for requested duration
+        self.counter = 0
+        interval = max(16, duration_ms // 100)  # 100 steps, min 16ms
+        if hasattr(self, 'close_timer') and self.close_timer.isActive():
+            self.close_timer.stop()
+        self.close_timer.start(interval)
+
     def update_timer(self):
         # Update counter
         self.counter += 1
 
-        # When counter reaches 100, emit finished signal
+        # When counter reaches 100, emit finished signals
         if self.counter >= 100:
             self.close_timer.stop()
             if hasattr(self, "spinner"):
                 self.spinner.stop()
             self.finished.emit()
+            self.loading_finished.emit()
 
     def paintEvent(self, event):
         # Add shadow effect to the widget
