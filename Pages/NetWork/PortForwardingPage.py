@@ -3,17 +3,14 @@ Updated PortForwardingPage with real port forwarding data integration
 Replaces the mock implementation with actual port forward management
 """
 
-from PyQt6.QtWidgets import (QHeaderView, QPushButton, QLabel, QVBoxLayout,
-                            QWidget, QHBoxLayout, QMessageBox, QMenu)
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer
+from PyQt6.QtWidgets import (QHeaderView, QPushButton, QMessageBox)
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor, QIcon
-from PyQt6.QtCore import QSize
 
 from Base_Components.base_components import SortableTableWidgetItem, StatusLabel
 from Base_Components.base_resource_page import BaseResourcePage
-from UI.Styles import AppColors, AppStyles
+from UI.Styles import AppColors
 from Utils.port_forward_manager import get_port_forward_manager, PortForwardConfig
-from Utils.port_forward_dialog import PortForwardDialog, ActivePortForwardsDialog
 from Styles.PortForwardingPageStyles import STOP_ALL_BUTTON_STYLE
 from functools import partial
 import time
@@ -32,6 +29,7 @@ class PortForwardingPage(BaseResourcePage):
         super().__init__(parent)
         self.resource_type = "portforwarding"
         self.port_manager = get_port_forward_manager()
+        self._is_deleting = False  # Flag to prevent refresh during deletion
         self.setup_page_ui()
 
         # Connect to port forward manager signals for real-time updates
@@ -51,7 +49,7 @@ class PortForwardingPage(BaseResourcePage):
         sortable_columns = {1, 2, 3, 4, 5, 6, 7, 8}
 
         # Set up the base UI components
-        layout = super().setup_ui("Port Forwarding", headers, sortable_columns)
+        super().setup_ui("Port Forwarding", headers, sortable_columns)
 
         # Table styling is already handled by BaseResourcePage
 
@@ -159,7 +157,9 @@ class PortForwardingPage(BaseResourcePage):
             return
 
         self.is_loading = True
-        self.selected_items.clear()
+        
+        # Preserve current selections to restore after refresh
+        preserved_selections = set(self.selected_items)
 
         # Get real port forwards from manager
         port_forwards = self.port_manager.get_port_forwards()
@@ -205,7 +205,34 @@ class PortForwardingPage(BaseResourcePage):
         # Update stop all button state
         self._update_stop_all_button()
 
+        # Restore selections for items that still exist
+        self._restore_selections(preserved_selections)
+
         self.is_loading = False
+
+    def _restore_selections(self, preserved_selections):
+        """Restore checkbox selections for items that still exist after refresh."""
+        if not preserved_selections:
+            return
+
+        # Get names of current resources
+        current_resource_names = {r['name'] for r in self.resources}
+
+        # Restore selections for items that still exist
+        for name, namespace in preserved_selections:
+            if name in current_resource_names:
+                self.selected_items.add((name, namespace))
+
+        # Update checkbox states in the table
+        for row in range(self.table.rowCount()):
+            checkbox_container = self.table.cellWidget(row, 0)
+            if checkbox_container:
+                checkbox = checkbox_container.findChild(type(checkbox_container.layout().itemAt(0).widget()))
+                if checkbox and row < len(self.resources):
+                    resource_name = self.resources[row]['name']
+                    # Check if this resource is in selected_items
+                    is_selected = any(name == resource_name for name, _ in self.selected_items)
+                    checkbox.setChecked(is_selected)
 
     def populate_resource_row(self, row, resource):
         """Populate a single row with port forward data"""
@@ -296,54 +323,65 @@ class PortForwardingPage(BaseResourcePage):
         action_container = self._create_action_container(row, action_button)
         self.table.setCellWidget(row, 9, action_container)
 
-    def _create_action_button(self, row, resource_name=None, resource_namespace=None):
-        """Create action button with port forward specific actions"""
-        from PyQt6.QtWidgets import QToolButton
-
-        button = QToolButton()
-        # Use theme-aware icon from parent class (cached and updates with theme)
-        button.setIcon(self.action_button_icon)
-        button.setIconSize(QSize(16, 16))
-        button.setText("")
-        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-        button.setFixedWidth(30)
-        button.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE)
-        button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        button.setCursor(Qt.CursorShape.PointingHandCursor)
-
-        # Create menu
-        menu = QMenu(button)
-        menu.setStyleSheet(AppStyles.MENU_STYLE)
-
+    def _create_action_menu(self, button, row):
+        """
+        Create and attach menu to action button with port forward specific actions.
+        Overrides base class to add port forwarding functionality.
+        """
+        # Call parent to get base menu functionality (Edit, Delete)
+        menu = super()._create_action_menu(button, row)
+        
         # Get port forward config
         resource = self.resources[row] if row < len(self.resources) else None
 
-        actions = []
-
         if resource:
+            # Clear existing actions to rebuild with port forward specific actions
+            menu.clear()
+            
+            # Add port forward specific actions based on status
             if resource['status'] == 'active':
-                actions.append({"text": "Open in Browser", "icon": "Icons/web.png", "dangerous": False})
-                actions.append({"text": "Copy URL", "icon": "Icons/copy.png", "dangerous": False})
-                actions.append({"text": "Restart", "icon": "Icons/refresh.png", "dangerous": False})
+                # Active port forward actions
+                open_browser_action = menu.addAction("Open in Browser")
+                open_browser_action.setIcon(QIcon(resource_path("Icons/web.png")))
+                open_browser_action.triggered.connect(
+                    partial(self._handle_action, "Open in Browser", row)
+                )
+                
+                copy_url_action = menu.addAction("Copy URL")
+                copy_url_action.setIcon(QIcon(resource_path("Icons/copy.png")))
+                copy_url_action.triggered.connect(
+                    partial(self._handle_action, "Copy URL", row)
+                )
+                
+                restart_action = menu.addAction("Restart")
+                restart_action.setIcon(QIcon(resource_path("Icons/refresh.png")))
+                restart_action.triggered.connect(
+                    partial(self._handle_action, "Restart", row)
+                )
             elif resource['status'] in ['inactive', 'error']:
-                actions.append({"text": "Restart", "icon": "Icons/refresh.png", "dangerous": False})
+                # Inactive/error port forward actions
+                restart_action = menu.addAction("Restart")
+                restart_action.setIcon(QIcon(resource_path("Icons/refresh.png")))
+                restart_action.triggered.connect(
+                    partial(self._handle_action, "Restart", row)
+                )
 
-            actions.append({"text": "Stop", "icon": "Icons/stop.png", "dangerous": True})
-            actions.append({"text": "Delete", "icon": "Icons/delete.png", "dangerous": True})
-
-        # Add actions to menu
-        for action_info in actions:
-            action = menu.addAction(action_info["text"])
-            if "icon" in action_info:
-                action.setIcon(QIcon(action_info["icon"]))
-            if action_info.get("dangerous", False):
-                action.setProperty("dangerous", True)
-            action.triggered.connect(
-                partial(self._handle_action, action_info["text"], row)
+            # Add common actions
+            stop_action = menu.addAction("Stop")
+            stop_action.setIcon(QIcon(resource_path("Icons/stop.png")))
+            stop_action.setProperty("dangerous", True)
+            stop_action.triggered.connect(
+                partial(self._handle_action, "Stop", row)
+            )
+            
+            delete_action = menu.addAction("Delete")
+            delete_action.setIcon(QIcon(resource_path("Icons/delete.png")))
+            delete_action.setProperty("dangerous", True)
+            delete_action.triggered.connect(
+                partial(self._handle_action, "Delete", row)
             )
 
-        button.setMenu(menu)
-        return button
+        return menu
 
     def _handle_action(self, action, row):
         """Handle action button clicks for port forwards"""
@@ -458,19 +496,23 @@ class PortForwardingPage(BaseResourcePage):
     # Signal handlers for real-time updates
     def on_port_forward_started(self, config: PortForwardConfig):
         """Handle port forward started"""
-        self.refresh_port_forwards()
+        if not self._is_deleting:
+            self.refresh_port_forwards()
 
     def on_port_forward_stopped(self, key: str):
         """Handle port forward stopped"""
-        self.refresh_port_forwards()
+        if not self._is_deleting:
+            self.refresh_port_forwards()
 
     def on_port_forward_error(self, key: str, error_message: str):
         """Handle port forward error"""
-        self.refresh_port_forwards()
+        if not self._is_deleting:
+            self.refresh_port_forwards()
 
     def on_port_forwards_updated(self, configs):
         """Handle port forwards updated"""
-        self.refresh_port_forwards()
+        if not self._is_deleting:
+            self.refresh_port_forwards()
 
     def handle_row_click(self, row, column):
         """Handle row selection"""
@@ -495,14 +537,34 @@ class PortForwardingPage(BaseResourcePage):
         )
 
         if reply == QMessageBox.StandardButton.Yes:
+            self._perform_deletion_without_confirmation()
+
+    def _perform_deletion_without_confirmation(self):
+        """Perform port forward deletion without confirmation dialog.
+        
+        Called by ResourceDeletionManager after confirmation has already been shown.
+        """
+        if not self.selected_items:
+            return
+
+        # Prevent signal-triggered refreshes during deletion
+        self._is_deleting = True
+
+        try:
+            # Copy to list to avoid 'Set changed size during iteration' error
+            items_to_delete = list(self.selected_items)
+
             # Find and stop selected port forwards
-            for selected_name, _ in self.selected_items:
+            for selected_name, _ in items_to_delete:
                 for resource in self.resources:
                     if resource['name'] == selected_name:
                         self.port_manager.stop_port_forward(resource['key'])
                         break
 
             self.selected_items.clear()
+        finally:
+            self._is_deleting = False
+            # Refresh once after all deletions are complete
             self.refresh_port_forwards()
 
     def cleanup(self):
