@@ -18,22 +18,24 @@ class ResourceDeletionManager:
         # Enhanced debugging for selection
         logging.debug(
             f"_handle_delete_selected called. Selected items: {len(selected_items) if selected_items else 0}")
-        logging.debug(
-            f"Selected items content: {list(selected_items) if selected_items else 'N/A'}")
 
         if not selected_items:
             QMessageBox.information(self.page, "No Selection",
                                     "Please select resources to delete by checking the checkboxes in the first column.")
             return
 
+        # Convert to list once and reuse
+        items_list = list(selected_items)
+        logging.debug(f"Selected items content: {items_list}")
+
         # Confirmation dialog
-        if not self.confirm_deletion(list(selected_items)):
+        if not self.confirm_deletion(items_list):
             logging.debug("User cancelled deletion in confirmation dialog")
             return
 
         # Start deletion process (confirmation already done)
         logging.debug("Starting deletion process after confirmation")
-        self.start_deletion_process(list(selected_items))
+        self.start_deletion_process(items_list)
 
     def confirm_deletion(self, selected_items):
         """Show confirmation dialog for multiple deletion."""
@@ -70,17 +72,23 @@ class ResourceDeletionManager:
 
     def delete_selected_resources(self, selected_items_list):
         """Perform batch deletion."""
-        if self.delete_thread and self.delete_thread.isRunning():
-            self.delete_thread.wait(300)
+        if self.batch_delete_thread and self.batch_delete_thread.isRunning():
+            self.batch_delete_thread.wait(300)
 
         if not selected_items_list:
             logging.warning("No items to delete")
             return
 
-        # Validation (using page's validation logic)
+        # Validation (using page's validation logic if available)
         validated_items = []
         for resource_name, namespace in selected_items_list:
-            if self.page._validate_resource_name(resource_name):
+            # Check if page has validation method, default to valid if not
+            if hasattr(self.page, '_validate_resource_name'):
+                is_valid = self.page._validate_resource_name(resource_name)
+            else:
+                is_valid = True  # Default: treat as valid if no validation exists
+            
+            if is_valid:
                 validated_items.append((resource_name, namespace))
             else:
                 logging.warning(
@@ -144,21 +152,29 @@ class ResourceDeletionManager:
             QMessageBox.information(self.page, "Deletion Results", result_message)
 
             # Refresh page data
-            self.page.force_load_data()
+            if hasattr(self.page, 'force_load_data') and callable(self.page.force_load_data):
+                self.page.force_load_data()
+            else:
+                logging.warning("Page does not have force_load_data method, skipping refresh")
 
         except Exception as e:
             logging.error(f"Error in batch delete completion handler: {e}")
             QMessageBox.critical(
                 self.page, "Error", f"Error processing deletion results: {str(e)}")
             try:
-                self.page.force_load_data()
-            except Exception as e:
-                logging.error(f"Failed to refresh data after deletion error: {e}")
+                if hasattr(self.page, 'force_load_data') and callable(self.page.force_load_data):
+                    self.page.force_load_data()
+            except Exception as inner_exc:
+                logging.error(f"Failed to refresh data after deletion error: {inner_exc}")
 
     def delete_resource_single(self, resource_name, resource_namespace):
         """Delete a single resource."""
+        # Block concurrent deletions instead of using arbitrary wait
         if self.delete_thread and self.delete_thread.isRunning():
-            self.delete_thread.wait(300)
+            QMessageBox.information(
+                self.page, "Deletion In Progress",
+                "A deletion is already in progress. Please wait for it to complete.")
+            return
 
         ns_text = f" in namespace {resource_namespace}" if resource_namespace else ""
         result = QMessageBox.warning(
@@ -181,7 +197,10 @@ class ResourceDeletionManager:
             QMessageBox.information(self.page, "Deletion Successful", message)
             if hasattr(self.page, 'selected_items'):
                 self.page.selected_items.discard((resource_name, resource_namespace))
-            self.page.force_load_data()
+            if hasattr(self.page, 'force_load_data'):
+                self.page.force_load_data()
+            else:
+                logging.warning("Page does not have force_load_data method, skipping refresh")
         else:
             QMessageBox.critical(self.page, "Deletion Failed", message)
 
