@@ -9,6 +9,7 @@ from Base_Components.base_components import SortableTableWidgetItem
 from Base_Components.base_resource_page import BaseResourcePage
 from UI.Styles import AppColors, AppConstants
 from UI.ThemeManager import get_theme_manager
+from Utils.data_formatters import parse_age_to_seconds
 
 import Styles.EventsPageStyles as EventsPageStyles
 import datetime
@@ -210,9 +211,12 @@ class EventsPage(BaseResourcePage):
             if col >= self.table.columnCount() - 1:  # Leave room for action column
                 break
 
-            item = SortableTableWidgetItem(str(value))
+            # Use numeric sort value for Age (col 7) and Last Seen (col 8)
+            if col in (7, 8):
+                item = SortableTableWidgetItem(str(value), parse_age_to_seconds(str(value)))
+            else:
+                item = SortableTableWidgetItem(str(value))
 
-            # FIXED: Add tooltip for all cells to show full content
             item.setToolTip(str(value))
 
             # Set alignment
@@ -383,20 +387,6 @@ class EventsPage(BaseResourcePage):
         if action == "Delete":
             self.delete_resource(resource["name"], resource["namespace"])
 
-    def _parse_age_to_minutes(self, age):
-
-        if 'm' in age:
-            return int(age.replace('m', ''))
-        elif 'h' in age:
-            return int(age.replace('h', '')) * 60
-        elif 'd' in age:
-            return int(age.replace('d', '')) * 1440
-        else:
-            try:
-                return int(age)
-            except ValueError:
-                return 0
-
     def handle_row_click(self, row, column):
 
         if column != self.table.columnCount() - 1:  # Not the action column
@@ -413,13 +403,13 @@ class EventsPage(BaseResourcePage):
 
     # Override checkbox - related methods to disable them for events
     def _create_select_all_checkbox(self):
-
+        """Override to return None - events don't need bulk selection"""
         return None
 
     def _handle_select_all(self, state):
-
+        """Override to do nothing - events don't support bulk operations"""
         pass
 
     def _handle_checkbox_change(self, state, item_name):
-
+        """Override to do nothing - events don't support bulk operations"""
         pass
