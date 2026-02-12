@@ -6,14 +6,12 @@ the core terminal functionality for input/output handling.
 """
 
 import logging
-from datetime import datetime
 from PyQt6.QtWidgets import QTextEdit, QApplication, QMenu
 from PyQt6.QtGui import QAction, QColor, QTextCursor, QFont, QTextCharFormat, QKeySequence
 from PyQt6.QtCore import Qt, pyqtSignal
 
-from UI.Styles import AppStyles
 from Utils.kubernetes_client import get_kubernetes_client
-from .terminal_constants import StyleConstants, CommandConstants
+from .terminal_constants import StyleConstants
 from UI.ThemeAwarePage import ThemeAwareMixin
 
 
@@ -249,7 +247,7 @@ class UnifiedTerminalWidget(QTextEdit, ThemeAwareMixin):
             tail_menu = QMenu("📜 Show Lines", self)
             for lines in [50, 100, 200, 500, 1000]:
                 action = QAction(f"Last {lines} lines", self)
-                action.triggered.connect(lambda checked, l=lines: self._refresh_logs_with_lines(l))
+                action.triggered.connect(lambda checked, n=lines: self._refresh_logs_with_lines(n))
                 tail_menu.addAction(action)
             menu.addMenu(tail_menu)
 
