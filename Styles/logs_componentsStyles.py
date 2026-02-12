@@ -1,107 +1,95 @@
 """
 logs_components-specific styles
-Contains theme-aware styles for logs_components following UI restoration rulebook.
+Contains static styles for logs_components extracted for centralized maintenance.
 """
 
 from UI.Styles import AppStyles
-from UI.ThemeManager import get_theme_manager
 
-
-def _get_theme():
-    """Get current theme for style functions."""
-    return get_theme_manager().get_current_theme()
-
-
-# LogsHeaderWidget styles (theme-aware)
-
+# LogsHeaderWidget styles
 def get_logs_header_widget_style():
-    """Get theme-aware header widget style."""
-    theme = _get_theme()
-    return f"""
-        QWidget {{
-            background-color: {theme.colors.BACKGROUND_SECONDARY};
-            border-bottom: 1px solid {theme.colors.BORDER_COLOR};
-        }}
-        QComboBox {{
-            background-color: {theme.colors.BACKGROUND_DARK};
-            border: 1px solid {theme.colors.BORDER_DARK};
+    """Get header widget style."""
+    return """
+        #logsHeader {
+            background-color: #2d2d2d;
+            border-bottom: 1px solid #3d3d3d;
+        }
+        QComboBox {
+            background-color: #1e1e1e;
+            border: 1px solid #555;
             border-radius: 4px;
             padding: 4px 8px;
-            color: {theme.colors.TEXT_PRIMARY};
+            color: white;
             font-size: 12px;
             min-width: 80px;
             max-height: 24px;
-        }}
-        QComboBox::drop-down {{
+        }
+        QComboBox::drop-down {
             border: none;
             width: 20px;
-        }}
-        QComboBox::down-arrow {{
+        }
+        QComboBox::down-arrow {
             image: none;
-        }}
-        QComboBox QAbstractItemView {{
-            background-color: {theme.colors.BACKGROUND_SECONDARY};
-            color: {theme.colors.TEXT_PRIMARY};
-            selection-background-color: {theme.colors.ACCENT_BLUE};
-        }}
-        QCheckBox {{
-            color: {theme.colors.TEXT_PRIMARY};
+        }
+        QComboBox QAbstractItemView {
+            background-color: #2d2d2d;
+            color: white;
+            selection-background-color: #2196F3;
+        }
+        QCheckBox {
+            color: white;
             font-size: 12px;
             padding: 2px;
-        }}
-        QCheckBox::indicator {{
+            background: transparent;
+        }
+        QCheckBox::indicator {
             width: 16px;
             height: 16px;
-            border: 2px solid {theme.colors.BORDER_DARK};
+            border: 2px solid #666;
             border-radius: 3px;
             background: transparent;
-        }}
-        QCheckBox::indicator:checked {{
-            background-color: {theme.colors.ACCENT_BLUE};
-            border-color: {theme.colors.ACCENT_BLUE};
-        }}
-        QLabel {{
-            color: {theme.colors.TEXT_PRIMARY};
+        }
+        QCheckBox::indicator:checked {
+            background-color: #2196F3;
+            border-color: #2196F3;
+        }
+        QLabel {
+            color: white;
             font-size: 12px;
-        }}
+            background: transparent;
+        }
     """
 
-
 def get_pod_info_label_style():
-    """Get theme-aware pod info label style."""
-    theme = _get_theme()
-    return f"font-weight: bold; color: {theme.colors.STATUS_ACTIVE}; font-size: 11px;"
-
+    """Get pod info label style."""
+    return "font-weight: bold; color: #4CAF50; font-size: 11px; background: transparent;"
 
 def get_search_results_label_style():
-    """Get theme-aware search results label style."""
-    theme = _get_theme()
-    return f"color: {theme.colors.STATUS_ACTIVE}; font-size: 10px; font-weight: bold;"
+    """Get search results label style."""
+    return "color: #4CAF50; font-size: 10px; font-weight: bold; background: transparent;"
 
-
-# EnhancedLogsViewer styles (theme-aware)
-
+# EnhancedLogsViewer styles
 def get_logs_display_style():
-    """Get theme-aware logs display text edit style."""
-    theme = _get_theme()
+    """Get logs display text edit style."""
     return f"""
         QTextEdit {{
-            background-color: {theme.colors.BACKGROUND_DARK};
-            color: {theme.colors.TEXT_SECONDARY};
+            background-color: #1e1e1e;
+            color: #e0e0e0;
             border: none;
-            selection-background-color: {theme.colors.SELECTED_BG};
+            selection-background-color: #264F78;
             padding: 8px;
         }}
         {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
     """
 
+def get_status_indicator_style():
+    """Get default status indicator style."""
+    return get_status_indicator_style_with_color("#4CAF50")
 
-def get_status_indicator_style_with_color(color: str):
-    """Get theme-aware status indicator style with custom color."""
-    theme = _get_theme()
+def get_status_indicator_style_with_color(color):
+    """Get status indicator style with custom color."""
     return f"""
         QLabel {{
-            background-color: {theme.colors.BACKGROUND_SECONDARY}CC;
+            background-color: rgba(45, 45, 45, 0.8);
             color: {color};
             font-size: 11px;
             font-weight: bold;
@@ -110,9 +98,3 @@ def get_status_indicator_style_with_color(color: str):
             margin: 4px;
         }}
     """
-
-
-def get_status_indicator_style():
-    """Get theme-aware default status indicator style."""
-    theme = _get_theme()
-    return get_status_indicator_style_with_color(theme.colors.STATUS_ACTIVE)
