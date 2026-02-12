@@ -2,13 +2,14 @@
 Dynamic implementation of the Persistent Volume Claims page with live Kubernetes data.
 """
 
-from PyQt6.QtWidgets import (QHeaderView, QWidget, QLabel, QHBoxLayout, QPushButton)
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer
+from PyQt6.QtWidgets import (QHeaderView)
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor
 
 from Base_Components.base_components import SortableTableWidgetItem, StatusLabel
 from Base_Components.base_resource_page import BaseResourcePage
-from UI.Styles import AppStyles, AppColors
+from UI.Styles import AppColors
+from Utils.data_formatters import parse_age_to_seconds
 
 
 class PersistentVolumeClaimsPage(BaseResourcePage):
@@ -28,7 +29,7 @@ class PersistentVolumeClaimsPage(BaseResourcePage):
         sortable_columns = {1, 2, 3, 4, 5, 6, 7}
 
         # Set up the base UI components with styles
-        layout = super().setup_ui("Persistent Volume Claims", headers, sortable_columns)
+        super().setup_ui("Persistent Volume Claims", headers, sortable_columns)
 
         # Table styling is already handled by BaseResourcePage
 
@@ -90,7 +91,6 @@ class PersistentVolumeClaimsPage(BaseResourcePage):
         raw_data = resource.get("raw_data", {})
         spec = raw_data.get("spec", {})
         status = raw_data.get("status", {})
-        metadata = raw_data.get("metadata", {})
 
         # Get storage class
         storage_class = spec.get("storageClassName", "<none>")
@@ -128,19 +128,7 @@ class PersistentVolumeClaimsPage(BaseResourcePage):
 
             # Handle numeric columns for sorting
             if col == 5:  # Age column
-                try:
-                    # Extract numeric part from age string
-                    if 'd' in value:
-                        num = int(value.replace('d', ''))
-                    elif 'h' in value:
-                        num = int(value.replace('h', '')) / 24  # Convert to fraction of day
-                    elif 'm' in value:
-                        num = int(value.replace('m', '')) / (24 * 60)  # Convert to fraction of day
-                    else:
-                        num = 0
-                except ValueError:
-                    num = 0
-                item = SortableTableWidgetItem(value, num)
+                item = SortableTableWidgetItem(value, parse_age_to_seconds(value))
             elif col == 4:  # Pods column - sort by number of pods
                 try:
                     if value == "<none>":
