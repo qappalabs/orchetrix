@@ -2,13 +2,14 @@
 Dynamic implementation of the Persistent Volumes page with live Kubernetes data.
 """
 
-from PyQt6.QtWidgets import (QHeaderView, QWidget)
+from PyQt6.QtWidgets import (QHeaderView)
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor
 
 from Base_Components.base_components import SortableTableWidgetItem, StatusLabel
 from Base_Components.base_resource_page import BaseResourcePage
 from UI.Styles import AppColors
+from Utils.data_formatters import parse_age_to_seconds
 
 
 class PersistentVolumesPage(BaseResourcePage):
@@ -121,20 +122,7 @@ class PersistentVolumesPage(BaseResourcePage):
 
             # Handle numeric columns for sorting (Age column)
             if col == 4:  # Age column
-                try:
-                    # Parse age with support for d, h, m, s suffixes
-                    age_str = str(value)
-                    if age_str and age_str[-1] in 'dhms':
-                        unit = age_str[-1]
-                        numeric_part = age_str[:-1]
-                        unit_multipliers = {'d': 86400, 'h': 3600, 'm': 60, 's': 1}
-                        num = int(float(numeric_part) * unit_multipliers.get(unit, 1))
-                    else:
-                        # No suffix, try to parse as integer
-                        num = int(float(age_str)) if age_str else 0
-                except (ValueError, TypeError):
-                    num = 0
-                item = SortableTableWidgetItem(value, num)
+                item = SortableTableWidgetItem(value, parse_age_to_seconds(value))
             else:
                 item = SortableTableWidgetItem(value)
 
