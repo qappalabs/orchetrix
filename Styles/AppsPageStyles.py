@@ -10,23 +10,19 @@ from UI.Styles import AppColors, AppStyles
 
 
 def _get_theme():
-
     return get_theme_manager().get_current_theme()
 
+
 # Live monitoring button - Start state (green)
-
-
 def get_live_monitor_btn_start_style():
     theme = _get_theme()
     theme_manager = get_theme_manager()
     theme_name = theme_manager.get_current_theme_name()
-
     # For colored buttons (green / red), use white text in dark theme, dark text in light theme
     if theme_name == "Dark":
         text_color = theme.colors.TEXT_LIGHT  # White in dark theme
     else:
         text_color = theme.colors.TEXT_DARK  # Dark text in light theme
-
     return f"""
         QPushButton {{
             background-color: {theme.colors.STATUS_ACTIVE};
@@ -38,17 +34,18 @@ def get_live_monitor_btn_start_style():
             font-size: 12px;
         }}
         QPushButton:hover {{
-            background-color: {theme.colors.HOVER_BG};
+            background-color: {theme.colors.SUCCESS_HOVER_BG};
         }}
         QPushButton:pressed {{
-            background-color: {theme.colors.BORDER_DARK};
+            background-color: {theme.colors.SUCCESS_PRESSED_BG};
         }}
         QPushButton:disabled {{
             background-color: {theme.colors.TEXT_SUBTLE};
             border-color: {theme.colors.TEXT_SUBTLE};
-            color: {theme.colors.TEXT_SUBTLE};
+            color: {theme.colors.TEXT_SECONDARY};
         }}
     """
+
 
 # Live monitoring button - Stop state (red)
 
@@ -57,13 +54,11 @@ def get_live_monitor_btn_stop_style():
     theme = _get_theme()
     theme_manager = get_theme_manager()
     theme_name = theme_manager.get_current_theme_name()
-
     # For colored buttons (green / red), use white text in dark theme, dark text in light theme
     if theme_name == "Dark":
         text_color = theme.colors.TEXT_LIGHT  # White in dark theme
     else:
         text_color = theme.colors.TEXT_DARK  # Dark text in light theme
-
     return f"""
         QPushButton {{
             background-color: {theme.colors.ACCENT_RED};
@@ -79,7 +74,13 @@ def get_live_monitor_btn_stop_style():
         QPushButton:pressed {{
             background-color: {theme.colors.DANGER_PRESSED_BG};
         }}
+        QPushButton:disabled {{
+            background-color: {theme.colors.TEXT_SUBTLE};
+            border-color: {theme.colors.TEXT_SUBTLE};
+            color: {theme.colors.TEXT_SECONDARY};
+        }}
     """
+
 
 # Refresh button style
 
@@ -120,6 +121,7 @@ def get_main_background_style():
         }}
     """
 
+
 # Filter label styles (namespace, workload, resource)
 
 
@@ -154,6 +156,7 @@ def get_diagram_title_style():
             max-height: 16px;
         }}
     """
+
 
 # Export button style
 
@@ -238,7 +241,9 @@ def get_diagram_splitter_style():
 
 
 def get_status_container_style():
-    bg_color = getattr(getattr(_get_theme(), 'colors', None), 'CARD_BG', AppColors.BG_MEDIUM)
+    bg_color = getattr(
+        getattr(_get_theme(), "colors", None), "CARD_BG", AppColors.BG_MEDIUM
+    )
     return f"""
         QFrame {{
             background-color: {bg_color};
@@ -252,13 +257,11 @@ def get_status_header_style():
     theme = _get_theme()
     theme_manager = get_theme_manager()
     theme_name = theme_manager.get_current_theme_name()
-
     # Ensure correct text color: white in dark theme, dark in light theme
     if theme_name == "Dark":
         text_color = theme.colors.TEXT_LIGHT  # White in dark theme
     else:
         text_color = theme.colors.TEXT_DARK  # Dark text in light theme
-
     return f"""
         QLabel {{
             color: {text_color};
@@ -288,61 +291,56 @@ def get_status_text_style():
 
 def get_diagram_area_main_style():
     theme = _get_theme()
-    if hasattr(theme, 'colors'):
+    if hasattr(theme, "colors"):
         colors = theme.colors
-        main_bg = getattr(colors, 'BG_DARK', AppColors.BG_DARK)
-        border_color = getattr(colors, 'BORDER_COLOR', AppColors.BORDER_COLOR)
-        light_border = getattr(colors, 'BORDER_LIGHT', AppColors.BORDER_LIGHT)
+        main_bg = getattr(colors, "BG_DARK", AppColors.BG_DARK)
+        border_color = getattr(colors, "BORDER_COLOR", AppColors.BORDER_COLOR)
+        light_border = getattr(colors, "BORDER_LIGHT", AppColors.BORDER_LIGHT)
     else:
         main_bg = AppColors.BG_DARK
         border_color = AppColors.BORDER_COLOR
         light_border = AppColors.BORDER_LIGHT
-
     return f"""
         /* Main container with theme - aware background */
         QWidget {{
             background-color: {main_bg};
         }}
-
         /* Diagram frame */
         QFrame {{
             background-color: {main_bg};
             border: 1px solid {border_color};
             border-radius: 6px;
         }}
-
         /* Graphics view */
         QGraphicsView {{
             background-color: {main_bg};
             border: 1px solid {light_border};
             border-radius: 4px;
         }}
-
         {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
     """
 
 
 def get_theme_aware_dropdown_style():
     theme = _get_theme()
-    if hasattr(theme, 'colors'):
+    if hasattr(theme, "colors"):
         colors = theme.colors
-        bg_color = getattr(colors, 'BG_MEDIUM', '#2d2d2d')
-        text_color = getattr(colors, 'TEXT_LIGHT', '#ffffff')
-        border_color = getattr(colors, 'BORDER_LIGHT', '#3d3d3d')
-        hover_border = getattr(colors, 'ACCENT_BLUE', '#555555')
-        selection_bg = getattr(colors, 'SELECTED_BG', '#0078d7')
+        bg_color = getattr(colors, "BG_MEDIUM", "#2d2d2d")
+        text_color = getattr(colors, "TEXT_LIGHT", "#ffffff")
+        border_color = getattr(colors, "BORDER_LIGHT", "#3d3d3d")
+        hover_border = getattr(colors, "ACCENT_BLUE", "#555555")
+        selection_bg = getattr(colors, "SELECTED_BG", "#0078d7")
     else:
         # Fallback to dark theme colors
-        bg_color = '#2d2d2d'
-        text_color = '#ffffff'
-        border_color = '#3d3d3d'
-        hover_border = '#555555'
-        selection_bg = '#0078d7'
-
+        bg_color = "#2d2d2d"
+        text_color = "#ffffff"
+        border_color = "#3d3d3d"
+        hover_border = "#555555"
+        selection_bg = "#0078d7"
     try:
         from UI.Icons import resource_path
-        down_arrow_icon = resource_path("Icons/down_btn.svg")
 
+        down_arrow_icon = resource_path("Icons/down_btn.svg")
         return f"""
         QComboBox {{
             background-color: {bg_color};
@@ -362,7 +360,7 @@ def get_theme_aware_dropdown_style():
             subcontrol-position: top right;
         }}
         QComboBox::down-arrow {{
-            image: url({down_arrow_icon.replace(os.sep, '/')});
+            image: url({down_arrow_icon.replace(os.sep, "/")});
             width: 12px;
             height: 12px;
             margin-right: 4px;
@@ -382,7 +380,8 @@ def get_theme_aware_dropdown_style():
         """
     except Exception as e:
         logging.exception(
-            f"Failed to load icon for dropdown style, falling back to style without icon: {type(e).__name__}: {e}")
+            f"Failed to load icon for dropdown style, falling back to style without icon: {type(e).__name__}: {e}"
+        )
         return f"""
         QComboBox {{
             background-color: {bg_color};
