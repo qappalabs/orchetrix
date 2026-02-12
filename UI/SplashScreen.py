@@ -12,8 +12,8 @@ class SplashScreenConstants:
     """Constants for splash screen styling - brand colors that remain consistent across themes"""
 
     # Brand colors for spinner - these are intentionally fixed for brand consistency
-    _BRAND_ORANGE = "#FF6D3F"
-    _BRAND_YELLOW = "#FFCD3A"
+    _BRAND_ORANGE = "#D0D4D8"  # Silver-white for spinner ring trail
+    _BRAND_YELLOW = "#FFFFFF"  # Pure white for bright head dot
     _SHADOW_COLOR = (20, 20, 20, 60)  # RGBA tuple for shadow
 
     @staticmethod
