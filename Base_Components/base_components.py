@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QLabel, QHeaderView, QToolButton, QMenu, QCheckBox, QAbstractItemView
 )
 from PyQt6.QtCore import Qt, QSize, pyqtSignal
-from PyQt6.QtGui import QColor, QIcon, QPainter, QPen
+from PyQt6.QtGui import QColor, QPainter, QPen
 from functools import partial
 import weakref
 
@@ -112,8 +112,8 @@ class CustomHeader(QHeaderView):
         theme = get_theme_manager().get_current_theme()
         return f"""
             QHeaderView::section {{
-                background-color: {theme.colors.HEADER_BG};
-                color: {theme.colors.TEXT_SECONDARY};
+                background-color: {theme.colors.TABLE_HEADER};
+                color: {theme.colors.TEXT_LIGHT};
                 padding: 8px;
                 border: none;
                 border-bottom: 1px solid {theme.colors.BORDER_COLOR};
