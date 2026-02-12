@@ -268,7 +268,6 @@ class AppFlowBusinessLogic:
                 continue
 
             # Calculate starting Y position to center the layer vertically
-            total_layer_height = len(layer_resources) * ITEM_SPACING_Y
             layer_start_y = START_Y
 
             # Smart spacing based on resource count to prevent overcrowding
@@ -299,6 +298,5 @@ class AppFlowBusinessLogic:
 
             layer_x += LAYER_SPACING_X
 
-        logging.info(f"Calculated layout positions for {len(positions)} resources across {len([l for l in layers.values() if l])} layers")
+        logging.info(f"Calculated layout positions for {len(positions)} resources across {len([layer for layer in layers.values() if layer])} layers")
         return positions
-
