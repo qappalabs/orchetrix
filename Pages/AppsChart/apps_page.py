@@ -9,26 +9,22 @@ import os
 import logging
 from datetime import datetime
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QLineEdit,
-    QPushButton, QFrame, QSizePolicy, QTextEdit, QScrollArea, QGraphicsView,
-    QGraphicsScene, QGraphicsRectItem, QGraphicsTextItem, QGraphicsLineItem,
-    QMessageBox, QProgressDialog, QGraphicsPixmapItem, QFileDialog, QMenu, QToolButton,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton, QFrame, QSizePolicy, QTextEdit, QGraphicsView,
+    QGraphicsScene, QMessageBox, QFileDialog, QMenu, QToolButton,
     QSplitter
 )
-from PyQt6.QtCore import Qt, QThread, QTimer, QRectF, QPointF
+from PyQt6.QtCore import Qt, QTimer, QRectF
 from PyQt6.QtGui import QFont, QPen, QBrush, QColor, QPainter, QPixmap, QIcon, QAction
 
-from UI.Styles import AppStyles, AppColors
+from UI.Styles import AppColors
 from UI.Icons import resource_path
 from UI.ThemeManager import get_theme_manager
 from Business_Logic.app_flow_business import (
-    AppFlowBusinessLogic, ResourceType, GraphLayout, ResourceInfo, ConnectionInfo
+    AppFlowBusinessLogic, ResourceType, GraphLayout, ResourceInfo
 )
 
 # Import modular components from the same package
-from .deployment_analyzer import DeploymentAnalyzer
 from Utils.unified_resource_loader import get_unified_resource_loader
-from Utils.data_formatters import format_age, truncate_string
 from .app_flow_analyzer import AppFlowAnalyzer
 
 # Import theme - aware components
@@ -56,14 +52,32 @@ class AppsPage(ThemeAwarePage):
         self.live_monitor_timer.timeout.connect(self.update_live_monitoring)
         self.live_monitor_timer.setInterval(5000)  # Update every 5 seconds
 
-        # Load namespaces after UI is set up
-        QTimer.singleShot(100, self.load_namespaces)
+        # Track if namespaces have been loaded (deferred to showEvent like BaseResourcePage)
+        self._namespaces_loaded = False
 
         # Connect dropdown change events
         self.namespace_combo.currentTextChanged.connect(
             self.on_selection_changed)
         self.workload_combo.currentTextChanged.connect(
             self.on_selection_changed)
+
+    def showEvent(self, event):
+        """Load namespaces when page becomes visible (like BaseResourcePage pattern).
+
+        This defers signal connection until the page is actually shown,
+        preventing signal processing when the page is inactive.
+        """
+        super().showEvent(event)
+        self._was_hidden = False
+        # Only load namespaces on first show (or if they need refreshing)
+        if not self._namespaces_loaded:
+            self._namespaces_loaded = True
+            QTimer.singleShot(100, self.load_namespaces)
+
+    def hideEvent(self, event):
+        """Track when page is hidden to skip signals while navigated away."""
+        super().hideEvent(event)
+        self._was_hidden = True
 
     def setup_ui(self):
 
@@ -245,6 +259,10 @@ class AppsPage(ThemeAwarePage):
         if resource_type != 'namespaces':
             return
 
+        # Skip if page is hidden (navigated away)
+        if getattr(self, '_was_hidden', False):
+            return
+
         if result.success:
             # Extract namespace names from the processed results
             namespaces = [item.get('name', '')
@@ -381,6 +399,10 @@ class AppsPage(ThemeAwarePage):
         if resource_type != getattr(self, '_current_workload_type', '').lower():
             return
 
+        # Skip if page is hidden (navigated away)
+        if getattr(self, '_was_hidden', False):
+            return
+
         if result.success:
             # Process the unified format resources
             resources = result.items
@@ -434,10 +456,14 @@ class AppsPage(ThemeAwarePage):
                 logging.info(
                     f"Auto - selected single resource: {resource_names[0]}")
             else:
+                # Auto-select first resource for multiple resources too
+                self.resource_combo.setCurrentIndex(0)
                 self.resource_combo.blockSignals(False)
                 self.resource_combo.setEnabled(True)
                 logging.info(
-                    "Multiple resources found, user selection required")
+                    f"Multiple resources found, auto-selected first: {resource_names[0]}")
+                # Auto-trigger graph generation for the first resource
+                QTimer.singleShot(100, self.on_resource_selected)
         else:
             self.resource_combo.addItem("No resources found")
             self.resource_combo.blockSignals(False)
@@ -1217,7 +1243,7 @@ class AppsPage(ThemeAwarePage):
         name_text = self.diagram_scene.addText(display_name, name_font)
         # Use light text so resource names stay legible on dark diagram backgrounds
         name_text.setDefaultTextColor(
-            QColor(self.get_theme_color('TEXT_LIGHT', "#")))
+            QColor(self.get_theme_color('TEXT_LIGHT', "#ffffff")))
 
         # Position text based on resource type
         is_pod = resource.resource_type.value.lower() == 'pod'
@@ -1264,13 +1290,13 @@ class AppsPage(ThemeAwarePage):
             if hasattr(theme, 'colors'):
                 return getattr(theme.colors, color_name, fallback)
             return fallback
-        except Exception:
+        except Exception as e:
             current_theme = "unknown"
             try:
                 current_theme = str(get_theme_manager().get_current_theme())
-            except:
+            except Exception:
                 pass
-            logging.warning(f"Error in get_theme_color() accessing theme.colors via get_theme_manager().get_current_theme() for color '{color_name}' with current theme {current_theme}")
+            logging.warning(f"Error in get_theme_color() accessing theme.colors via get_theme_manager().get_current_theme() for color '{color_name}' with current theme {current_theme}: {e}")
             return fallback
 
     def get_status_color(self, status: str) -> str:
@@ -1332,7 +1358,6 @@ class AppsPage(ThemeAwarePage):
 
     def create_interactive_resource_group(self, main_rect, icon_item, resource: ResourceInfo, x: float, y: float, width: float, height: float):
 
-        from PyQt6.QtWidgets import QGraphicsItemGroup, QGraphicsProxyWidget, QLabel
 
         # Enable hover events on the main rectangle
         main_rect.setAcceptHoverEvents(True)
@@ -1612,7 +1637,7 @@ class AppsPage(ThemeAwarePage):
         label_text = self.diagram_scene.addText(label, label_font)
         # Use light text for connection labels to maintain contrast
         label_text.setDefaultTextColor(
-            QColor(self.get_theme_color('TEXT_LIGHT', "#")))
+            QColor(self.get_theme_color('TEXT_LIGHT', "#ffffff")))
 
         # Position label
         text_width = label_text.boundingRect().width()
@@ -2037,7 +2062,7 @@ class AppsPage(ThemeAwarePage):
 
         # Add title and timestamp - Use theme - aware text color for dark background visibility
         # Theme - aware text for dark background
-        painter.setPen(QColor(self.get_theme_color('TEXT_LIGHT', "#")))
+        painter.setPen(QColor(self.get_theme_color('TEXT_LIGHT', "#ffffff")))
         painter.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
 
         # Use deployment name instead of namespace in title
