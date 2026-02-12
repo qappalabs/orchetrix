@@ -4,17 +4,17 @@ Main DetailPage component that orchestrates all sections
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTabWidget, QFrame,
-    QGraphicsDropShadowEffect, QToolButton, QSizePolicy, QApplication,
+    QGraphicsDropShadowEffect, QSizePolicy, QApplication,
     QMessageBox, QDialog, QPushButton
 )
 from PyQt6.QtCore import (
     Qt, QPropertyAnimation, QRect, QEasingCurve, QSize, QTimer, pyqtSignal,
     QParallelAnimationGroup, QAbstractAnimation, QEvent
 )
-from PyQt6.QtGui import QColor, QIcon
+from PyQt6.QtGui import QColor
 from typing import Optional, Dict, Any
 import logging
-from UI.Icons import resource_path, Icons
+from UI.Icons import Icons
 from UI.ThemeManager import get_theme_manager
 
 # Import Kubernetes client
@@ -309,6 +309,9 @@ class DetailPageComponent(ThemeAwareMixin, QWidget):
         elif resource_type.lower() in ["helmrelease", "release"] and self.release_raw_data is not None:
             raw_data = self.release_raw_data
             logging.info(f"DetailPageComponent: Using release raw data for {resource_type}")
+        elif resource_type.lower() in ["event", "events"] and self.event_raw_data is not None:
+            raw_data = self.event_raw_data
+            logging.info(f"DetailPageComponent: Using event raw data for {resource_type}")
         elif self.resource_raw_data is not None:
             raw_data = self.resource_raw_data
             logging.info(f"DetailPageComponent: Using generic raw data for {resource_type}")
@@ -324,7 +327,11 @@ class DetailPageComponent(ThemeAwareMixin, QWidget):
                 # Store data directly on the section for immediate access
                 section.current_data = raw_data
         else:
-            logging.warning(f"DetailPageComponent: No raw data found for {resource_type}")
+            # Only warn if this is a resource type that should have raw data
+            if resource_type.lower() in ["chart", "helmchart", "helmrelease", "release", "event", "events"]:
+                logging.warning(f"DetailPageComponent: Expected raw data for {resource_type} but none found")
+            else:
+                logging.debug(f"DetailPageComponent: No special raw data handling needed for {resource_type}")
 
     def _post_show_setup(self):
         """Single post-show setup to avoid flickering"""
@@ -578,7 +585,7 @@ class DetailPageComponent(ThemeAwareMixin, QWidget):
 
     def update_global_loading_state(self):
         """Update global loading indicator based on section states"""
-        any_loading = any(self.section_loading_states.values())
+        any(self.section_loading_states.values())
 
     # Resize handle methods
     def resize_handle_mousePressEvent(self, event):
