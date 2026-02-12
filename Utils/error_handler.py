@@ -8,7 +8,7 @@ import traceback
 import threading
 import gc
 from datetime import datetime
-from typing import Optional, Callable, Any, Dict, List
+from typing import Callable, Any, List
 from functools import wraps
 from PyQt6.QtWidgets import QMessageBox, QApplication
 from PyQt6.QtCore import QTimer, QThread
@@ -90,28 +90,59 @@ class ErrorHandler:
             msg.setStandardButtons(QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Retry)
             msg.setDefaultButton(QMessageBox.StandardButton.Ok)
 
-            # Style the dialog for better UX
-            msg.setStyleSheet("""
-                QMessageBox {
-                    background-color: #f0f0f0;
-                    font-family: 'Segoe UI', Arial, sans-serif;
-                }
-                QMessageBox QLabel {
-                    font-size: 12px;
-                    padding: 10px;
-                }
-                QMessageBox QPushButton {
-                    min-width: 80px;
-                    padding: 6px 12px;
-                    background-color: #0078d4;
-                    color: white;
-                    border: none;
-                    border-radius: 3px;
-                }
-                QMessageBox QPushButton:hover {
-                    background-color: #106ebe;
-                }
-            """)
+            # Style the dialog for better UX - theme aware
+            try:
+                from UI.ThemeManager import get_theme_manager
+                theme_manager = get_theme_manager()
+                is_dark = theme_manager.get_current_theme_name() == "Dark"
+            except Exception:
+                is_dark = False
+            
+            if is_dark:
+                msg.setStyleSheet("""
+                    QMessageBox {
+                        background-color: #2d2d2d;
+                        font-family: 'Segoe UI', Arial, sans-serif;
+                    }
+                    QMessageBox QLabel {
+                        font-size: 12px;
+                        padding: 10px;
+                        color: #e0e0e0;
+                    }
+                    QMessageBox QPushButton {
+                        min-width: 80px;
+                        padding: 6px 12px;
+                        background-color: #0078d4;
+                        color: white;
+                        border: none;
+                        border-radius: 3px;
+                    }
+                    QMessageBox QPushButton:hover {
+                        background-color: #106ebe;
+                    }
+                """)
+            else:
+                msg.setStyleSheet("""
+                    QMessageBox {
+                        background-color: #f0f0f0;
+                        font-family: 'Segoe UI', Arial, sans-serif;
+                    }
+                    QMessageBox QLabel {
+                        font-size: 12px;
+                        padding: 10px;
+                    }
+                    QMessageBox QPushButton {
+                        min-width: 80px;
+                        padding: 6px 12px;
+                        background-color: #0078d4;
+                        color: white;
+                        border: none;
+                        border-radius: 3px;
+                    }
+                    QMessageBox QPushButton:hover {
+                        background-color: #106ebe;
+                    }
+                """)
 
             # Auto-close after 15 seconds with countdown
             self._setup_auto_close_with_countdown(msg, 15)
