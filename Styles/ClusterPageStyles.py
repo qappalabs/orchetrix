@@ -75,8 +75,8 @@ def get_resource_label_allocated_style():
     return "color: #ff9428;"
 
 def get_resource_label_capacity_style():
-    # Legacy color: #d0d0d0 (Light Gray) - Kept hardcoded for both themes
-    return "color: #d0d0d0;"
+    theme = _get_theme()
+    return f"color: {theme.colors.TEXT_SECONDARY};"
 
 def get_active_button_style():
     theme = _get_theme()
