@@ -2,11 +2,12 @@
 Dynamic implementation of the LimitRanges page with live Kubernetes data.
 """
 
-from PyQt6.QtWidgets import QHeaderView, QPushButton, QLabel, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QHeaderView
 from PyQt6.QtCore import Qt, QTimer
 
 from Base_Components.base_components import SortableTableWidgetItem
 from Base_Components.base_resource_page import BaseResourcePage
+from Utils.data_formatters import parse_age_to_seconds
 
 
 class LimitRangesPage(BaseResourcePage):
@@ -32,7 +33,7 @@ class LimitRangesPage(BaseResourcePage):
         sortable_columns = {1, 2, 3}
 
         # Set up the base UI components
-        layout = super().setup_ui("Limit Ranges", headers, sortable_columns)
+        super().setup_ui("Limit Ranges", headers, sortable_columns)
 
         # Configure column widths
         self.configure_columns()
@@ -95,11 +96,7 @@ class LimitRangesPage(BaseResourcePage):
 
             # Handle numeric columns for sorting
             if col == 2:  # Age column
-                try:
-                    num = int(value.replace('d', ''))
-                except ValueError:
-                    num = 0
-                item = SortableTableWidgetItem(value, num)
+                item = SortableTableWidgetItem(value, parse_age_to_seconds(value))
             else:
                 item = SortableTableWidgetItem(value)
 
