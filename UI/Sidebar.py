@@ -1,10 +1,9 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QToolButton, QLabel,
-                             QGraphicsDropShadowEffect, QMenu, QToolTip, QSizePolicy,
+                             QGraphicsDropShadowEffect, QGraphicsColorizeEffect, QMenu, QToolTip, QSizePolicy,
                              QFrame, QLayout)
 from PyQt6.QtCore import Qt, QSize, QPropertyAnimation, QEasingCurve, QEvent, QTimer, QPoint, QRect
-from PyQt6.QtGui import QIcon, QFont, QColor, QAction, QPixmap
+from PyQt6.QtGui import QIcon, QFont, QColor, QAction, QPixmap, QPainter
 
-import os
 import logging
 import platform
 
@@ -526,21 +525,36 @@ class NavIconButton(QToolButton):
         # Update label colors based on active state (skip for coming_soon buttons)
         if not self.coming_soon:
             text_color = self.get_text_color()
+            font_weight = "bold" if self.is_active else "normal"
             if hasattr(self, 'icon_label') and self.icon_label:
-                self.icon_label.setStyleSheet(f"background-color: transparent; color: {text_color}; font-size: 14px;")
+                self.icon_label.setStyleSheet(f"background-color: transparent; color: {text_color}; font-size: 14px; font-weight: {font_weight};")
+                # Apply exact color tint to icon when active using QPainter
+                if self.icon_loaded:
+                    if self.is_active:
+                        # Create a colored copy preserving the original alpha channel
+                        original_pixmap = self.icon.pixmap(QSize(20, 20))
+                        colored_pixmap = QPixmap(original_pixmap)
+                        painter = QPainter(colored_pixmap)
+                        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+                        painter.fillRect(colored_pixmap.rect(), QColor(SidebarStyles.get_sidebar_active_text()))
+                        painter.end()
+                        self.icon_label.setPixmap(colored_pixmap)
+                    else:
+                        # Restore original icon
+                        self.icon_label.setPixmap(self.icon.pixmap(QSize(20, 20)))
             if hasattr(self, 'text_label') and self.text_label:
-                self.text_label.setStyleSheet(f"background-color: transparent; color: {text_color}; font-size: 14px;")
+                self.text_label.setStyleSheet(f"background-color: transparent; color: {text_color}; font-size: 14px; font-weight: {font_weight};")
 
     def get_background_color(self):
         if self.coming_soon:
             return "rgba(255, 149, 0, 0.15)"  # Orange tint for coming soon
         elif self.is_active:
-            return SidebarStyles.get_hover_bg()
+            return SidebarStyles.get_sidebar_active_bg()
         return "transparent"
 
     def get_text_color(self):
         if self.is_active:
-            return SidebarStyles.get_text_light()
+            return SidebarStyles.get_sidebar_active_text()
         return SidebarStyles.get_text_subtle()
 
     def eventFilter(self, obj, event):
@@ -734,24 +748,6 @@ class Sidebar(ThemeAwareMixin, QWidget):
             )
             self.nav_buttons.append(nav_btn)
             self.sidebar_layout.addWidget(nav_btn)
-
-    def refresh_custom_resources_dropdown(self):
-        """Refresh the Custom Resources dropdown menu when CRDs are loaded"""
-        try:
-            # Find the Custom Resources button
-            custom_resources_button = None
-            for button in self.nav_buttons:
-                if hasattr(button, 'item_text') and button.item_text == "Custom Resources":
-                    custom_resources_button = button
-                    break
-
-            if custom_resources_button and hasattr(custom_resources_button, 'setup_dropdown'):
-                logging.info("Refreshing Custom Resources dropdown...")
-                # Force recreation of the dropdown
-                custom_resources_button.setup_dropdown()
-                logging.info("Custom Resources dropdown refreshed")
-        except Exception as e:
-            logging.error(f"Error refreshing Custom Resources dropdown: {e}")
 
     def toggle_complete_event(self):
         """Fire an event when sidebar toggle animation completes"""
