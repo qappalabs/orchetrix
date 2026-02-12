@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QStackedWidget, QLabel
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QPoint, QPointF
 from PyQt6.QtGui import QColor, QPainter, QBrush
-from typing import Dict, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any
 import math
 import logging
 
@@ -166,6 +166,7 @@ DROPDOWN_MENUS = {
     "Storage": ["Persistent Volume Claims", "Persistent Volumes", "Storage Classes"],
     "Access Control": ["Service Accounts", "Cluster Roles", "Roles",
                        "Cluster Role Bindings", "Role Bindings"],
+    "Helm": ["Charts", "Releases"],
     "Custom Resources": ["Definitions"]
 }
 
@@ -276,6 +277,10 @@ class ClusterView(ThemeAwareMixin, QWidget):
         self.pages: Dict[str, QWidget] = {}
         self._loaded_pages: Dict[str, bool] = {}
         self.active_cluster: Optional[str] = None
+        
+        # CRD cache for dropdown population
+        self._cached_crds: Dict[str, List[Dict]] = {}  # cluster_name -> crds list
+        self._crd_fetch_in_progress: set = set()  # Track ongoing CRD fetches
 
         # Initialize detail manager first (doesn't depend on UI)
         self._initialize_detail_manager()
@@ -798,6 +803,8 @@ class ClusterView(ThemeAwareMixin, QWidget):
                 return
 
         logging.info(f"ClusterView: Set active cluster to {cluster_name}, waiting for connection events")
+        # Trigger CRD fetching for the new cluster
+        self._fetch_crds_for_cluster(cluster_name)
 
     def show_detail_for_table_item(self, row: int, col: int, page, page_name: str) -> None:
         """Show detail page for clicked table item"""
@@ -835,29 +842,6 @@ class ClusterView(ThemeAwareMixin, QWidget):
         if resource_name:
             self.detail_manager.show_detail(resource_type, resource_name, namespace, raw_data)
 
-    def handle_page_change(self, page_widget: QWidget) -> None:
-        """Handle page changes with optimized performance"""
-        # Close detail page (with safety check)
-        if hasattr(self, 'detail_manager') and self.detail_manager.is_detail_visible():
-            self.detail_manager.hide_detail()
-
-        # Find page name
-        page_name = None
-        for name, widget in self.pages.items():
-            if widget == page_widget:
-                page_name = name
-                break
-
-        if not page_name:
-            return
-
-        # Update navigation
-        self._reset_navigation_states()
-        self._set_active_navigation(page_name)
-
-        # Load data with delay to allow UI update
-        QTimer.singleShot(50, lambda: self._load_page_data(page_widget))
-
     def set_active_nav_button(self, active_button) -> None:
         """Handle sidebar navigation button clicks"""
         if active_button.item_text == "Terminal":
@@ -882,44 +866,14 @@ class ClusterView(ThemeAwareMixin, QWidget):
                 btn.update_style()
 
     def get_available_crds(self):
-        """Get available CustomResourceDefinitions for sidebar menu"""
+        """Get available CustomResourceDefinitions for sidebar menu - uses cached data first"""
         try:
-            # Check if we have an active cluster connection first
-            if not hasattr(self, 'active_cluster') or not self.active_cluster:
-                logging.debug("No active cluster, returning empty CRDs list")
-                return []
-
-            # First try to fetch CRDs directly from API
-            from Utils.kubernetes_client import get_kubernetes_client
-            kubernetes_client = get_kubernetes_client()
-            if kubernetes_client:
-                try:
-                    logging.info("Attempting to fetch CRDs directly from API...")
-                    # Use the apiextensions_v1 API to list CRDs
-                    crd_list = kubernetes_client.apiextensions_v1.list_custom_resource_definition()
-                    if crd_list and hasattr(crd_list, 'items'):
-                        crds = []
-                        logging.info(f"Found {len(crd_list.items)} CRDs from API")
-                        for crd_item in crd_list.items:
-                            # Convert to dict format
-                            crd_dict = kubernetes_client.v1.api_client.sanitize_for_serialization(crd_item)
-                            spec = crd_dict.get("spec", {})
-                            names = spec.get("names", {})
-                            metadata = crd_dict.get("metadata", {})
-
-                            crd_info = {
-                                "name": metadata.get("name", ""),
-                                "kind": names.get("kind", metadata.get("name", "")),
-                                "spec": spec
-                            }
-                            crds.append(crd_info)
-                            logging.info(f"CRD found: {crd_info['kind']} ({crd_info['name']})")
-                        return crds
-                    else:
-                        logging.info("No CRD items found in API response")
-                except Exception as e:
-                    logging.warning(f"Failed to fetch CRDs directly: {e}")
-
+            # First, check if we have cached CRDs for the active cluster
+            if self.active_cluster and self.active_cluster in self._cached_crds:
+                crds = self._cached_crds[self.active_cluster]
+                logging.debug(f"ClusterView: Returning {len(crds)} cached CRDs for cluster {self.active_cluster}")
+                return crds
+            
             # Fallback: Try to get CRDs from the definitions page if it's loaded
             if "Definitions" in self.pages:
                 definitions_page = self.pages["Definitions"]
@@ -929,18 +883,24 @@ class ClusterView(ThemeAwareMixin, QWidget):
                         raw_data = resource.get("raw_data", {})
                         spec = raw_data.get("spec", {})
                         names = spec.get("names", {})
-
+                        
                         crd_info = {
                             "name": resource["name"],
                             "kind": names.get("kind", resource["name"]),
                             "spec": spec
                         }
                         crds.append(crd_info)
-                    logging.info(f"Found {len(crds)} CRDs from Definitions page")
+                    logging.debug(f"ClusterView: Found {len(crds)} CRDs from Definitions page as fallback")
                     return crds
                 else:
-                    logging.info("Definitions page loaded but no resources or resources empty")
-
+                    logging.debug("ClusterView: Definitions page loaded but no resources available")
+            
+            # If no cache and no loaded Definitions page, trigger manual fetch as last resort
+            if self.active_cluster and self.active_cluster not in self._crd_fetch_in_progress:
+                logging.info(f"ClusterView: No cached CRDs available, triggering manual fetch for {self.active_cluster}")
+                self._fetch_crds_for_cluster(self.active_cluster)
+            
+            logging.debug("ClusterView: No CRDs currently available")
             return []
         except Exception as e:
             logging.error(f"Error getting available CRDs: {e}")
@@ -988,11 +948,91 @@ class ClusterView(ThemeAwareMixin, QWidget):
                 btn.dropdown_open = False
                 btn.update_style()
 
+        # Set the parent dropdown button as active
+        self._reset_navigation_states()
+        self._set_active_navigation(item_name)
+
     def toggle_terminal(self) -> None:
         """Toggle terminal visibility"""
         self.terminal_panel.toggle_terminal()
         if self.terminal_panel.is_visible:
             self._adjust_terminal_position()
+
+    def _fetch_crds_for_cluster(self, cluster_name: str) -> None:
+        """Fetch CRDs for a cluster during connection time (background task)"""
+        if not cluster_name or cluster_name in self._crd_fetch_in_progress:
+            return
+            
+        self._crd_fetch_in_progress.add(cluster_name)
+        logging.info(f"ClusterView: Fetching CRDs for cluster {cluster_name}...")
+        
+        def fetch_crds_background():
+            """Background task to fetch CRDs"""
+            try:
+                from Utils.kubernetes_client import get_kubernetes_client
+                kubernetes_client = get_kubernetes_client()
+                if not kubernetes_client:
+                    logging.warning(f"No kubernetes client available for CRD fetch: {cluster_name}")
+                    return
+                
+                # Fetch CRDs from API
+                crd_list = kubernetes_client.apiextensions_v1.list_custom_resource_definition()
+                if crd_list and hasattr(crd_list, 'items'):
+                    crds = []
+                    for crd_item in crd_list.items:
+                        # Convert to dict format
+                        crd_dict = kubernetes_client.v1.api_client.sanitize_for_serialization(crd_item)
+                        spec = crd_dict.get("spec", {})
+                        names = spec.get("names", {})
+                        metadata = crd_dict.get("metadata", {})
+                        
+                        crd_info = {
+                            "name": metadata.get("name", ""),
+                            "kind": names.get("kind", metadata.get("name", "")),
+                            "spec": spec
+                        }
+                        crds.append(crd_info)
+                    
+                    # Cache the CRDs
+                    self._cached_crds[cluster_name] = crds
+                    logging.info(f"ClusterView: Cached {len(crds)} CRDs for cluster {cluster_name}")
+                    
+                    # Update sidebar dropdown on main thread
+                    QTimer.singleShot(0, lambda: self._update_sidebar_crd_dropdown())
+                else:
+                    self._cached_crds[cluster_name] = []
+                    logging.info(f"ClusterView: No CRDs found for cluster {cluster_name}")
+                    
+            except Exception as e:
+                logging.warning(f"Failed to fetch CRDs for cluster {cluster_name}: {e}")
+                self._cached_crds[cluster_name] = []
+            finally:
+                self._crd_fetch_in_progress.discard(cluster_name)
+        
+        # Execute in background thread
+        from Utils.thread_manager import get_thread_manager
+        from Utils.enhanced_worker import EnhancedBaseWorker
+        
+        class CRDFetchWorker(EnhancedBaseWorker):
+            def __init__(self, fetch_func):
+                super().__init__(f"crd_fetch_{cluster_name}")
+                self.fetch_func = fetch_func
+                
+            def execute(self):
+                return self.fetch_func()
+        
+        thread_manager = get_thread_manager()
+        worker = CRDFetchWorker(fetch_crds_background)
+        thread_manager.submit_worker(f"crd_fetch_{cluster_name}", worker)
+
+    def _update_sidebar_crd_dropdown(self) -> None:
+        """Update the Custom Resources dropdown in the sidebar"""
+        try:
+            if hasattr(self, 'sidebar') and hasattr(self.sidebar, 'refresh_custom_resources_dropdown'):
+                self.sidebar.refresh_custom_resources_dropdown()
+                logging.debug("ClusterView: Updated Custom Resources dropdown")
+        except Exception as e:
+            logging.error(f"Error updating sidebar CRD dropdown: {e}")
 
     def _on_connection_started(self, cluster_name: str) -> None:
         """Handle connection start"""
@@ -1141,8 +1181,6 @@ class ClusterView(ThemeAwareMixin, QWidget):
         except Exception as e:
             logging.exception(f"Error closing detail panels: {e}")
 
-    # Also add this method to ensure detail panels are closed in handle_page_change:
-
     def handle_page_change(self, page_widget: QWidget) -> None:
         """Handle page changes with optimized performance"""
         # Close detail page first - this is the important part!
@@ -1170,6 +1208,13 @@ class ClusterView(ThemeAwareMixin, QWidget):
         """Clear data from all loaded pages when switching clusters - FIXED"""
         try:
             logging.info("ClusterView: Clearing data from all loaded pages for cluster switch")
+            
+            # Clear CRD cache for the previous cluster when switching
+            if hasattr(self, '_cached_crds'):
+                previous_cache_size = len(self._cached_crds)
+                self._cached_crds.clear()
+                if previous_cache_size > 0:
+                    logging.info(f"ClusterView: Cleared CRD cache ({previous_cache_size} clusters)")
 
             for page_name, page_widget in self.pages.items():
                 if hasattr(page_widget, 'clear_for_cluster_change'):
