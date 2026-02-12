@@ -7,7 +7,8 @@ import math
 import datetime
 import logging
 
-from UI.Styles import AppStyles, AppColors
+from UI.Styles import AppColors
+from UI.ThemeManager import get_theme_manager
 import Styles.ClusterPageStyles as ClusterPageStyles
 from UI.ThemeAwarePage import ThemeAwareMixin
 from Utils.cluster_connector import get_cluster_connector
@@ -370,8 +371,9 @@ class ResourceCircularIndicator(QWidget):
         pen.setWidth(max(3, int(pen_width)))
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
 
-        # Draw background circles
-        pen.setColor(QColor(30, 30, 30))
+        # Draw background circles (theme-aware)
+        theme = get_theme_manager().get_current_theme()
+        pen.setColor(QColor(theme.colors.TEXT_SECONDARY))
         painter.setPen(pen)
 
         # Always draw the outer ring for usage
@@ -772,6 +774,14 @@ class ClusterPage(ThemeAwareMixin, QWidget):
         if hasattr(self, 'issues_header'):
             self.issues_header.setStyleSheet(ClusterPageStyles.get_status_title_style())
         
+        # Refresh no-issues status text
+        if hasattr(self, 'no_issues_title'):
+            self.no_issues_title.setStyleSheet(ClusterPageStyles.get_status_title_style())
+        if hasattr(self, 'no_issues_subtitle'):
+            self.no_issues_subtitle.setStyleSheet(ClusterPageStyles.get_status_subtitle_style())
+        if hasattr(self, 'no_issues_icon'):
+            self.no_issues_icon.setStyleSheet(ClusterPageStyles.get_status_icon_style())
+        
         # Refresh tooltips for custom widgets
         if hasattr(self, 'cpu_chart'):
             self.cpu_chart.setStyleSheet(ClusterPageStyles.get_bar_chart_tooltip_style())
@@ -974,21 +984,21 @@ class ClusterPage(ThemeAwareMixin, QWidget):
         no_issues_layout.setSpacing(8)
         no_issues_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        success_icon = QLabel("✓")
-        success_icon.setFixedSize(80, 80)
-        success_icon.setStyleSheet(ClusterPageStyles.get_status_icon_style())
+        self.no_issues_icon = QLabel("✓")
+        self.no_issues_icon.setFixedSize(80, 80)
+        self.no_issues_icon.setStyleSheet(ClusterPageStyles.get_status_icon_style())
 
-        status_title = QLabel("No issues found")
-        status_title.setStyleSheet(ClusterPageStyles.get_status_title_style())
-        status_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.no_issues_title = QLabel("No issues found")
+        self.no_issues_title.setStyleSheet(ClusterPageStyles.get_status_title_style())
+        self.no_issues_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        status_subtitle = QLabel("All resources are within acceptable limits")
-        status_subtitle.setStyleSheet(ClusterPageStyles.get_status_subtitle_style())
-        status_subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.no_issues_subtitle = QLabel("All resources are within acceptable limits")
+        self.no_issues_subtitle.setStyleSheet(ClusterPageStyles.get_status_subtitle_style())
+        self.no_issues_subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        no_issues_layout.addWidget(success_icon, 0, Qt.AlignmentFlag.AlignCenter)
-        no_issues_layout.addWidget(status_title)
-        no_issues_layout.addWidget(status_subtitle)
+        no_issues_layout.addWidget(self.no_issues_icon, 0, Qt.AlignmentFlag.AlignCenter)
+        no_issues_layout.addWidget(self.no_issues_title)
+        no_issues_layout.addWidget(self.no_issues_subtitle)
 
         # Issues content
         issues_widget = QWidget()
@@ -1074,7 +1084,7 @@ class ClusterPage(ThemeAwareMixin, QWidget):
 
                 if hasattr(self, 'cpu_status'):
                     self.cpu_status.update_metrics(usage, requests, limits, allocatable, capacity)
-                    logging.info(f"ClusterPage: CPU status widget updated successfully")
+                    logging.info("ClusterPage: CPU status widget updated successfully")
                 else:
                     logging.error("ClusterPage: cpu_status widget not found")
 
@@ -1107,7 +1117,7 @@ class ClusterPage(ThemeAwareMixin, QWidget):
 
                 if hasattr(self, 'memory_status'):
                     self.memory_status.update_metrics(usage, requests, limits, allocatable, capacity)
-                    logging.info(f"ClusterPage: Memory status widget updated successfully")
+                    logging.info("ClusterPage: Memory status widget updated successfully")
                 else:
                     logging.error("ClusterPage: memory_status widget not found")
 
@@ -1139,7 +1149,7 @@ class ClusterPage(ThemeAwareMixin, QWidget):
                 if hasattr(self, 'disk_status'):
                     # For pods, we use count as requests and don't have limits/allocated
                     self.disk_status.update_metrics(usage, count, 0, 0, capacity)
-                    logging.info(f"ClusterPage: Pod status widget updated successfully")
+                    logging.info("ClusterPage: Pod status widget updated successfully")
                 else:
                     logging.error("ClusterPage: disk_status widget not found")
 
