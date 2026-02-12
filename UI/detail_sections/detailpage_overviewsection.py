@@ -13,7 +13,6 @@ import logging
 from .base_detail_section import BaseDetailSection
 import Styles.BaseDetailSectionStyles as BaseDetailSectionStyles
 import Styles.OverviewSectionStyles as OverviewSectionStyles
-from UI.ThemeManager import get_theme_manager
 
 
 class DetailPageOverviewSection(BaseDetailSection):
@@ -77,10 +76,10 @@ class DetailPageOverviewSection(BaseDetailSection):
         # Refresh labels content (static)
         if hasattr(self, 'labels_content'):
             self.labels_content.setStyleSheet(BaseDetailSectionStyles.get_field_value_style() + """
-                font - family: 'Consolas', 'Courier New', monospace;
-                background - color: rgba(255, 255, 255, 0.05);
+                font-family: 'Consolas', 'Courier New', monospace;
+                background-color: rgba(255, 255, 255, 0.05);
                 padding: 8px;
-                border - radius: 4px;
+                border-radius: 4px;
             """)
 
         # Refresh tables if they exist (static)
@@ -251,7 +250,7 @@ class DetailPageOverviewSection(BaseDetailSection):
 
         self.no_conditions_label = QLabel("No conditions available")
         self.no_conditions_label.setStyleSheet(BaseDetailSectionStyles.get_secondary_text_style() + """
-            font - style: italic;
+            font-style: italic;
             padding: 8px;
         """)
         self.conditions_container_layout.addWidget(self.no_conditions_label)
@@ -271,10 +270,10 @@ class DetailPageOverviewSection(BaseDetailSection):
         labels_card_layout = QVBoxLayout(self.labels_card)  # ✅ ADDED THIS LINE
         self.labels_content = QLabel("No labels")
         self.labels_content.setStyleSheet(BaseDetailSectionStyles.get_field_value_style() + """
-            font - family: 'Consolas', 'Courier New', monospace;
-            background - color: rgba(255, 255, 255, 0.05);
+            font-family: 'Consolas', 'Courier New', monospace;
+            background-color: rgba(255, 255, 255, 0.05);
             padding: 8px;
-            border - radius: 4px;
+            border-radius: 4px;
         """)
         self.labels_content.setWordWrap(True)
         labels_card_layout.addWidget(self.labels_content)  # ✅ FIXED THIS LINE
@@ -402,8 +401,8 @@ class DetailPageOverviewSection(BaseDetailSection):
             # Update resource - specific fields
             self.add_resource_specific_fields(data)
 
-        except Exception:
-            self.handle_error("Error updating UI")
+        except Exception as e:
+            self.handle_error(f"Error updating UI: {str(e)}")
 
     def update_ui_with_basic_info(self, data: Dict[str, Any]):
 
@@ -462,7 +461,7 @@ class DetailPageOverviewSection(BaseDetailSection):
                         if "waiting" in state:
                             waiting = state["waiting"]
                             reason = waiting.get("reason", "")
-                            if reason in ("CrashLoopBackO", "ImagePullBackO", "ErrImagePull"):
+                            if reason in ("CrashLoopBackOff", "ImagePullBackOff", "ErrImagePull"):
                                 status_value = reason
                                 break
                         elif "terminated" in state:
@@ -488,7 +487,7 @@ class DetailPageOverviewSection(BaseDetailSection):
             elif status_value in ["Succeeded"] or "Completed" in status_value:
                 status_text = "Pod completed successfully"
                 status_type = "success"
-            elif status_value in ["CrashLoopBackO", "ImagePullBackO", "ErrImagePull"]:
+            elif status_value in ["CrashLoopBackOff", "ImagePullBackOff", "ErrImagePull"]:
                 status_text = f"Pod error: {status_value}"
                 status_type = "error"
 
@@ -867,7 +866,7 @@ class DetailPageOverviewSection(BaseDetailSection):
         if not conditions:
             self.no_conditions_label = QLabel("No conditions available")
             self.no_conditions_label.setStyleSheet(BaseDetailSectionStyles.get_secondary_text_style() + """
-                font - style: italic;
+                font-style: italic;
                 padding: 8px;
             """)
             self.conditions_container_layout.addWidget(
@@ -1253,7 +1252,7 @@ class DetailPageOverviewSection(BaseDetailSection):
 
             try:
                 self.kubernetes_client.deployment_rollback_completed.disconnect()
-            except TypeError as e:
+            except TypeError:
                 pass  # No connections to disconnect
 
             # Connect new handlers
@@ -1282,8 +1281,12 @@ class DetailPageOverviewSection(BaseDetailSection):
                 pass  # Signal already disconnected or object deleted
 
             # Hide loading label and show container
-            self.history_loading_label.hide()
-            self.history_container.show()
+            try:
+                self.history_loading_label.hide()
+                self.history_container.show()
+            except RuntimeError:
+                # Widget deleted, panel was closed - skip UI update
+                return
 
             if not history_data:
                 no_history_label = QLabel("No rollback history available")
@@ -1434,7 +1437,7 @@ class DetailPageOverviewSection(BaseDetailSection):
             else:
                 return f"{minutes}m"
 
-        except Exception as e:
+        except Exception:
             logging.exception("Failed to parse timestamp: %s", timestamp_str)
             return "Unknown"
 
@@ -1508,16 +1511,20 @@ class DetailPageOverviewSection(BaseDetailSection):
             try:
                 self.kubernetes_client.deployment_rollback_completed.disconnect(
                     self._handle_deployment_rollback_completed)
-            except (TypeError, RuntimeError) as e:
+            except (TypeError, RuntimeError):
                 pass  # Signal already disconnected or object deleted
 
-            # Re - enable buttons
-            for i in range(self.history_table.rowCount()):
-                widget = self.history_table.cellWidget(
-                    i, 4)  # Action column widget
-                if isinstance(widget, QPushButton):
-                    widget.setText("Rollback")
-                    widget.setEnabled(True)
+            # Re-enable buttons (wrap in try-except for deleted widget safety)
+            try:
+                for i in range(self.history_table.rowCount()):
+                    widget = self.history_table.cellWidget(
+                        i, 4)  # Action column widget
+                    if isinstance(widget, QPushButton):
+                        widget.setText("Rollback")
+                        widget.setEnabled(True)
+            except RuntimeError:
+                # Widget deleted, panel was closed - skip UI update
+                pass
 
             # Show result message
             from PyQt6.QtWidgets import QMessageBox
@@ -1562,8 +1569,6 @@ class DetailPageOverviewSection(BaseDetailSection):
             logging.error(f"Error refreshing deployment details: {str(e)}")
 
     def _add_configmap_specific_fields(self, data):
-
-        spec = data.get("spec", {})
 
         section_header = QLabel("CONFIGMAP DETAILS")
         section_header.setStyleSheet(
@@ -1852,7 +1857,6 @@ class DetailPageOverviewSection(BaseDetailSection):
 
     def _add_node_specific_fields(self, data):
 
-        spec = data.get("spec", {})
         status = data.get("status", {})
 
         section_header = QLabel("NODE DETAILS")
@@ -1934,7 +1938,6 @@ class DetailPageOverviewSection(BaseDetailSection):
     def _add_generic_custom_resource_fields(self, data):
 
         spec = data.get("spec", {})
-        status = data.get("status", {})
 
         section_header = QLabel("CUSTOM RESOURCE DETAILS")
         section_header.setStyleSheet(
@@ -2065,7 +2068,7 @@ class DetailPageOverviewSection(BaseDetailSection):
                     try:
                         widget.setParent(None)
                         widget.deleteLater()
-                    except RuntimeError as e:
+                    except RuntimeError:
                         # Widget already deleted, skip
                         pass
         except Exception as e:
@@ -2269,8 +2272,12 @@ class DetailPageOverviewSection(BaseDetailSection):
                 pass
 
             # Hide loading label and show table container
-            self.pods_loading_label.hide()
-            self.pods_container.show()
+            try:
+                self.pods_loading_label.hide()
+                self.pods_container.show()
+            except RuntimeError:
+                # Widget deleted, panel was closed - skip UI update
+                return
 
             if not pods_data:
                 # Show empty state in table
@@ -2335,7 +2342,7 @@ class DetailPageOverviewSection(BaseDetailSection):
                 elif status.lower() in ["pending", "containercreating"]:
                     status_item.setForeground(
                         QColor(OverviewSectionStyles.get_status_warning_color()))
-                elif status.lower() in ["failed", "crashloopbacko", "error"]:
+                elif status.lower() in ["failed", "crashloopbackoff", "error"]:
                     status_item.setForeground(
                         QColor(OverviewSectionStyles.get_text_danger_color()))
                 else:
@@ -2386,20 +2393,24 @@ class DetailPageOverviewSection(BaseDetailSection):
             pass
 
         # Hide loading label and show error in table
-        self.pods_loading_label.hide()
-        self.pods_container.show()
+        try:
+            self.pods_loading_label.hide()
+            self.pods_container.show()
 
-        # Show error in table
-        self.pods_table.setRowCount(1)
-        error_item = QTableWidgetItem(f"Error loading pods: {error_message}")
-        error_item.setFlags(error_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-        error_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        error_item.setForeground(
-            QColor(OverviewSectionStyles.get_text_danger_color()))
-        self.pods_table.setItem(0, 0, error_item)
+            # Show error in table
+            self.pods_table.setRowCount(1)
+            error_item = QTableWidgetItem(f"Error loading pods: {error_message}")
+            error_item.setFlags(error_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            error_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            error_item.setForeground(
+                QColor(OverviewSectionStyles.get_text_danger_color()))
+            self.pods_table.setItem(0, 0, error_item)
 
-        # Span across all columns
-        self.pods_table.setSpan(0, 0, 1, 5)
+            # Span across all columns
+            self.pods_table.setSpan(0, 0, 1, 5)
+        except RuntimeError:
+            # Widget deleted, panel was closed - skip UI update
+            pass
 
         logging.error(f"Node pods error: {error_message}")
 
@@ -2634,7 +2645,6 @@ class DetailPageOverviewSection(BaseDetailSection):
 
         try:
             metadata = data.get("metadata", {})
-            spec = data.get("spec", {})
             status = data.get("status", {})
 
             # Update resource header
