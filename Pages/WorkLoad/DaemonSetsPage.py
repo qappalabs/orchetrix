@@ -12,6 +12,7 @@ from PyQt6.QtGui import QColor
 from Base_Components.base_components import SortableTableWidgetItem
 from Base_Components.base_resource_page import BaseResourcePage
 from UI.Styles import AppColors
+from Utils.data_formatters import parse_age_to_seconds
 
 class DaemonSetsPage(BaseResourcePage):
     """
@@ -36,7 +37,7 @@ class DaemonSetsPage(BaseResourcePage):
         sortable_columns = {1, 2, 3, 5}
 
         # Set up the base UI components with styles
-        layout = super().setup_ui("Daemon Sets", headers, sortable_columns)
+        super().setup_ui("Daemon Sets", headers, sortable_columns)
 
         # Table styling is already handled by BaseResourcePage
 
@@ -173,19 +174,7 @@ class DaemonSetsPage(BaseResourcePage):
                     pods_value = 0
                 item = SortableTableWidgetItem(value, pods_value)
             elif col == 4:  # Age column
-                try:
-                    # Convert age string (like "5d" or "2h") to minutes for sorting
-                    if 'd' in value:
-                        age_value = int(value.replace('d', '')) * 1440  # days to minutes
-                    elif 'h' in value:
-                        age_value = int(value.replace('h', '')) * 60  # hours to minutes
-                    elif 'm' in value:
-                        age_value = int(value.replace('m', ''))  # minutes
-                    else:
-                        age_value = 0
-                except ValueError:
-                    age_value = 0
-                item = SortableTableWidgetItem(value, age_value)
+                item = SortableTableWidgetItem(value, parse_age_to_seconds(value))
             else:
                 item = SortableTableWidgetItem(value)
 
