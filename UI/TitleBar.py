@@ -5,14 +5,109 @@ import logging
 project_root = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(project_root)
 
-from PyQt6.QtCore import Qt, QPoint, QEvent, QSize
-from PyQt6.QtGui import QFont, QLinearGradient, QPainter, QColor, QPixmap, QIcon, QPainterPath, QCursor, QAction
-from PyQt6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QLabel, QToolButton, QFrame, QLineEdit, QMenu, QSpacerItem, QWidgetAction
+from PyQt6.QtCore import Qt, QPoint, QEvent, QSize, QPropertyAnimation, QEasingCurve, pyqtProperty, QRectF  # noqa: E402
+from PyQt6.QtGui import QFont, QLinearGradient, QPainter, QColor, QPixmap, QIcon, QPainterPath, QCursor, QAction  # noqa: E402
+from PyQt6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QLabel, QToolButton, QFrame, QLineEdit, QMenu, QSpacerItem, QWidgetAction, QAbstractButton  # noqa: E402
 
-from Styles import TitleBarStyles
-from UI.Icons import Icons, resource_path
-from UI.ThemeAwarePage import ThemeAwareMixin
-from UI.ThemeManager import get_theme_manager
+from Styles import TitleBarStyles  # noqa: E402
+from UI.Icons import Icons, resource_path  # noqa: E402
+from UI.ThemeAwarePage import ThemeAwareMixin  # noqa: E402
+from UI.ThemeManager import get_theme_manager  # noqa: E402
+
+class ThemeToggle(QAbstractButton):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setCheckable(True)
+        self.setFixedSize(52, 28)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        
+        # Colors
+        self._track_color_light = QColor("#E0E0E0")
+        self._track_color_dark = QColor("#404040")
+        self._handle_color = QColor("#FFFFFF")
+        
+        self._position = 0.0
+        self._anim = QPropertyAnimation(self, b"position", self)
+        self._anim.setDuration(300)
+        self._anim.setEasingCurve(QEasingCurve.Type.InOutQuart)
+        
+        # Load icons
+        try:
+            self._sun_icon = QIcon(resource_path("Icons/sun.svg"))
+            self._moon_icon = QIcon(resource_path("Icons/moon.svg"))
+        except Exception as e:
+            logging.error(f"Failed to load toggle icons: {e}")
+            self._sun_icon = QIcon()
+            self._moon_icon = QIcon()
+            
+        self.toggled.connect(self.start_animation)
+
+    @pyqtProperty(float)
+    def position(self):
+        return self._position
+
+    @position.setter
+    def position(self, pos):
+        self._position = pos
+        self.update()
+
+    def start_animation(self, checked):
+        self._anim.stop()
+        self._anim.setEndValue(1.0 if checked else 0.0)
+        self._anim.start()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        rect = self.rect()
+        track_rect = QRectF(rect).adjusted(2, 2, -2, -2)
+        corner_radius = track_rect.height() / 2
+        
+        # Draw Track
+        # Interpolate track color based on position
+        color = self._interpolate_color(self._track_color_light, self._track_color_dark, self._position)
+        
+        p.setBrush(color)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawRoundedRect(track_rect, corner_radius, corner_radius)
+        
+        # Draw Handle
+        handle_height = track_rect.height() - 4
+        handle_width = handle_height
+        
+        start_x = track_rect.left() + 2
+        end_x = track_rect.right() - handle_width - 2
+        
+        current_x = start_x + (end_x - start_x) * self._position
+        handle_rect = QRectF(current_x, track_rect.top() + 2, handle_width, handle_height)
+        
+        p.setBrush(self._handle_color)
+        p.drawEllipse(handle_rect)
+        
+        # Draw Icon inside handle
+        icon_rect = handle_rect.adjusted(3, 3, -3, -3)
+        icon_target = icon_rect.toRect()
+        
+        if self._position < 0.5:
+            # Draw Sun (fade out as we move right)
+            opacity = 1.0 - (self._position * 2)
+            if opacity > 0:
+                p.setOpacity(opacity)
+                self._sun_icon.paint(p, icon_target)
+        else:
+            # Draw Moon (fade in as we move right)
+            opacity = (self._position - 0.5) * 2
+            if opacity > 0:
+                p.setOpacity(opacity)
+                self._moon_icon.paint(p, icon_target)
+                
+    def _interpolate_color(self, start, end, progress):
+        r = start.red() + (end.red() - start.red()) * progress
+        g = start.green() + (end.green() - start.green()) * progress
+        b = start.blue() + (end.blue() - start.blue()) * progress
+        return QColor(int(r), int(g), int(b))
+
 
 
 class TitleBar(ThemeAwareMixin, QWidget):
@@ -24,8 +119,8 @@ class TitleBar(ThemeAwareMixin, QWidget):
         # Define consistent icon sizes
         self.normal_icon_size = QSize(18, 18)      # Standard size for most icons
         self.logo_icon_size = QSize(24, 24)        # Size for the app logo
-        self.window_ctrl_size = QSize(10, 10)      # Original size for window controls
-        self.maximized_icon_size = QSize(18, 18)   # Size for maximized state icon
+        self.window_ctrl_size = QSize(18, 18)      # MODIFIED: Increased to match normal icon size
+        self.maximized_icon_size = QSize(18, 18)   # MODIFIED: Made consistent with other icons
 
         # Store the signal for pinned items updates
         self.update_pinned_items_signal = update_pinned_items_signal
@@ -43,6 +138,8 @@ class TitleBar(ThemeAwareMixin, QWidget):
 
         self.setup_ui()
         self.old_pos = None
+        self.drag_position = None
+        self.double_click_in_progress = False
         self.dropdown_menu = None
         self.search_input = None  # Instance variable for the search input
         self.search_action = None  # Instance variable for the search action
@@ -121,6 +218,19 @@ class TitleBar(ThemeAwareMixin, QWidget):
         pinned_layout.addStretch()
         pinned_layout.addWidget(self.pinned_clusters_arrow_btn)
 
+        # Theme Toggle
+        self.theme_toggle = ThemeToggle(self)
+        self.theme_toggle.clicked.connect(self.toggle_theme)
+        
+        # Initialize state
+        current_theme = get_theme_manager().get_current_theme_name()
+        is_dark = current_theme == "Dark"
+        # Block signals to prevent double-triggering logic, though toggle logic handles it
+        self.theme_toggle.blockSignals(True)
+        self.theme_toggle.setChecked(is_dark)
+        self.theme_toggle.position = 1.0 if is_dark else 0.0 
+        self.theme_toggle.blockSignals(False)
+
         # Settings icon on the right (removed troubleshoot, notifications, and profile)
         self.settings_btn = self.create_icon_button("preferences", "Settings")
 
@@ -141,6 +251,8 @@ class TitleBar(ThemeAwareMixin, QWidget):
         layout.addSpacerItem(QSpacerItem(90, 0))
         layout.addWidget(self.pinned_clusters_container)
         layout.addStretch(1)
+        layout.addWidget(self.theme_toggle)
+        layout.addSpacing(10)
         layout.addWidget(self.settings_btn)
         layout.addWidget(self.minimize_btn)
         layout.addWidget(self.maximize_btn)
@@ -232,12 +344,27 @@ class TitleBar(ThemeAwareMixin, QWidget):
             max_filename = "maximize_active.svg" if is_maximized else "maximize.svg"
             max_icon = Icons.get_theme_icon(max_filename, theme_folder)
 
-            # Determine correct size (Preserve original logic: 10x10 for restore, window_ctrl_size for maximized)
+            # Use original sizing: 10x10 for windowed, 18x18 for maximized
             current_size = self.window_ctrl_size if is_maximized else QSize(10, 10)
 
             if not max_icon.isNull():
                 self.maximize_btn.setIcon(max_icon)
                 self.maximize_btn.setIconSize(current_size)
+        
+        # Sync toggle state if theme changed externally (e.g. from Preferences)
+        if hasattr(self, 'theme_toggle'):
+            is_dark = theme_name == "Dark"
+            if self.theme_toggle.isChecked() != is_dark:
+                self.theme_toggle.blockSignals(True)
+                self.theme_toggle.setChecked(is_dark)
+                self.theme_toggle.position = 1.0 if is_dark else 0.0
+                self.theme_toggle.blockSignals(False)
+
+    def toggle_theme(self):
+        """Toggle between Light and Dark themes"""
+        is_dark = self.theme_toggle.isChecked()
+        new_theme = "Dark" if is_dark else "Light"
+        get_theme_manager().set_theme(new_theme)
 
     def update_current_cluster(self, cluster_name):
         """Update the pinned clusters label with the selected cluster name and icon"""
@@ -644,7 +771,7 @@ class TitleBar(ThemeAwareMixin, QWidget):
 
         if not icon.isNull():
             self.maximize_btn.setIcon(icon)
-            # Use correct size based on state (10x10 vs 18x18)
+            # Use original sizing: 10x10 for windowed, 18x18 for maximized
             current_size = self.window_ctrl_size if is_maximized else QSize(10, 10)
             self.maximize_btn.setIconSize(current_size)
             self.maximize_btn.setText("")
