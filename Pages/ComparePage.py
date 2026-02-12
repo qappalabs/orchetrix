@@ -985,6 +985,9 @@ class ComparePage(ThemeAwareMixin, QWidget):
     def _on_unified_loader_completed(self, resource_type, result_obj):
         if resource_type != "namespaces":
             return
+        # Skip if page is hidden (navigated away)
+        if getattr(self, '_was_hidden', False):
+            return
 
         if result_obj.success:
             # Extract namespace names from the processed results (same as BaseResourcePage)
@@ -1018,8 +1021,8 @@ class ComparePage(ThemeAwareMixin, QWidget):
         # Temporarily disconnect signal to prevent unwanted triggers
         try:
             self.namespace_combo.currentTextChanged.disconnect(self._on_namespace_changed)
-        except Exception:
-            pass
+        except TypeError:
+            pass  # Signal wasn't connected - expected when called before first connection
 
         self.namespace_combo.clear()
         if not namespaces:
@@ -1674,6 +1677,7 @@ class ComparePage(ThemeAwareMixin, QWidget):
     # ---------- show/hide guards ----------
     def showEvent(self, event):
         super().showEvent(event)
+        self._was_hidden = False
         # Check if namespace dropdown is empty (could happen after cluster change)
         if (hasattr(self, 'namespace_combo') and self.namespace_combo and
                 self.namespace_combo.count() <= 1 and
@@ -1685,6 +1689,11 @@ class ComparePage(ThemeAwareMixin, QWidget):
         # Ensure namespace filter is initialized
         if not hasattr(self, 'namespace_filter'):
             self.namespace_filter = "default"
+
+    def hideEvent(self, event):
+        """Track when page is hidden to skip signals while navigated away."""
+        super().hideEvent(event)
+        self._was_hidden = True
 
     # Cluster switch handling now done via clear_for_cluster_change() method (called by ClusterView)
 
