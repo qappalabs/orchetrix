@@ -335,7 +335,7 @@ class BatchResourceDeleterThread(QThread):
                 if e.status == 404:
                     # Resource not found - log as warning instead of error for better UX
                     logging.warning(f"Resource {self.resource_type}/{resource_name} not found during delete (may have been deleted already)")
-                    error_list.append((resource_name, namespace, f"Resource not found (may have been deleted already)"))
+                    error_list.append((resource_name, namespace, "Resource not found (may have been deleted already)"))
                 else:
                     logging.error(f"API error deleting {self.resource_type}/{resource_name}: {e.reason}")
                     error_list.append((resource_name, namespace, f"API error: {e.reason}"))
