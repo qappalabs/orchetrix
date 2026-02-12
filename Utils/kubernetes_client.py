@@ -7,11 +7,10 @@ Designed for minimal overhead and maximum performance.
 import logging
 import sys
 from typing import Optional, Dict, List, Any
-from dataclasses import dataclass
 from PyQt6.QtCore import QObject, pyqtSignal as Signal, QProcess
 
 # Import the new service architecture
-from Services.kubernetes.kubernetes_service import get_kubernetes_service, KubeCluster
+from Services.kubernetes.kubernetes_service import get_kubernetes_service
 from Services.kubernetes.api_config import APIClientConfig
 from Utils.enhanced_worker import EnhancedBaseWorker
 from Utils.thread_manager import get_thread_manager
@@ -233,8 +232,6 @@ class KubernetesClient(QObject):
         return self.service.get_pod_logs(pod_name, namespace, container, tail_lines)
 
     def start_log_stream(self, pod_name: str, namespace: str, container: str = None, tail_lines: int = 100):
-        """Start log stream - backward compatibility"""
-
         """Start log stream - backward compatibility"""
         self.service.start_log_stream(
             pod_name, namespace, container, tail_lines)
@@ -708,7 +705,7 @@ class KubernetesClient(QObject):
             # Check for invalid field values
             name = metadata.get('name', '')
             if not isinstance(name, str) or not name.strip():
-                return False, "metadata.name must be a non - empty string"
+                return False, "metadata.name must be a non-empty string"
 
             # For Pod validation, be more lenient with container validation
             if resource_data.get('kind') == 'Pod':
@@ -746,7 +743,7 @@ class KubernetesClient(QObject):
                 else:
                     # Search efficiently in common namespaces instead of all namespaces
                     common_namespaces = ["default",
-                                         "kube - system", "kube - public"]
+                                         "kube-system", "kube-public"]
                     for ns in common_namespaces:
                         try:
                             resource_detail = self.v1.read_namespaced_pod(
@@ -765,7 +762,7 @@ class KubernetesClient(QObject):
                 else:
                     # Search efficiently in common namespaces instead of all namespaces
                     common_namespaces = ["default",
-                                         "kube - system", "kube - public"]
+                                         "kube-system", "kube-public"]
                     for ns in common_namespaces:
                         try:
                             resource_detail = self.v1.read_namespaced_service(
@@ -783,7 +780,7 @@ class KubernetesClient(QObject):
                 else:
                     # Search efficiently in common namespaces instead of all namespaces
                     common_namespaces = ["default",
-                                         "kube - system", "kube - public"]
+                                         "kube-system", "kube-public"]
                     for ns in common_namespaces:
                         try:
                             resource_detail = self.apps_v1.read_namespaced_deployment(
@@ -801,7 +798,7 @@ class KubernetesClient(QObject):
                 else:
                     # Search efficiently in common namespaces instead of all namespaces
                     common_namespaces = ["default",
-                                         "kube - system", "kube - public"]
+                                         "kube-system", "kube-public"]
                     for ns in common_namespaces:
                         try:
                             resource_detail = self.apps_v1.read_namespaced_replica_set(
@@ -811,6 +808,70 @@ class KubernetesClient(QObject):
                             if "404" not in str(ns_error) and "not found" not in str(ns_error).lower():
                                 logging.debug(
                                     f"Error searching for replicaset {resource_name} in namespace {ns}: {ns_error}")
+                            continue
+            elif resource_type.lower() == "daemonset":
+                if namespace:
+                    resource_detail = self.apps_v1.read_namespaced_daemon_set(
+                        name=resource_name, namespace=namespace)
+                else:
+                    common_namespaces = ["default", "kube-system", "kube-public"]
+                    for ns in common_namespaces:
+                        try:
+                            resource_detail = self.apps_v1.read_namespaced_daemon_set(
+                                name=resource_name, namespace=ns)
+                            break
+                        except Exception as ns_error:
+                            if "404" not in str(ns_error) and "not found" not in str(ns_error).lower():
+                                logging.debug(
+                                    f"Error searching for daemonset {resource_name} in namespace {ns}: {ns_error}")
+                            continue
+            elif resource_type.lower() == "statefulset":
+                if namespace:
+                    resource_detail = self.apps_v1.read_namespaced_stateful_set(
+                        name=resource_name, namespace=namespace)
+                else:
+                    common_namespaces = ["default", "kube-system", "kube-public"]
+                    for ns in common_namespaces:
+                        try:
+                            resource_detail = self.apps_v1.read_namespaced_stateful_set(
+                                name=resource_name, namespace=ns)
+                            break
+                        except Exception as ns_error:
+                            if "404" not in str(ns_error) and "not found" not in str(ns_error).lower():
+                                logging.debug(
+                                    f"Error searching for statefulset {resource_name} in namespace {ns}: {ns_error}")
+                            continue
+            elif resource_type.lower() == "job":
+                if namespace:
+                    resource_detail = self.batch_v1.read_namespaced_job(
+                        name=resource_name, namespace=namespace)
+                else:
+                    common_namespaces = ["default", "kube-system", "kube-public"]
+                    for ns in common_namespaces:
+                        try:
+                            resource_detail = self.batch_v1.read_namespaced_job(
+                                name=resource_name, namespace=ns)
+                            break
+                        except Exception as ns_error:
+                            if "404" not in str(ns_error) and "not found" not in str(ns_error).lower():
+                                logging.debug(
+                                    f"Error searching for job {resource_name} in namespace {ns}: {ns_error}")
+                            continue
+            elif resource_type.lower() == "cronjob":
+                if namespace:
+                    resource_detail = self.batch_v1.read_namespaced_cron_job(
+                        name=resource_name, namespace=namespace)
+                else:
+                    common_namespaces = ["default", "kube-system", "kube-public"]
+                    for ns in common_namespaces:
+                        try:
+                            resource_detail = self.batch_v1.read_namespaced_cron_job(
+                                name=resource_name, namespace=ns)
+                            break
+                        except Exception as ns_error:
+                            if "404" not in str(ns_error) and "not found" not in str(ns_error).lower():
+                                logging.debug(
+                                    f"Error searching for cronjob {resource_name} in namespace {ns}: {ns_error}")
                             continue
             elif resource_type.lower() == "node":
                 resource_detail = self.v1.read_node(name=resource_name)
@@ -851,10 +912,22 @@ class KubernetesClient(QObject):
                 if namespace:
                     resource_detail = self.v1.read_namespaced_service_account(
                         name=resource_name, namespace=namespace)
-            elif resource_type.lower() == "endpoint":
+            elif resource_type.lower() in ["endpoint", "endpoints"]:
                 if namespace:
                     resource_detail = self.v1.read_namespaced_endpoints(
                         name=resource_name, namespace=namespace)
+                else:
+                    common_namespaces = ["default", "kube-system", "kube-public"]
+                    for ns in common_namespaces:
+                        try:
+                            resource_detail = self.v1.read_namespaced_endpoints(
+                                name=resource_name, namespace=ns)
+                            break
+                        except Exception as ns_error:
+                            if "404" not in str(ns_error) and "not found" not in str(ns_error).lower():
+                                logging.debug(
+                                    f"Error searching for endpoints {resource_name} in namespace {ns}: {ns_error}")
+                            continue
             elif resource_type.lower() == "lease":
                 if namespace:
                     resource_detail = self.coordination_v1.read_namespaced_lease(
@@ -896,6 +969,42 @@ class KubernetesClient(QObject):
             elif resource_type.lower() == "customresourcedefinition":
                 resource_detail = self.apiextensions_v1.read_custom_resource_definition(
                     name=resource_name)
+            elif resource_type.lower() in ["networkpolicy", "networkpolicies"]:
+                if namespace:
+                    resource_detail = self.networking_v1.read_namespaced_network_policy(
+                        name=resource_name, namespace=namespace)
+                else:
+                    common_namespaces = ["default", "kube-system", "kube-public"]
+                    for ns in common_namespaces:
+                        try:
+                            resource_detail = self.networking_v1.read_namespaced_network_policy(
+                                name=resource_name, namespace=ns)
+                            break
+                        except Exception as ns_error:
+                            if "404" not in str(ns_error) and "not found" not in str(ns_error).lower():
+                                logging.debug(
+                                    f"Error searching for networkpolicy {resource_name} in namespace {ns}: {ns_error}")
+                            continue
+            elif resource_type.lower() in ["ingressclass", "ingressclasses"]:
+                resource_detail = self.networking_v1.read_ingress_class(name=resource_name)
+            elif resource_type.lower() in ["storageclass", "storageclasses"]:
+                resource_detail = self.storage_v1.read_storage_class(name=resource_name)
+            elif resource_type.lower() in ["event", "events"]:
+                if namespace:
+                    resource_detail = self.v1.read_namespaced_event(
+                        name=resource_name, namespace=namespace)
+                else:
+                    common_namespaces = ["default", "kube-system", "kube-public"]
+                    for ns in common_namespaces:
+                        try:
+                            resource_detail = self.v1.read_namespaced_event(
+                                name=resource_name, namespace=ns)
+                            break
+                        except Exception as ns_error:
+                            if "404" not in str(ns_error) and "not found" not in str(ns_error).lower():
+                                logging.debug(
+                                    f"Error searching for event {resource_name} in namespace {ns}: {ns_error}")
+                            continue
 
             if resource_detail:
                 # Convert to dictionary format for compatibility
@@ -1007,8 +1116,8 @@ class KubernetesClient(QObject):
                             'name': pod.metadata.name,
                             'namespace': pod.metadata.namespace,
                             'status': pod.status.phase if pod.status and pod.status.phase else 'Unknown',
-                            'cpu_usage': "N / A",
-                            'memory_usage': "N / A"
+                            'cpu_usage': "N/A",
+                            'memory_usage': "N/A"
                         }
                         node_pods.append(pod_data)
 
@@ -1100,12 +1209,12 @@ class KubernetesClient(QObject):
 
             history = []
             current_deployment_revision = int(deployment.metadata.annotations.get(
-                "deployment.kubernetes.io / revision", "1"))
+                "deployment.kubernetes.io/revision", "1"))
 
             for rs in deployment_replica_sets:
                 annotations = rs.metadata.annotations or {}
                 revision_str = annotations.get(
-                    "deployment.kubernetes.io / revision", "1")
+                    "deployment.kubernetes.io/revision", "1")
 
                 try:
                     revision = int(revision_str)
@@ -1127,7 +1236,7 @@ class KubernetesClient(QObject):
 
                 # Extract change cause
                 change_cause = annotations.get(
-                    "kubernetes.io / change - cause", "No change cause recorded")
+                    "kubernetes.io/change-cause", "No change cause recorded")
 
                 # Get image information from the pod template
                 containers = rs.spec.template.spec.containers or []
@@ -1144,7 +1253,7 @@ class KubernetesClient(QObject):
                     "current": is_current,
                     "change_cause": change_cause,
                     "images": images,
-                    "template_hash": annotations.get("pod - template - hash", ""),
+                    "template_hash": annotations.get("pod-template-hash", ""),
                     "status": "Current" if is_current else ("Available" if available_replicas > 0 else "Inactive")
                 }
                 history.append(history_item)
@@ -1180,7 +1289,7 @@ class KubernetesClient(QObject):
             )
 
             original_template_hash = deployment.spec.template.metadata.labels.get(
-                "pod - template - hash", "")
+                "pod-template-hash", "")
             logging.debug(
                 f"Current deployment template hash: {original_template_hash}")
 
@@ -1191,8 +1300,8 @@ class KubernetesClient(QObject):
             # Try multiple label selectors
             selectors = [
                 f"app={app_label}",
-                f"app.kubernetes.io / name={deployment_name}",
-                f"app.kubernetes.io / instance={deployment_name}"
+                f"app.kubernetes.io/name={deployment_name}",
+                f"app.kubernetes.io/instance={deployment_name}"
             ]
 
             target_rs = None
@@ -1215,13 +1324,13 @@ class KubernetesClient(QObject):
                         if is_owned:
                             annotations = rs.metadata.annotations or {}
                             rs_revision_str = annotations.get(
-                                "deployment.kubernetes.io / revision", "1")
+                                "deployment.kubernetes.io/revision", "1")
                             try:
                                 rs_revision = int(rs_revision_str)
                                 if rs_revision == revision:
                                     target_rs = rs
                                     break
-                            except (ValueError, TypeError) as e:
+                            except (ValueError, TypeError):
                                 continue
 
                     if target_rs:
@@ -1237,7 +1346,7 @@ class KubernetesClient(QObject):
                     f"Revision {revision} not found for deployment {deployment_name}. Available revisions might be limited.")
 
             target_template_hash = target_rs.spec.template.metadata.labels.get(
-                "pod - template - hash", "")
+                "pod-template-hash", "")
             logging.info(
                 f"Found target ReplicaSet {target_rs.metadata.name} with template hash: {target_template_hash}")
 
@@ -1257,9 +1366,9 @@ class KubernetesClient(QObject):
             from datetime import datetime
             timestamp = datetime.now().isoformat()
             rollback_deployment.metadata.annotations.update({
-                "kubernetes.io / change - cause": f"Rolled back to revision {revision} at {timestamp}",
-                "deployment.kubernetes.io / rollback - revision": str(revision),
-                "orchetrix.io / rollback - timestamp": timestamp
+                "kubernetes.io/change-cause": f"Rolled back to revision {revision} at {timestamp}",
+                "deployment.kubernetes.io/rollback-revision": str(revision),
+                "orchetrix.io/rollback-timestamp": timestamp
             })
 
             # Step 4: Perform the rollback with retry logic
@@ -1269,7 +1378,7 @@ class KubernetesClient(QObject):
                     logging.debug(
                         f"Rollback attempt {attempt + 1}/{max_retries}")
 
-                    result = self.apps_v1.patch_namespaced_deployment(
+                    self.apps_v1.patch_namespaced_deployment(
                         name=deployment_name,
                         namespace=namespace,
                         body=rollback_deployment,
@@ -1361,14 +1470,16 @@ class KubernetesPodSSH(QObject):
     data_received = Signal(str)
     error_occurred = Signal(str)
 
-    def __init__(self, pod_name: str, namespace: str):
+    def __init__(self, pod_name: str, namespace: str, context: str = None):
         super().__init__()
 
         self.pod_name = pod_name
         self.namespace = namespace
+        self.context = context
         self.process = None
         self.is_connected = False
         self._connecting = False  # Flag to suppress TTY errors during connection attempts
+        self._shell_error_detected = False  # Track shell-not-found errors for fallback
 
     def connect_to_pod(self) -> bool:
         """
@@ -1410,9 +1521,17 @@ class KubernetesPodSSH(QObject):
 
         except Exception as e:
             self._connecting = False
-            logging.error(f"Error connecting to pod {self.pod_name}: {e}")
-            self.error_occurred.emit(f"Connection error: {str(e)}")
-            return False
+            # Check if this is a compatibility issue with setCreateProcessArgumentsModifier
+            if "setCreateProcessArgumentsModifier" in str(e):
+                # This is a known compatibility issue, not a real error
+                logging.info(f"Compatibility note for pod {self.pod_name}: {e}")
+                # Continue with connection - this is not a blocking error
+                return True
+            else:
+                # Real connection error
+                logging.error(f"Error connecting to pod {self.pod_name}: {e}")
+                self.error_occurred.emit(f"Connection error: {str(e)}")
+                return False
 
     def _try_shell_connection(self) -> bool:
         """
@@ -1443,6 +1562,7 @@ class KubernetesPodSSH(QObject):
         """
         try:
             logging.info(f"Trying TTY connection to {self.pod_name} with {shell}")
+            self._shell_error_detected = False  # Reset error flag for this attempt
 
             # Create a fresh process for each attempt to avoid "Process is already running" error
             if self.process:
@@ -1469,7 +1589,10 @@ class KubernetesPodSSH(QObject):
                     pass
 
             cmd = "kubectl"
-            args = ["exec", "-it", self.pod_name, "-n", self.namespace, "--", shell]
+            args = ["exec", "-it", self.pod_name, "-n", self.namespace]
+            if self.context:
+                args.extend(["--context", self.context])
+            args.extend(["--", shell])
 
             self.process.start(cmd, args)
 
@@ -1477,20 +1600,37 @@ class KubernetesPodSSH(QObject):
                 # Give shell time to start
                 self.process.waitForReadyRead(2000)
 
-                # Check if process is still running
-                if self.process.state() == QProcess.ProcessState.Running:
-                    logging.info(f"Connected to {self.pod_name} using {shell}")
-                    return True
-                else:
-                    logging.info(f"Shell {shell} not available")
+                # Wait for shell errors to propagate - kubectl exec takes time:
+                # (connect to API → request exec → container tries shell → error)
+                # Use waitForFinished instead of msleep to process Qt events (signals)
+                self.process.waitForFinished(500)
+
+                # Check if shell error was detected by stderr handler
+                if self._shell_error_detected:
+                    logging.info(f"Shell {shell} not available (error detected)")
                     return False
+
+                # Check if process terminated quickly (sign of shell failure)
+                if self.process.state() != QProcess.ProcessState.Running:
+                    logging.info(f"Shell {shell} not available (process exited)")
+                    return False
+
+                logging.info(f"Connected to {self.pod_name} using {shell}")
+                return True
             else:
-                logging.info(f"Failed to start kubectl")
+                logging.info("Failed to start kubectl")
                 return False
 
         except Exception as e:
-            logging.error(f"Exception trying {shell} with TTY: {e}")
-            return False
+            # Check if this is a compatibility issue with setCreateProcessArgumentsModifier
+            if "setCreateProcessArgumentsModifier" in str(e):
+                # This is a known compatibility issue, not a real error
+                logging.info(f"Compatibility note for TTY connection: {e}")
+                # Continue with connection - this is not a blocking error
+                return True
+            else:
+                logging.error(f"Exception trying {shell} with TTY: {e}")
+                return False
 
     def _attempt_connection_without_tty(self, shell: str) -> bool:
         """
@@ -1498,6 +1638,7 @@ class KubernetesPodSSH(QObject):
         """
         try:
             logging.info(f"Trying non-TTY connection to {self.pod_name} with {shell}")
+            self._shell_error_detected = False  # Reset error flag for this attempt
 
             # Create a new process for non-TTY connection
             if self.process:
@@ -1522,7 +1663,10 @@ class KubernetesPodSSH(QObject):
                     print(f"Note: setCreateProcessArgumentsModifier not available: {e}")
 
             cmd = "kubectl"
-            args = ["exec", "-i", self.pod_name, "-n", self.namespace, "--", shell]
+            args = ["exec", "-i", self.pod_name, "-n", self.namespace]
+            if self.context:
+                args.extend(["--context", self.context])
+            args.extend(["--", shell])
             logging.info(f"Starting: {cmd} {' '.join(args)}")
 
             self.process.start(cmd, args)
@@ -1531,20 +1675,36 @@ class KubernetesPodSSH(QObject):
                 # Give shell time to start
                 self.process.waitForReadyRead(2000)
 
-                # Check if process is still running
-                if self.process.state() == QProcess.ProcessState.Running:
-                    logging.info(f"Connected to {self.pod_name} using {shell} (non-TTY)")
-                    return True
-                else:
-                    logging.info(f"Shell {shell} not available (non-TTY)")
+                # Wait for shell errors to propagate - kubectl exec takes time
+                # Use waitForFinished instead of msleep to process Qt events (signals)
+                self.process.waitForFinished(500)
+
+                # Check if shell error was detected by stderr handler
+                if self._shell_error_detected:
+                    logging.info(f"Shell {shell} not available (non-TTY, error detected)")
                     return False
+
+                # Check if process terminated quickly (sign of shell failure)
+                if self.process.state() != QProcess.ProcessState.Running:
+                    logging.info(f"Shell {shell} not available (non-TTY, process exited)")
+                    return False
+
+                logging.info(f"Connected to {self.pod_name} using {shell} (non-TTY)")
+                return True
             else:
-                logging.info(f"Failed to start kubectl (non-TTY)")
+                logging.info("Failed to start kubectl (non-TTY)")
                 return False
 
         except Exception as e:
-            logging.error(f"Exception trying {shell} without TTY: {e}")
-            return False
+            # Check if this is a compatibility issue with setCreateProcessArgumentsModifier
+            if "setCreateProcessArgumentsModifier" in str(e):
+                # This is a known compatibility issue, not a real error
+                logging.info(f"Compatibility note for non-TTY connection: {e}")
+                # Continue with connection - this is not a blocking error
+                return True
+            else:
+                logging.error(f"Exception trying {shell} without TTY: {e}")
+                return False
 
     def send_command(self, command: str):
 
@@ -1561,8 +1721,12 @@ class KubernetesPodSSH(QObject):
 
         if self.process:
             self.process.terminate()
+            if not self.process.waitForFinished(500):
+                self.process.kill()
+                self.process.waitForFinished(200)
             self.is_connected = False
             self.session_status.emit("disconnected")
+            self.session_closed.emit()  # Notify UI that session is closed
 
     def cleanup_ssh_session(self):
 
@@ -1584,6 +1748,13 @@ class KubernetesPodSSH(QObject):
                 if "Unable to use a TTY" in data or "input is not a terminal" in data:
                     logging.debug(f"TTY warning (expected): {data.strip()}")
                     return
+                # During connection attempts, detect shell-not-found errors for fallback
+                if self._connecting:
+                    shell_errors = ["no such file", "not found", "cannot execute", "exec failed"]
+                    if any(err in data.lower() for err in shell_errors):
+                        self._shell_error_detected = True
+                        logging.debug(f"Shell error detected during connection: {data.strip()}")
+                        return  # Don't emit error - let fallback mechanism try other shells
                 self.error_occurred.emit(data)
 
     def _handle_finished(self, exit_code, exit_status):
@@ -1603,4 +1774,5 @@ class KubernetesPodSSH(QObject):
         self.is_connected = False
         error_msg = f"Process error: {error}"
         self.error_occurred.emit(error_msg)
+        self.session_closed.emit()  # Notify UI that session is closed
         logging.error(f"SSH process error for {self.pod_name}: {error_msg}")
