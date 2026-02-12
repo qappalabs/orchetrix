@@ -3,7 +3,6 @@ import os
 import traceback
 import logging
 import time
-import requests
 import json
 import gc
 from datetime import datetime
@@ -11,7 +10,7 @@ from PyQt6.QtCore import QPoint
 
 # Set up logging first
 try:
-    from log_handler import setup_logging, log_exception
+    from log_handler import setup_logging
     log_file = setup_logging()
 except ImportError as e:
     # Fallback logging setup
@@ -35,7 +34,7 @@ try:
         QApplication, QMainWindow, QWidget, QVBoxLayout,
         QStackedWidget, QMessageBox
     )
-    from PyQt6.QtCore import Qt, QTimer, qVersion, QThread, pyqtSignal
+    from PyQt6.QtCore import Qt, QTimer, qVersion, QThread
     from PyQt6.QtGui import QFont, QIcon
 
     # Import application components
@@ -44,15 +43,14 @@ try:
     from Pages.Preferences import PreferencesWidget
     from UI.TitleBar import TitleBar
     from UI.ClusterView import ClusterView, LoadingOverlay
-    from UI.Styles import AppColors, AppStyles
-    from Utils.cluster_connector import get_cluster_connector
     from UI.DetailPageComponent import DetailPageComponent
     from UI.detail_sections.detailpage_yamlsection import DetailPageYAMLSection
 
 
     from Utils.cluster_state_manager import get_cluster_state_manager, ClusterState
-    from Utils.thread_manager import get_thread_manager, shutdown_thread_manager
+    from Utils.thread_manager import shutdown_thread_manager
     from Utils.error_handler import get_error_handler, ResourceCleaner, error_handler
+    from Utils.kubeconfig_watcher import get_kubeconfig_watcher, cleanup_kubeconfig_watcher
 
 
     logging.info("All modules imported successfully")
@@ -168,6 +166,9 @@ class MainWindow(QMainWindow):
         if hasattr(self.home_page, 'initialize_cluster_connector'):
             self.home_page.initialize_cluster_connector()
 
+        # Initialize kubeconfig file watcher to detect external changes
+        self._setup_kubeconfig_watcher()
+
     def _periodic_cleanup(self):
         """Enhanced periodic cleanup to prevent memory leaks and performance degradation"""
         try:
@@ -264,6 +265,31 @@ class MainWindow(QMainWindow):
             logging.error(f"Failed to setup cluster state manager: {e}")
             self.cluster_state_manager = None
 
+    def _setup_kubeconfig_watcher(self):
+        """Setup kubeconfig file watcher to detect external changes"""
+        try:
+            self._kubeconfig_watcher = get_kubeconfig_watcher()
+            self._kubeconfig_watcher.kubeconfig_changed.connect(self._on_kubeconfig_changed)
+            logging.info(f"Kubeconfig watcher initialized, watching: {self._kubeconfig_watcher.get_kubeconfig_path()}")
+        except Exception as e:
+            logging.error(f"Failed to setup kubeconfig watcher: {e}")
+            self._kubeconfig_watcher = None
+
+    def _on_kubeconfig_changed(self):
+        """Handle kubeconfig file changes by refreshing cluster list"""
+        if self._shutting_down:
+            return
+        
+        logging.info("Kubeconfig changed detected, refreshing cluster list...")
+        
+        try:
+            # Refresh clusters on home page if available
+            if hasattr(self, 'home_page') and hasattr(self.home_page, 'refresh_cluster_status'):
+                self.home_page.refresh_cluster_status()
+                logging.info("Cluster list refresh triggered due to kubeconfig change")
+        except Exception as e:
+            logging.error(f"Error refreshing clusters after kubeconfig change: {e}")
+
     def resizeEvent(self, event):
         """Handle resize event"""
         super().resizeEvent(event)
@@ -280,7 +306,10 @@ class MainWindow(QMainWindow):
         self.main_layout.setSpacing(0)
 
         # Initialize pages
+        # processEvents() calls keep the splash spinner animated during heavy construction
         self.home_page = OrchestrixGUI()
+        QApplication.processEvents()  # Allow splash spinner to animate
+
         self.title_bar = TitleBar(self, update_pinned_items_signal=self.home_page.update_pinned_items_signal)
         self.main_layout.addWidget(self.title_bar)
 
@@ -290,7 +319,9 @@ class MainWindow(QMainWindow):
         self.main_layout.addWidget(self.stacked_widget)
 
         # Create pages
+        QApplication.processEvents()  # Allow splash spinner to animate
         self.cluster_view = ClusterView(self)
+        QApplication.processEvents()  # Allow splash spinner to animate
         self.preferences_page = PreferencesWidget()
 
         # Add pages to stacked widget
@@ -316,6 +347,7 @@ class MainWindow(QMainWindow):
         """Set up signal connections between components"""
         self.home_page.open_cluster_signal.connect(self.switch_to_cluster_view)
         self.home_page.open_preferences_signal.connect(self.switch_to_preferences)
+        self.home_page.signals.cluster_deleted_signal.connect(self.handle_cluster_deletion)
         self.title_bar.home_btn.clicked.connect(self.switch_to_home)
         self.title_bar.settings_btn.clicked.connect(self.switch_to_preferences)
         self.preferences_page.back_signal.connect(self.handle_preferences_back)
@@ -326,6 +358,73 @@ class MainWindow(QMainWindow):
         self.preferences_page.line_numbers_changed.connect(self.update_yaml_editor_line_numbers)
         self.preferences_page.tab_size_changed.connect(self.update_yaml_editor_tab_size)
         self.preferences_page.timezone_changed.connect(self.apply_timezone_change)
+
+    def handle_cluster_deletion(self, cluster_name):
+        """Handle scenario when a cluster is deleted externally.
+        
+        If the user is currently viewing the deleted cluster, show error first
+        (blocking), then redirect to home page after user acknowledges.
+        
+        Implements UI-level deduplication as second layer of defense
+        (primary deduplication is in kubeconfig_watcher via mtime validation).
+        """
+        # UI-LEVEL DEDUPLICATION (Singleton Dialog Pattern)
+        # This prevents stacked dialogs if duplicate signals slip through
+        if not hasattr(self, '_recently_handled_deletions'):
+            self._recently_handled_deletions = set()
+        
+        if cluster_name in self._recently_handled_deletions:
+            logging.debug(f"Suppressing duplicate deletion handling for: {cluster_name}")
+            return
+        
+        # Mark as handled and auto-clear after 5 seconds
+        self._recently_handled_deletions.add(cluster_name)
+        QTimer.singleShot(5000, lambda: self._recently_handled_deletions.discard(cluster_name))
+        
+        logging.info(f"Main handling external deletion of cluster: {cluster_name}")
+        
+        # CRITICAL: Clear stale state for the deleted cluster regardless of current view
+        # This prevents "already connected" issues when cluster is recreated
+        try:
+            from Utils.cluster_state_manager import get_cluster_state_manager
+            state_manager = get_cluster_state_manager()
+            state_manager.reset_cluster_state(cluster_name)
+            logging.debug(f"Reset cluster state for deleted cluster: {cluster_name}")
+        except Exception as e:
+            logging.warning(f"Failed to reset cluster state for {cluster_name}: {e}")
+
+        try:
+            # Reset API service to force fresh connection on next attempt
+            from Services.kubernetes.api_service import get_kubernetes_api_service
+            api_service = get_kubernetes_api_service()
+            api_service.reset_clients()
+            logging.debug(f"Reset API clients after cluster deletion: {cluster_name}")
+        except Exception as e:
+            logging.warning(f"Failed to reset API clients: {e}")
+
+        try:
+            # Reset kubernetes_client's current_cluster to prevent "already connected" check
+            # This fixes the 10+ second retry delay when reconnecting to a recreated cluster
+            from Utils.kubernetes_client import get_kubernetes_client
+            kube_client = get_kubernetes_client()
+            if kube_client and hasattr(kube_client, 'current_cluster') and kube_client.current_cluster == cluster_name:
+                kube_client.current_cluster = None
+                logging.debug(f"Reset kubernetes_client.current_cluster for deleted cluster: {cluster_name}")
+        except Exception as e:
+            logging.warning(f"Failed to reset kubernetes_client: {e}")
+
+        # If we are currently viewing this cluster, show error then switch to home
+        if (self.stacked_widget.currentWidget() == self.cluster_view and 
+            hasattr(self.cluster_view, 'active_cluster') and 
+            self.cluster_view.active_cluster == cluster_name):
+            
+            logging.info(f"Current active cluster {cluster_name} was deleted - redirecting to home")
+            self.show_error_message(
+                f"The cluster '{cluster_name}' is no longer available. It may have been deleted.", 
+                context="accessing cluster"
+            )
+            self.switch_to_home()
+
 
     def show_simple_notification(self, title, message):
         """Show a simple notification"""
@@ -374,7 +473,7 @@ class MainWindow(QMainWindow):
 
         except Exception as e:
             logging.error(f"Error applying timezone change: {e}")
-            self.show_error_message(f"Failed to change timezone: {str(e)}")
+            self.show_error_message(f"Failed to change timezone: {str(e)}", exc=e)
 
     def save_timezone_preference(self, timezone):
         """Save timezone preference to settings"""
@@ -551,8 +650,7 @@ class MainWindow(QMainWindow):
         """Handle cluster state changes with better error handling"""
         try:
             if state == ClusterState.CONNECTING:
-                # Don't show loading overlay during connection
-                pass
+                logging.debug(f"Connecting to cluster: {cluster_name}")
 
             elif state == ClusterState.CONNECTED:
                 # Don't show loading message, connect silently
@@ -666,9 +764,9 @@ class MainWindow(QMainWindow):
 
         except Exception as e:
             logging.error(f"Error in switch_to_cluster_view for {cluster_name}: {e}")
-            self.show_error_message(f"Error switching to cluster: {str(e)}")
+            self.show_error_message(f"Error switching to cluster: {str(e)}", exc=e)
 
-    def show_error_message(self, error_message):
+    def show_error_message(self, error_message, context="application", exc: Exception = None):
         """Display error messages using centralized error handler"""
         if self._shutting_down:
             return
@@ -681,8 +779,8 @@ class MainWindow(QMainWindow):
             # Use centralized error handler with proper context
             error_handler = get_error_handler()
             error_handler.handle_error(
-                Exception(error_message),
-                context="application",
+                exc if exc is not None else Exception(error_message),
+                context=context,
                 show_dialog=True
             )
 
@@ -792,6 +890,12 @@ class MainWindow(QMainWindow):
 
         except Exception as e:
             logging.error(f"Error in shutdown_cluster_operations: {e}")
+
+        # Cleanup kubeconfig watcher
+        try:
+            cleanup_kubeconfig_watcher()
+        except Exception as e:
+            logging.error(f"Error cleaning up kubeconfig watcher: {e}")
 
     def cleanup_ui_components(self):
         """Clean up UI components safely"""
