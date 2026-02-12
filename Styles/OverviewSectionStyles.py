@@ -58,6 +58,7 @@ def get_history_table_style():
             border-radius: 6px;
             gridline-color: {theme.colors.BORDER_COLOR};
             selection-background-color: {theme.colors.SELECTED_BG};
+            selection-color: {theme.colors.TEXT_LIGHT};
         }}
         QTableWidget::item {{
             padding: 8px;
@@ -65,6 +66,7 @@ def get_history_table_style():
         }}
         QTableWidget::item:selected {{
             background-color: {theme.colors.SELECTED_BG};
+            color: {theme.colors.TEXT_LIGHT};
         }}
         QHeaderView::section {{
             background-color: {theme.colors.BG_MEDIUM};
