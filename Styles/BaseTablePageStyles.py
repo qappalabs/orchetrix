@@ -56,8 +56,8 @@ def get_table_style():
         }}
 
         QHeaderView::section {{
-            background-color: {theme.colors.HEADER_BG};
-            color: {theme.colors.TEXT_SECONDARY};
+            background-color: {theme.colors.TABLE_HEADER};
+            color: {theme.colors.TEXT_LIGHT};
             padding: 10px 8px;
             border: none;
             border-bottom: 1px solid {theme.colors.BORDER_COLOR};
