@@ -2,8 +2,8 @@
 Debounced Update Manager with Throttling - Prevents excessive UI updates and API calls
 """
 
-from PyQt6.QtCore import QTimer, QObject, pyqtSignal
-from typing import Dict, Callable, Any
+from PyQt6.QtCore import QTimer, QObject
+from typing import Callable
 from collections import deque
 import logging
 import time
