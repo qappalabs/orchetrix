@@ -4,15 +4,16 @@ Dynamic implementation of the Namespaces page with live Kubernetes data using AP
 
 import re
 from PyQt6.QtWidgets import (
-    QHeaderView, QWidget, QLabel, QHBoxLayout, QPushButton, QInputDialog, QMessageBox, QLayout
+    QHeaderView, QWidget, QHBoxLayout, QPushButton, QInputDialog, QMessageBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTimer
 from PyQt6.QtGui import QColor
 
 from Base_Components.base_components import SortableTableWidgetItem, StatusLabel
 from Base_Components.base_resource_page import BaseResourcePage
-from UI.Styles import AppStyles, AppColors
+from UI.Styles import AppColors
 from UI.ThemeManager import get_theme_manager
+from Utils.data_formatters import parse_age_to_seconds
 from Styles.NamespacesPageStyles import get_add_namespace_button_style
 from Utils.kubernetes_client import get_kubernetes_client
 from Services.kubernetes.api_config import APIClientConfig
@@ -188,6 +189,10 @@ class NamespacesPage(BaseResourcePage):
 
     def _on_theme_changed(self, theme_name):
         """Update styles when theme changes"""
+        # Call parent to handle all inherited theme-aware widgets
+        super()._on_theme_changed(theme_name)
+        
+        # Only handle NamespacesPage-specific widgets
         if hasattr(self, 'add_namespace_button'):
             self.add_namespace_button.setStyleSheet(get_add_namespace_button_style())
 
@@ -242,11 +247,7 @@ class NamespacesPage(BaseResourcePage):
             cell_col = col + 1
 
             if col == 2:
-                try:
-                    num = int(value.replace('d', '').replace('h', '').replace('m', ''))
-                except ValueError:
-                    num = 0
-                item = SortableTableWidgetItem(value, num)
+                item = SortableTableWidgetItem(value, parse_age_to_seconds(value))
             else:
                 item = SortableTableWidgetItem(value)
 
