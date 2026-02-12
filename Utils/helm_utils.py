@@ -4,12 +4,10 @@ Includes installation, management, and repository handling capabilities.
 """
 
 import os
-import time
 import yaml
 import logging
 import random
 import string
-import traceback
 import re
 import json
 import requests
@@ -26,17 +24,16 @@ if sys.platform == 'win32':
     SUBPROCESS_FLAGS = subprocess.CREATE_NO_WINDOW
 else:
     SUBPROCESS_FLAGS = 0
-from typing import Dict, Any, Optional
+from typing import Optional
 from kubernetes import client
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QFormLayout, QLineEdit, QComboBox,
     QTextEdit, QHBoxLayout, QPushButton, QProgressDialog, QMessageBox,
-    QCheckBox, QLabel, QListWidget, QListWidgetItem, QDialogButtonBox,
-    QTabWidget, QSplitter, QTreeWidget, QTreeWidgetItem, QHeaderView, QWidget, QScrollArea
+    QCheckBox, QLabel, QTabWidget, QWidget
 )
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QCoreApplication
-from PyQt6.QtGui import QFont
-from UI.Styles import AppColors
+from UI.ThemeManager import get_theme_manager
+from UI.ThemeAwarePage import ThemeAwareMixin
 
 
 def check_helm_installed():
@@ -482,7 +479,7 @@ def add_repository_for_chart(chart_name, repository_name):
         if success:
             logging.info(f"Successfully added repository: {repository_name}")
             # Skip update since it takes too long and is optional for installation
-            logging.info(f"Skipping repository update to avoid timeout")
+            logging.info("Skipping repository update to avoid timeout")
             return True, f"Successfully added repository: {repository_name}"
         else:
             logging.error(f"Failed to add repository {repository_name}: {message}")
@@ -957,7 +954,7 @@ class HelmInstallThread(QThread):
                     "first_deployed": datetime.datetime.now().isoformat() + "Z",
                     "last_deployed": datetime.datetime.now().isoformat() + "Z",
                     "status": "deployed",
-                    "description": f"Install complete"
+                    "description": "Install complete"
                 },
                 "chart": {
                     "metadata": {
@@ -1006,7 +1003,7 @@ class HelmInstallThread(QThread):
             logging.error(f"Error creating Helm release secret: {e}")
 
 
-class ChartInstallDialog(QDialog):
+class ChartInstallDialog(ThemeAwareMixin, QDialog):
     """Enhanced chart install dialog with improved validation and user experience"""
 
     # Class variable to track dialog instances
@@ -1027,35 +1024,170 @@ class ChartInstallDialog(QDialog):
 
         self.setWindowTitle(f"Install Chart: {chart_name}")
         self.setMinimumSize(600, 500)
+        
+        self.setup_ui()
+        
+        # Apply theme-aware styling
+        self.apply_styles()
+    
+    def apply_styles(self):
+        """Apply comprehensive theme-aware styling to the dialog"""
+        theme = get_theme_manager().get_current_theme()
+        
+        # Store theme manager for theme changes
+        self._theme_manager = get_theme_manager()
+        
+        # Apply main dialog styling
         self.setStyleSheet(f"""
             QDialog {{
-                background-color: {AppColors.BG_DARK};
-                color: {AppColors.TEXT_LIGHT};
+                background-color: {theme.colors.BG_DARK};
+                color: {theme.colors.TEXT_LIGHT};
             }}
             QTabWidget::pane {{
-                border: 1px solid #3d3d3d;
-                background-color: {AppColors.BG_DARK};
+                border: 1px solid {theme.colors.BORDER_COLOR};
+                background-color: {theme.colors.BG_DARK};
             }}
             QTabWidget::tab-bar {{
                 alignment: left;
             }}
             QTabBar::tab {{
-                background-color: #2d2d2d;
-                color: {AppColors.TEXT_LIGHT};
-                border: 1px solid #3d3d3d;
+                background-color: {theme.colors.BG_MEDIUM};
+                color: {theme.colors.TEXT_LIGHT};
+                border: 1px solid {theme.colors.BORDER_COLOR};
                 padding: 8px 16px;
                 margin-right: 2px;
             }}
             QTabBar::tab:selected {{
-                background-color: {AppColors.BG_DARK};
-                border-bottom: 2px solid #0078d7;
+                background-color: {theme.colors.BG_DARK};
+                border-bottom: 2px solid {theme.colors.ACCENT_BLUE};
             }}
             QTabBar::tab:hover {{
-                background-color: #3d3d3d;
+                background-color: {theme.colors.HOVER_BG};
             }}
         """)
+        
+        # Apply input field styling - match releases page theme consistency
+        if hasattr(self, 'release_name_input'):
+            self.release_name_input.setStyleSheet(self._get_input_field_style())
+        
+        if hasattr(self, 'namespace_combo'):
+            self.namespace_combo.setStyleSheet(self._get_dropdown_style())
+        
+        if hasattr(self, 'version_input'):
+            self.version_input.setStyleSheet(self._get_input_field_style())
+        
+        if hasattr(self, 'values_editor'):
+            self.values_editor.setStyleSheet(self._get_text_edit_style())
+        
+        if hasattr(self, 'timeout_input'):
+            self.timeout_input.setStyleSheet(self._get_input_field_style())
+        
+        # Apply checkbox styling
+        checkboxes = [
+            getattr(self, 'create_namespace_checkbox', None),
+            getattr(self, 'wait_checkbox', None),
+            getattr(self, 'atomic_checkbox', None),
+            getattr(self, 'dry_run_checkbox', None)
+        ]
+        
+        for checkbox in checkboxes:
+            if checkbox:
+                checkbox.setStyleSheet(f"color: {theme.colors.TEXT_LIGHT}; font-size: 13px;")
+        
+        # Apply label styling for validation labels
+        if hasattr(self, 'yaml_validation_label') and self.yaml_validation_label:
+            self.yaml_validation_label.setStyleSheet(f"color: {theme.colors.TEXT_SUBTLE}; font-size: 12px; margin-top: 5px;")
 
-        self.setup_ui()
+        if hasattr(self, 'validation_status') and self.validation_status:
+            self.validation_status.setStyleSheet(f"color: {theme.colors.TEXT_SUBTLE}; font-size: 12px; margin: 5px 0;")
+
+        # Apply header label styling
+        if hasattr(self, 'name_label') and self.name_label:
+            self.name_label.setStyleSheet(f"color: {theme.colors.TEXT_LIGHT}; font-weight: bold;")
+
+        if hasattr(self, 'repo_label') and self.repo_label:
+            self.repo_label.setStyleSheet(f"color: {theme.colors.TEXT_SUBTLE}; font-size: 14px;")
+
+        # Note: Button styling is kept as original inline styles in create_button_box()
+        # to preserve the install button's font-weight: bold and original colors
+
+    def _get_input_field_style(self):
+        """Input field (QLineEdit, QSpinBox) style - theme-aware, matches releases page"""
+        theme = get_theme_manager().get_current_theme()
+        return f"""
+            QLineEdit, QSpinBox {{
+                background-color: {theme.colors.BG_LIGHT};
+                color: {theme.colors.TEXT_LIGHT};
+                border: 1px solid {theme.colors.BORDER_COLOR};
+                border-radius: 4px;
+                padding: 8px 12px;
+                font-size: 13px;
+            }}
+            QLineEdit:focus, QSpinBox:focus {{
+                border-color: {theme.colors.ACCENT_BLUE};
+                background-color: {theme.colors.BG_MEDIUM};
+            }}
+        """
+
+    def _get_dropdown_style(self):
+        """Dropdown (QComboBox) style - theme-aware, matches original sizing"""
+        theme = get_theme_manager().get_current_theme()
+        return f"""
+            QComboBox {{
+                background-color: {theme.colors.BG_LIGHT};
+                color: {theme.colors.TEXT_LIGHT};
+                border: 1px solid {theme.colors.BORDER_COLOR};
+                border-radius: 4px;
+                padding: 8px;
+                font-size: 13px;
+                min-width: 150px;
+            }}
+            QComboBox:focus {{
+                border: 1px solid {theme.colors.ACCENT_BLUE};
+                background-color: {theme.colors.BG_MEDIUM};
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 20px;
+            }}
+            QComboBox::down-arrow {{
+                image: none;
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-top: 5px solid {theme.colors.TEXT_LIGHT};
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: {theme.colors.BG_LIGHT};
+                color: {theme.colors.TEXT_LIGHT};
+                border: 1px solid {theme.colors.BORDER_COLOR};
+                selection-background-color: {theme.colors.ACCENT_BLUE};
+            }}
+        """
+
+    def _get_text_edit_style(self):
+        """Text editor (QTextEdit) style - theme-aware, matches releases page"""
+        theme = get_theme_manager().get_current_theme()
+        return f"""
+            QTextEdit {{
+                background-color: {theme.colors.BG_DARK};
+                color: {theme.colors.TEXT_LIGHT};
+                border: 1px solid {theme.colors.BORDER_COLOR};
+                border-radius: 4px;
+                padding: 8px;
+                font-family: 'Consolas', 'Monaco', monospace;
+                font-size: 13px;
+                line-height: 1.4;
+            }}
+            QTextEdit:focus {{
+                border-color: {theme.colors.ACCENT_BLUE};
+                background-color: {theme.colors.BG_MEDIUM};
+            }}
+        """
+
+    def _on_theme_changed(self, theme_name):
+        """Handle theme change events"""
+        # Refresh all styling
+        self.apply_styles()
 
     def closeEvent(self, event):
         """Handle dialog close event"""
@@ -1084,32 +1216,32 @@ class ChartInstallDialog(QDialog):
     def get_active_dialog_count(cls):
         """Get the number of active install dialogs"""
         return len(cls._active_dialogs)
-
+        
     def setup_ui(self):
         """Setup the enhanced dialog UI"""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(15)
-
+        
         # Chart info header
         self.create_chart_info_header(layout)
-
+        
         # Tab widget for different sections
         self.tab_widget = QTabWidget()
         layout.addWidget(self.tab_widget)
-
+        
         # Basic configuration tab
         self.setup_basic_config_tab()
-
+        
         # Values tab
         self.setup_values_tab()
-
+        
         # Advanced tab
         self.setup_advanced_tab()
-
+        
         # Validation status
         self.setup_validation_status(layout)
-
+        
         # Button box
         self.create_button_box(layout)
 
@@ -1122,15 +1254,13 @@ class ChartInstallDialog(QDialog):
         # Title row
         title_layout = QHBoxLayout()
 
-        name_label = QLabel(f"<h2>{self.chart_name}</h2>")
-        name_label.setStyleSheet("color: #ffffff; font-weight: bold;")
-        title_layout.addWidget(name_label)
+        self.name_label = QLabel(f"<h2>{self.chart_name}</h2>")
+        title_layout.addWidget(self.name_label)
 
         title_layout.addStretch()
 
-        repo_label = QLabel(f"Repository: {self.repository}")
-        repo_label.setStyleSheet("color: #888888; font-size: 14px;")
-        title_layout.addWidget(repo_label)
+        self.repo_label = QLabel(f"Repository: {self.repository}")
+        title_layout.addWidget(self.repo_label)
 
         info_layout.addLayout(title_layout)
         layout.addWidget(info_widget)
@@ -1140,41 +1270,41 @@ class ChartInstallDialog(QDialog):
         basic_widget = QWidget()
         basic_layout = QFormLayout(basic_widget)
         basic_layout.setSpacing(15)
-
+        
         # Release name with validation
         self.release_name_input = QLineEdit()
         self.release_name_input.setText(f"{self.chart_name}-{''.join(random.choices(string.ascii_lowercase, k=4))}")
-        self.release_name_input.setStyleSheet(self.get_input_style())
+        self.release_name_input.setStyleSheet(self._get_input_field_style())
         self.release_name_input.textChanged.connect(self._start_validation_timer)
         basic_layout.addRow("Release Name:", self.release_name_input)
-
+        
         # Namespace with autocomplete
         self.namespace_combo = QComboBox()
         self.namespace_combo.setEditable(True)
-        self.namespace_combo.setStyleSheet(self.get_combo_style())
+        self.namespace_combo.setStyleSheet(self._get_dropdown_style())
         self.load_namespaces()
         self.namespace_combo.currentTextChanged.connect(self._start_validation_timer)
         basic_layout.addRow("Namespace:", self.namespace_combo)
-
+        
         # Version
         self.version_input = QLineEdit()
         self.version_input.setPlaceholderText("Latest")
-        self.version_input.setStyleSheet(self.get_input_style())
+        self.version_input.setStyleSheet(self._get_input_field_style())
         basic_layout.addRow("Chart Version:", self.version_input)
-
+        
         # Create namespace option
         self.create_namespace_checkbox = QCheckBox("Create namespace if it doesn't exist")
         self.create_namespace_checkbox.setChecked(True)
-        self.create_namespace_checkbox.setStyleSheet("color: #ffffff; font-size: 13px;")
+        self.create_namespace_checkbox.setStyleSheet(f"color: {get_theme_manager().get_current_theme().colors.TEXT_LIGHT}; font-size: 13px;")
         basic_layout.addRow("", self.create_namespace_checkbox)
-
+        
         self.tab_widget.addTab(basic_widget, "Basic Configuration")
 
     def setup_values_tab(self):
         """Setup enhanced values editing tab"""
         values_widget = QWidget()
         values_layout = QVBoxLayout(values_widget)
-
+        
         # Values editor
         self.values_editor = QTextEdit()
         self.values_editor.setStyleSheet("""
@@ -1195,12 +1325,12 @@ class ChartInstallDialog(QDialog):
         self.values_editor.setPlaceholderText("# Your custom values will appear here\n# Edit as needed before installation")
         self.values_editor.textChanged.connect(self._start_validation_timer)
         values_layout.addWidget(self.values_editor)
-
+        
         # Validation status for YAML
         self.yaml_validation_label = QLabel("")
         self.yaml_validation_label.setStyleSheet("color: #888888; font-size: 12px; margin-top: 5px;")
         values_layout.addWidget(self.yaml_validation_label)
-
+        
         self.tab_widget.addTab(values_widget, "Values Configuration")
 
     def setup_advanced_tab(self):
@@ -1208,31 +1338,31 @@ class ChartInstallDialog(QDialog):
         advanced_widget = QWidget()
         advanced_layout = QFormLayout(advanced_widget)
         advanced_layout.setSpacing(15)
-
+        
         # Timeout
         self.timeout_input = QLineEdit()
         self.timeout_input.setText("300")
         self.timeout_input.setPlaceholderText("300")
         self.timeout_input.setStyleSheet(self.get_input_style())
         advanced_layout.addRow("Timeout (seconds):", self.timeout_input)
-
+        
         # Wait for resources
         self.wait_checkbox = QCheckBox("Wait for all resources to be ready")
         self.wait_checkbox.setChecked(True)
         self.wait_checkbox.setStyleSheet("color: #ffffff; font-size: 13px;")
         advanced_layout.addRow("", self.wait_checkbox)
-
+        
         # Atomic installation
         self.atomic_checkbox = QCheckBox("Atomic installation (rollback on failure)")
         self.atomic_checkbox.setChecked(True)
         self.atomic_checkbox.setStyleSheet("color: #ffffff; font-size: 13px;")
         advanced_layout.addRow("", self.atomic_checkbox)
-
+        
         # Dry run
         self.dry_run_checkbox = QCheckBox("Dry run (validate without installing)")
         self.dry_run_checkbox.setStyleSheet("color: #ffffff; font-size: 13px;")
         advanced_layout.addRow("", self.dry_run_checkbox)
-
+        
         self.tab_widget.addTab(advanced_widget, "Advanced Options")
 
     def setup_validation_status(self, layout):
@@ -1244,12 +1374,12 @@ class ChartInstallDialog(QDialog):
     def _on_cancel_clicked(self):
         """Handle cancel button click"""
         self.reject()
-
+        
     def create_button_box(self, layout):
         """Create enhanced dialog button box"""
         button_layout = QHBoxLayout()
         button_layout.setSpacing(10)
-
+        
         self.cancel_button = QPushButton("Cancel")
         self.cancel_button.setStyleSheet("""
             QPushButton {
@@ -1265,7 +1395,7 @@ class ChartInstallDialog(QDialog):
             }
         """)
         self.cancel_button.clicked.connect(self._on_cancel_clicked)
-
+        
         self.install_button = QPushButton("Install Chart")
         self.install_button.setStyleSheet("""
             QPushButton {
@@ -1290,21 +1420,21 @@ class ChartInstallDialog(QDialog):
         """)
         self.install_button.clicked.connect(self._on_install_clicked)
         self.install_button.setEnabled(True)
-
+    
         button_layout.addStretch()
         button_layout.addWidget(self.cancel_button)
         button_layout.addWidget(self.install_button)
-
+        
         layout.addLayout(button_layout)
-
+    
     def _on_install_clicked(self):
         """Handle install button click with validation"""
         # Prevent multiple installations if other dialogs are active
         if ChartInstallDialog.get_active_dialog_count() > 1:
-            QMessageBox.warning(self, "Multiple Dialogs",
+            QMessageBox.warning(self, "Multiple Dialogs", 
                                "Please close other installation dialogs before proceeding.")
             return
-
+        
         # Proceed with acceptance
         self.accept()
 
@@ -1361,7 +1491,7 @@ class ChartInstallDialog(QDialog):
         """Load available namespaces using Kubernetes API"""
         try:
             from Utils.kubernetes_client import get_kubernetes_client
-
+            
             k8s_client = get_kubernetes_client()
             if k8s_client and k8s_client.v1:
                 # Get namespaces using Kubernetes API
@@ -1384,7 +1514,7 @@ class ChartInstallDialog(QDialog):
         """Enhanced form validation with detailed feedback"""
         errors = []
         warnings = []
-
+        
         # Validate release name
         release_name = self.release_name_input.text().strip()
         if not release_name:
@@ -1393,19 +1523,19 @@ class ChartInstallDialog(QDialog):
             errors.append("Release name must be lowercase alphanumeric with hyphens")
         elif len(release_name) > 53:
             errors.append("Release name must be 53 characters or less")
-
+        
         # Validate namespace
         namespace = self.namespace_combo.currentText().strip()
         if not namespace:
             errors.append("Namespace is required")
         elif not re.match(r'^[a-z0-9]([-a-z0-9]*[a-z0-9])?$', namespace):
             errors.append("Namespace must be lowercase alphanumeric with hyphens")
-
+        
         # Validate YAML
         yaml_error = self._validate_yaml()
         if yaml_error:
             errors.append(f"YAML Error: {yaml_error}")
-
+        
         # Update validation status
         if errors:
             self.validation_status.setText(f"❌ {'; '.join(errors)}")
@@ -1443,17 +1573,16 @@ class ChartInstallDialog(QDialog):
         # Final validation before accepting
         if not self.install_button.isEnabled():
             return None
-
+        
         values_text = self.values_editor.toPlainText().strip()
-        values_dict = {}
 
         if values_text:
             try:
-                values_dict = yaml.safe_load(values_text) or {}
+                yaml.safe_load(values_text)
             except yaml.YAMLError as e:
                 QMessageBox.critical(self, "Invalid YAML", f"Error parsing values: {e}")
                 return None
-
+        
         return {
             "release_name": self.release_name_input.text().strip(),
             "namespace": self.namespace_combo.currentText().strip(),
@@ -1851,7 +1980,7 @@ class HelmUpgradeThread(QThread):
                     "first_deployed": datetime.datetime.now().isoformat() + "Z",
                     "last_deployed": datetime.datetime.now().isoformat() + "Z",
                     "status": "deployed",
-                    "description": f"Upgrade complete"
+                    "description": "Upgrade complete"
                 },
                 "chart": {
                     "metadata": {
