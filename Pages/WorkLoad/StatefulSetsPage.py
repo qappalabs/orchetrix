@@ -1,7 +1,6 @@
 """
 Dynamic implementation of the StatefulSets page with live Kubernetes data and resource operations.
 """
-import re
 
 from PyQt6.QtWidgets import QHeaderView
 from PyQt6.QtCore import Qt, QTimer
@@ -10,34 +9,7 @@ from PyQt6.QtGui import QColor
 from Base_Components.base_components import SortableTableWidgetItem
 from Base_Components.base_resource_page import BaseResourcePage
 from UI.Styles import AppColors
-
-
-def parse_age_to_minutes(age_str: str) -> float:
-    """
-    Parse a Kubernetes age string to total minutes.
-    Supports single-suffix (e.g., '5d', '12h', '30m', '45s') and
-    compound formats (e.g., '5d2h', '3h15m', '2d5h30m').
-    Returns 0 for invalid or unexpected formats.
-    """
-    if not age_str:
-        return 0
-
-    total_minutes = 0.0
-    multipliers = {'d': 1440, 'h': 60, 'm': 1, 's': 1/60}
-
-    # Match all number+suffix pairs in the string
-    matches = re.findall(r'(\d+)([dhms])', age_str)
-    if not matches:
-        return 0
-
-    for value_str, unit in matches:
-        try:
-            value = int(value_str)
-            total_minutes += value * multipliers.get(unit, 0)
-        except ValueError:
-            continue
-
-    return total_minutes
+from Utils.data_formatters import parse_age_to_seconds
 
 class StatefulSetsPage(BaseResourcePage):
     """
@@ -160,7 +132,7 @@ class StatefulSetsPage(BaseResourcePage):
                     replicas_value = 0
                 item = SortableTableWidgetItem(value, replicas_value)
             elif col == 4:  # Age column
-                age_value = parse_age_to_minutes(value)
+                age_value = parse_age_to_seconds(value)
                 item = SortableTableWidgetItem(value, age_value)
             else:
                 item = SortableTableWidgetItem(value)
