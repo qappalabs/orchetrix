@@ -4,13 +4,14 @@ Dynamic implementation of the Definitions page with live Kubernetes data.
 
 import logging
 
-from PyQt6.QtWidgets import (QHeaderView, QWidget, QLabel)
+from PyQt6.QtWidgets import (QHeaderView)
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor
 
 from Base_Components.base_components import SortableTableWidgetItem
 from Base_Components.base_resource_page import BaseResourcePage
-from UI.Styles import AppStyles, AppColors
+from UI.Styles import AppColors
+from Utils.data_formatters import parse_age_to_seconds
 
 class DefinitionsPage(BaseResourcePage):
     """
@@ -29,7 +30,7 @@ class DefinitionsPage(BaseResourcePage):
         sortable_columns = {1, 2, 3, 4, 5}
 
         # Set up the base UI components
-        layout = super().setup_ui("Definitions", headers, sortable_columns)
+        super().setup_ui("Definitions", headers, sortable_columns)
 
         # Apply table style
         # Table styling is already handled by BaseResourcePage
@@ -117,11 +118,7 @@ class DefinitionsPage(BaseResourcePage):
 
             # Handle numeric columns for sorting
             if col == 4:  # Age column
-                try:
-                    num = int(value.replace('d', ''))
-                except ValueError:
-                    num = 0
-                item = SortableTableWidgetItem(value, num)
+                item = SortableTableWidgetItem(value, parse_age_to_seconds(value))
             else:
                 item = SortableTableWidgetItem(value)
 
