@@ -2,13 +2,14 @@
 Dynamic implementation of the ConfigMaps page with live Kubernetes data and resource operations.
 """
 
-from PyQt6.QtWidgets import QHeaderView, QMenu, QPushButton, QMessageBox
+from PyQt6.QtWidgets import QHeaderView
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor
 
 from Base_Components.base_components import SortableTableWidgetItem
 from Base_Components.base_resource_page import BaseResourcePage
-from UI.Styles import AppColors, AppStyles
+from UI.Styles import AppColors
+from Utils.data_formatters import parse_age_to_seconds
 
 class ConfigMapsPage(BaseResourcePage):
     """
@@ -99,15 +100,7 @@ class ConfigMapsPage(BaseResourcePage):
 
             # Handle numeric columns for sorting
             if col == 3:  # Age column
-                try:
-                    num = int(value.replace('d', '').replace('h', '').replace('m', ''))
-                    if 'd' in value:
-                        num = num * 1440  # Convert days to minutes
-                    elif 'h' in value:
-                        num = num * 60    # Convert hours to minutes
-                except ValueError:
-                    num = 0
-                item = SortableTableWidgetItem(value, num)
+                item = SortableTableWidgetItem(value, parse_age_to_seconds(value))
             else:
                 item = SortableTableWidgetItem(value)
 
