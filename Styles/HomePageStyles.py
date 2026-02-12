@@ -19,13 +19,14 @@ def get_sidebar_button_style():
             font-size: 14px;
         }}
         QPushButton:hover {{
-            background-color: {theme.colors.HOVER_BG};
+            background-color: {theme.colors.SIDEBAR_HOVER_BG};
             color: {theme.colors.TEXT_LIGHT};
         }}
         QPushButton:checked {{
-            background-color: {theme.colors.HOVER_BG};
-            color: {theme.colors.TEXT_LIGHT};
+            background-color: {theme.colors.SIDEBAR_ACTIVE_BG};
+            color: {theme.colors.SIDEBAR_ACTIVE_TEXT};
             padding-left: 17px;
+            font-weight: bold;
         }}
     """
 
