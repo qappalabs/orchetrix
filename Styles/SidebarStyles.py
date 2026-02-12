@@ -74,7 +74,7 @@ def get_nav_icon_button_expanded_style(background_color, text_color):
             text-align: left;
         }}
         QToolButton:hover {{
-            background-color: {theme.colors.HOVER_BG};
+            background-color: {theme.colors.SIDEBAR_HOVER_BG};
         }}
     """
 
@@ -92,7 +92,7 @@ def get_nav_icon_button_collapsed_style(background_color, text_color):
             text-align: left;
         }}
         QToolButton:hover {{
-            background-color: {theme.colors.HOVER_BG};
+            background-color: {theme.colors.SIDEBAR_HOVER_BG};
         }}
     """
 
@@ -168,6 +168,16 @@ def get_divider_style():
 def get_hover_bg():
     """Get theme-aware hover background color"""
     return _get_theme().colors.HOVER_BG
+
+
+def get_sidebar_active_bg():
+    """Get theme-aware sidebar active/selected background color"""
+    return _get_theme().colors.SIDEBAR_ACTIVE_BG
+
+
+def get_sidebar_active_text():
+    """Get theme-aware sidebar active/selected text color"""
+    return _get_theme().colors.SIDEBAR_ACTIVE_TEXT
 
 
 def get_text_light():
