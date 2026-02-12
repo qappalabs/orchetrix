@@ -1,10 +1,10 @@
-from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor, QLinearGradient, QFont
-from PyQt6.QtCore import Qt, QRect, QSize
+from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor, QLinearGradient
+from PyQt6.QtCore import Qt, QRect
 import os
 import logging
 import sys
 
-from UI.Styles import AppStyles, AppColors  # Import AppStyles and AppColors for styling
+from UI.Styles import AppStyles  # Import AppStyles and AppColors for styling
 
 # Define resource_path function directly in this file to ensure it's always available
 def resource_path(relative_path):
