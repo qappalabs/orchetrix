@@ -1,24 +1,9 @@
-import re
-
 from PyQt6.QtWidgets import QHeaderView
 from PyQt6.QtCore import Qt, QTimer
 
 from Base_Components.base_components import SortableTableWidgetItem
 from Base_Components.base_resource_page import BaseResourcePage
-
-
-def parse_age_to_days(age_str: str) -> float:
-    """
-    Parse an age string (e.g., '5d', '12h', '30m', '45s') to a float representing days.
-    Returns 0 for invalid or unexpected formats.
-    """
-    match = re.match(r'^(\d+)([dhms])$', age_str)
-    if not match:
-        return 0
-    value = int(match.group(1))
-    unit = match.group(2)
-    divisors = {'d': 1, 'h': 24, 'm': 24 * 60, 's': 24 * 3600}
-    return value / divisors.get(unit, 1)
+from Utils.data_formatters import parse_age_to_seconds
 
 class IngressClassesPage(BaseResourcePage):
     """
@@ -44,7 +29,7 @@ class IngressClassesPage(BaseResourcePage):
         sortable_columns = {1, 2, 3, 4, 5, 6}
 
         # Set up the base UI components
-        layout = super().setup_ui("Ingress Classes", headers, sortable_columns)
+        super().setup_ui("Ingress Classes", headers, sortable_columns)
 
         # Table styling is already handled by BaseResourcePage
 
@@ -102,7 +87,6 @@ class IngressClassesPage(BaseResourcePage):
         # Extract data from raw_data
         raw_data = resource.get("raw_data", {})
         spec = raw_data.get("spec", {})
-        metadata = raw_data.get("metadata", {})
 
         # Get controller
         controller = spec.get("controller", "<none>")
@@ -136,7 +120,7 @@ class IngressClassesPage(BaseResourcePage):
 
             # Handle numeric columns for sorting
             if col == 5:  # Age column
-                num = parse_age_to_days(value)
+                num = parse_age_to_seconds(value)
                 item = SortableTableWidgetItem(value, num)
             else:
                 item = SortableTableWidgetItem(value)
@@ -165,10 +149,16 @@ class IngressClassesPage(BaseResourcePage):
 
             # Get resource details
             resource_name = None
+            raw_data = None
 
             # Get the resource name
             if self.table.item(row, 1) is not None:
                 resource_name = self.table.item(row, 1).text()
+
+            # Get the raw data from resources array (like NodesPage does)
+            if hasattr(self, 'resources') and self.resources and row < len(self.resources):
+                resource = self.resources[row]
+                raw_data = resource.get("raw_data", {})
 
             # Show detail view
             if resource_name:
@@ -179,4 +169,5 @@ class IngressClassesPage(BaseResourcePage):
 
                 if parent and hasattr(parent, 'detail_manager'):
                     # IngressClasses are cluster-scoped, so no namespace
-                    parent.detail_manager.show_detail("ingressclass", resource_name, None)
+                    # Pass raw_data as 4th parameter (like NodesPage does)
+                    parent.detail_manager.show_detail("ingressclass", resource_name, None, raw_data)
