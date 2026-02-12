@@ -3,7 +3,6 @@ PortForwardingPage-specific styles
 Contains styles that are unique to PortForwardingPage and defined inline in the page.
 """
 
-import textwrap
 
 # Stop button color constants
 STOP_BUTTON_BG = "#f44336"
