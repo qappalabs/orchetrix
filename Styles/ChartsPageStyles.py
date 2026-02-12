@@ -3,21 +3,21 @@ ChartsPage-specific styles
 Contains styles that are unique to ChartsPage and defined inline in the page.
 """
 
-from UI.ThemeManager import get_theme_manager
+from UI.ThemeManager import get_theme_manager, BaseTheme
 
 
-def _get_theme():
+def _get_theme() -> BaseTheme:
     """Get current theme"""
     return get_theme_manager().get_current_theme()
 
 
-def get_repository_label_style():
+def get_repository_label_style() -> str:
     """Style for repository label"""
     theme = _get_theme()
     return f"color: {theme.colors.TEXT_LIGHT}; font-size: 12px; font-weight: normal;"
 
 
-def get_loading_bar_style():
+def get_loading_bar_style() -> str:
     """Style for loading progress bar"""
     theme = _get_theme()
     return f"""
@@ -33,18 +33,35 @@ def get_loading_bar_style():
     """
 
 
-def get_loading_text_style():
+def get_loading_text_style() -> str:
     """Style for loading text"""
     theme = _get_theme()
     return f"color: {theme.colors.TEXT_SUBTLE}; font-size: 12px;"
 
 
-def get_icon_label_default_style():
-    """Default style for icon labels (chart icons)"""
+def _build_icon_label_style(
+    color: str | None = None, font_size: str | None = None
+) -> str:
+    """
+    Build icon label style with optional color and font size.
+
+    Args:
+        color: Optional text color (e.g., theme.colors.STATUS_ACTIVE)
+        font_size: Optional font size (e.g., '14px')
+
+    Returns:
+        CSS style string for QLabel
+    """
     theme = _get_theme()
+    extra_styles = ""
+    if color:
+        extra_styles += f"color: {color};\n            "
+    if font_size:
+        extra_styles += f"font-size: {font_size};\n            "
+
     return f"""
         QLabel {{
-            border-radius: 3px;
+            {extra_styles}border-radius: 3px;
             background-color: {theme.colors.HOVER_BG};
             border: none;
             padding: 0px;
@@ -53,20 +70,17 @@ def get_icon_label_default_style():
     """
 
 
-def get_icon_label_emoji_style():
+def get_icon_label_default_style() -> str:
+    """Default style for icon labels (chart icons)"""
+    return _build_icon_label_style()
+
+
+def get_icon_label_emoji_style() -> str:
     """Style for icon label with emoji fallback"""
     theme = _get_theme()
-    return f"""
-        QLabel {{
-            color: {theme.colors.STATUS_ACTIVE};
-            font-size: 14px;
-            border-radius: 3px;
-            background-color: {theme.colors.HOVER_BG};
-            border: none;
-            padding: 0px;
-            margin: 0px;
-        }}
-    """
+    return _build_icon_label_style(
+        color=theme.colors.STATUS_ACTIVE, font_size="14px"
+    )
 
 
 def get_chart_detail_dialog_style() -> str:
