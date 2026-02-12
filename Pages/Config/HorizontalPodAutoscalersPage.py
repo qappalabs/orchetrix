@@ -2,13 +2,14 @@
 Dynamic implementation of the Horizontal Pod Autoscalers page with live Kubernetes data.
 """
 
-from PyQt6.QtWidgets import QHeaderView, QPushButton, QLabel, QWidget, QHBoxLayout
+from PyQt6.QtWidgets import QHeaderView, QPushButton
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor
 
 from Base_Components.base_components import SortableTableWidgetItem, StatusLabel
 from Base_Components.base_resource_page import BaseResourcePage
-from UI.Styles import AppColors, AppStyles
+from UI.Styles import AppColors
+from Utils.data_formatters import parse_age_to_seconds
 
 
 class HorizontalPodAutoscalersPage(BaseResourcePage):
@@ -29,18 +30,17 @@ class HorizontalPodAutoscalersPage(BaseResourcePage):
         self.setup_page_ui()
 
     def setup_page_ui(self):
-
+        """Set up the main UI elements for the HPAs page"""
         # Define headers and sortable columns
+        headers = ["", "Name", "Namespace", "Metrics", "Min Pods", "Max Pods", "Replicas", "Age", "Status", ""]
+        sortable_columns = {1, 2, 3, 4, 5, 6, 7, 8}
 
-        # Set up the base UI components with styles
-
-        # Apply table style
-        # Table styling is already handled by BaseResourcePage
+        # Set up the base UI components - creates self.table
+        # Table styling is handled by BaseResourcePage
+        super().setup_ui("Horizontal Pod Autoscalers", headers, sortable_columns)
 
         # Configure column widths
         self.configure_columns()
-
-        # Add delete selected button
 
     def configure_columns(self):
 
@@ -115,13 +115,13 @@ class HorizontalPodAutoscalersPage(BaseResourcePage):
             if col == 3:  # Min Pods column
                 try:
                     num = int(value)
-                except ValueError as e:
+                except ValueError:
                     num = 0
                 item = SortableTableWidgetItem(value, num)
             elif col == 4:  # Max Pods column
                 try:
                     num = int(value)
-                except ValueError as e:
+                except ValueError:
                     num = 0
                 item = SortableTableWidgetItem(value, num)
             elif col == 5:  # Replicas column
@@ -131,16 +131,7 @@ class HorizontalPodAutoscalersPage(BaseResourcePage):
                     num = 0
                 item = SortableTableWidgetItem(value, num)
             elif col == 6:  # Age column
-                try:
-                    num = int(value.replace('d', '').replace(
-                        'h', '').replace('m', ''))
-                    if 'd' in value:
-                        num = num * 1440  # Convert days to minutes
-                    elif 'h' in value:
-                        num = num * 60    # Convert hours to minutes
-                except ValueError as e:
-                    num = 0
-                item = SortableTableWidgetItem(value, num)
+                item = SortableTableWidgetItem(value, parse_age_to_seconds(value))
             else:
                 item = SortableTableWidgetItem(value)
 
@@ -196,7 +187,7 @@ class HorizontalPodAutoscalersPage(BaseResourcePage):
         cell_widget = self.table.cellWidget(row, column)
         if cell_widget:
             # Check if the widget contains interactive elements like QCheckBox or QPushButton
-            from PyQt6.QtWidgets import QCheckBox, QPushButton
+            from PyQt6.QtWidgets import QCheckBox
             if cell_widget.findChild(QCheckBox) or cell_widget.findChild(QPushButton):
                 return
 
