@@ -5,10 +5,9 @@ Events section for DetailPage component
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QListWidget, QListWidgetItem, QLabel, QHBoxLayout
 )
-from PyQt6.QtCore import Qt, QTimer, QSize
+from PyQt6.QtCore import QSize
 from PyQt6.QtGui import QColor
-from typing import Dict, Any, List
-from datetime import datetime, timezone
+from typing import Dict, Any
 import logging
 
 from .base_detail_section import BaseDetailSection
