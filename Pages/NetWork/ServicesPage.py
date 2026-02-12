@@ -1,7 +1,6 @@
 """
 Enhanced ServicesPage with integrated port forwarding functionality
 """
-import re
 from PyQt6.QtWidgets import QHeaderView, QPushButton, QMessageBox
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor
@@ -11,20 +10,7 @@ from Base_Components.base_resource_page import BaseResourcePage
 from UI.Styles import AppColors
 from Utils.port_forward_manager import get_port_forward_manager, PortForwardConfig
 from Utils.port_forward_dialog import PortForwardDialog, ActivePortForwardsDialog
-
-
-def parse_age_to_seconds(age_str: str) -> int:
-    """
-    Parse a Kubernetes age string (e.g., '5d', '12h', '30m', '45s') to seconds.
-    Returns 0 for invalid or unexpected formats.
-    """
-    match = re.match(r'^(\d+)([dhms])$', age_str)
-    if not match:
-        return 0
-    value = int(match.group(1))
-    unit = match.group(2)
-    multipliers = {'d': 86400, 'h': 3600, 'm': 60, 's': 1}
-    return value * multipliers.get(unit, 0)
+from Utils.data_formatters import parse_age_to_seconds
 
 
 class ServicesPage(BaseResourcePage):
