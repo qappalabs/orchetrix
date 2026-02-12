@@ -12,9 +12,7 @@ def _get_theme():
     """Get current theme"""
     return get_theme_manager().get_current_theme()
 
-
 # DIALOG STYLING
-
 def get_dialog_style():
     """Main dialog container style - theme-aware"""
     theme = _get_theme()
@@ -36,9 +34,7 @@ def get_dialog_style():
         }}
     """
 
-
 # HEADER SECTION STYLING
-
 def get_header_frame_style():
     """Header frame container style - theme-aware"""
     theme = _get_theme()
@@ -51,9 +47,7 @@ def get_header_frame_style():
         }}
     """
 
-
 # GROUP BOX STYLING
-
 def get_group_box_style():
     """Group box container style - theme-aware"""
     theme = _get_theme()
@@ -76,9 +70,7 @@ def get_group_box_style():
         }}
     """
 
-
 # RESOURCE INFO STYLING
-
 def get_resource_info_style():
     """Resource information label style - theme-aware"""
     theme = _get_theme()
@@ -88,7 +80,6 @@ def get_resource_info_style():
             color: {theme.colors.STATUS_ACTIVE};
         }}
     """
-
 
 def get_namespace_info_style():
     """Namespace information label style - theme-aware"""
@@ -100,7 +91,6 @@ def get_namespace_info_style():
         }}
     """
 
-
 def get_ports_info_style():
     """Available ports information label style - theme-aware"""
     theme = _get_theme()
@@ -110,9 +100,7 @@ def get_ports_info_style():
         }}
     """
 
-
 # HELP TEXT STYLING
-
 def get_help_text_style():
     """Help text label style - theme-aware"""
     theme = _get_theme()
@@ -124,9 +112,7 @@ def get_help_text_style():
         }}
     """
 
-
 # INPUT FIELD STYLING
-
 def get_input_field_style():
     """Input field (SpinBox, LineEdit) style - theme-aware"""
     theme = _get_theme()
@@ -134,10 +120,10 @@ def get_input_field_style():
         QSpinBox, QLineEdit {{
             background-color: {theme.colors.BG_LIGHT};
             color: {theme.colors.TEXT_LIGHT};
-            border: 2px solid {theme.colors.BORDER_COLOR};
-            border-radius: 6px;
+            border: 1px solid {theme.colors.BORDER_COLOR};
+            border-radius: 4px;
             padding: 8px 12px;
-            font-size: 12px;
+            font-size: 13px;
         }}
         QSpinBox:focus, QLineEdit:focus {{
             border-color: {theme.colors.ACCENT_BLUE};
@@ -145,9 +131,7 @@ def get_input_field_style():
         }}
     """
 
-
 # CHECKBOX STYLING
-
 def get_auto_port_checkbox_style():
     """Auto-assign port checkbox style - theme-aware"""
     theme = _get_theme()
@@ -158,9 +142,7 @@ def get_auto_port_checkbox_style():
         }}
     """
 
-
 # PREVIEW SECTION STYLING
-
 def get_preview_text_style():
     """Configuration preview text area style - theme-aware"""
     theme = _get_theme()
@@ -169,8 +151,8 @@ def get_preview_text_style():
             background-color: {theme.colors.BG_DARK};
             color: {theme.colors.TEXT_LIGHT};
             border: 1px solid {theme.colors.BORDER_COLOR};
-            border-radius: 6px;
-            padding: 12px;
+            border-radius: 4px;
+            padding: 8px;
             font-family: 'Consolas', 'Monaco', monospace;
             font-size: 11px;
             line-height: 1.4;
@@ -178,9 +160,7 @@ def get_preview_text_style():
         {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
     """
 
-
 # BUTTON SECTION STYLING
-
 def get_button_frame_style():
     """Button section frame style - theme-aware"""
     theme = _get_theme()
@@ -189,7 +169,6 @@ def get_button_frame_style():
             border-top: 1px solid {theme.colors.BORDER_COLOR};
         }}
     """
-
 
 def get_primary_button_style():
     """Primary action button style - theme-aware"""
@@ -213,7 +192,6 @@ def get_primary_button_style():
         }}
     """
 
-
 def get_secondary_button_style():
     """Secondary action button style - theme-aware"""
     theme = _get_theme()
@@ -236,9 +214,7 @@ def get_secondary_button_style():
         }}
     """
 
-
 # ACTIVE PORT FORWARDS DIALOG STYLING
-
 def get_active_dialog_style():
     """Active port forwards dialog style - theme-aware"""
     theme = _get_theme()
@@ -272,9 +248,7 @@ def get_active_dialog_style():
         }}
     """
 
-
 # STATUS LABEL STYLING
-
 def get_status_loading_style():
     """Loading status label style - theme-aware"""
     theme = _get_theme()
@@ -285,7 +259,6 @@ def get_status_loading_style():
         }}
     """
 
-
 def get_status_inactive_style():
     """Inactive status label style - theme-aware"""
     theme = _get_theme()
@@ -295,7 +268,6 @@ def get_status_inactive_style():
             font-weight: bold;
         }}
     """
-
 
 def get_status_active_style():
     """Active status label style - theme-aware"""
