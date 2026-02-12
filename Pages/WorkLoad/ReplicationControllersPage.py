@@ -65,7 +65,7 @@ class ReplicaControllersPage(BaseResourcePage):
         sortable_columns = {1, 2, 3, 4, 5}
 
         # Set up the base UI components with styles
-        layout = super().setup_ui("Replication Controllers", headers, sortable_columns)
+        super().setup_ui("Replication Controllers", headers, sortable_columns)
 
         # Table styling is already handled by BaseResourcePage
 
