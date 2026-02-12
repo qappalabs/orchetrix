@@ -23,7 +23,7 @@ def get_metric_card_style():
                 padding: 0px;
             }}
             QFrame#metricCard:hover {{
-                border-color: {theme.colors.ACCENT_BLUE};
+                border-color: #F5964E;
             }}
         """
 
@@ -39,7 +39,7 @@ def get_metric_card_style_with_border(border_color):
                 padding: 0px;
             }}
             QFrame#metricCard:hover {{
-                border-color: {theme.colors.ACCENT_BLUE};
+                border-color: #F5964E;
             }}
         """
 
