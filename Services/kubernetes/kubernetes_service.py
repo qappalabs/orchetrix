@@ -337,9 +337,49 @@ class KubernetesService(QObject):
         """Get current cluster name"""
         return self.current_cluster
 
+    def _ensure_current_context(self):
+        """Ensure kubeconfig has a valid current-context.
+        
+        Auto-repairs kubeconfig when current-context is empty by setting it
+        to the first available context. This prevents errors when switching contexts.
+        """
+        import os
+        import yaml
+        
+        try:
+            config_file = os.path.expanduser("~/.kube/config")
+            if not os.path.exists(config_file):
+                return
+
+            with open(config_file, 'r') as f:
+                content = f.read()
+                if not content.strip():
+                    return
+                kube_config = yaml.safe_load(content) or {}
+            
+            target_context = kube_config.get('current-context')
+            contexts = kube_config.get('contexts', [])
+            
+            # If current-context is missing/empty but we have contexts
+            if (not target_context) and contexts and len(contexts) > 0:
+                # Get the first context name
+                first_context = contexts[0].get('name')
+                if first_context:
+                    logging.info(f"Auto-repairing kubeconfig: Setting current-context to '{first_context}'")
+                    kube_config['current-context'] = first_context
+                    
+                    with open(config_file, 'w') as f:
+                        yaml.dump(kube_config, f, default_flow_style=False)
+                        
+        except Exception as e:
+            logging.warning(f"Auto-repair check failed (non-critical): {e}")
+
     def load_clusters_async(self):
         """Load available Kubernetes clusters/contexts asynchronously"""
         try:
+            # Ensure config is valid before loading
+            self._ensure_current_context()
+            
             # Import here to avoid circular imports
             from kubernetes import config
             import yaml
