@@ -251,9 +251,13 @@ def get_menu_fallback_style():
 
 
 def get_action_container_fallback_style():
-    """Fallback style for action container when AppStyles not available"""
+    """Fallback style for action container when AppStyles not available.
+
+    Note: The consuming widget must call setObjectName("actionContainer") before
+    applying this style to avoid cascading to child widgets.
+    """
     return """
-        QWidget {
+        QWidget#actionContainer {
             background-color: transparent;
             border: none;
             margin: 0;
