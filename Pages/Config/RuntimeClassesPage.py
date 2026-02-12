@@ -2,12 +2,12 @@
 Dynamic implementation of the RuntimeClasses page with live Kubernetes data.
 """
 
-from PyQt6.QtWidgets import QHeaderView, QPushButton
+from PyQt6.QtWidgets import QHeaderView
 from PyQt6.QtCore import Qt, QTimer
 
 from Base_Components.base_components import SortableTableWidgetItem
 from Base_Components.base_resource_page import BaseResourcePage
-from UI.Styles import AppStyles
+from Utils.data_formatters import parse_age_to_seconds
 from Utils.resource_utils import singularize_resource_type
 
 
@@ -30,15 +30,16 @@ class RuntimeClassesPage(BaseResourcePage):
         self.setup_page_ui()
 
     def setup_page_ui(self):
+        """Set up the main UI elements for the RuntimeClasses page"""
+        headers = ["", "Name", "Handler", "Age", ""]
+        sortable_columns = {1, 2, 3}
 
-        # Define headers and sortable columns
-
-        # Set up the base UI components
+        # Set up the base UI components - creates self.table
+        # Table styling is handled by BaseResourcePage
+        super().setup_ui("Runtime Classes", headers, sortable_columns)
 
         # Configure column widths
         self.configure_columns()
-
-        # Add delete selected button
 
     def configure_columns(self):
 
@@ -101,11 +102,7 @@ class RuntimeClassesPage(BaseResourcePage):
 
             # Handle numeric columns for sorting
             if col == 2:  # Age column
-                try:
-                    num = int(value.replace('d', ''))
-                except ValueError as e:
-                    num = 0
-                item = SortableTableWidgetItem(value, num)
+                item = SortableTableWidgetItem(value, parse_age_to_seconds(value))
             else:
                 item = SortableTableWidgetItem(value)
 
@@ -135,15 +132,13 @@ class RuntimeClassesPage(BaseResourcePage):
 
             # Get resource details
             resource_name = None
-            namespace = None
 
             # Get the resource name
             if self.table.item(row, 1) is not None:
                 resource_name = self.table.item(row, 1).text()
 
-            # Get namespace if applicable
-            if self.table.item(row, 2) is not None:
-                namespace = self.table.item(row, 2).text()
+            # RuntimeClasses are cluster-scoped - no namespace
+            namespace = None
 
             # Show detail view
             if resource_name:
