@@ -4,13 +4,13 @@ Corrected implementation of the Nodes page with performance improvements and pro
 
 from functools import partial
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
-    QLabel, QHeaderView, QToolButton, QMenu, QCheckBox, QFrame,
-    QGraphicsDropShadowEffect, QSizePolicy, QStyleOptionButton, QStyle, QStyleOptionHeader,
-    QApplication, QPushButton, QProxyStyle, QMessageBox
+    QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QHeaderView, QToolButton, QMenu, QFrame,
+    QGraphicsDropShadowEffect, QSizePolicy, QStyle, QStyleOptionHeader,
+    QApplication, QProxyStyle, QMessageBox
 )
-from PyQt6.QtCore import Qt, QTimer, QRect, QRectF, pyqtSignal, QSize, QEventLoop
-from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QLinearGradient, QPainterPath, QBrush, QCursor
+from PyQt6.QtCore import Qt, QTimer, QRectF, QSize, QEventLoop
+from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QLinearGradient, QPainterPath
 
 from UI.Styles import AppStyles, AppColors, AppConstants
 from UI.ThemeManager import get_theme_manager
@@ -20,18 +20,14 @@ from Base_Components.base_components import SortableTableWidgetItem, StatusLabel
 from Base_Components.base_resource_page import BaseResourcePage
 from Utils.cluster_connector import get_cluster_connector
 from UI.Icons import resource_path
-import random
+from Utils.data_formatters import parse_age_to_seconds
 import datetime
-import re
 import logging
 import time
 from Utils.thread_manager import is_shutdown_requested
 
-# ------------------------------------------------------------------
+
 # Custom Style to hide checkbox in header
-# ------------------------------------------------------------------
-
-
 class CustomHeaderStyle(QProxyStyle):
 
     def __init__(self, style=None):
@@ -46,11 +42,8 @@ class CustomHeaderStyle(QProxyStyle):
                 return
         super().drawControl(element, option, painter, widget)
 
-# ------------------------------------------------------------------
+
 # Optimized GraphWidget
-# ------------------------------------------------------------------
-
-
 class GraphWidget(QFrame):
 
     def __init__(self, title, unit, color, parent=None):
@@ -219,6 +212,11 @@ class GraphWidget(QFrame):
         self.metrics_thread.start()
 
     def _on_metrics_ready(self, metrics_data):
+        # Capture local references at callback start to avoid race condition
+        # A new thread could be created between _is_updating=False and cleanup,
+        # and we must not delete that new thread
+        local_thread = getattr(self, 'metrics_thread', None)
+        local_worker = getattr(self, 'metrics_worker', None)
 
         # Check if widget is being destroyed or disabled
         if hasattr(self, '_accept_metrics') and not self._accept_metrics:
@@ -232,12 +230,14 @@ class GraphWidget(QFrame):
             logging.error(f"Error updating metrics data: {e}")
         finally:
             self._is_updating = False
-            # Clean up thread
-            if hasattr(self, 'metrics_thread') and self.metrics_thread:
-                self.metrics_thread.quit()
-                self.metrics_thread.wait()
-                self.metrics_thread.deleteLater()
-                self.metrics_worker.deleteLater()
+            # Only clean up the specific thread that produced this callback
+            # Check that self.metrics_thread is still the same instance we captured
+            if local_thread and hasattr(self, 'metrics_thread') and self.metrics_thread is local_thread:
+                local_thread.quit()
+                local_thread.wait()
+                local_thread.deleteLater()
+                if local_worker:
+                    local_worker.deleteLater()
 
     def get_node_utilization(self, node_name):
         return self.utilization_data.get(node_name, 0)
@@ -395,9 +395,12 @@ class GraphWidget(QFrame):
                 pass
             self.theme_manager = None
 
+    def closeEvent(self, event):
+        """Ensure cleanup runs when widget is destroyed."""
+        self.cleanup()
+        super().closeEvent(event)
+
 # No Data Available Widget
-
-
 class NoDataWidget(QWidget):
 
     def __init__(self, message="No data available", parent=None):
@@ -442,11 +445,8 @@ class NoDataWidget(QWidget):
         self.cleanup()
         super().closeEvent(event)
 
-# ------------------------------------------------------------------
+
 # NodesPage - Now extending BaseResourcePage for consistency
-# ------------------------------------------------------------------
-
-
 class NodesPage(BaseResourcePage):
     """
     Displays Kubernetes Nodes with live data and resource operations.
@@ -580,6 +580,7 @@ class NodesPage(BaseResourcePage):
     def update_nodes(self, nodes_data):
 
         self.is_loading = False
+        self.hide_loading_indicator()  # FIXED: Ensure loading overlay is hidden
         self.is_showing_skeleton = False
 
         if hasattr(self, 'skeleton_timer') and self.skeleton_timer.isActive():
@@ -752,19 +753,19 @@ class NodesPage(BaseResourcePage):
             if cpu_capacity:
                 display_cpu = f"{cpu_capacity} ({cpu_util:.1f}%)"
             else:
-                display_cpu = f"{cpu_util:.1f}%" if cpu_util > 0 else "N / A"
+                display_cpu = f"{cpu_util:.1f}%" if cpu_util > 0 else "N/A"
 
             mem_capacity = resource.get("memory_capacity", "")
             if mem_capacity:
                 display_mem = f"{mem_capacity} ({mem_util:.1f}%)"
             else:
-                display_mem = f"{mem_util:.1f}%" if mem_util > 0 else "N / A"
+                display_mem = f"{mem_util:.1f}%" if mem_util > 0 else "N/A"
 
             disk_capacity = resource.get("disk_capacity", "")
             if disk_capacity:
                 display_disk = f"{disk_capacity} ({disk_util:.1f}%)"
             else:
-                display_disk = f"{disk_util:.1f}%" if disk_util > 0 else "N / A"
+                display_disk = f"{disk_util:.1f}%" if disk_util > 0 else "N/A"
 
             taints = str(resource.get("taints", "0"))
 
@@ -819,24 +820,11 @@ class NodesPage(BaseResourcePage):
                 elif col == 4:  # Taints column
                     try:
                         sort_value = int(taints)
-                    except (ValueError, TypeError) as e:
+                    except (ValueError, TypeError):
                         sort_value = 0
                     item = SortableTableWidgetItem(value, sort_value)
                 elif col == 7:  # Age column
-                    try:
-                        if isinstance(value, str):
-                            if 'd' in value:
-                                age_value = int(value.replace('d', '')) * 1440
-                            elif 'h' in value:
-                                age_value = int(value.replace('h', '')) * 60
-                            elif 'm' in value:
-                                age_value = int(value.replace('m', ''))
-                            else:
-                                age_value = 0
-                        else:
-                            age_value = 0
-                    except (ValueError, TypeError) as e:
-                        age_value = 0
+                    age_value = parse_age_to_seconds(value) if isinstance(value, str) else 0
                     item = SortableTableWidgetItem(value, age_value)
                 else:
                     item = SortableTableWidgetItem(value)
@@ -954,23 +942,22 @@ class NodesPage(BaseResourcePage):
             button.setFixedWidth(30)
             return button
 
-    def _handle_action(self, action, row):
+    def _handle_action(self, action, node_name):
+        """Handle action for a node by name (not row index).
 
-        # Get node name from table (robust against nodes_data being empty)
-        node_name = None
-        if hasattr(self, 'table') and self.table and row < self.table.rowCount():
-            if self.table.item(row, 1):  # Name column
-                node_name = self.table.item(row, 1).text()
-
+        Args:
+            action: The action to perform ("Detail", "Delete", "View Metrics", etc.)
+            node_name: The name of the node (captured at menu creation time)
+        """
         if not node_name:
-            logging.warning(f"No node name found for row {row}")
+            logging.warning(f"No node name provided for action {action}")
             return
 
         # Handle common actions using base class methods when appropriate
         if action == "Edit":
             # Use base class edit functionality if it exists
             if hasattr(self, '_handle_edit_resource'):
-                # Search nodes_data by name instead of using row index (which can be out - of - sync after sorting)
+                # Search nodes_data by name
                 resource = None
                 for entry in self.nodes_data:
                     if entry.get("name") == node_name:
@@ -985,20 +972,25 @@ class NodesPage(BaseResourcePage):
                 self._handle_edit_resource(node_name, "", resource)
             else:
                 # Fallback to detail view
-                self._handle_node_action("Detail", row, node_name)
+                self._handle_node_action("Detail", node_name)
         elif action == "Delete":
             # Use base class delete functionality
             if hasattr(self, 'delete_resource'):
                 self.delete_resource(node_name, "")
             else:
-                self._handle_node_action("Delete", row, node_name)
+                self._handle_node_action("Delete", node_name)
         else:
             # Handle node - specific actions
-            self._handle_node_action(action, row, node_name)
+            self._handle_node_action(action, node_name)
 
-    def _handle_node_action(self, action, row, node_name):
+    def _handle_node_action(self, action, node_name):
+        """Handle node-specific actions by node name.
 
-        # Search nodes_data by name instead of using row index (which can be out - of - sync after sorting)
+        Args:
+            action: The action to perform
+            node_name: The name of the node
+        """
+        # Search nodes_data by name
         resource = None
         for entry in self.nodes_data:
             if entry.get("name") == node_name:
@@ -1033,7 +1025,29 @@ class NodesPage(BaseResourcePage):
         elif action == "Delete":
             self.delete_resource(node_name, "")
         elif action == "View Metrics":
-            self.select_node_for_graphs(row)
+            # Find the current row for this node name in the table
+            row = self._find_row_by_node_name(node_name)
+            if row >= 0:
+                self.select_node_for_graphs(row)
+            else:
+                logging.warning(f"Cannot find row for node {node_name} in table")
+
+    def _find_row_by_node_name(self, node_name):
+        """Find the current visual row for a node by name.
+
+        Args:
+            node_name: The name of the node to find
+
+        Returns:
+            Row index if found, -1 otherwise
+        """
+        if not self.table:
+            return -1
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 1)  # Name column
+            if item and item.text() == node_name:
+                return row
+        return -1
 
     def _create_action_menu(self, button, row):
         """
@@ -1043,6 +1057,7 @@ class NodesPage(BaseResourcePage):
         Follows PyQt6 best practices:
         - Uses functools.partial for signal connections (avoids lambda capture issues)
         - Sets button as parent for proper Qt object ownership
+        - Captures node_name instead of row to handle table sorting correctly
         - Returns menu for reference (already attached to button)
 
         Args:
@@ -1052,45 +1067,53 @@ class NodesPage(BaseResourcePage):
         Returns:
             QMenu object (for reference, though it's already attached to button)
         """
+        # Capture node_name at menu creation time to handle sorting correctly
+        # Row index can become stale after sorting, but node_name is stable
+        node_name = None
+        if self.table.item(row, 1):
+            node_name = self.table.item(row, 1).text()
+
+        if not node_name:
+            logging.warning(f"Cannot create action menu: no node name at row {row}")
+            return None
+
         # Create menu with button as parent for proper Qt ownership
         menu = QMenu(button)
         menu.setStyleSheet(BaseTablePageStyles.get_menu_style())
 
         # Connect signals using functools.partial (PyQt6 best practice)
-        # This avoids lambda capture issues and provides proper object lifecycle
+        # Row is still used for visual highlighting (works regardless of sorting)
         menu.aboutToShow.connect(
             partial(self._highlight_active_row, row, True))
         menu.aboutToHide.connect(
             partial(self._highlight_active_row, row, False))
 
         # Add node - specific actions
+        # Use node_name instead of row for actions to handle sorting correctly
         detail_action = menu.addAction("Detail")
         try:
             detail_action.setIcon(QIcon(resource_path("icons/edit.png")))
         except Exception:
             pass  # Icon loading failure is not critical
-        # Use functools.partial instead of lambda for proper signal handling
         detail_action.triggered.connect(
-            partial(self._handle_action, "Detail", row))
+            partial(self._handle_action, "Detail", node_name))
 
         delete_action = menu.addAction("Delete")
         try:
             delete_action.setIcon(QIcon(resource_path("icons/delete.png")))
-        except Exception as e:
+        except Exception:
             pass  # Icon loading failure is not critical
         delete_action.setProperty("dangerous", True)
-        # Use functools.partial instead of lambda for proper signal handling
         delete_action.triggered.connect(
-            partial(self._handle_action, "Delete", row))
+            partial(self._handle_action, "Delete", node_name))
 
         view_metrics = menu.addAction("View Metrics")
         try:
             view_metrics.setIcon(QIcon(resource_path("icons/chart.png")))
         except Exception:
             pass  # Icon loading failure is not critical
-        # Use functools.partial instead of lambda for proper signal handling
         view_metrics.triggered.connect(
-            partial(self._handle_action, "View Metrics", row))
+            partial(self._handle_action, "View Metrics", node_name))
 
         # Attach menu to button (button is already parent, so ownership is clear)
         button.setMenu(menu)
