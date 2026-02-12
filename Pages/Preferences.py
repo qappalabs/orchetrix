@@ -1,19 +1,16 @@
-import sys
 import platform
 import os
 import time
-import json
-import requests
 from datetime import datetime
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox,
-    QFrame, QLineEdit, QCheckBox, QScrollArea, QTextEdit, QMessageBox
+    QFrame, QLineEdit, QCheckBox, QScrollArea, QMessageBox
 )
-from PyQt6.QtGui import QFont, QIcon, QColor, QPalette, QPainter
-from PyQt6.QtCore import Qt, QSize, QPropertyAnimation, QEasingCurve, pyqtSignal, QTimer
+from PyQt6.QtGui import QColor, QPainter
+from PyQt6.QtCore import Qt, QSize, pyqtSignal, QTimer
 
 import Styles.PreferencesStyles as PreferencesStyles
-from UI.Icons import resource_path, Icons
+from UI.Icons import Icons
 from UI.ThemeManager import get_theme_manager
 from UI.ThemeAwarePage import ThemeAwareMixin
 
@@ -67,7 +64,6 @@ class ToggleSwitch(QCheckBox):
         system = platform.system()
         if system == 'Windows':
             try:
-                import winreg
                 print("Added to Windows startup")
             except Exception as e:
                 print(f"Failed to add to Windows startup: {e}")
@@ -87,7 +83,6 @@ class ToggleSwitch(QCheckBox):
         system = platform.system()
         if system == 'Windows':
             try:
-                import winreg
                 print("Removed from Windows startup")
             except Exception as e:
                 print(f"Failed to remove from Windows startup: {e}")
@@ -252,6 +247,14 @@ class PreferencesWidget(ThemeAwareMixin, QWidget):
 
         # Refresh current section to update its components
         self.show_section(self.current_section)
+
+        # Update Theme Dropdown if it exists
+        if hasattr(self, 'theme_combo'):
+            theme_name = self.theme_manager.get_current_theme_name()
+            if self.theme_combo.currentText() != theme_name:
+                self.theme_combo.blockSignals(True)
+                self.theme_combo.setCurrentText(theme_name)
+                self.theme_combo.blockSignals(False)
 
     def go_back(self):
         self.back_signal.emit()
