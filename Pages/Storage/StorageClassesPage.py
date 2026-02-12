@@ -2,58 +2,14 @@
 Dynamic implementation of the Storage Classes page with live Kubernetes data.
 """
 
-from PyQt6.QtWidgets import (QHeaderView, QWidget, QLabel)
+from PyQt6.QtWidgets import (QHeaderView)
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor
 
-import re
-
 from Base_Components.base_components import SortableTableWidgetItem
 from Base_Components.base_resource_page import BaseResourcePage
-from UI.Styles import AppStyles, AppColors
-
-
-def _parse_age_to_seconds(age_str):
-    """
-    Parse Kubernetes age string into total seconds for sorting.
-
-    Handles formats like:
-    - "30s" (30 seconds)
-    - "5m" (5 minutes)
-    - "2h" (2 hours)
-    - "1d" (1 day)
-    - "1d2h3m4s" (compound values)
-
-    Args:
-        age_str: Age string from Kubernetes (e.g., "1d2h30m")
-
-    Returns:
-        int: Total seconds for sorting
-    """
-    if not age_str or not isinstance(age_str, str):
-        return 0
-
-    # Use regex to find all number-unit pairs
-    pattern = r'(\d+)([dhms])'
-    matches = re.findall(pattern, age_str.lower())
-
-    total_seconds = 0
-    multipliers = {
-        's': 1,           # seconds
-        'm': 60,          # minutes
-        'h': 3600,        # hours
-        'd': 86400        # days
-    }
-
-    for number_str, unit in matches:
-        try:
-            number = int(number_str)
-            multiplier = multipliers.get(unit, 0)
-            total_seconds += number * multiplier
-        except ValueError:
-            continue  # Skip invalid numbers
-
-    return total_seconds
+from UI.Styles import AppColors
+from Utils.data_formatters import parse_age_to_seconds
 
 
 class StorageClassesPage(BaseResourcePage):
@@ -74,7 +30,7 @@ class StorageClassesPage(BaseResourcePage):
         sortable_columns = {1, 2, 3, 4, 5}
 
         # Set up the base UI components with styles
-        layout = super().setup_ui("Storage Classes", headers, sortable_columns)
+        super().setup_ui("Storage Classes", headers, sortable_columns)
 
         # Table styling is already handled by BaseResourcePage
 
@@ -154,8 +110,7 @@ class StorageClassesPage(BaseResourcePage):
 
             # Handle numeric columns for sorting
             if col == 4:  # Age column
-                # Parse age string to seconds for proper sorting
-                seconds = _parse_age_to_seconds(value)
+                seconds = parse_age_to_seconds(value)
                 item = SortableTableWidgetItem(value, seconds)
             else:
                 item = SortableTableWidgetItem(value)
@@ -192,10 +147,16 @@ class StorageClassesPage(BaseResourcePage):
 
             # Get resource details
             resource_name = None
+            raw_data = None
 
             # Get the resource name
             if self.table.item(row, 1) is not None:
                 resource_name = self.table.item(row, 1).text()
+
+            # Get raw data from resources if available
+            if row < len(getattr(self, 'resources', [])):
+                resource = self.resources[row]
+                raw_data = resource.get("raw_data")
 
             # Show detail view
             if resource_name:
@@ -206,4 +167,4 @@ class StorageClassesPage(BaseResourcePage):
 
                 if parent and hasattr(parent, 'detail_manager'):
                     # StorageClasses are cluster-wide resources, no namespace needed
-                    parent.detail_manager.show_detail("storageclass", resource_name)
+                    parent.detail_manager.show_detail("storageclass", resource_name, None, raw_data=raw_data)
