@@ -5,11 +5,11 @@ Uses QTableView with VirtualizedResourceModel for optimal performance
 
 import logging
 from PyQt6.QtWidgets import (
-    QTableView, QVBoxLayout, QWidget, QHeaderView, QAbstractItemView,
+    QTableView, QHeaderView, QAbstractItemView,
     QStyledItemDelegate, QApplication
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QModelIndex, QTimer
-from PyQt6.QtGui import QColor, QPainter, QFont
+from PyQt6.QtGui import QColor, QPainter
 from typing import List, Dict, Any, Optional, Callable
 
 from .virtualized_table_model import VirtualizedResourceModel
