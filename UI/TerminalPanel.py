@@ -6,10 +6,15 @@ including regular terminals, SSH sessions, and log viewers.
 """
 
 import os
+
 import platform
+
 import shutil
+
 import logging
+
 import sys
+
 from PyQt6.QtWidgets import (
     QApplication,
     QWidget,
@@ -19,29 +24,38 @@ from PyQt6.QtWidgets import (
     QLabel,
     QPushButton,
 )
+
 from PyQt6.QtGui import QIcon
+
 from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QPoint, QTimer, QProcess
 
 from UI.Styles import AppStyles
+
 from UI.Icons import resource_path
+
 from UI.ThemeAwarePage import ThemeAwareMixin
+
 from Styles.TerminalPanelStyles import (
     get_logs_tab_label_style,
     get_logs_tab_button_style,
     get_ssh_tab_label_style,
     get_ssh_tab_button_style,
 )
+
 from .terminal.terminal_constants import CommandConstants, StyleConstants
+
 from .terminal.terminal_widget import UnifiedTerminalWidget
+
 from .terminal.ssh_terminal_widget import SSHTerminalWidget
+
 from .terminal.terminal_components import UnifiedTerminalHeader
+
 from .terminal.logs_components import EnhancedLogsViewer
 
 
 class TerminalPanel(QWidget, ThemeAwareMixin):
     """
     Main terminal panel widget that manages multiple terminal tabs.
-
     This panel provides a unified interface for managing terminal tabs,
     including regular terminals, SSH sessions, and log viewers.
     """
@@ -80,30 +94,23 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setFixedHeight(self.normal_height)
-
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(0, 0, 0, 0)
         self.main_layout.setSpacing(0)
-
         self.terminal_wrapper = QWidget()
         self.terminal_wrapper.setObjectName("terminal_wrapper")
         self.terminal_wrapper.setStyleSheet(AppStyles.TERMINAL_WRAPPER)
-
         self.wrapper_layout = QVBoxLayout(self.terminal_wrapper)
         self.wrapper_layout.setContentsMargins(0, 0, 0, 0)
         self.wrapper_layout.setSpacing(0)
-
         self.unified_header = UnifiedTerminalHeader(self)
         self.wrapper_layout.addWidget(self.unified_header)
-
         self.terminal_stack = QWidget()
         self.stack_layout = QVBoxLayout(self.terminal_stack)
         self.stack_layout.setContentsMargins(0, 0, 0, 0)
         self.stack_layout.setSpacing(0)
-
         self.wrapper_layout.addWidget(self.terminal_stack, 1)
         self.main_layout.addWidget(self.terminal_wrapper)
-
         self.unified_header.resize_handle.installEventFilter(self)
 
     def _on_theme_changed(self, theme_name):
@@ -190,23 +197,18 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
         try:
             # First terminate all processes
             self.terminate_all_processes()
-
             # Clear all widgets from stack layout
             while self.stack_layout.count():
                 child = self.stack_layout.takeAt(0)
                 if child.widget():
                     child.widget().deleteLater()
-
             # Clear all tabs from header
             self.unified_header.clear_all_tabs()
-
             # Reset tab data
             self.terminal_tabs.clear()
             self.active_terminal_index = 0
-
             # Add a fresh terminal tab
             self.add_terminal_tab()
-
         except Exception as e:
             logging.error(f"Error resetting terminal tabs: {e}")
 
@@ -220,55 +222,42 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
                 else "powershell.exe"
             )
             print(f"Selected shell {shell} not found, falling back to {selected_shell}")
-
         tab_widget = QWidget()
         tab_widget.setFixedHeight(28)
         tab_widget.setCursor(Qt.CursorShape.PointingHandCursor)
-
         tab_layout = QHBoxLayout(tab_widget)
         tab_layout.setContentsMargins(8, 0, 8, 0)
         tab_layout.setSpacing(6)
-
         label = QLabel(f"Terminal {tab_index + 1}")
         label.setStyleSheet(AppStyles.TERMINAL_TAB_LABEL)
-
         close_btn = QPushButton("✕")
         close_btn.setFixedSize(16, 16)
         close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         close_btn.setStyleSheet(AppStyles.TERMINAL_TAB_CLOSE_BUTTON)
-
         tab_layout.addWidget(label)
         tab_layout.addWidget(close_btn)
-
         tab_btn = QPushButton()
         tab_btn.setCheckable(True)
         tab_btn.setStyleSheet(AppStyles.TERMINAL_TAB_BUTTON)
         tab_btn.setLayout(tab_layout)
-
         tab_container = QWidget()
         container_layout = QHBoxLayout(tab_container)
         container_layout.setContentsMargins(0, 0, 0, 0)
         container_layout.setSpacing(0)
         container_layout.addWidget(tab_btn)
-
         close_btn.clicked.connect(lambda: self.close_terminal_tab(tab_index))
         tab_btn.clicked.connect(lambda: self.switch_to_terminal_tab(tab_index))
-
         self.unified_header.add_tab(tab_container)
-
         content_widget = QWidget()
         content_layout = QVBoxLayout(content_widget)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(0)
-
         terminal_widget = UnifiedTerminalWidget()
         terminal_widget.set_copy_paste_enabled(self.copy_paste_enabled)
         content_layout.addWidget(terminal_widget, 1)
         self.stack_layout.addWidget(content_widget)
         content_widget.setVisible(False)
-
         process = QProcess(self)
-
         # Windows configuration to prevent terminal window
         if sys.platform == "win32":
             try:
@@ -280,7 +269,6 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
             except Exception as e:
                 # Fallback: method not available in this PyQt6 version
                 print(f"Note: setCreateProcessArgumentsModifier not available: {e}")
-
         process.readyReadStandardOutput.connect(lambda: self.handle_stdout(tab_index))
         process.readyReadStandardError.connect(lambda: self.handle_stderr(tab_index))
         process.finished.connect(
@@ -291,7 +279,6 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
         terminal_widget.commandEntered.connect(
             lambda cmd: self.execute_command(cmd, tab_index)
         )
-
         terminal_data = {
             "tab_button": tab_btn,
             "tab_container": tab_container,
@@ -303,7 +290,6 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
             "active": False,
         }
         self.terminal_tabs.append(terminal_data)
-
         welcome_msg = (
             f"Kubernetes Terminal {tab_index + 1} ({os.path.basename(selected_shell)})\n"
             f"Working directory: {self.working_directory}\n"
@@ -313,7 +299,6 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
         )
         terminal_widget.append_output(welcome_msg)
         terminal_widget.ensure_cursor_at_input()
-
         self.switch_to_terminal_tab(tab_index)
         if self.is_visible:
             self.start_terminal_process(tab_index)
@@ -371,7 +356,6 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
                 print(
                     f"Shell {shell} not found, falling back to {shell} for terminal {tab_index}"
                 )
-
             try:
                 process.setWorkingDirectory(self.working_directory)
                 process.start(shell)
@@ -402,7 +386,6 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
         process = terminal_data.get("process")
         if not terminal_widget or not terminal_widget.is_valid or not process:
             return
-
         command_lower = command.strip().lower()
         if command_lower == CommandConstants.CLEAR.value:
             terminal_widget.clear_output()
@@ -413,7 +396,6 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
             else:
                 self.hide_terminal()
             return
-
         if process.state() == QProcess.ProcessState.NotRunning:
             self.start_terminal_process(tab_index)
         if process.state() == QProcess.ProcessState.Running:
@@ -449,12 +431,10 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
     def switch_to_terminal_tab(self, tab_index):
         if tab_index >= len(self.terminal_tabs):
             return
-
         # Update header based on tab type
         terminal_data = self.terminal_tabs[tab_index]
         is_logs_tab = terminal_data.get("is_logs_tab", False)
         is_ssh_tab = terminal_data.get("is_ssh_tab", False)
-
         # Update header for different tab types
         if is_logs_tab:
             self.unified_header.update_header_for_tab_type(True)
@@ -462,26 +442,22 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
             self.unified_header.update_header_for_ssh_tab()
         else:
             self.unified_header.update_header_for_tab_type(False)
-
         # Hide all tabs first, then show the selected one
         for i, tab_data in enumerate(self.terminal_tabs):
             is_selected = i == tab_index
             content_widget = tab_data.get("content_widget")
             tab_button = tab_data.get("tab_button")
-
             if content_widget:
                 content_widget.setVisible(is_selected)
             if tab_button:
                 tab_button.setChecked(is_selected)
             tab_data["active"] = is_selected
-
         if terminal_widget := terminal_data.get("terminal_widget"):
             terminal_widget.setFocus()
             if hasattr(terminal_widget, "ensure_cursor_at_input"):
                 terminal_widget.ensure_cursor_at_input()
         elif logs_viewer := terminal_data.get("logs_viewer"):
             logs_viewer.setFocus()
-
         self.active_terminal_index = tab_index
         if (
             not terminal_data.get("started", False)
@@ -496,7 +472,6 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
         if len(self.terminal_tabs) <= 1:
             self.hide_terminal()
             return
-
         terminal_data = self.terminal_tabs[tab_index]
         # Handle different tab types
         if terminal_data.get("is_logs_tab", False):
@@ -525,18 +500,15 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
                             process.waitForFinished(200)
                     except Exception as e:
                         print(f"Error terminating process: {e}")
-
         if tab_container := terminal_data.get("tab_container"):
             self.unified_header.remove_tab(tab_container)
         if content_widget := terminal_data.get("content_widget"):
             self.stack_layout.removeWidget(content_widget)
             content_widget.deleteLater()
-
         self.terminal_tabs.pop(tab_index)
         self.active_terminal_index = min(
             max(0, self.active_terminal_index), len(self.terminal_tabs) - 1
         )
-
         for i, tab_data in enumerate(self.terminal_tabs):
             if tab_container := tab_data.get("tab_container"):
                 for child in tab_container.findChildren(QPushButton):
@@ -548,7 +520,6 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
                         child.clicked.connect(
                             lambda checked=False, idx=i: self.close_terminal_tab(idx)
                         )
-
         if self.terminal_tabs:
             self.switch_to_terminal_tab(self.active_terminal_index)
         self.renumber_tabs()
@@ -565,7 +536,6 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
         if self.active_terminal_index >= len(self.terminal_tabs):
             return
         terminal_data = self.terminal_tabs[self.active_terminal_index]
-
         # Only restart regular terminals, not logs tabs
         if terminal_data.get("is_logs_tab", False):
             # For logs tabs, refresh the logs instead
@@ -573,12 +543,10 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
             if logs_viewer and hasattr(logs_viewer, "refresh_logs"):
                 logs_viewer.refresh_logs()
             return
-
         process = terminal_data.get("process")
         terminal_widget = terminal_data.get("terminal_widget")
         if not process or not terminal_widget or not terminal_widget.is_valid:
             return
-
         if process.state() == QProcess.ProcessState.Running:
             newline = b"\r\n" if platform.system() == "Windows" else b"\n"
             process.write(b"exit" + newline)
@@ -589,7 +557,6 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
             if process.state() == QProcess.ProcessState.Running:
                 process.kill()
                 process.waitForFinished(200)
-
         terminal_widget.clear_output()
         QTimer.singleShot(
             300, lambda: self.start_terminal_process(self.active_terminal_index)
@@ -620,7 +587,6 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
                 self.start_terminal_process(self.active_terminal_index)
         self.show()
         self.is_visible = True
-
         # Set focus based on tab type
         if self.terminal_tabs and self.active_terminal_index < len(self.terminal_tabs):
             terminal_data = self.terminal_tabs[self.active_terminal_index]
@@ -702,9 +668,7 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
     def download_terminal_output(self):
         if self.active_terminal_index >= len(self.terminal_tabs):
             return
-
         terminal_data = self.terminal_tabs[self.active_terminal_index]
-
         # Handle different tab types
         if terminal_data.get("is_logs_tab", False):
             # Download logs
@@ -716,7 +680,6 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
             terminal_widget = terminal_data.get("terminal_widget")
             if not terminal_widget or not terminal_widget.is_valid:
                 return
-
             file_name, _ = QFileDialog.getSaveFileName(
                 self, "Save Terminal Output", "", "Text Files (*.txt);;All Files (*)"
             )
@@ -740,12 +703,10 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
             # Check if a logs tab for this pod already exists
             logs_tab_name = f"Logs: {pod_name}"
             existing_tab_index = None
-
             for i, tab_data in enumerate(self.terminal_tabs):
                 if tab_data.get("is_logs_tab") and tab_data.get("pod_name") == pod_name:
                     existing_tab_index = i
                     break
-
             if existing_tab_index is not None:
                 # Switch to existing logs tab and refresh
                 self.switch_to_terminal_tab(existing_tab_index)
@@ -759,7 +720,6 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
                 )
                 if new_tab_index is not None:
                     self.switch_to_terminal_tab(new_tab_index)
-
         except Exception as e:
             logging.error(f"Error creating enhanced logs tab for {pod_name}: {e}")
 
@@ -767,56 +727,44 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
         """Create a new enhanced logs tab"""
         try:
             tab_index = len(self.terminal_tabs)
-
             # Create tab widget
             tab_widget = QWidget()
             tab_widget.setFixedHeight(28)
             tab_widget.setCursor(Qt.CursorShape.PointingHandCursor)
-
             tab_layout = QHBoxLayout(tab_widget)
             tab_layout.setContentsMargins(8, 0, 8, 0)
             tab_layout.setSpacing(6)
-
             # Create label with enhanced logs icon and name
             label = QLabel(f"📋 {pod_name}")
             label.setStyleSheet(get_logs_tab_label_style())
-
             # Create close button
             close_btn = QPushButton("✕")
             close_btn.setFixedSize(16, 16)
             close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             close_btn.setStyleSheet(AppStyles.TERMINAL_TAB_CLOSE_BUTTON)
-
             tab_layout.addWidget(label)
             tab_layout.addWidget(close_btn)
-
             # Create tab button
             tab_btn = QPushButton()
             tab_btn.setCheckable(True)
             tab_btn.setStyleSheet(get_logs_tab_button_style())
             tab_btn.setLayout(tab_layout)
-
             # Create tab container
             tab_container = QWidget()
             container_layout = QHBoxLayout(tab_container)
             container_layout.setContentsMargins(0, 0, 0, 0)
             container_layout.setSpacing(0)
             container_layout.addWidget(tab_btn)
-
             # Connect signals
             close_btn.clicked.connect(lambda: self.close_terminal_tab(tab_index))
             tab_btn.clicked.connect(lambda: self.switch_to_terminal_tab(tab_index))
-
             # Add tab to header
             self.unified_header.add_tab(tab_container)
-
             # Create enhanced logs viewer widget
             logs_viewer = EnhancedLogsViewer(pod_name, namespace)
-
             # Add the logs viewer to terminal stack
             self.stack_layout.addWidget(logs_viewer)
             logs_viewer.setVisible(False)
-
             # Store tab data with enhanced information
             terminal_data = {
                 "tab_button": tab_btn,
@@ -832,9 +780,7 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
                 "namespace": namespace,
             }
             self.terminal_tabs.append(terminal_data)
-
             return tab_index
-
         except Exception as e:
             logging.error(f"Error creating new enhanced logs tab: {e}")
             return None
@@ -842,60 +788,48 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
     def eventFilter(self, obj, event):
         return super().eventFilter(obj, event)
 
-    def create_ssh_tab(self, pod_name, namespace):
+    def create_ssh_tab(self, pod_name, namespace, context=None):
         """Create an SSH tab for pod access"""
         try:
             tab_index = len(self.terminal_tabs)
-
             # Create tab widget
             tab_widget = QWidget()
             tab_widget.setFixedHeight(28)
             tab_widget.setCursor(Qt.CursorShape.PointingHandCursor)
-
             tab_layout = QHBoxLayout(tab_widget)
             tab_layout.setContentsMargins(8, 0, 8, 0)
             tab_layout.setSpacing(6)
-
             # Create label with SSH icon and pod name
             label = QLabel(f"🔑 {pod_name}")
             label.setStyleSheet(get_ssh_tab_label_style())
-
             # Create close button
             close_btn = QPushButton("✕")
             close_btn.setFixedSize(16, 16)
             close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             close_btn.setStyleSheet(AppStyles.TERMINAL_TAB_CLOSE_BUTTON)
-
             tab_layout.addWidget(label)
             tab_layout.addWidget(close_btn)
-
             # Create tab button
             tab_btn = QPushButton()
             tab_btn.setCheckable(True)
             tab_btn.setStyleSheet(get_ssh_tab_button_style())
             tab_btn.setLayout(tab_layout)
-
             # Create tab container
             tab_container = QWidget()
             container_layout = QHBoxLayout(tab_container)
             container_layout.setContentsMargins(0, 0, 0, 0)
             container_layout.setSpacing(0)
             container_layout.addWidget(tab_btn)
-
             # Connect signals
             close_btn.clicked.connect(lambda: self.close_terminal_tab(tab_index))
             tab_btn.clicked.connect(lambda: self.switch_to_terminal_tab(tab_index))
-
             # Add tab to header
             self.unified_header.add_tab(tab_container)
-
             # Create SSH terminal widget
-            ssh_terminal = SSHTerminalWidget(pod_name, namespace)
-
+            ssh_terminal = SSHTerminalWidget(pod_name, namespace, context)
             # Add the SSH terminal to terminal stack
             self.stack_layout.addWidget(ssh_terminal)
             ssh_terminal.setVisible(False)
-
             # Store tab data
             terminal_data = {
                 "tab_button": tab_btn,
@@ -911,12 +845,9 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
                 "namespace": namespace,
             }
             self.terminal_tabs.append(terminal_data)
-
             # Switch to the new SSH tab
             self.switch_to_terminal_tab(tab_index)
-
             return tab_index
-
         except Exception as e:
             logging.error(f"Error creating SSH tab: {e}")
             return None
