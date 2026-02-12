@@ -3,8 +3,7 @@ Optimized Detail Manager for ClusterView that handles showing and managing resou
 Improved version with better performance, error handling, and code organization.
 """
 
-from PyQt6.QtCore import QObject, pyqtSignal, Qt, QTimer
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 from typing import Optional, Dict, Any
 
 from .DetailPageComponent import DetailPageComponent
@@ -89,6 +88,33 @@ class DetailManager(QObject):
             'resourcequotas': 'resourcequota',
             'limitranges': 'limitrange',
             'replicationcontrollers': 'replicationcontroller',
+            # Additional resource type mappings (restored from original)
+            'daemonsets': 'daemonset',
+            'statefulsets': 'statefulset',
+            'cronjobs': 'cronjob',
+            'jobs': 'job',
+            'networkpolicies': 'networkpolicy',
+            'ingressclasses': 'ingressclass',
+            'storageclasses': 'storageclass',
+            'endpoints': 'endpoint',
+            'events': 'event',
+            'persistentvolumes': 'persistentvolume',
+            'persistentvolumeclaims': 'persistentvolumeclaim',
+            'configmaps': 'configmap',
+            'secrets': 'secret',
+            'ingresses': 'ingress',
+            'services': 'service',
+            'pods': 'pod',
+            'nodes': 'node',
+            'namespaces': 'namespace',
+            'deployments': 'deployment',
+            'replicasets': 'replicaset',
+            'serviceaccounts': 'serviceaccount',
+            'roles': 'role',
+            'rolebindings': 'rolebinding',
+            'clusterroles': 'clusterrole',
+            'clusterrolebindings': 'clusterrolebinding',
+            'leases': 'lease',
         }
 
         resource_type_singular = plural_to_singular_mapping.get(resource_type.lower(),
@@ -109,18 +135,24 @@ class DetailManager(QObject):
             'namespace': namespace
         })
 
-        # Handle special data for different resource types
-        # NOTE: For events, we want to treat the raw event data like a normal resource
-        # so that all detail sections (Overview, Details, YAML, Events) can render it
-        # directly without making an extra API call.
+        # Handle special data for different resource types - CLEAR ALL FIRST
+        # Clear all raw data attributes to prevent interference between resources
+        if hasattr(detail_page, 'event_raw_data'):
+            detail_page.event_raw_data = None
+        if hasattr(detail_page, 'chart_raw_data'):
+            detail_page.chart_raw_data = None
+        if hasattr(detail_page, 'release_raw_data'):
+            detail_page.release_raw_data = None
+        if hasattr(detail_page, 'resource_raw_data'):
+            detail_page.resource_raw_data = None
+
+        # Now set the appropriate raw data if provided
         if raw_data:
-            # Use generic resource_raw_data for events so DetailPageComponent can
-            # distribute it to all sections via _handle_special_resource_data.
-            if resource_type_singular.lower() == "event":
-                detail_page.resource_raw_data = raw_data
-            elif resource_type_singular.lower() in ["chart", "helmchart"]:
+            if resource_type.lower() == "event":
+                detail_page.event_raw_data = raw_data
+            elif resource_type.lower() in ["chart", "helmchart"]:
                 detail_page.chart_raw_data = raw_data
-            elif resource_type_singular.lower() in ["helmrelease", "release"]:
+            elif resource_type.lower() in ["helmrelease", "release"]:
                 detail_page.release_raw_data = raw_data
             else:
                 detail_page.resource_raw_data = raw_data
