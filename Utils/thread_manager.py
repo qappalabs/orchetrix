@@ -4,6 +4,13 @@ import weakref
 import logging
 import time
 
+# Common stop event for cooperative shutdown
+_global_stop_event = threading.Event()
+
+def is_shutdown_requested():
+    """Check if application shutdown has been requested"""
+    return _global_stop_event.is_set()
+
 class EnhancedThreadPoolManager(QObject):
     def __init__(self, max_threads=4):  # Reduced from 8 to 4 for better performance
         super().__init__()
@@ -13,62 +20,63 @@ class EnhancedThreadPoolManager(QObject):
         self.worker_refs = weakref.WeakValueDictionary()
         self.lock = threading.RLock()
         self._shutdown = False
-        
+
         # Setup timers with thread safety
         self._setup_timers()
-    
+
     def _setup_timers(self):
         """Initialize and configure timers with thread safety"""
         # Ensure timers are created on main thread
         from PyQt6.QtWidgets import QApplication
-        if self.thread() != QApplication.instance().thread():
+        app = QApplication.instance()
+        if app and self.thread() != app.thread():
             logging.warning("ThreadManager timers being created from non-main thread - deferring to main thread")
             from PyQt6.QtCore import QMetaObject
             QMetaObject.invokeMethod(self, "_setup_timers_on_main_thread", Qt.ConnectionType.QueuedConnection)
             return
-        
+
         # Cleanup timer for expired workers - less frequent for better performance
         self.cleanup_timer = QTimer()
         self.cleanup_timer.timeout.connect(self._cleanup_expired_workers)
         self.cleanup_timer.start(30000)  # Cleanup every 30 seconds for better performance
-    
+
     def _setup_timers_on_main_thread(self):
         """Setup timers on main thread - called via QMetaObject.invokeMethod"""
         self._setup_timers()
-        
+
     def submit_worker(self, worker_id, worker, priority=0):
-        if self._shutdown:
+        if self._shutdown or is_shutdown_requested():
             return False
-            
+
         with self.lock:
             # Cancel existing worker with same ID
             if worker_id in self.active_workers:
                 old_worker = self.active_workers[worker_id]
                 if hasattr(old_worker, 'cancel'):
                     old_worker.cancel()
-                    
+
             # Set up cleanup
             def cleanup():
                 with self.lock:
                     self.active_workers.pop(worker_id, None)
-                    
+
             def on_finished(result):
                 cleanup()
-                
+
             def on_error(error):
                 cleanup()
-                
+
             def on_cancelled():
                 cleanup()
-            
+
             worker.signals.finished.connect(on_finished)
             worker.signals.error.connect(on_error)
             if hasattr(worker.signals, 'cancelled'):
                 worker.signals.cancelled.connect(on_cancelled)
-            
+
             self.active_workers[worker_id] = worker
             self.worker_refs[worker_id] = worker
-            
+
             # Set priority and start
             worker.setAutoDelete(True)
             if hasattr(self.thread_pool, 'start'):
@@ -76,29 +84,23 @@ class EnhancedThreadPoolManager(QObject):
                     self.thread_pool.start(worker, priority)
                 else:
                     self.thread_pool.start(worker)
-            
+
             return True
-    
-    def start_worker(self, worker, priority=0):
-        """Start a worker - backward compatibility method"""
-        # Generate a unique worker ID if not provided
-        worker_id = getattr(worker, 'worker_id', f"worker_{id(worker)}")
-        return self.submit_worker(worker_id, worker, priority)
-    
+
     def cancel_worker(self, worker_id):
         with self.lock:
             worker = self.active_workers.get(worker_id)
             if worker and hasattr(worker, 'cancel'):
                 worker.cancel()
-                
+
     def _cleanup_expired_workers(self):
-        if self._shutdown:
+        if self._shutdown or is_shutdown_requested():
             return
-            
+
         with self.lock:
             current_time = time.time()
             expired_workers = []
-            
+
             # More efficient cleanup - use timestamps dict for faster lookup
             for worker_id, worker in list(self.active_workers.items()):
                 if hasattr(worker, '_start_time'):
@@ -108,45 +110,74 @@ class EnhancedThreadPoolManager(QObject):
                         expired_workers.append(worker_id)
                         if hasattr(worker, 'cancel'):
                             worker.cancel()
-            
+
             # Batch cleanup to reduce lock contention
             if expired_workers:
                 for worker_id in expired_workers:
                     self.active_workers.pop(worker_id, None)
                     self.worker_refs.pop(worker_id, None)
                 logging.info(f"Cleaned up {len(expired_workers)} expired workers: {expired_workers}")
-    
-    def get_active_count(self):
-        with self.lock:
-            return len(self.active_workers)
-    
+
     def shutdown(self):
         self._shutdown = True
-        self.cleanup_timer.stop()
-        
+        _global_stop_event.set()
+
+        if hasattr(self, 'cleanup_timer'):
+            self.cleanup_timer.stop()
+
         with self.lock:
             # Cancel all workers
             for worker in list(self.active_workers.values()):
                 if hasattr(worker, 'cancel'):
-                    worker.cancel()
-            
+                    try:
+                        worker.cancel()
+                    except Exception as e:
+                        logging.debug(f"Error canceling worker during shutdown: {e}")
+
             # Fast shutdown approach - reduced timeout for quicker app closing
-            if not self.thread_pool.waitForDone(3000):  # Reduced to 3 seconds for faster shutdown
-                logging.warning("Thread pool did not shut down gracefully within 3 seconds")
+            if not self.thread_pool.waitForDone(2000):  # Reduced from 3s to 2s
+                logging.warning("Thread pool did not shut down gracefully within 2 seconds")
                 # Force termination of remaining threads immediately
                 self._force_thread_termination()
-            
+
             self.active_workers.clear()
             self.worker_refs.clear()
-    
+
     def _force_thread_termination(self):
-        """Force termination of remaining threads as last resort"""
+        """Cooperative termination of remaining threads as last resort"""
         try:
-            # Try to clear the thread pool
+            # First, try to interrupt all running threads
+            active_thread_count = self.thread_pool.activeThreadCount()
+            if active_thread_count > 0:
+                logging.warning(f"Attempting cooperative shutdown for {active_thread_count} active threads")
+
+            # Signal cooperative shutdown
+            _global_stop_event.set()
+
+            # Clear the thread pool queue
             self.thread_pool.clear()
+
+            # Iterate through all threads and attempt join
+            import threading
+            current = threading.current_thread()
+            for thread in threading.enumerate():
+                if thread != current:
+                    # Target only our background threads to avoid interfering with external libs
+                    if thread.name.startswith('Thread-') or not thread.daemon:
+                        logging.info(f"Joining thread {thread.name} (daemon={thread.daemon})")
+                        try:
+                            thread.join(timeout=0.5)
+                        except Exception as e:
+                            logging.error(f"Error joining thread {thread.name}: {e}")
+
+            # Force exit as last last resort - but avoid thread._stop()
+            import gc
+            gc.collect()  # Force garbage collection to clean up thread references
+
             logging.info("Forced thread pool clearing completed")
         except Exception as e:
             logging.error(f"Error during forced thread termination: {e}")
+
 
 # Singleton with better management
 _thread_manager_instance = None

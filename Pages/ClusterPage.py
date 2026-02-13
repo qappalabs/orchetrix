@@ -1,4 +1,4 @@
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, 
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
                              QGridLayout, QSizePolicy, QFrame, QToolTip,
                              QTableWidget, QTableWidgetItem, QHeaderView, QStackedLayout)
 from PyQt6.QtCore import Qt, QSize, QRect, QTimer
@@ -7,7 +7,10 @@ import math
 import datetime
 import logging
 
-from UI.Styles import AppStyles, AppColors
+from UI.Styles import AppColors
+from UI.ThemeManager import get_theme_manager
+import Styles.ClusterPageStyles as ClusterPageStyles
+from UI.ThemeAwarePage import ThemeAwareMixin
 from Utils.cluster_connector import get_cluster_connector
 
 class BarChart(QWidget):
@@ -17,25 +20,30 @@ class BarChart(QWidget):
         self.data = []
         self.current_value = 0
         self.setMinimumHeight(300)
-        self.setStyleSheet(AppStyles.BAR_CHART_TOOLTIP_STYLE)
+        self.setStyleSheet(ClusterPageStyles.get_bar_chart_tooltip_style())
 
-        if color == "#ff0000":  # Red for CPU
+        # Use provided title, or fall back to color-based titles
+        if title:
+            self.chart_title = title
+        elif color == "#ff0000":  # Red for CPU
             self.chart_title = "CPU Usage"
-        else:  # Cyan for Memory
+        elif color == "#00ffff":  # Cyan for Memory
             self.chart_title = "Memory Usage"
-            
+        else:
+            self.chart_title = "Resource Usage"
+
         self.times = []
         self.bar_positions = []
         self.hovered_bar = -1
         self.has_data = False
-        
+
         # Enable mouse tracking
         self.setMouseTracking(True)
 
     def mouseMoveEvent(self, event):
         if not self.has_data or not self.data:
             return super().mouseMoveEvent(event)
-            
+
         for i, rect in enumerate(self.bar_positions):
             if rect.contains(event.pos()):
                 if self.hovered_bar != i:
@@ -45,12 +53,12 @@ class BarChart(QWidget):
                         tooltip_text = f"{self.chart_title}\nTime: {self.times[i]}\nValue: {self.data[i]:.1f}%"
                         QToolTip.showText(QCursor.pos(), tooltip_text, self)
                 return
-        
+
         if self.hovered_bar != -1:
             self.hovered_bar = -1
             self.update()
             QToolTip.hideText()
-        
+
         super().mouseMoveEvent(event)
 
     def leaveEvent(self, event):
@@ -59,7 +67,7 @@ class BarChart(QWidget):
             self.update()
             QToolTip.hideText()
         super().leaveEvent(event)
-    
+
     def update_data(self, data, times=None):
         """Update chart with real data and proper cleanup"""
         try:
@@ -68,7 +76,7 @@ class BarChart(QWidget):
                 self.data.clear()
                 self.times.clear()
                 self.bar_positions.clear()
-                
+
                 # Validate and limit data to max 8 points
                 validated_data = []
                 data_to_use = data[-8:] if len(data) > 8 else data  # Only take last 8 points
@@ -78,15 +86,15 @@ class BarChart(QWidget):
                         validated_data.append(max(0, min(100, val)))  # Clamp between 0-100
                     except (ValueError, TypeError):
                         validated_data.append(0)
-                
+
                 self.data = validated_data
-                
+
                 # Generate times if not provided
                 if times and len(times) >= len(self.data):
                     self.times = times[-len(self.data):]  # Take matching number of times
                 else:
                     self.times = self._generate_time_labels(len(self.data))
-                
+
                 self.has_data = True
                 logging.debug(f"Chart updated with {len(self.data)} data points (max 8): {self.data}")
                 self.update()
@@ -96,7 +104,7 @@ class BarChart(QWidget):
         except Exception as e:
             logging.error(f"Error updating chart data: {e}")
             self._clear_chart_data()
-    
+
     def _clear_chart_data(self):
         """Clear all chart data and reset state"""
         self.has_data = False
@@ -105,13 +113,13 @@ class BarChart(QWidget):
         self.bar_positions.clear()
         self.hovered_bar = -1
         self.update()
-    
+
     def _generate_time_labels(self, count):
         """Generate time labels for the chart"""
         try:
             now = datetime.datetime.now()
             times = []
-            
+
             # Calculate interval based on count
             if count <= 12:
                 interval_minutes = 5
@@ -119,23 +127,23 @@ class BarChart(QWidget):
                 interval_minutes = 2
             else:
                 interval_minutes = 1
-            
+
             for i in range(count):
                 time_point = now - datetime.timedelta(minutes=(count - i) * interval_minutes)
                 times.append(time_point.strftime("%H:%M"))
-            
+
             return times
         except Exception as e:
             logging.error(f"Error generating time labels: {e}")
             return [f"T{i}" for i in range(count)]
-    
+
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
+
         width = self.width()
         height = self.height()
-        
+
         # Don't draw chart if we don't have data
         if not self.has_data or not self.data:
             painter.setPen(QColor("#aaaaaa"))
@@ -143,18 +151,18 @@ class BarChart(QWidget):
             font.setPointSize(12)
             painter.setFont(font)
             painter.drawText(
-                0, 0, width, height, 
-                int(Qt.AlignmentFlag.AlignCenter), 
+                0, 0, width, height,
+                int(Qt.AlignmentFlag.AlignCenter),
                 "Loading real-time data..."
             )
             return
-            
+
         # Calculate chart area
         chart_height = height - 140
         bottom_y = height - 50
-        
+
         self.bar_positions = []
-        
+
         # Draw y-axis grid and labels
         y_labels = ["0%", "20%", "40%", "60%", "80%", "100%"]
         for i, label in enumerate(y_labels):
@@ -165,27 +173,27 @@ class BarChart(QWidget):
             # Draw label
             painter.setPen(QColor("#aaaaaa"))
             painter.drawText(0, int(y) - 10, 30, 20, int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter), label)
-        
+
         # Calculate bar sizes
         bar_count = len(self.data)
         available_width = width - 60
         bar_width = min(30, available_width / bar_count * 0.6)
         bar_spacing = available_width / bar_count - bar_width
-        
+
         # Draw x-axis
         painter.setPen(QPen(QColor("#333333"), 1, Qt.PenStyle.SolidLine))
         painter.drawLine(40, bottom_y - 70, width - 20, bottom_y - 70)
-        
+
         # Draw bars and x-axis labels
         for i, value in enumerate(self.data):
             # Calculate bar position
             bar_height = (value / 100) * chart_height if value <= 100 else chart_height
             x = 40 + (bar_width + bar_spacing) * i + bar_spacing/2
             y = bottom_y - 70 - bar_height
-            
+
             bar_rect = QRect(int(x), int(y), int(bar_width), int(bar_height))
             self.bar_positions.append(bar_rect)
-            
+
             # Draw the bar with appropriate color
             if i == self.hovered_bar:
                 if self.color == QColor("#ff0000"):  # Red
@@ -197,15 +205,15 @@ class BarChart(QWidget):
             else:
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.setBrush(QBrush(self.color))
-                
+
             painter.drawRect(bar_rect)
-            
+
             # Draw x-axis labels (time)
             painter.setPen(QColor("#aaaaaa"))
             label_font = painter.font()
             label_font.setPointSize(9)
             painter.setFont(label_font)
-            
+
             # Show every nth label to avoid overcrowding
             label_interval = max(1, bar_count // 8)
             if i % label_interval == 0 or i == bar_count - 1:
@@ -235,9 +243,9 @@ class ResourceCircularIndicator(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setMouseTracking(True)
         self.title = ""
-        self.setStyleSheet(AppStyles.CIRCULAR_INDICATOR_TOOLTIP_STYLE)
+        self.setStyleSheet(ClusterPageStyles.get_circular_indicator_tooltip_style())
         self.has_data = False
-        
+
     def set_title(self, title):
         self.title = title
 
@@ -259,36 +267,36 @@ class ResourceCircularIndicator(QWidget):
     def get_segment_at_position(self, x, y):
         if not self.has_data:
             return None
-            
+
         width = self.width()
         height = self.height()
         center_x = width / 2
         center_y = height / 2
-        
+
         dx = x - center_x
         dy = y - center_y
         distance = (dx**2 + dy**2)**0.5
-        
+
         angle = -1 * math.atan2(-dy, dx) * 180 / math.pi
         if angle < 0:
             angle += 360
         angle = (angle + 90) % 360
-        
+
         size_factor = min(width, height) / 150
-        
+
         outer_radius = min(width, height) / 2 - (10 * size_factor)
         ring4_radius = outer_radius - (8 * size_factor)
         ring3_radius = ring4_radius - (8 * size_factor)
         ring2_radius = ring3_radius - (8 * size_factor)
-        
+
         if distance > outer_radius or distance < ring2_radius - 5:
             return None
-            
+
         usage_angle = self.usage / 100 * 360 if self.usage <= 100 else 360
         requests_angle = self.requests / self.capacity * 360 if self.capacity > 0 else 0
         limits_angle = self.limits / self.capacity * 360 if self.capacity > 0 else 0
         allocated_angle = self.allocated / self.capacity * 360 if self.capacity > 0 else 0
-        
+
         # Determine which segment was hovered
         if distance >= ring4_radius + 5:
             return "usage" if angle <= usage_angle else None
@@ -303,11 +311,11 @@ class ResourceCircularIndicator(QWidget):
 
     def mouseMoveEvent(self, event):
         segment = self.get_segment_at_position(event.pos().x(), event.pos().y())
-        
+
         if segment != self.hovered_segment:
             self.hovered_segment = segment
             self.update()
-            
+
             if segment == "usage":
                 tooltip_text = f"{self.title}\nUsage: {self.usage:.1f}%"
                 QToolTip.showText(QCursor.pos(), tooltip_text, self)
@@ -322,7 +330,7 @@ class ResourceCircularIndicator(QWidget):
                 QToolTip.showText(QCursor.pos(), tooltip_text, self)
             else:
                 QToolTip.hideText()
-        
+
         super().mouseMoveEvent(event)
 
     def leaveEvent(self, event):
@@ -346,8 +354,8 @@ class ResourceCircularIndicator(QWidget):
             font.setPointSize(12)
             painter.setFont(font)
             painter.drawText(
-                0, 0, width, height, 
-                int(Qt.AlignmentFlag.AlignCenter), 
+                0, 0, width, height,
+                int(Qt.AlignmentFlag.AlignCenter),
                 "Loading..."
             )
             return
@@ -363,24 +371,25 @@ class ResourceCircularIndicator(QWidget):
         pen.setWidth(max(3, int(pen_width)))
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
 
-        # Draw background circles
-        pen.setColor(QColor(30, 30, 30))
+        # Draw background circles (theme-aware)
+        theme = get_theme_manager().get_current_theme()
+        pen.setColor(QColor(theme.colors.TEXT_SECONDARY))
         painter.setPen(pen)
 
         # Always draw the outer ring for usage
         painter.drawEllipse(int(center_x - outer_radius), int(center_y - outer_radius),
                             int(outer_radius * 2), int(outer_radius * 2))
-        
+
         # Only draw other rings if we have data
         if self.requests > 0 or self.resource_type == "pods":
             painter.drawEllipse(int(center_x - ring4_radius), int(center_y - ring4_radius),
                             int(ring4_radius * 2), int(ring4_radius * 2))
-        
+
         if self.resource_type != "pods":
             if self.limits > 0:
                 painter.drawEllipse(int(center_x - ring3_radius), int(center_y - ring3_radius),
                                 int(ring3_radius * 2), int(ring3_radius * 2))
-            
+
             if self.allocated > 0:
                 painter.drawEllipse(int(center_x - ring2_radius), int(center_y - ring2_radius),
                                 int(ring2_radius * 2), int(ring2_radius * 2))
@@ -442,7 +451,7 @@ class ResourceStatusWidget(QWidget):
 
         self.box = QFrame()
         self.box.setObjectName("statusBox")
-        self.box.setStyleSheet(AppStyles.CLUSTER_STATUS_BOX_STYLE)
+        self.box.setStyleSheet(ClusterPageStyles.get_status_box_style())
 
         box_layout = QVBoxLayout(self.box)
         box_layout.setContentsMargins(10, 10, 10, 10)
@@ -453,7 +462,7 @@ class ResourceStatusWidget(QWidget):
         font = QFont()
         font.setBold(True)
         self.title_label.setFont(font)
-        self.title_label.setStyleSheet(AppStyles.CLUSTER_RESOURCE_TITLE_STYLE)
+        self.title_label.setStyleSheet(ClusterPageStyles.get_resource_title_style())
         self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         box_layout.addWidget(self.title_label)
 
@@ -461,7 +470,7 @@ class ResourceStatusWidget(QWidget):
         self.progress = ResourceCircularIndicator(usage, requests, limits, allocated, capacity, resource_type)
         self.progress.set_title(title)
         self.progress.setFixedSize(130, 130)
-        
+
         progress_container = QWidget()
         progress_layout = QVBoxLayout(progress_container)
         progress_layout.setContentsMargins(0, 0, 0, 0)
@@ -477,29 +486,29 @@ class ResourceStatusWidget(QWidget):
         labels_layout.setSpacing(1)
 
         self.usage_label = QLabel("● Usage: Loading...")
-        self.usage_label.setStyleSheet(AppStyles.CLUSTER_RESOURCE_LABEL_USAGE_STYLE)
+        self.usage_label.setStyleSheet(ClusterPageStyles.get_resource_label_usage_style())
         self.usage_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
         labels_layout.addWidget(self.usage_label)
 
         self.requests_label = QLabel("● Requests: Loading...")
-        self.requests_label.setStyleSheet(AppStyles.CLUSTER_RESOURCE_LABEL_REQUESTS_STYLE)
+        self.requests_label.setStyleSheet(ClusterPageStyles.get_resource_label_requests_style())
         self.requests_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
         labels_layout.addWidget(self.requests_label)
 
         # For CPU and Memory, add limits and allocated labels
         if resource_type != "pods":
             self.limits_label = QLabel("● Limits: Loading...")
-            self.limits_label.setStyleSheet(AppStyles.CLUSTER_RESOURCE_LABEL_LIMITS_STYLE)
+            self.limits_label.setStyleSheet(ClusterPageStyles.get_resource_label_limits_style())
             self.limits_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
             labels_layout.addWidget(self.limits_label)
 
             self.allocated_label = QLabel("● Allocated: Loading...")
-            self.allocated_label.setStyleSheet(AppStyles.CLUSTER_RESOURCE_LABEL_ALLOCATED_STYLE)
+            self.allocated_label.setStyleSheet(ClusterPageStyles.get_resource_label_allocated_style())
             self.allocated_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
             labels_layout.addWidget(self.allocated_label)
 
         self.capacity_label = QLabel("● Capacity: Loading...")
-        self.capacity_label.setStyleSheet(AppStyles.CLUSTER_RESOURCE_LABEL_CAPACITY_STYLE)
+        self.capacity_label.setStyleSheet(ClusterPageStyles.get_resource_label_capacity_style())
         self.capacity_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
         labels_layout.addWidget(self.capacity_label)
 
@@ -509,16 +518,16 @@ class ResourceStatusWidget(QWidget):
         box_layout.addStretch(1)
         main_layout.addWidget(self.box)
         self.setStyleSheet("background-color: transparent;")
-        
+
     def update_metrics(self, usage, requests, limits, allocated, capacity=None):
         """Update the resource metrics with real data"""
         try:
             # Update the progress indicator
             if capacity is not None:
                 self.progress.capacity = capacity
-            
+
             self.progress.update_metrics(usage, requests, limits, allocated, self.progress.capacity)
-            
+
             # Update labels based on resource type
             if self.resource_type == "cpu":
                 usage_cores = (usage / 100) * self.progress.capacity if self.progress.capacity > 0 else 0
@@ -535,7 +544,7 @@ class ResourceStatusWidget(QWidget):
                     if hasattr(self, 'allocated_label'):
                         self.allocated_label.setText("● Allocated: Not set")
                 self.capacity_label.setText(f"● Capacity: {self.progress.capacity:.2f} cores")
-                
+
             elif self.resource_type == "memory":
                 usage_memory = (usage / 100) * self.progress.capacity if self.progress.capacity > 0 else 0
                 self.usage_label.setText(f"● Usage: {usage:.1f}% ({self.format_memory(usage_memory)})")
@@ -551,18 +560,18 @@ class ResourceStatusWidget(QWidget):
                     if hasattr(self, 'allocated_label'):
                         self.allocated_label.setText("● Allocated: Not set")
                 self.capacity_label.setText(f"● Capacity: {self.format_memory(self.progress.capacity)}")
-                
+
             elif self.resource_type == "pods":
                 count = int(requests)  # For pods, requests represents count
                 self.usage_label.setText(f"● Usage: {usage:.1f}% ({count} pods)")
                 self.requests_label.setText(f"● Count: {count} pods")
                 self.capacity_label.setText(f"● Capacity: {int(self.progress.capacity)} pods")
-                
+
             logging.debug(f"Updated {self.resource_type} metrics: usage={usage:.1f}%")
-            
+
         except Exception as e:
             logging.error(f"Error updating {self.resource_type} metrics: {e}")
-    
+
     def format_memory(self, memory_value):
         """Format memory values to human-readable format"""
         try:
@@ -578,7 +587,7 @@ class ResourceStatusWidget(QWidget):
         except Exception as e:
             logging.error(f"Unexpected error formatting memory value: {e}")
             return "Unknown"
-        
+
     def sizeHint(self):
         return QSize(170, 300)
 
@@ -599,21 +608,21 @@ class IssuesTable(QTableWidget):
         self.setColumnWidth(0, 80)
         self.setColumnWidth(1, 120)
         self.setColumnWidth(3, 80)
-        self.setStyleSheet(AppStyles.TABLE_STYLE)
+        self.setStyleSheet(ClusterPageStyles.get_issues_table_style())
         self.verticalHeader().setVisible(False)
         self.setAlternatingRowColors(True)
         self.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        
+
     def update_issues(self, issues):
         """Update the table with a list of issues"""
         self.setRowCount(0)
-        
+
         if not issues:
             return
-            
+
         for i, issue in enumerate(issues):
             self.insertRow(i)
-            
+
             # Type
             type_item = QTableWidgetItem(issue.get("type", "Unknown"))
             type_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -622,61 +631,62 @@ class IssuesTable(QTableWidget):
             elif issue.get("type", "").lower() == "error":
                 type_item.setForeground(QColor(AppColors.STATUS_ERROR))
             self.setItem(i, 0, type_item)
-            
+
             # Reason
             reason_item = QTableWidgetItem(issue.get("reason", "Unknown"))
             reason_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.setItem(i, 1, reason_item)
-            
+
             # Object
             object_item = QTableWidgetItem(issue.get("object", "Unknown"))
             object_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             self.setItem(i, 2, object_item)
-            
+
             # Age
             age_item = QTableWidgetItem(issue.get("age", "Unknown"))
             age_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.setItem(i, 3, age_item)
-            
+
             # Message
             message_item = QTableWidgetItem(issue.get("message", "Unknown"))
             message_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             self.setItem(i, 4, message_item)
-        
+
         # Adjust row heights
         for row in range(self.rowCount()):
             self.setRowHeight(row, 40)
 
 
-class ClusterPage(QWidget):
+class ClusterPage(ThemeAwareMixin, QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        
+
         # Get the cluster connector
         self.cluster_connector = get_cluster_connector()
-        
+
         # Initialize data
         self.cluster_info = None
         self.metrics_data = None
         self.issues_data = []
-        
+
         # FIXED: Connect signals with better error handling and logging
         self._connect_cluster_signals()
-        
+
         # Data refresh timer
         self.refresh_timer = QTimer(self)
         self.refresh_timer.timeout.connect(self.refresh_data)
-        
+
         # Store historical data for charts
         self.cpu_history = []
         self.memory_history = []
         self.max_history_points = 8
         self.last_metrics_hash = None
-        
+        self.duplicate_count = 0
+
         # UI setup
         self.setup_ui()
-        
+
         # Ensure worker is selected by default and master remains disabled
         QTimer.singleShot(100, self.show_worker_data)
 
@@ -690,19 +700,105 @@ class ClusterPage(QWidget):
                 self.cluster_connector.issues_data_loaded.disconnect()
             except (TypeError, RuntimeError):
                 pass  # No existing connections
-            
+
             # Connect signals
             self.cluster_connector.cluster_data_loaded.connect(self.update_cluster_info)
             self.cluster_connector.metrics_data_loaded.connect(self.update_metrics)
             self.cluster_connector.issues_data_loaded.connect(self.update_issues)
-            
+
             logging.info("ClusterPage: Successfully connected cluster connector signals")
-            
+
         except Exception as e:
             logging.error(f"ClusterPage: Error connecting cluster signals: {e}")
 
+    def _on_theme_changed(self, theme_name):
+        """Refresh UI when theme changes"""
+        logging.info(f"ClusterPage: Theme changed to {theme_name}, refreshing widgets")
+        
+        # Refresh main background
+        self.setStyleSheet(ClusterPageStyles.get_main_background_style())
+        
+        # Refresh panel styles
+        if hasattr(self, 'chart_panel'):
+            self.chart_panel.setStyleSheet(ClusterPageStyles.get_chart_panel_style())
+        if hasattr(self, 'metrics_container'):
+            self.metrics_container.setStyleSheet(ClusterPageStyles.get_metrics_panel_style())
+        if hasattr(self, 'status_widget'):
+            self.status_widget.setStyleSheet(ClusterPageStyles.get_status_panel_style())
+        
+        # Refresh resource status widgets
+        if hasattr(self, 'cpu_status') and hasattr(self.cpu_status, 'box'):
+            self.cpu_status.box.setStyleSheet(ClusterPageStyles.get_status_box_style())
+            self.cpu_status.title_label.setStyleSheet(ClusterPageStyles.get_resource_title_style())
+            self.cpu_status.usage_label.setStyleSheet(ClusterPageStyles.get_resource_label_usage_style())
+            self.cpu_status.requests_label.setStyleSheet(ClusterPageStyles.get_resource_label_requests_style())
+            if hasattr(self.cpu_status, 'limits_label'):
+                self.cpu_status.limits_label.setStyleSheet(ClusterPageStyles.get_resource_label_limits_style())
+            if hasattr(self.cpu_status, 'allocated_label'):
+                self.cpu_status.allocated_label.setStyleSheet(ClusterPageStyles.get_resource_label_allocated_style())
+            self.cpu_status.capacity_label.setStyleSheet(ClusterPageStyles.get_resource_label_capacity_style())
+        
+        if hasattr(self, 'memory_status') and hasattr(self.memory_status, 'box'):
+            self.memory_status.box.setStyleSheet(ClusterPageStyles.get_status_box_style())
+            self.memory_status.title_label.setStyleSheet(ClusterPageStyles.get_resource_title_style())
+            self.memory_status.usage_label.setStyleSheet(ClusterPageStyles.get_resource_label_usage_style())
+            self.memory_status.requests_label.setStyleSheet(ClusterPageStyles.get_resource_label_requests_style())
+            if hasattr(self.memory_status, 'limits_label'):
+                self.memory_status.limits_label.setStyleSheet(ClusterPageStyles.get_resource_label_limits_style())
+            if hasattr(self.memory_status, 'allocated_label'):
+                self.memory_status.allocated_label.setStyleSheet(ClusterPageStyles.get_resource_label_allocated_style())
+            self.memory_status.capacity_label.setStyleSheet(ClusterPageStyles.get_resource_label_capacity_style())
+        
+        if hasattr(self, 'disk_status') and hasattr(self.disk_status, 'box'):
+            self.disk_status.box.setStyleSheet(ClusterPageStyles.get_status_box_style())
+            self.disk_status.title_label.setStyleSheet(ClusterPageStyles.get_resource_title_style())
+            self.disk_status.usage_label.setStyleSheet(ClusterPageStyles.get_resource_label_usage_style())
+            self.disk_status.requests_label.setStyleSheet(ClusterPageStyles.get_resource_label_requests_style())
+            self.disk_status.capacity_label.setStyleSheet(ClusterPageStyles.get_resource_label_capacity_style())
+        
+        # Refresh button styles
+        if hasattr(self, 'worker_btn'):
+            self.worker_btn.setStyleSheet(ClusterPageStyles.get_active_button_style())
+        if hasattr(self, 'master_btn'):
+            self.master_btn.setStyleSheet(ClusterPageStyles.get_disabled_button_style())
+        if hasattr(self, 'cpu_btn'):
+            self.cpu_btn.setStyleSheet(ClusterPageStyles.get_active_button_style())
+        if hasattr(self, 'memory_btn'):
+            self.memory_btn.setStyleSheet(ClusterPageStyles.get_inactive_button_style())
+        
+        # Refresh issues table
+        if hasattr(self, 'issues_table'):
+            self.issues_table.setStyleSheet(ClusterPageStyles.get_issues_table_style())
+        
+        # Refresh issues header
+        if hasattr(self, 'issues_header'):
+            self.issues_header.setStyleSheet(ClusterPageStyles.get_status_title_style())
+        
+        # Refresh no-issues status text
+        if hasattr(self, 'no_issues_title'):
+            self.no_issues_title.setStyleSheet(ClusterPageStyles.get_status_title_style())
+        if hasattr(self, 'no_issues_subtitle'):
+            self.no_issues_subtitle.setStyleSheet(ClusterPageStyles.get_status_subtitle_style())
+        if hasattr(self, 'no_issues_icon'):
+            self.no_issues_icon.setStyleSheet(ClusterPageStyles.get_status_icon_style())
+        
+        # Refresh tooltips for custom widgets
+        if hasattr(self, 'cpu_chart'):
+            self.cpu_chart.setStyleSheet(ClusterPageStyles.get_bar_chart_tooltip_style())
+        if hasattr(self, 'memory_chart'):
+            self.memory_chart.setStyleSheet(ClusterPageStyles.get_bar_chart_tooltip_style())
+        if hasattr(self, 'cpu_status') and hasattr(self.cpu_status, 'progress'):
+            self.cpu_status.progress.setStyleSheet(ClusterPageStyles.get_circular_indicator_tooltip_style())
+        if hasattr(self, 'memory_status') and hasattr(self.memory_status, 'progress'):
+            self.memory_status.progress.setStyleSheet(ClusterPageStyles.get_circular_indicator_tooltip_style())
+        if hasattr(self, 'disk_status') and hasattr(self.disk_status, 'progress'):
+            self.disk_status.progress.setStyleSheet(ClusterPageStyles.get_circular_indicator_tooltip_style())
+
 
     def setup_ui(self):
+        # Set main background
+        self.setStyleSheet(ClusterPageStyles.get_main_background_style())
+        
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -723,168 +819,136 @@ class ClusterPage(QWidget):
         top_layout.setSpacing(16)
 
         # Create the chart panel
-        chart_panel = self.create_chart_panel()
-        
+        self.chart_panel = self.create_chart_panel()
+
         # Create metrics container
-        metrics_container = QWidget()
-        metrics_container.setStyleSheet(AppStyles.CLUSTER_METRICS_PANEL_STYLE)
-        metrics_container.setMinimumWidth(600)
-        
-        metrics_grid = QGridLayout(metrics_container)
+        self.metrics_container = QWidget()
+        self.metrics_container.setStyleSheet(ClusterPageStyles.get_metrics_panel_style())
+        self.metrics_container.setMinimumWidth(600)
+
+        metrics_grid = QGridLayout(self.metrics_container)
         metrics_grid.setContentsMargins(16, 16, 16, 16)
         metrics_grid.setSpacing(15)
-        
+
         # Create resource widgets
         self.cpu_status = ResourceStatusWidget("CPU Resources", 0, 0, 0, 0, 100, "cpu")
         self.memory_status = ResourceStatusWidget("Memory Resources", 0, 0, 0, 0, 100, "memory")
         self.disk_status = ResourceStatusWidget("Pod Resources", 0, 0, 0, 0, 100, "pods")
-        
+
         # Set fixed width for alignment
         fixed_width = 180
         self.cpu_status.setFixedWidth(fixed_width)
         self.memory_status.setFixedWidth(fixed_width)
         self.disk_status.setFixedWidth(fixed_width)
-        
+
         # Add widgets to grid
         metrics_grid.addWidget(self.cpu_status, 0, 0)
         metrics_grid.addWidget(self.memory_status, 0, 1)
         metrics_grid.addWidget(self.disk_status, 0, 2)
-        
+
         # Set equal column stretches
         metrics_grid.setColumnStretch(0, 1)
         metrics_grid.setColumnStretch(1, 1)
         metrics_grid.setColumnStretch(2, 1)
-        
+
         # Add to top section
-        top_layout.addWidget(chart_panel, 1)
-        top_layout.addWidget(metrics_container, 0)
-        
+        top_layout.addWidget(self.chart_panel, 1)
+        top_layout.addWidget(self.metrics_container, 0)
+
         # Status panel for issues
         self.status_panel = self.create_status_panel()
 
         # Add sections to main layout
         content_layout.addWidget(top_section)
         content_layout.addWidget(self.status_panel)
-        
+
         return content_widget
 
     def create_chart_panel(self):
         panel = QWidget()
-        panel.setStyleSheet(AppStyles.CLUSTER_CHART_PANEL_STYLE)
+        panel.setStyleSheet(ClusterPageStyles.get_chart_panel_style())
         panel.setMinimumHeight(380)
-        
+
         main_layout = QVBoxLayout(panel)
         main_layout.setContentsMargins(16, 16, 16, 16)
         main_layout.setSpacing(16)
-        
+
         # Create tabs for switching between chart views
         tabs = QWidget()
         tabs_layout = QHBoxLayout(tabs)
         tabs_layout.setContentsMargins(0, 0, 0, 0)
         tabs_layout.setSpacing(4)
-        
+
         self.master_btn = QPushButton("Master")
         # Custom disabled style that clearly shows it's inactive and disabled
-        disabled_style = """
-            QPushButton {
-                background-color: #2a2a2a;
-                color: #666666;
-                border: 1px solid #444444;
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-weight: normal;
-                opacity: 0.6;
-            }
-            QPushButton:disabled {
-                background-color: #2a2a2a;
-                color: #555555;
-                border: 1px solid #333333;
-                opacity: 0.5;
-            }
-        """
-        self.master_btn.setStyleSheet(disabled_style)
+        self.master_btn.setStyleSheet(ClusterPageStyles.get_disabled_button_style())
         self.master_btn.setEnabled(False)  # Disable the Master button
         # self.master_btn.clicked.connect(self.show_master_data)  # Removed click handler
-        
+
         self.worker_btn = QPushButton("Worker")
-        self.worker_btn.setStyleSheet(AppStyles.CLUSTER_ACTIVE_BTN_STYLE)
+        self.worker_btn.setStyleSheet(ClusterPageStyles.get_active_button_style())
         self.worker_btn.clicked.connect(self.show_worker_data)
-        
+
         tabs_layout.addWidget(self.master_btn)
         tabs_layout.addWidget(self.worker_btn)
         tabs_layout.addStretch()
-        
+
         self.cpu_btn = QPushButton("CPU")
-        self.cpu_btn.setStyleSheet(AppStyles.CLUSTER_ACTIVE_BTN_STYLE)
+        self.cpu_btn.setStyleSheet(ClusterPageStyles.get_active_button_style())
         self.cpu_btn.clicked.connect(self.show_cpu_chart)
 
         self.memory_btn = QPushButton("Memory")
-        self.memory_btn.setStyleSheet(AppStyles.CLUSTER_INACTIVE_BTN_STYLE)
+        self.memory_btn.setStyleSheet(ClusterPageStyles.get_inactive_button_style())
         self.memory_btn.clicked.connect(self.show_memory_chart)
 
         tabs_layout.addWidget(self.cpu_btn)
         tabs_layout.addWidget(self.memory_btn)
-        
+
         main_layout.addWidget(tabs)
-        
+
         # Create charts container
         self.charts_container = QWidget()
         self.charts_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        
+
         self.charts_layout = QStackedLayout(self.charts_container)
         self.charts_layout.setContentsMargins(0, 16, 0, 0)
-        
+
         # Initialize charts with better sizing
         self.cpu_chart = BarChart(color="#ff0000", title="CPU Usage", unit="%")
         self.memory_chart = BarChart(color="#00ffff", title="Memory Usage", unit="%")
-        
+
         # Set minimum size to ensure charts are visible
         self.cpu_chart.setMinimumSize(400, 300)
         self.memory_chart.setMinimumSize(400, 300)
-        
+
         # Add charts to stacked layout
         self.charts_layout.addWidget(self.cpu_chart)
         self.charts_layout.addWidget(self.memory_chart)
-        
+
         # Set CPU chart as current and ensure it's visible
         self.charts_layout.setCurrentWidget(self.cpu_chart)
         self.cpu_chart.show()
         logging.info("ClusterPage: Charts initialized and CPU chart set as current")
-        
+
         main_layout.addWidget(self.charts_container)
 
         return panel
 
+    # Reserved for future usage when master view is re-enabled. 
+    # Logic references master_btn, worker_btn and ClusterPageStyles constants (ClusterPageStyles.get_active_button_style() / ClusterPageStyles.get_inactive_button_style())
     def show_master_data(self):
-        self.master_btn.setStyleSheet(AppStyles.CLUSTER_ACTIVE_BTN_STYLE)
-        self.worker_btn.setStyleSheet(AppStyles.CLUSTER_INACTIVE_BTN_STYLE)
-        
+        self.master_btn.setStyleSheet(ClusterPageStyles.get_active_button_style())
+        self.worker_btn.setStyleSheet(ClusterPageStyles.get_inactive_button_style())
+
     def show_worker_data(self):
-        self.worker_btn.setStyleSheet(AppStyles.CLUSTER_ACTIVE_BTN_STYLE)
+        self.worker_btn.setStyleSheet(ClusterPageStyles.get_active_button_style())
         # Keep Master button disabled style
-        disabled_style = """
-            QPushButton {
-                background-color: #2a2a2a;
-                color: #666666;
-                border: 1px solid #444444;
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-weight: normal;
-                opacity: 0.6;
-            }
-            QPushButton:disabled {
-                background-color: #2a2a2a;
-                color: #555555;
-                border: 1px solid #333333;
-                opacity: 0.5;
-            }
-        """
-        self.master_btn.setStyleSheet(disabled_style)
+        self.master_btn.setStyleSheet(ClusterPageStyles.get_disabled_button_style())
 
     def show_cpu_chart(self):
-        self.cpu_btn.setStyleSheet(AppStyles.CLUSTER_ACTIVE_BTN_STYLE)
-        self.memory_btn.setStyleSheet(AppStyles.CLUSTER_INACTIVE_BTN_STYLE)
-        
+        self.cpu_btn.setStyleSheet(ClusterPageStyles.get_active_button_style())
+        self.memory_btn.setStyleSheet(ClusterPageStyles.get_inactive_button_style())
+
         if hasattr(self, 'charts_layout') and self.charts_layout and hasattr(self, 'cpu_chart'):
             self.charts_layout.setCurrentWidget(self.cpu_chart)
             self.cpu_chart.show()
@@ -892,27 +956,27 @@ class ClusterPage(QWidget):
             logging.info("ClusterPage: Switched to CPU chart")
 
     def show_memory_chart(self):
-        self.memory_btn.setStyleSheet(AppStyles.CLUSTER_ACTIVE_BTN_STYLE)
-        self.cpu_btn.setStyleSheet(AppStyles.CLUSTER_INACTIVE_BTN_STYLE)
-        
+        self.memory_btn.setStyleSheet(ClusterPageStyles.get_active_button_style())
+        self.cpu_btn.setStyleSheet(ClusterPageStyles.get_inactive_button_style())
+
         if hasattr(self, 'charts_layout') and self.charts_layout and hasattr(self, 'memory_chart'):
             self.charts_layout.setCurrentWidget(self.memory_chart)
             self.memory_chart.show()
             self.memory_chart.update()
             logging.info("ClusterPage: Switched to Memory chart")
-    
+
     def create_status_panel(self):
         container = QWidget()
         container_layout = QVBoxLayout(container)
         container_layout.setContentsMargins(0, 0, 0, 0)
         container_layout.setSpacing(0)
-        
+
         self.status_widget = QWidget()
-        self.status_widget.setStyleSheet(AppStyles.CLUSTER_STATUS_PANEL_STYLE)
-        
+        self.status_widget.setStyleSheet(ClusterPageStyles.get_status_panel_style())
+
         self.stacked_layout = QStackedLayout(self.status_widget)
         self.stacked_layout.setContentsMargins(0, 0, 0, 0)
-        
+
         # No issues content
         no_issues_widget = QWidget()
         no_issues_layout = QVBoxLayout(no_issues_widget)
@@ -920,51 +984,51 @@ class ClusterPage(QWidget):
         no_issues_layout.setSpacing(8)
         no_issues_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        success_icon = QLabel("✓")
-        success_icon.setFixedSize(80, 80)
-        success_icon.setStyleSheet(AppStyles.CLUSTER_STATUS_ICON_STYLE)
+        self.no_issues_icon = QLabel("✓")
+        self.no_issues_icon.setFixedSize(80, 80)
+        self.no_issues_icon.setStyleSheet(ClusterPageStyles.get_status_icon_style())
 
-        status_title = QLabel("No issues found")
-        status_title.setStyleSheet(AppStyles.CLUSTER_STATUS_TITLE_STYLE)
-        status_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.no_issues_title = QLabel("No issues found")
+        self.no_issues_title.setStyleSheet(ClusterPageStyles.get_status_title_style())
+        self.no_issues_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        status_subtitle = QLabel("All resources are within acceptable limits")
-        status_subtitle.setStyleSheet(AppStyles.CLUSTER_STATUS_SUBTITLE_STYLE)
-        status_subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.no_issues_subtitle = QLabel("All resources are within acceptable limits")
+        self.no_issues_subtitle.setStyleSheet(ClusterPageStyles.get_status_subtitle_style())
+        self.no_issues_subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        no_issues_layout.addWidget(success_icon, 0, Qt.AlignmentFlag.AlignCenter)
-        no_issues_layout.addWidget(status_title)
-        no_issues_layout.addWidget(status_subtitle)
-        
+        no_issues_layout.addWidget(self.no_issues_icon, 0, Qt.AlignmentFlag.AlignCenter)
+        no_issues_layout.addWidget(self.no_issues_title)
+        no_issues_layout.addWidget(self.no_issues_subtitle)
+
         # Issues content
         issues_widget = QWidget()
         issues_layout = QVBoxLayout(issues_widget)
         issues_layout.setContentsMargins(16, 2, 16, 16)
         issues_layout.setSpacing(8)
-        
-        issues_header = QLabel("Cluster Issues")
-        issues_header.setStyleSheet(AppStyles.CLUSTER_STATUS_TITLE_STYLE)
-        issues_header.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        
+
+        self.issues_header = QLabel("Cluster Issues")
+        self.issues_header.setStyleSheet(ClusterPageStyles.get_status_title_style())
+        self.issues_header.setAlignment(Qt.AlignmentFlag.AlignLeft)
+
         self.issues_table = IssuesTable()
-        
-        issues_layout.addWidget(issues_header)
+
+        issues_layout.addWidget(self.issues_header)
         issues_layout.addWidget(self.issues_table)
-        
+
         # Add both widgets to stacked layout
         self.stacked_layout.addWidget(no_issues_widget)  # index 0
         self.stacked_layout.addWidget(issues_widget)     # index 1
-        
+
         container_layout.addWidget(self.status_widget)
         return container
-    
+
     def preload_with_cached_data(self, cluster_info, metrics, issues):
         """Preload the page with cached data"""
         logging.info(f"ClusterPage: Preloading with data for cluster: {cluster_info.get('name') if cluster_info else 'Unknown'}")
         try:
             if cluster_info:
                 self.update_cluster_info(cluster_info)
-            
+
             if metrics:
                 self.update_metrics(metrics)
             else:
@@ -974,7 +1038,7 @@ class ClusterPage(QWidget):
             if issues is not None: # Allow empty list of issues
                 self.update_issues(issues)
             else:
-                if hasattr(self, 'issues_table'): 
+                if hasattr(self, 'issues_table'):
                     self.update_issues([])
 
             logging.info("Preloaded cluster page with cached data")
@@ -984,7 +1048,7 @@ class ClusterPage(QWidget):
     def update_metrics(self, metrics):
         """Update metrics with real data and maintain history"""
         logging.info(f"ClusterPage: update_metrics called with data: {metrics}")
-        
+
         self.metrics_data = metrics
         if not metrics:
             logging.warning("ClusterPage: No metrics data to update.")
@@ -992,22 +1056,20 @@ class ClusterPage(QWidget):
 
         # Create hash to prevent excessive duplicate updates (allow some updates for chart progression)
         metrics_hash = hash(str(sorted(metrics.items()))) if metrics else None
-        if hasattr(self, 'duplicate_count'):
-            if self.last_metrics_hash == metrics_hash:
-                self.duplicate_count += 1
-                if self.duplicate_count < 3:  # Allow first 3 updates even if duplicate
-                    logging.debug(f"ClusterPage: Allowing duplicate metrics update #{self.duplicate_count}")
-                else:
-                    logging.debug("ClusterPage: Skipping excessive duplicate metrics update")
-                    return
+        
+        if self.last_metrics_hash == metrics_hash:
+            self.duplicate_count += 1
+            if self.duplicate_count < 3:  # Allow first 3 updates even if duplicate
+                logging.debug(f"ClusterPage: Allowing duplicate metrics update #{self.duplicate_count}")
             else:
-                self.duplicate_count = 0
+                logging.debug("ClusterPage: Skipping excessive duplicate metrics update")
+                return
         else:
             self.duplicate_count = 0
         self.last_metrics_hash = metrics_hash
 
         logging.info(f"ClusterPage: Processing metrics with keys: {list(metrics.keys())}")
-        
+
         try:
             # Update CPU metrics
             if "cpu" in metrics:
@@ -1017,15 +1079,15 @@ class ClusterPage(QWidget):
                 limits = float(cpu.get("limits", 0))
                 allocatable = float(cpu.get("allocatable", 0))
                 capacity = float(cpu.get("capacity", 100))
-                
+
                 logging.info(f"ClusterPage: Updating CPU - usage={usage}%, capacity={capacity}")
-                
+
                 if hasattr(self, 'cpu_status'):
                     self.cpu_status.update_metrics(usage, requests, limits, allocatable, capacity)
-                    logging.info(f"ClusterPage: CPU status widget updated successfully")
+                    logging.info("ClusterPage: CPU status widget updated successfully")
                 else:
                     logging.error("ClusterPage: cpu_status widget not found")
-                
+
                 # Update CPU chart with proper cleanup
                 if hasattr(self, 'cpu_chart') and self.cpu_chart:
                     # Add usage data (allow duplicate values to build up chart)
@@ -1033,7 +1095,7 @@ class ClusterPage(QWidget):
                     # Limit to max 8 points
                     if len(self.cpu_history) > self.max_history_points:
                         self.cpu_history = self.cpu_history[-self.max_history_points:]
-                    
+
                     timestamps = cpu.get("timestamps", self._generate_time_points(len(self.cpu_history)))
                     self.cpu_chart.update_data(self.cpu_history.copy(), timestamps)
                     # Force repaint to ensure chart is visible
@@ -1041,7 +1103,7 @@ class ClusterPage(QWidget):
                     logging.info(f"ClusterPage: CPU chart updated successfully with {len(self.cpu_history)} points")
                 else:
                     logging.error("ClusterPage: cpu_chart widget not found")
-            
+
             # Update Memory metrics
             if "memory" in metrics:
                 memory = metrics["memory"]
@@ -1050,15 +1112,15 @@ class ClusterPage(QWidget):
                 limits = float(memory.get("limits", 0))
                 allocatable = float(memory.get("allocatable", 0))
                 capacity = float(memory.get("capacity", 100))
-                
+
                 logging.info(f"ClusterPage: Updating Memory - usage={usage}%, capacity={capacity}")
-                
+
                 if hasattr(self, 'memory_status'):
                     self.memory_status.update_metrics(usage, requests, limits, allocatable, capacity)
-                    logging.info(f"ClusterPage: Memory status widget updated successfully")
+                    logging.info("ClusterPage: Memory status widget updated successfully")
                 else:
                     logging.error("ClusterPage: memory_status widget not found")
-                    
+
                 # Update Memory chart with proper cleanup
                 if hasattr(self, 'memory_chart'):
                     # Add usage data (allow duplicate values to build up chart)
@@ -1066,7 +1128,7 @@ class ClusterPage(QWidget):
                     # Limit to max 8 points
                     if len(self.memory_history) > self.max_history_points:
                         self.memory_history = self.memory_history[-self.max_history_points:]
-                    
+
                     timestamps = memory.get("timestamps", self._generate_time_points(len(self.memory_history)))
                     self.memory_chart.update_data(self.memory_history.copy(), timestamps)
                     # Force repaint to ensure chart is visible
@@ -1081,18 +1143,18 @@ class ClusterPage(QWidget):
                 usage = float(pods.get("usage", 0))
                 count = int(pods.get("count", 0))
                 capacity = int(pods.get("capacity", 100))
-                
+
                 logging.info(f"ClusterPage: Updating Pods - usage={usage}%, count={count}, capacity={capacity}")
-                
+
                 if hasattr(self, 'disk_status'):
                     # For pods, we use count as requests and don't have limits/allocated
                     self.disk_status.update_metrics(usage, count, 0, 0, capacity)
-                    logging.info(f"ClusterPage: Pod status widget updated successfully")
+                    logging.info("ClusterPage: Pod status widget updated successfully")
                 else:
                     logging.error("ClusterPage: disk_status widget not found")
-                    
+
             logging.info("ClusterPage: All metrics widgets updated successfully")
-            
+
         except Exception as e:
             logging.error(f"ClusterPage: Error updating metrics UI: {e}")
             import traceback
@@ -1101,9 +1163,9 @@ class ClusterPage(QWidget):
     def update_issues(self, issues):
         """Update issues display with real data"""
         logging.info(f"ClusterPage: update_issues called with {len(issues) if issues else 0} issues")
-        
+
         self.issues_data = issues if issues is not None else []
-        
+
         try:
             if hasattr(self, 'stacked_layout') and hasattr(self, 'issues_table'):
                 if self.issues_data:
@@ -1115,7 +1177,7 @@ class ClusterPage(QWidget):
                     self.stacked_layout.setCurrentIndex(0)  # Show no issues view
             else:
                 logging.error("ClusterPage: Issues display widgets not found")
-                
+
         except Exception as e:
             logging.error(f"ClusterPage: Error updating issues UI: {e}")
 
@@ -1130,7 +1192,7 @@ class ClusterPage(QWidget):
         if hasattr(self, '_loading') and self._loading:
             logging.debug("ClusterPage: force_load_data skipped - already loading")
             return
-            
+
         logging.info("ClusterPage: force_load_data called - requesting fresh metrics and issues")
         self._loading = True
         try:
@@ -1142,19 +1204,19 @@ class ClusterPage(QWidget):
                 self.cpu_history = self.cpu_history[-2:]
             if len(self.memory_history) > 2:
                 self.memory_history = self.memory_history[-2:]
-            
+
             # Clear chart data
             if hasattr(self, 'cpu_chart'):
                 self.cpu_chart._clear_chart_data()
             if hasattr(self, 'memory_chart'):
                 self.memory_chart._clear_chart_data()
-                
+
             # Ensure signals are connected
             self._connect_cluster_signals()
-            
+
             # Request fresh data
             self.refresh_data()
-            
+
             # Cache system removed - data will be loaded fresh
         finally:
             self._loading = False
@@ -1165,7 +1227,7 @@ class ClusterPage(QWidget):
         try:
             now = datetime.datetime.now()
             times = []
-            
+
             # Calculate interval based on count
             if count <= 12:
                 interval_minutes = 5
@@ -1173,11 +1235,11 @@ class ClusterPage(QWidget):
                 interval_minutes = 2
             else:
                 interval_minutes = 1
-            
+
             for i in range(count):
                 time_point = now - datetime.timedelta(minutes=(count - i) * interval_minutes)
                 times.append(time_point.strftime("%H:%M"))
-            
+
             return times
         except Exception as e:
             logging.error(f"Error generating time points: {e}")
@@ -1207,7 +1269,7 @@ class ClusterPage(QWidget):
         super().hideEvent(event)
         if self.refresh_timer.isActive():
             self.refresh_timer.stop()
-        
+
         # Clear historical data when page is hidden to save memory
         if len(self.cpu_history) > 4:
             self.cpu_history = self.cpu_history[-4:]  # Keep only last 4 points

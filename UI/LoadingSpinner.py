@@ -5,18 +5,27 @@ Google-style loading animation with smooth performance
 
 import math
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QHBoxLayout
-from PyQt6.QtCore import QTimer, QPropertyAnimation, QRect, pyqtProperty, Qt
-from PyQt6.QtGui import QPainter, QPen, QColor, QFont, QBrush
-from UI.Styles import AppColors
+from PyQt6.QtCore import QTimer, QRect, Qt
+from PyQt6.QtGui import QPainter, QPen, QColor, QBrush
+from UI.ThemeAwarePage import ThemeAwareMixin
+from Styles.LoadingSpinnerStyles import (
+    get_loading_overlay_style,
+    get_message_label_style,
+    LoadingSpinnerConstants,
+)
 
 
-class CircularSpinner(QWidget):
+class CircularSpinner(QWidget, ThemeAwareMixin):
     """Lightweight circular spinner similar to Google's loading animation"""
 
     def __init__(self, size=32, color=None, parent=None):
         super().__init__(parent)
         self.size = size
-        self.color = QColor(color) if color else QColor(AppColors.ACCENT_ORANGE)
+        self.color = (
+            QColor(color)
+            if color
+            else QColor(LoadingSpinnerConstants.get_accent_color())
+        )
         self.angle = 0
         self.setFixedSize(size, size)
 
@@ -24,6 +33,13 @@ class CircularSpinner(QWidget):
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_rotation)
         self.timer.setInterval(16)  # ~60fps for smooth animation
+
+    def _on_theme_changed(self, theme_name):
+        """Handle theme changes by updating spinner color"""
+        super()._on_theme_changed(theme_name)
+        # Update color if using default (not custom color)
+        if not hasattr(self, "_custom_color"):
+            self.color = QColor(LoadingSpinnerConstants.get_accent_color())
 
     def start_animation(self):
         """Start the spinning animation"""
@@ -74,12 +90,16 @@ class CircularSpinner(QWidget):
             painter.drawArc(rect, start_angle * 16, span_angle * 16)
 
 
-class PulsingDots(QWidget):
+class PulsingDots(QWidget, ThemeAwareMixin):
     """Three pulsing dots loading animation (alternative style)"""
 
     def __init__(self, color=None, parent=None):
         super().__init__(parent)
-        self.color = QColor(color) if color else QColor(AppColors.ACCENT_ORANGE)
+        self.color = (
+            QColor(color)
+            if color
+            else QColor(LoadingSpinnerConstants.get_accent_color())
+        )
         self.setFixedSize(60, 20)
 
         self.phase = 0
@@ -88,6 +108,13 @@ class PulsingDots(QWidget):
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_phase)
         self.timer.setInterval(100)  # 100ms for smooth pulsing
+
+    def _on_theme_changed(self, theme_name):
+        """Handle theme changes by updating dots color"""
+        super()._on_theme_changed(theme_name)
+        # Update color if using default (not custom color)
+        if not hasattr(self, "_custom_color"):
+            self.color = QColor(LoadingSpinnerConstants.get_accent_color())
 
     def start_animation(self):
         """Start the pulsing animation"""
@@ -127,10 +154,12 @@ class PulsingDots(QWidget):
             painter.setPen(Qt.PenStyle.NoPen)
 
             radius = dot_radius * scale
-            painter.drawEllipse(int(x - radius), int(y - radius), int(radius * 2), int(radius * 2))
+            painter.drawEllipse(
+                int(x - radius), int(y - radius), int(radius * 2), int(radius * 2)
+            )
 
 
-class GoogleStyleSpinner(QWidget):
+class GoogleStyleSpinner(QWidget, ThemeAwareMixin):
     """Google-style multicolor spinner"""
 
     def __init__(self, size=32, parent=None):
@@ -138,14 +167,8 @@ class GoogleStyleSpinner(QWidget):
         self.size = size
         self.setFixedSize(size, size)
 
-        # White color only with different opacities for Google-style effect
-        white = QColor("#ffffff")
-        self.colors = [
-            QColor(white.red(), white.green(), white.blue(), 255),  # Full opacity
-            QColor(white.red(), white.green(), white.blue(), 200),  # 80% opacity
-            QColor(white.red(), white.green(), white.blue(), 150),  # 60% opacity
-            QColor(white.red(), white.green(), white.blue(), 100),  # 40% opacity
-        ]
+        # Use theme-aware white color with different opacities for Google-style effect
+        self._update_colors()
 
         self.angle = 0
 
@@ -153,6 +176,22 @@ class GoogleStyleSpinner(QWidget):
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_rotation)
         self.timer.setInterval(20)  # 50fps for smooth animation
+
+    def _update_colors(self):
+        """Update colors based on current theme"""
+        white_color = LoadingSpinnerConstants.get_white_color()
+        white = QColor(white_color)
+        self.colors = [
+            QColor(white.red(), white.green(), white.blue(), 255),  # Full opacity
+            QColor(white.red(), white.green(), white.blue(), 200),  # 80% opacity
+            QColor(white.red(), white.green(), white.blue(), 150),  # 60% opacity
+            QColor(white.red(), white.green(), white.blue(), 100),  # 40% opacity
+        ]
+
+    def _on_theme_changed(self, theme_name):
+        """Handle theme changes by updating spinner colors"""
+        super()._on_theme_changed(theme_name)
+        self._update_colors()
 
     def start_animation(self):
         """Start the spinning animation"""
@@ -178,7 +217,7 @@ class GoogleStyleSpinner(QWidget):
 
         # Draw four colored arcs
         arc_span = 60  # Each arc spans 60 degrees
-        gap = 30      # 30 degree gap between arcs
+        gap = 30  # 30 degree gap between arcs
 
         for i, color in enumerate(self.colors):
             pen = QPen(color)
@@ -192,7 +231,7 @@ class GoogleStyleSpinner(QWidget):
             painter.drawArc(rect, start_angle * 16, arc_span * 16)
 
 
-class LoadingOverlay(QWidget):
+class LoadingOverlay(QWidget, ThemeAwareMixin):
     """Full page loading overlay with spinner and message"""
 
     def __init__(self, message="Loading...", spinner_type="circular", parent=None):
@@ -200,12 +239,7 @@ class LoadingOverlay(QWidget):
         self.setObjectName("LoadingOverlay")
 
         # Semi-transparent background
-        self.setStyleSheet(f"""
-            QWidget#LoadingOverlay {{
-                background-color: rgba(0, 0, 0, 0.3);
-                border-radius: 8px;
-            }}
-        """)
+        self.setStyleSheet(get_loading_overlay_style())
 
         # Layout
         layout = QVBoxLayout(self)
@@ -217,32 +251,36 @@ class LoadingOverlay(QWidget):
         spinner_container.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         if spinner_type == "circular":
-            self.spinner = CircularSpinner(40, AppColors.ACCENT_ORANGE)
+            self.spinner = CircularSpinner(
+                40, LoadingSpinnerConstants.get_accent_color()
+            )
         elif spinner_type == "dots":
-            self.spinner = PulsingDots(AppColors.ACCENT_ORANGE)
+            self.spinner = PulsingDots(LoadingSpinnerConstants.get_accent_color())
         elif spinner_type == "google":
             self.spinner = GoogleStyleSpinner(40)
         else:
-            self.spinner = CircularSpinner(40, AppColors.ACCENT_ORANGE)
+            self.spinner = CircularSpinner(
+                40, LoadingSpinnerConstants.get_accent_color()
+            )
 
         spinner_container.addWidget(self.spinner)
         layout.addLayout(spinner_container)
 
         # Loading message
         self.message_label = QLabel(message)
+        self.message_label.setObjectName("LoadingMessage")
         self.message_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.message_label.setStyleSheet(f"""
-            QLabel {{
-                color: {AppColors.TEXT_LIGHT};
-                font-size: 14px;
-                font-weight: 500;
-                background-color: transparent;
-                margin: 8px;
-            }}
-        """)
+        self.message_label.setStyleSheet(get_message_label_style())
         layout.addWidget(self.message_label)
 
         self.hide()
+
+    def _on_theme_changed(self, theme_name):
+        """Handle theme changes by updating styles"""
+        super()._on_theme_changed(theme_name)
+        # Update styles with new theme
+        self.setStyleSheet(get_loading_overlay_style())
+        self.message_label.setStyleSheet(get_message_label_style())
 
     def show_loading(self, message=None):
         """Show the loading overlay with optional message"""
@@ -262,13 +300,17 @@ class LoadingOverlay(QWidget):
         self.message_label.setText(message)
 
 
-class CompactSpinner(QWidget):
+class CompactSpinner(QWidget, ThemeAwareMixin):
     """Compact spinner for inline use in tables/cards"""
 
     def __init__(self, size=16, color=None, parent=None):
         super().__init__(parent)
         self.size = size
-        self.color = QColor(color) if color else QColor(AppColors.TEXT_SECONDARY)
+        self.color = (
+            QColor(color)
+            if color
+            else QColor(LoadingSpinnerConstants.get_secondary_color())
+        )
         self.setFixedSize(size, size)
 
         self.angle = 0
@@ -277,6 +319,13 @@ class CompactSpinner(QWidget):
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_rotation)
         self.timer.setInterval(50)  # 20fps for compact spinner
+
+    def _on_theme_changed(self, theme_name):
+        """Handle theme changes by updating spinner color"""
+        super()._on_theme_changed(theme_name)
+        # Update color if using default (not custom color)
+        if not hasattr(self, "_custom_color"):
+            self.color = QColor(LoadingSpinnerConstants.get_secondary_color())
 
     def start_animation(self):
         """Start the spinning animation"""
@@ -316,10 +365,12 @@ def create_loading_overlay(parent, message="Loading...", spinner_type="circular"
     overlay = LoadingOverlay(message, spinner_type, parent)
     return overlay
 
+
 def create_compact_spinner(parent, size=16, color=None):
     """Create and return a compact spinner widget"""
     spinner = CompactSpinner(size, color, parent)
     return spinner
+
 
 def create_circular_spinner(parent, size=32, color=None):
     """Create and return a circular spinner widget"""

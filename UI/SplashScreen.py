@@ -3,12 +3,37 @@ from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QRectF
 from PyQt6.QtGui import QPixmap, QColor, QPainter, QPen, QBrush, QConicalGradient
 from UI.Styles import AppStyles
 from UI.Icons import resource_path
+from UI.ThemeAwarePage import ThemeAwareMixin
 import logging
 import math
-import os
-import sys
 
-class PulsatingSpinner(QWidget):
+
+class SplashScreenConstants:
+    """Constants for splash screen styling - brand colors that remain consistent across themes"""
+
+    # Brand colors for spinner - these are intentionally fixed for brand consistency
+    _BRAND_ORANGE = "#D0D4D8"  # Silver-white for spinner ring trail
+    _BRAND_YELLOW = "#FFFFFF"  # Pure white for bright head dot
+    _SHADOW_COLOR = (20, 20, 20, 60)  # RGBA tuple for shadow
+
+    @staticmethod
+    def get_brand_orange():
+        """Get brand orange color - fixed for brand consistency"""
+        return SplashScreenConstants._BRAND_ORANGE
+
+    @staticmethod
+    def get_brand_yellow():
+        """Get brand yellow color - fixed for brand consistency"""
+        return SplashScreenConstants._BRAND_YELLOW
+
+    @staticmethod
+    def get_shadow_color():
+        """Get shadow color for splash screen as QColor"""
+        r, g, b, a = SplashScreenConstants._SHADOW_COLOR
+        return QColor(r, g, b, a)
+
+
+class PulsatingSpinner(QWidget, ThemeAwareMixin):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedSize(80, 80)
@@ -22,9 +47,9 @@ class PulsatingSpinner(QWidget):
         self.max_width = 10
         self.min_width = 4
 
-        # Color definitions for gradient
-        self.orange = QColor("#FF6D3F")
-        self.yellow = QColor("#FFCD3A")
+        # Color definitions for gradient using centralized constants
+        self.orange = QColor(SplashScreenConstants.get_brand_orange())
+        self.yellow = QColor(SplashScreenConstants.get_brand_yellow())
         self.orange_trans = QColor(self.orange)
         self.orange_trans.setAlpha(0)
 
@@ -32,6 +57,12 @@ class PulsatingSpinner(QWidget):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_animation)
         self.timer.start(16)  # ~60fps
+
+    def _on_theme_changed(self, theme_name):
+        """Handle theme changes - spinner colors remain consistent for brand identity"""
+        super()._on_theme_changed(theme_name)
+        # Brand colors remain fixed, but we could add theme-specific adjustments here if needed
+        # For now, splash screen maintains brand consistency across themes
 
     def update_animation(self):
         # Update rotation
@@ -53,7 +84,9 @@ class PulsatingSpinner(QWidget):
 
         # Calculate pulsating width
         pulse_factor = (math.sin(self.pulse_phase) + 1) / 2  # 0 to 1
-        current_width = self.min_width + (self.max_width - self.min_width) * pulse_factor
+        current_width = (
+            self.min_width + (self.max_width - self.min_width) * pulse_factor
+        )
 
         # Create conical gradient for the spinner
         gradient = QConicalGradient(center_x, center_y, self.angle)
@@ -78,7 +111,7 @@ class PulsatingSpinner(QWidget):
             int(center_x - radius),
             int(center_y - radius),
             int(radius * 2),
-            int(radius * 2)
+            int(radius * 2),
         )
 
         # Draw brightest point as a dot
@@ -91,10 +124,10 @@ class PulsatingSpinner(QWidget):
         highlight_size = current_width * 0.8  # Slightly smaller than pen width
         painter.drawEllipse(
             QRectF(
-                bright_x - highlight_size/2,
-                bright_y - highlight_size/2,
+                bright_x - highlight_size / 2,
+                bright_y - highlight_size / 2,
                 highlight_size,
-                highlight_size
+                highlight_size,
             )
         )
 
@@ -103,9 +136,10 @@ class PulsatingSpinner(QWidget):
             self.timer.stop()
 
 
-class SplashScreen(QWidget):
+class SplashScreen(QWidget, ThemeAwareMixin):
     # Signal to notify when loading is complete
     finished = pyqtSignal()
+    loading_finished = pyqtSignal()  # Alias used by main.py for splash-to-window handshake
 
     def __init__(self):
         super().__init__()
@@ -119,6 +153,12 @@ class SplashScreen(QWidget):
 
         self.setup_ui()
 
+    def _on_theme_changed(self, theme_name):
+        """Handle theme changes - splash screen maintains brand consistency"""
+        super()._on_theme_changed(theme_name)
+        # Splash screen uses mostly fixed brand colors and AppStyles
+        # The background image and brand colors remain consistent across themes
+
     def setup_ui(self):
         # Create main layout
         main_layout = QVBoxLayout(self)
@@ -131,7 +171,9 @@ class SplashScreen(QWidget):
 
         # Use a layout for content positioning
         center_layout = QVBoxLayout(center_container)
-        center_layout.setContentsMargins(0, 0, 0, 0)  # No margins to allow full-screen image
+        center_layout.setContentsMargins(
+            0, 0, 0, 0
+        )  # No margins to allow full-screen image
         center_layout.setSpacing(0)
 
         # Create background image container that will display the entire splash image
@@ -142,20 +184,24 @@ class SplashScreen(QWidget):
 
         try:
             # Load the splash screen image with resource_path
-            splash_path = resource_path("Images/orchetrix_splash.png")
+            splash_path = resource_path("Images/Orchetrix_splash.png")
             bg_pixmap = QPixmap(splash_path)
-            
+
             if not bg_pixmap.isNull():
                 logging.debug("Successfully loaded splash screen image")
-                self.bg_container.setPixmap(bg_pixmap.scaled(
-                    self.bg_container.size(),
-                    Qt.AspectRatioMode.IgnoreAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation
-                ))
+                self.bg_container.setPixmap(
+                    bg_pixmap.scaled(
+                        self.bg_container.size(),
+                        Qt.AspectRatioMode.IgnoreAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
+                )
             else:
                 logging.debug("Failed to load splash screen image - pixmap is null")
                 # Fallback to a static color if image isn't available
-                self.bg_container.setStyleSheet(AppStyles.SPLASH_ANIMATION_FALLBACK_STYLE)
+                self.bg_container.setStyleSheet(
+                    AppStyles.SPLASH_ANIMATION_FALLBACK_STYLE
+                )
         except Exception as e:
             logging.debug(f"Error loading splash screen image: {e}")
             # Fallback to static color
@@ -174,29 +220,44 @@ class SplashScreen(QWidget):
         self.close_timer.timeout.connect(self.update_timer)
         self.close_timer.start(30)  # Update every 30ms for a total of about 3 seconds
 
+    def start_loading_simulation(self, duration_ms=3000):
+        """Start loading simulation with specified duration.
+        
+        Called by main.py to initiate the timed splash screen sequence.
+        Resets and reconfigures the close timer for the requested duration.
+        """
+        # Reset counter and recalculate interval for requested duration
+        self.counter = 0
+        interval = max(16, duration_ms // 100)  # 100 steps, min 16ms
+        if hasattr(self, 'close_timer') and self.close_timer.isActive():
+            self.close_timer.stop()
+        self.close_timer.start(interval)
+
     def update_timer(self):
         # Update counter
         self.counter += 1
 
-        # When counter reaches 100, emit finished signal
+        # When counter reaches 100, emit finished signals
         if self.counter >= 100:
             self.close_timer.stop()
-            if hasattr(self, 'spinner'):
+            if hasattr(self, "spinner"):
                 self.spinner.stop()
             self.finished.emit()
+            self.loading_finished.emit()
 
     def paintEvent(self, event):
         # Add shadow effect to the widget
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # Draw shadow
-        painter.setBrush(QColor(20, 20, 20, 60))
+        # Draw shadow using centralized color constant
+        shadow_color = SplashScreenConstants.get_shadow_color()
+        painter.setBrush(shadow_color)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(10, 10, self.width() - 20, self.height() - 20, 10, 10)
 
     def closeEvent(self, event):
         # Clean up resources when the window is closed
-        if hasattr(self, 'spinner'):
+        if hasattr(self, "spinner"):
             self.spinner.stop()
         super().closeEvent(event)

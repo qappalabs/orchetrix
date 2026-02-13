@@ -15,6 +15,7 @@ debug_launcher.py
 Orchestrix_Enhanced.spec
 version.txt
 logs
+data
 
 # Distribution / packaging
 dist/
@@ -46,3 +47,8 @@ htmlcov/
 .coverage.*
 coverage.xml
 *.cover
+# Claude Code personal configuration
+.claude/
+
+# Kiro IDE configuration and specs
+.kiro/

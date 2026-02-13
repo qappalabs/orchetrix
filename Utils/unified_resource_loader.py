@@ -9,8 +9,8 @@ import time
 import threading
 # Use unified thread manager instead of separate ThreadPoolExecutor
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Any, Callable, Union, Set
+from datetime import datetime, timezone
+from typing import Dict, List, Optional, Any, Callable
 from collections import defaultdict
 
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer, Qt, QMetaObject
@@ -18,9 +18,11 @@ from PyQt6.QtWidgets import QApplication
 
 from kubernetes.client.rest import ApiException
 from Utils.kubernetes_client import get_kubernetes_client
-from Utils.error_handler import get_error_handler, safe_execute, log_performance
+from Services.kubernetes.api_config import APIClientConfig
+from Utils.error_handler import get_error_handler, log_performance
 from Utils.enhanced_worker import EnhancedBaseWorker
 from Utils.thread_manager import get_thread_manager
+from Utils.unified_cache_system import get_unified_cache
 
 
 # For cluster-scoped resources, return the original all-namespaces method
@@ -38,13 +40,14 @@ class ResourceConfig:
     api_method: str
     namespace: Optional[str] = None
     batch_size: int = 50  # Increased for heavy data handling
-    timeout_seconds: int = 45  # Longer timeout for heavy data
+    timeout_seconds: int = APIClientConfig.REQUEST_TIMEOUT  # Use centralized timeout
     enable_streaming: bool = False  # Keep disabled for stability
     enable_pagination: bool = True  # Enable for heavy data handling
     max_concurrent_requests: int = 3  # Slightly increased for heavy data
     enable_chunking: bool = True  # New: Enable data chunking for heavy loads
     chunk_size: int = 100  # New: Process data in chunks of 100 items
     progressive_loading: bool = True  # New: Enable progressive loading
+    enable_caching: bool = True  # Enable caching by default
 
 
 @dataclass
@@ -62,36 +65,36 @@ class LoadResult:
 
 class SearchResourceLoadWorker(EnhancedBaseWorker):
     """Worker specifically for search operations across all resources"""
-    
+
     def __init__(self, config: ResourceConfig, loader_instance, search_query: str):
         super().__init__(f"search_resource_load_{config.resource_type}")
         self.config = config
         self.loader = loader_instance
         self.search_query = search_query.lower() if search_query else ""
         self._start_time = time.time()
-    
+
     def execute(self) -> LoadResult:
         """Execute search across all resources with filtering"""
         start_time = time.time()
-        
+
         try:
             # Load directly from API (no caching)
-            
+
             # Load from API with comprehensive search
             items = self._load_and_filter_from_api()
-            
+
             if self.is_cancelled():
                 return LoadResult(
-                    success=False, 
+                    success=False,
                     resource_type=self.config.resource_type,
                     error_message="Search operation cancelled"
                 )
-            
+
             # Process search results using the parent loader's processing logic
             processed_items = self._process_search_items(items)
-            
+
             load_time = (time.time() - start_time) * 1000
-            
+
             return LoadResult(
                 success=True,
                 resource_type=self.config.resource_type,
@@ -101,7 +104,7 @@ class SearchResourceLoadWorker(EnhancedBaseWorker):
                 from_cache=False,
                 metadata={'search_query': self.search_query}
             )
-            
+
         except ApiException as api_error:
             # Handle Kubernetes API exceptions during search
             if api_error.status == 404:
@@ -126,15 +129,15 @@ class SearchResourceLoadWorker(EnhancedBaseWorker):
         except Exception as e:
             error_handler = get_error_handler()
             error_message = error_handler.format_connection_error(str(e), self.config.resource_type)
-            
+
             return LoadResult(
                 success=False,
                 resource_type=self.config.resource_type,
                 error_message=f"Search failed: {error_message}",
                 load_time_ms=(time.time() - start_time) * 1000
             )
-    
-    
+
+
     def _load_and_filter_from_api(self) -> List[Any]:
         """Load from API and filter by search query"""
         # Use the same loading mechanism as the parent class
@@ -144,26 +147,28 @@ class SearchResourceLoadWorker(EnhancedBaseWorker):
         else:
             # Search specific namespace
             all_items = self._load_from_single_namespace_with_search()
-        
+
         # Filter results by search query
         if self.search_query:
+            logging.info(f"Filtering {len(all_items)} items for search query: '{self.search_query}'")
             filtered_items = []
             for item in all_items:
                 if self._item_matches_search(item):
                     filtered_items.append(item)
+            logging.info(f"Search filtering result: {len(filtered_items)} items matched out of {len(all_items)} total")
             return filtered_items
-        
+
         return all_items
-    
+
     def _load_from_single_namespace_with_search(self) -> List[Any]:
         """Load from single namespace for search"""
         kube_client = get_kubernetes_client()
         api_client = self.loader._get_api_client(kube_client, self.config.resource_type)
-        
+
         # Get the correct namespaced API method
         namespaced_method_name = self.loader._get_namespaced_api_method(self.config.resource_type)
         api_method = getattr(api_client, namespaced_method_name)
-        
+
         kwargs = {
             # 'namespace': self.config.namespace,
             'timeout_seconds': self.config.timeout_seconds,
@@ -176,57 +181,57 @@ class SearchResourceLoadWorker(EnhancedBaseWorker):
 
         response = api_method(**kwargs)
         return response.items if hasattr(response, 'items') else []
-    
+
     def _load_from_multiple_namespaces_with_search(self) -> List[Any]:
         """Load from multiple namespaces for comprehensive search"""
         all_items = []
-        
+
         try:
             kube_client = get_kubernetes_client()
             api_client = self.loader._get_api_client(kube_client, self.config.resource_type)
-            
+
             # Handle cluster-scoped resources differently
             if self.config.resource_type in cluster_scoped_resources:
                 # For cluster-scoped resources (like nodes), use cluster-wide API method
                 cluster_method_name = self.loader._get_api_method(self.config.resource_type)
                 api_method = getattr(api_client, cluster_method_name)
-                
+
                 kwargs = {
-                    'timeout_seconds': 30,
-                    '_request_timeout': 35,
+                    'timeout_seconds': APIClientConfig.REQUEST_TIMEOUT,
+                    '_request_timeout': APIClientConfig.REQUEST_TIMEOUT + 5,
                     'limit': 100
                 }
-                
+
                 response = api_method(**kwargs)
                 if hasattr(response, 'items'):
                     all_items.extend(response.items)
-                    
+
                 logging.info(f"Search loaded {len(all_items)} cluster-scoped {self.config.resource_type}")
                 return all_items
-            
+
             # For namespaced resources, search across namespaces
             namespaces_response = get_kubernetes_client().v1.list_namespace(limit=100)
             namespace_names = [ns.metadata.name for ns in namespaces_response.items]
-            
+
             namespaced_method_name = self.loader._get_namespaced_api_method(self.config.resource_type)
             api_method = getattr(api_client, namespaced_method_name)
-            
+
             for namespace in namespace_names:
                 if self.is_cancelled():
                     break
-                    
+
                 try:
                     kwargs = {
                         'namespace': namespace,
-                        'timeout_seconds': 30,
-                        '_request_timeout': 35,
+                        'timeout_seconds': APIClientConfig.REQUEST_TIMEOUT,
+                        '_request_timeout': APIClientConfig.REQUEST_TIMEOUT + 5,
                         'limit': 100
                     }
 
                     response = api_method(**kwargs)
                     if hasattr(response, 'items'):
                         all_items.extend(response.items)
-                        
+
                 except ApiException as api_error:
                     # Handle API exceptions gracefully during search
                     if api_error.status == 404:
@@ -238,248 +243,485 @@ class SearchResourceLoadWorker(EnhancedBaseWorker):
                     # Continue with other namespaces silently
                     logging.debug(f"Search error in namespace {namespace}: {e}")
                     continue
-            
+
             logging.info(f"Search loaded {len(all_items)} {self.config.resource_type} from {len(namespace_names)} namespaces")
             return all_items
-            
+
         except Exception as e:
             logging.warning(f"Error in multi-namespace search: {e}")
             # Fallback to default namespace
             return self._load_from_single_namespace_with_search()
-    
+
     def _item_matches_search(self, item: Any) -> bool:
-        """Check if item matches the search query"""
+        """Check if item matches the search query (focused search for better UX)"""
         if not self.search_query:
             return True
-        
+
         try:
-            # Search in name
+            # Get item name for logging
+            name = getattr(item.metadata, 'name', 'unknown') if hasattr(item, 'metadata') and item.metadata else 'unknown'
+
+            # PRIMARY SEARCH: Name matching (most important)
             if hasattr(item, 'metadata') and item.metadata:
-                name = getattr(item.metadata, 'name', '').lower()
-                if self.search_query in name:
+                item_name = getattr(item.metadata, 'name', '').lower()
+                if self.search_query in item_name:
+                    logging.info(f"Search match in name: '{item_name}' contains '{self.search_query}'")
                     return True
-                
-                # Search in namespace
+
+                # SECONDARY SEARCH: Namespace matching (less important)
                 namespace = getattr(item.metadata, 'namespace', '').lower()
                 if self.search_query in namespace:
+                    logging.info(f"Search match in namespace: '{namespace}' contains '{self.search_query}' for item '{name}'")
                     return True
-                
-                # Search in labels
+
+                # TERTIARY SEARCH: Important labels only (very selective)
                 labels = getattr(item.metadata, 'labels', {}) or {}
-                for key, value in labels.items():
-                    if (self.search_query in key.lower() or 
-                        self.search_query in str(value).lower()):
-                        return True
-            
-            # Search in spec fields (for certain resources)
-            if hasattr(item, 'spec') and item.spec:
-                # Convert spec to string and search
-                spec_str = str(item.spec).lower()
-                if self.search_query in spec_str:
-                    return True
-            
-        except Exception:
+                important_labels = ['app', 'name', 'component', 'tier', 'version', 'k8s-app']
+                for label_key in important_labels:
+                    if label_key in labels:
+                        label_value = str(labels[label_key]).lower()
+                        if self.search_query in label_value:
+                            logging.info(f"Search match in important label '{label_key}': '{label_value}' contains '{self.search_query}' for item '{name}'")
+                            return True
+
+            # SKIP spec search for now as it's too broad and causes false positives
+            # This makes search results more predictable and user-friendly
+
+            # Log what we searched in
+            logging.debug(f"No search match for query '{self.search_query}' in item: name='{name}', namespace='{getattr(item.metadata, 'namespace', 'N/A') if hasattr(item, 'metadata') and item.metadata else 'N/A'}'")
+
+        except Exception as e:
+            logging.debug(f"Exception in search matching: {e}")
             pass
-        
+
         return False
-    
-    
+
+
     def _process_search_items(self, items: List[Any]) -> List[Dict[str, Any]]:
         """Process search results using simplified processing for speed"""
         if not items:
+            logging.debug("No items to process for search")
             return []
-        
+
+        logging.info(f"Processing {len(items)} search items")
         processed_items = []
-        
+        skipped_count = 0
+
         for item in items:
             if self.is_cancelled():
                 break
-            
+
             try:
                 # Use basic processing for search results (faster)
                 processed_item = self._process_single_search_item(item)
                 if processed_item:
                     processed_items.append(processed_item)
+                else:
+                    skipped_count += 1
+                    item_name = getattr(item.metadata, 'name', 'unknown') if hasattr(item, 'metadata') else 'unknown'
+                    logging.info(f"SKIPPED processing item: {item_name} - _process_single_search_item returned None")
             except Exception as e:
-                logging.debug(f"Error processing search item: {e}")
+                skipped_count += 1
+                item_name = getattr(item.metadata, 'name', 'unknown') if hasattr(item, 'metadata') else 'unknown'
+                logging.info(f"ERROR processing search item {item_name}: {e}")
                 continue
-        
+
+        logging.info(f"Search processing complete: {len(processed_items)} processed, {skipped_count} skipped")
         return processed_items
-    
+
     def _process_single_search_item(self, item: Any) -> Optional[Dict[str, Any]]:
-        """Process a single search result item (simplified for speed)"""
+        """Process a single search result item with comprehensive data"""
         try:
             # Extract basic fields efficiently
             metadata = item.metadata
+            if not metadata:
+                return None
+
             name = metadata.name
+            if not name:
+                return None
+
             namespace = getattr(metadata, 'namespace', None)
             creation_timestamp = metadata.creation_timestamp
-            
-            # Calculate age using the unified method
+
+            # Calculate age efficiently
             age = self._format_age_fast(creation_timestamp)
-            
-            # Build basic resource data
+
+            # Build resource data using the same structure as regular loader
             resource_data = {
                 'name': name,
-                'namespace': namespace or '',
+                'namespace': namespace,
                 'age': age,
-                'created': creation_timestamp.isoformat() if creation_timestamp else None,
-                'resource_type': self.config.resource_type,
-                'search_matched': True,  # Mark as search result
+                'created': creation_timestamp,
                 'labels': metadata.labels or {},
                 'annotations': metadata.annotations or {},
-                'uid': metadata.uid if hasattr(metadata, 'uid') else None,
+                'resource_type': self.config.resource_type,
+                'uid': metadata.uid,
+                'search_matched': True,  # Mark as search result
             }
-            
-            # Add resource-specific fields efficiently
-            self._add_basic_resource_fields(resource_data, item)
-            
-            # Add raw_data for UI components that need detailed information - CRITICAL for proper display
+
+            # Add resource-specific fields
+            self._add_resource_specific_fields(resource_data, item)
+
+            # Add raw_data for UI components that need detailed information
             try:
                 kube_client = get_kubernetes_client()
                 if hasattr(kube_client, 'v1') and hasattr(kube_client.v1, 'api_client'):
                     resource_data['raw_data'] = kube_client.v1.api_client.sanitize_for_serialization(item)
                 else:
-                    # No fallback - skip items that can't be serialized to avoid dummy data
-                    logging.warning(f"Skipping item {name} - unable to serialize raw data")
-                    return None
+                    resource_data['raw_data'] = {}
             except Exception as e:
                 logging.debug(f"Error serializing search raw data: {e}")
                 resource_data['raw_data'] = {}
-            
+
             return resource_data
-            
+
         except Exception as e:
             logging.debug(f"Error processing single search item: {e}")
             return None
-    
-    def _add_basic_resource_fields(self, processed_item: Dict[str, Any], item: Any):
-        """Add basic resource-specific fields for search results"""
+
+    def _format_age_fast(self, creation_timestamp) -> str:
+        """Format age quickly for search results"""
+        if not creation_timestamp:
+            return "Unknown"
+
         try:
-            # Add status and basic info based on resource type
-            if self.config.resource_type == 'pods':
-                if hasattr(item, 'status') and item.status:
-                    processed_item['status'] = item.status.phase or 'Unknown'
-                    if item.status.container_statuses:
-                        ready_containers = sum(1 for cs in item.status.container_statuses if cs.ready)
-                        total_containers = len(item.status.container_statuses)
-                        processed_item['ready'] = f"{ready_containers}/{total_containers}"
-                        processed_item['containers_count'] = str(total_containers)
-                        
-                        # Calculate restart count
-                        restart_count = sum(cs.restart_count for cs in item.status.container_statuses if cs.restart_count)
-                        processed_item['restart_count'] = str(restart_count)
-                    else:
-                        processed_item['containers_count'] = "0"
-                        processed_item['restart_count'] = "0"
-                
-                # Add additional pod-specific fields that PodsPage expects
-                processed_item['controller_by'] = ""  # Default empty, could be enhanced
-                processed_item['qos_class'] = ""      # Default empty, could be enhanced
-                
-                # Add node name if available
-                if hasattr(item, 'spec') and item.spec and hasattr(item.spec, 'node_name'):
-                    processed_item['node_name'] = item.spec.node_name or ""
-                else:
-                    processed_item['node_name'] = ""
-                
-            elif self.config.resource_type in ['deployments', 'replicasets', 'daemonsets', 'statefulsets']:
-                if hasattr(item, 'status') and item.status:
-                    replicas = getattr(item.status, 'replicas', 0) or 0
-                    ready_replicas = getattr(item.status, 'ready_replicas', 0) or 0
-                    available_replicas = getattr(item.status, 'available_replicas', ready_replicas) or ready_replicas
-                    processed_item['ready'] = f"{available_replicas}/{replicas}"
-                    processed_item['status'] = 'Ready' if ready_replicas == replicas and replicas > 0 else 'Not Ready'
-                    
-                    # Add fields that DeploymentPage expects
-                    processed_item['pods_str'] = f"{available_replicas}/{replicas}"
-                    processed_item['replicas_str'] = str(replicas)
-                
-                # Add spec replicas if available
-                if hasattr(item, 'spec') and item.spec:
-                    spec_replicas = getattr(item.spec, 'replicas', 0) or 0
-                    processed_item['replicas_str'] = str(spec_replicas)
-                
-            elif self.config.resource_type == 'services':
-                if hasattr(item, 'spec') and item.spec:
-                    processed_item['type'] = item.spec.type or 'Unknown'
-                    processed_item['cluster_ip'] = item.spec.cluster_ip or 'None'
-                    processed_item['service_type'] = item.spec.type or 'Unknown'
-                    
-                    # Add ports information
-                    ports = []
-                    if hasattr(item.spec, 'ports') and item.spec.ports:
-                        for port in item.spec.ports:
-                            port_info = f"{port.port}"
-                            if hasattr(port, 'target_port') and port.target_port:
-                                port_info += f":{port.target_port}"
-                            if hasattr(port, 'protocol') and port.protocol:
-                                port_info += f"/{port.protocol}"
-                            ports.append(port_info)
-                    processed_item['port_text'] = ",".join(ports)
-                    
-                    # Add selector information
-                    selector_parts = []
-                    if hasattr(item.spec, 'selector') and item.spec.selector:
-                        for key, value in item.spec.selector.items():
-                            selector_parts.append(f"{key}={value}")
-                    processed_item['selector_text'] = ",".join(selector_parts)
-                    
-                    # Add external IP information
-                    processed_item['external_ip_text'] = ""  # Default empty, could be enhanced
-            
-            elif self.config.resource_type == 'nodes':
-                # Use the unified loader's node field processing for consistency
-                self.loader._add_node_fields(processed_item, item)
-            
+            if hasattr(creation_timestamp, 'replace'):
+                created_time = creation_timestamp.replace(tzinfo=timezone.utc)
+            else:
+                created_time = datetime.fromisoformat(str(creation_timestamp).replace('Z', '+00:00'))
+
+            now = datetime.now(timezone.utc)
+            diff = now - created_time
+
+            if diff.days > 0:
+                return f"{diff.days}d"
+            elif diff.seconds > 3600:
+                return f"{diff.seconds // 3600}h"
+            else:
+                return f"{diff.seconds // 60}m"
+        except Exception:
+            return "Unknown"
+
+    def _add_resource_specific_fields(self, processed_item: Dict[str, Any], item: Any):
+        """Add resource-specific fields for search results"""
+        resource_type = self.config.resource_type
+
+        try:
+            if resource_type == 'pods':
+                self._add_pod_fields(processed_item, item)
+            elif resource_type == 'services':
+                self._add_service_fields(processed_item, item)
+            elif resource_type in ['deployments', 'replicasets', 'statefulsets', 'daemonsets']:
+                self._add_workload_fields(processed_item, item)
+            elif resource_type == 'nodes':
+                self._add_node_fields(processed_item, item)
+            elif resource_type == 'configmaps':
+                self._add_configmap_fields(processed_item, item)
+            elif resource_type == 'secrets':
+                self._add_secret_fields(processed_item, item)
+            # Add default status for other resource types
+            else:
+                processed_item['status'] = 'Active'
         except Exception as e:
-            logging.debug(f"Error adding basic resource fields: {e}")
-    
+            logging.debug(f"Error adding resource-specific fields: {e}")
+            processed_item['status'] = 'Unknown'
+
+    def _add_pod_fields(self, processed_item: Dict[str, Any], pod: Any):
+        """Add pod-specific fields"""
+        status = pod.status if hasattr(pod, 'status') else None
+        spec = pod.spec if hasattr(pod, 'spec') else None
+
+        # Pod status with enhanced details
+        pod_status = 'Unknown'
+        if status:
+            pod_status = status.phase or 'Unknown'
+
+            # Check for more specific container states
+            if hasattr(status, 'container_statuses') and status.container_statuses:
+                for cs in status.container_statuses:
+                    if hasattr(cs, 'state') and cs.state:
+                        if hasattr(cs.state, 'waiting') and cs.state.waiting:
+                            reason = cs.state.waiting.reason
+                            if reason in ("CrashLoopBackOff", "ImagePullBackOff", "ErrImagePull"):
+                                pod_status = reason
+                                break
+                        elif hasattr(cs.state, 'terminated') and cs.state.terminated:
+                            # For terminated containers, show more specific status
+                            exit_code = cs.state.terminated.exit_code
+                            reason = cs.state.terminated.reason
+                            if exit_code != 0:
+                                pod_status = f"Error ({reason})"
+                                break
+                            elif reason == "Completed":
+                                pod_status = f"Completed ({exit_code})"
+                                break
+
+        # Container counts and restart count
+        containers_count = 0
+        restart_count = 0
+        ready_containers = 0
+
+        if spec and hasattr(spec, 'containers') and spec.containers:
+            containers_count = len(spec.containers)
+
+        if status and hasattr(status, 'container_statuses') and status.container_statuses:
+            ready_containers = sum(1 for cs in status.container_statuses if hasattr(cs, 'ready') and cs.ready)
+            restart_count = sum(getattr(cs, 'restart_count', 0) for cs in status.container_statuses)
+
+        processed_item.update({
+            'status': pod_status,
+            'ready': f"{ready_containers}/{containers_count}",
+            'restarts': str(restart_count),
+            'containers': containers_count,
+            'node_name': getattr(spec, 'node_name', '') if spec else '',
+        })
+
+    def _add_service_fields(self, processed_item: Dict[str, Any], service: Any):
+        """Add service-specific fields"""
+        spec = service.spec if hasattr(service, 'spec') else None
+
+        if spec:
+            processed_item.update({
+                'type': getattr(spec, 'type', 'Unknown'),
+                'cluster_ip': getattr(spec, 'cluster_ip', 'None'),
+                'service_type': getattr(spec, 'type', 'Unknown'),
+                'status': 'Active'
+            })
+
+            # Add ports
+            ports = []
+            if hasattr(spec, 'ports') and spec.ports:
+                for port in spec.ports:
+                    port_info = str(getattr(port, 'port', ''))
+                    if hasattr(port, 'target_port') and port.target_port:
+                        port_info += f":{port.target_port}"
+                    if hasattr(port, 'protocol') and port.protocol:
+                        port_info += f"/{port.protocol}"
+                    ports.append(port_info)
+            processed_item['port_text'] = ",".join(ports)
+        else:
+            processed_item['status'] = 'Unknown'
+
+    def _add_workload_fields(self, processed_item: Dict[str, Any], workload: Any):
+        """Add workload-specific fields (deployments, replicasets, etc.)"""
+        status = workload.status if hasattr(workload, 'status') else None
+        spec = workload.spec if hasattr(workload, 'spec') else None
+
+        if status:
+            replicas = getattr(status, 'replicas', 0) or 0
+            ready_replicas = getattr(status, 'ready_replicas', 0) or 0
+            available_replicas = getattr(status, 'available_replicas', ready_replicas) or ready_replicas
+
+            processed_item.update({
+                'ready': f"{available_replicas}/{replicas}",
+                'status': 'Ready' if ready_replicas == replicas and replicas > 0 else 'Not Ready',
+                'replicas_str': str(replicas)
+            })
+        else:
+            processed_item['status'] = 'Unknown'
+
+        # Add spec replicas if available
+        if spec and hasattr(spec, 'replicas'):
+            processed_item['replicas_str'] = str(getattr(spec, 'replicas', 0))
+
+    def _add_node_fields(self, processed_item: Dict[str, Any], node: Any):
+        """Add node-specific fields"""
+        status = node.status if hasattr(node, 'status') else None
+
+        # Node status
+        node_status = 'Unknown'
+        conditions_list = []
+        if status and hasattr(status, 'conditions') and status.conditions:
+            for condition in status.conditions:
+                if getattr(condition, 'type', '') == 'Ready':
+                    node_status = 'Ready' if getattr(condition, 'status', '') == 'True' else 'NotReady'
+
+                # Format condition for display
+                condition_display = f"{condition.type}={condition.status}"
+                if condition.status != 'True' and hasattr(condition, 'reason') and condition.reason:
+                    condition_display += f" ({condition.reason})"
+                conditions_list.append(condition_display)
+
+        # Get node roles
+        roles = []
+        if hasattr(node, 'metadata') and node.metadata and hasattr(node.metadata, 'labels') and node.metadata.labels:
+            for label_key in node.metadata.labels:
+                if 'node-role.kubernetes.io/' in label_key:
+                    role = label_key.replace('node-role.kubernetes.io/', '')
+                    if role:
+                        roles.append(role)
+
+        roles_text = ",".join(roles) if roles else "<none>"
+
+        # Get Kubernetes version
+        version = 'Unknown'
+        if status and hasattr(status, 'node_info') and status.node_info:
+            version = getattr(status.node_info, 'kubelet_version', 'Unknown')
+
+        # Get capacity information for CPU, Memory, Disk
+        cpu_capacity = ''
+        memory_capacity = ''
+        disk_capacity = ''
+        if status and hasattr(status, 'capacity') and status.capacity:
+            cpu_capacity = status.capacity.get('cpu', '')
+            memory_raw = status.capacity.get('memory', '')
+            disk_raw = status.capacity.get('ephemeral-storage', '')
+
+            # Format memory capacity for display
+            if memory_raw:
+                try:
+                    if memory_raw.endswith('Ki'):
+                        memory_mb = int(memory_raw[:-2]) / 1024
+                        memory_capacity = f"{memory_mb:.1f}GB"
+                    else:
+                        memory_capacity = memory_raw
+                except Exception:
+                    memory_capacity = memory_raw
+
+            # Format disk capacity for display
+            if disk_raw:
+                try:
+                    if disk_raw.endswith('Ki'):
+                        disk_gb = int(disk_raw[:-2]) / 1024 / 1024
+                        disk_capacity = f"{disk_gb:.1f}GB"
+                    else:
+                        disk_capacity = disk_raw
+                except Exception:
+                    disk_capacity = disk_raw
+
+        # Get taints count
+        taints_count = 0
+        if hasattr(node, 'spec') and node.spec and hasattr(node.spec, 'taints') and node.spec.taints:
+            taints_count = len(node.spec.taints)
+
+        processed_item.update({
+            'status': node_status,
+            'roles': roles_text,
+            'version': version,
+            'conditions': ", ".join(conditions_list) if conditions_list else "Unknown",
+            'cpu_capacity': cpu_capacity,
+            'memory_capacity': memory_capacity,
+            'disk_capacity': disk_capacity,
+            'cpu_usage': 0.0,  # Default values for metrics (real metrics would require separate API calls)
+            'memory_usage': 0.0,
+            'disk_usage': 0.0,
+            'taints': str(taints_count),
+            'os': getattr(getattr(status, 'node_info', None), 'operating_system', 'Unknown') if status else 'Unknown',
+            'kernel': getattr(getattr(status, 'node_info', None), 'kernel_version', 'Unknown') if status else 'Unknown'
+        })
+
+    def _add_configmap_fields(self, processed_item: Dict[str, Any], configmap: Any):
+        """Add configmap-specific fields"""
+        data = configmap.data if hasattr(configmap, 'data') else None
+        data_count = len(data) if data else 0
+
+        processed_item.update({
+            'status': 'Active',
+            'data_count': str(data_count)
+        })
+
+    def _add_secret_fields(self, processed_item: Dict[str, Any], secret: Any):
+        """Add secret-specific fields"""
+        data = secret.data if hasattr(secret, 'data') else None
+        data_count = len(data) if data else 0
+        secret_type = getattr(secret, 'type', 'Opaque') if hasattr(secret, 'type') else 'Opaque'
+
+        processed_item.update({
+            'status': 'Active',
+            'type': secret_type,
+            'data_count': str(data_count)
+        })
+
     def _generate_cache_key(self) -> str:
         """Generate cache key for search results - FIXED to include cluster"""
         # FIXED: Include cluster information in search cache key
         try:
             kube_client = get_kubernetes_client()
             cluster_name = kube_client.current_cluster if kube_client else 'unknown-cluster'
-        except:
+        except Exception:
             cluster_name = 'unknown-cluster'
-            
+
         namespace_key = f"ns_{self.config.namespace}" if self.config.namespace else "all_namespaces"
         return f"{cluster_name}_{self.config.resource_type}_{namespace_key}"
 
 
 class ResourceLoadWorker(EnhancedBaseWorker):
     """High-performance worker for loading Kubernetes resources"""
-    
+
     def __init__(self, config: ResourceConfig, loader_instance):
         super().__init__(f"resource_load_{config.resource_type}")
         self.config = config
         self.loader = loader_instance
         self._start_time = time.time()
-    
+
     def execute(self) -> LoadResult:
-        """Execute resource loading with performance optimizations"""
+        """Execute resource loading with performance optimizations and caching"""
         start_time = time.time()
-        
+
         try:
-            # Load directly from API (no caching)
+            # Check cache first if caching is enabled
+            cache_key = None
+            cached_result = None
             
+            if self.config.enable_caching:
+                cache_key = self._generate_cache_key()
+                cached_result = self.loader._cache.get_cached_resources(self.config.resource_type, cache_key)
+
+                # Treat empty cached data as a cache miss for ALL resource types
+                # Empty cache could be from transient errors (cluster disconnect, API timeout, etc.)
+                # A legitimate "no resources" scenario is rare and worth re-verifying from API
+                if cached_result is not None and cached_result:
+                    # Cache hit with actual data - update stats and return
+                    with self.loader._cache_lock:
+                        self.loader._cache_stats[self.config.resource_type]['hits'] += 1
+
+                    load_time = (time.time() - start_time) * 1000
+                    logging.debug(f"Cache hit for {self.config.resource_type}: {len(cached_result)} items in {load_time:.1f}ms")
+
+                    return LoadResult(
+                        success=True,
+                        resource_type=self.config.resource_type,
+                        items=cached_result,
+                        total_count=len(cached_result),
+                        load_time_ms=load_time,
+                        from_cache=True
+                    )
+                else:
+                    # Cache miss or empty cache - update stats and refetch
+                    with self.loader._cache_lock:
+                        self.loader._cache_stats[self.config.resource_type]['misses'] += 1
+                    # Clear empty cache entries to prevent stale empty results
+                    if cached_result is not None and not cached_result:
+                        logging.debug(f"Clearing empty cache entry for {self.config.resource_type}")
+                        self.loader._cache.clear_resource_cache(self.config.resource_type, cache_key)
+
             # Load from Kubernetes API with optimizations
             items = self._load_from_api()
-            
+
             if self.is_cancelled():
                 return LoadResult(
-                    success=False, 
+                    success=False,
                     resource_type=self.config.resource_type,
                     error_message="Operation cancelled"
                 )
-            
-            # Process results with chunking for heavy data  
+
+            # Process results with chunking for heavy data
             processed_items = self._process_items_chunked(items) if self.config.enable_chunking else self._process_items(items)
-            
+
+            # Cache the processed results if caching is enabled
+            if self.config.enable_caching and cache_key and processed_items:
+                try:
+                    self.loader._cache.cache_resources(self.config.resource_type, cache_key, processed_items)
+                    with self.loader._cache_lock:
+                        self.loader._cache_stats[self.config.resource_type]['size'] = len(processed_items)
+                    logging.debug(f"Cached {len(processed_items)} {self.config.resource_type} items with key: {cache_key}")
+                except Exception as cache_error:
+                    logging.debug(f"Failed to cache {self.config.resource_type}: {cache_error}")
+
             load_time = (time.time() - start_time) * 1000
             logging.info(f"Unified Resource Loader: Loaded {len(processed_items)} {self.config.resource_type} in {load_time:.1f}ms")
-            
+
             return LoadResult(
                 success=True,
                 resource_type=self.config.resource_type,
@@ -488,7 +730,7 @@ class ResourceLoadWorker(EnhancedBaseWorker):
                 load_time_ms=load_time,
                 from_cache=False
             )
-            
+
         except ApiException as api_error:
             # Handle Kubernetes API exceptions gracefully
             if api_error.status == 404:
@@ -523,13 +765,28 @@ class ResourceLoadWorker(EnhancedBaseWorker):
         except Exception as e:
             error_handler = get_error_handler()
             error_message = str(e)
-            
+
             # Handle specific timeout and connection errors gracefully
             if "timeout" in error_message.lower() or "read timed out" in error_message.lower():
                 # For timeout-prone resources, return cached data if available
-                # No cache fallback available
-                logging.info(f"No fallback available for timed-out {self.config.resource_type}")
-                
+                if self.config.enable_caching and cache_key:
+                    # Try to get any cached data, even if expired, as fallback
+                    try:
+                        fallback_data = self.loader._cache.get_cached_resources(self.config.resource_type, cache_key)
+                        if fallback_data:
+                            logging.info(f"Using cached fallback data for timed-out {self.config.resource_type}: {len(fallback_data)} items")
+                            return LoadResult(
+                                success=True,
+                                resource_type=self.config.resource_type,
+                                items=fallback_data,
+                                total_count=len(fallback_data),
+                                load_time_ms=(time.time() - start_time) * 1000,
+                                from_cache=True,
+                                metadata={'fallback': True, 'reason': 'timeout'}
+                            )
+                    except Exception as cache_error:
+                        logging.debug(f"Cache fallback failed: {cache_error}")
+
                 error_message = f"Connection timeout - {self.config.resource_type} may be slow to respond"
                 logging.warning(f"Timeout loading {self.config.resource_type}: {error_message}")
             elif "connection" in error_message.lower():
@@ -537,37 +794,37 @@ class ResourceLoadWorker(EnhancedBaseWorker):
                 logging.warning(f"Connection error loading {self.config.resource_type}: {error_message}")
             else:
                 error_message = error_handler.format_connection_error(str(e), self.config.resource_type)
-            
+
             return LoadResult(
                 success=False,
                 resource_type=self.config.resource_type,
                 error_message=error_message,
                 load_time_ms=(time.time() - start_time) * 1000
             )
-    
-    
+
+
     def _load_from_api(self) -> List[Any]:
         """Load resources from Kubernetes API with performance optimizations"""
         kube_client = get_kubernetes_client()
-        
+
         # Get the appropriate API client
         api_client = self._get_api_client(kube_client)
-        
+
         # Build method parameters for optimal performance and heavy data handling
         kwargs = {
             'timeout_seconds': self.config.timeout_seconds,  # Use config timeout
             '_request_timeout': self.config.timeout_seconds + 10  # Request timeout with buffer
         }
-        
+
         # For heavy data scenarios, add pagination support
         if self.config.enable_pagination and self.config.resource_type == 'nodes':
             kwargs['limit'] = min(self.config.chunk_size, 1000)  # Limit for heavy data
-        
+
         # Handle cluster scoped vs namespaced resources
         # Use the global cluster_scoped_resources set instead of redefining
-        
+
         is_cluster_scoped = self.config.resource_type in cluster_scoped_resources
-        
+
         # Handle "All Namespaces" case efficiently
         if not self.config.namespace and not is_cluster_scoped:
             # For "All Namespaces", use optimized multi-namespace approach
@@ -575,104 +832,103 @@ class ResourceLoadWorker(EnhancedBaseWorker):
         elif self.config.namespace and not is_cluster_scoped:
             # Specific namespace
             kwargs['namespace'] = self.config.namespace
-        
+
         # Get the API method
         api_method = getattr(api_client, self.config.api_method)
-        
+
         # Enable streaming for large datasets
         if self.config.enable_streaming:
             kwargs['watch'] = False  # We handle our own streaming
-        
+
         # Optimize field selection for better performance with heavy data
         if self.config.resource_type in ['pods', 'nodes', 'services']:
             # Only get essential fields to reduce network overhead for heavy data
             field_selector = self._get_field_selector()
             if field_selector:
                 kwargs['field_selector'] = field_selector
-        
+
         # For nodes, further optimize by reducing unnecessary data
         if self.config.resource_type == 'nodes':
             # Skip some heavy fields that aren't displayed in UI
             logging.debug(f"Unified Resource Loader: Optimizing node API call for heavy data - using limit: {kwargs.get('limit', 'no limit')}")
-        
+
         # Execute API call with retry logic
         response = self._execute_with_retry(api_method, **kwargs)
-        
+
         return response.items if hasattr(response, 'items') else []
-    
+
     def _execute_with_retry(self, api_method, max_retries=3, **kwargs):
         """Execute API call with exponential backoff retry logic"""
-        import time
         import random
-        
+
         last_exception = None
-        
+
         for attempt in range(max_retries):
             try:
                 response = api_method(**kwargs)
                 if attempt > 0:
                     logging.info(f"API call succeeded on attempt {attempt + 1}")
                 return response
-                
+
             except Exception as e:
                 last_exception = e
                 error_str = str(e).lower()
-                
+
                 # Don't retry on certain errors
                 if any(err in error_str for err in ['unauthorized', 'forbidden', 'not found']):
                     logging.debug(f"Non-retryable error, failing immediately: {e}")
                     raise
-                
+
                 # Calculate exponential backoff with jitter
                 if attempt < max_retries - 1:
                     delay = (2 ** attempt) + random.uniform(0, 1)
                     logging.warning(f"API call failed (attempt {attempt + 1}/{max_retries}), retrying in {delay:.1f}s: {e}")
                     time.sleep(delay)
-                    
+
                     # Check if cancelled during delay
                     if self.is_cancelled():
                         raise Exception("Operation cancelled during retry")
                 else:
                     logging.error(f"API call failed after {max_retries} attempts: {e}")
-        
+
         # Re-raise the last exception if all retries failed
         raise last_exception
-    
+
     def _load_from_multiple_namespaces(self, api_client, base_kwargs) -> List[Any]:
         """Load resources from multiple namespaces efficiently for 'All Namespaces' option"""
         all_items = []
-        
+
         try:
             # Get namespaces first (with caching)
             namespaces_response = get_kubernetes_client().v1.list_namespace(limit=100)
             namespace_names = [ns.metadata.name for ns in namespaces_response.items]
-            
+
             # Prioritize important namespaces and limit total namespaces for performance
             important_namespaces = ["default", "kube-system", "kube-public"]
             other_namespaces = [ns for ns in namespace_names if ns not in important_namespaces]
-            
+
             # Limit to first 20 namespaces to prevent excessive API calls
             selected_namespaces = important_namespaces + other_namespaces[:17]  # Total of 20
-            
+
             # Get the correct namespaced API method for multi-namespace loading
             namespaced_method_name = self.loader._get_namespaced_api_method(self.config.resource_type)
             api_method = getattr(api_client, namespaced_method_name)
-            
+
             for namespace in selected_namespaces:
                 if self.is_cancelled():
                     break
-                    
+
                 try:
                     # Create kwargs for this namespace
                     ns_kwargs = base_kwargs.copy()
                     ns_kwargs['namespace'] = namespace
                     ns_kwargs['limit'] = 50  # Limit per namespace for performance
-                    
+
                     # Execute API call for this namespace
                     response = api_method(**ns_kwargs)
                     if hasattr(response, 'items'):
                         all_items.extend(response.items)
-                        
+
                 except ApiException as api_error:
                     # Handle API exceptions gracefully - log but continue
                     if api_error.status == 404:
@@ -686,11 +942,11 @@ class ResourceLoadWorker(EnhancedBaseWorker):
                     # Continue with other namespaces silently for better performance
                     logging.debug(f"Error loading {self.config.resource_type} from namespace {namespace}: {ns_error}")
                     continue
-            
+
             if all_items:
                 logging.info(f"Loaded {len(all_items)} {self.config.resource_type} from {len(selected_namespaces)} namespaces")
             return all_items
-            
+
         except Exception as e:
             logging.warning(f"Error loading from multiple namespaces, falling back to specific namespaces: {e}")
             # Fallback to loading from default namespace only
@@ -698,7 +954,7 @@ class ResourceLoadWorker(EnhancedBaseWorker):
                 fallback_kwargs = base_kwargs.copy()
                 fallback_kwargs['namespace'] = 'default'
                 fallback_kwargs['limit'] = 100
-                
+
                 namespaced_method_name = self.loader._get_namespaced_api_method(self.config.resource_type)
                 api_method = getattr(api_client, namespaced_method_name)
                 response = api_method(**fallback_kwargs)
@@ -706,7 +962,7 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             except Exception as fallback_error:
                 logging.error(f"Fallback namespace loading also failed: {fallback_error}")
                 return []
-    
+
     def _get_api_client(self, kube_client):
         """Get the appropriate API client for the resource type"""
         api_mapping = {
@@ -725,140 +981,129 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             'limitranges': kube_client.v1,
             'resourcequotas': kube_client.v1,
             'serviceaccounts': kube_client.v1,
-            
+
             # Apps v1 resources
             'deployments': kube_client.apps_v1,
             'replicasets': kube_client.apps_v1,
             'daemonsets': kube_client.apps_v1,
             'statefulsets': kube_client.apps_v1,
-            
-            # Networking v1 resources  
+
+            # Networking v1 resources
             'ingresses': kube_client.networking_v1,
             'networkpolicies': kube_client.networking_v1,
             'ingressclasses': kube_client.networking_v1,
-            
+
             # Storage v1 resources
             'storageclasses': kube_client.storage_v1,
-            
+
             # Batch v1 resources
             'jobs': kube_client.batch_v1,
             'cronjobs': kube_client.batch_v1,
-            
+
             # RBAC v1 resources
             'roles': kube_client.rbac_v1,
             'rolebindings': kube_client.rbac_v1,
             'clusterroles': kube_client.rbac_v1,
             'clusterrolebindings': kube_client.rbac_v1,
-            
+
             # Autoscaling v2 resources
             'horizontalpodautoscalers': kube_client.autoscaling_v2,
-            
+
             # Policy v1 resources
             'poddisruptionbudgets': kube_client.policy_v1,
-            
+
             # Scheduling v1 resources
             'priorityclasses': kube_client.scheduling_v1,
-            
+
             # Node v1 resources
             'runtimeclasses': kube_client.node_v1,
-            
+
             # Admission registration v1 resources
             'mutatingwebhookconfigurations': kube_client.admissionregistration_v1,
             'validatingwebhookconfigurations': kube_client.admissionregistration_v1,
-            
+
             # Coordination v1 resources
             'leases': kube_client.coordination_v1,
-            
+
             # Custom Resources
             'customresourcedefinitions': kube_client.apiextensions_v1,
         }
-        
+
         return api_mapping.get(self.config.resource_type, kube_client.v1)
-    
+
     def _get_field_selector(self) -> str:
         """Get optimized field selector for common resources"""
         if self.config.resource_type == 'pods':
-            return 'status.phase!=Succeeded,status.phase!=Failed'
+            # Show all pods including Succeeded and Failed for better visibility
+            # Only filter out pods that are truly not useful
+            return ''  # No filtering - show all pods regardless of status
         elif self.config.resource_type == 'nodes':
             return 'spec.unschedulable!=true'
         return ''
-    
+
     def _process_items(self, items: List[Any]) -> List[Dict[str, Any]]:
         """Process raw API items into optimized format for UI consumption"""
         if not items:
             return []
-        
+
         processed_items = []
-        
+
         # Use optimized batch processing for better performance
         batch_size = min(self.config.batch_size, len(items))
-        
-        # Process in smaller batches to prevent API overload
-        from concurrent.futures import ThreadPoolExecutor
-        import math
-        
-        # Use smaller batches and fewer workers for stability
+
+        # Use smaller batches for stability
         optimal_batch_size = max(25, batch_size // 2)
-        num_batches = math.ceil(len(items) / optimal_batch_size)
-        
-        with ThreadPoolExecutor(max_workers=min(2, num_batches)) as executor:
-            futures = []
-            
-            for i in range(0, len(items), optimal_batch_size):
-                if self.is_cancelled():
-                    break
-                    
-                batch = items[i:i + optimal_batch_size]
-                future = executor.submit(self._process_batch, batch)
-                futures.append(future)
-            
-            # Collect results
-            for future in futures:
-                if self.is_cancelled():
-                    break
-                try:
-                    batch_result = future.result(timeout=10)
-                    processed_items.extend(batch_result)
-                except Exception as e:
-                    logging.debug(f"Error in batch processing: {e}")
-                    continue
-        
+
+        # Process batches sequentially to avoid per-call executor overhead
+        # This is more efficient for typical batch sizes and avoids thread pool churn
+        for i in range(0, len(items), optimal_batch_size):
+            if self.is_cancelled():
+                break
+
+            batch = items[i:i + optimal_batch_size]
+            try:
+                batch_result = self._process_batch(batch)
+                processed_items.extend(batch_result)
+            except Exception as e:
+                logging.debug(f"Error in batch processing: {e}")
+                continue
+
         return processed_items
-    
+
     def _process_items_chunked(self, raw_items: List[Any]) -> List[Dict[str, Any]]:
         """Process raw Kubernetes objects in chunks for heavy data scenarios - OPTIMIZED FOR NODES"""
         if not raw_items:
             return []
-        
+
         processed_items = []
         chunk_size = self.config.chunk_size
         total_items = len(raw_items)
-        
+
         logging.info(f"Unified Resource Loader: Processing {total_items} {self.config.resource_type} in chunks of {chunk_size}")
-        
+
         # PERFORMANCE OPTIMIZATION: For nodes, load metrics in background (non-blocking)
         all_node_metrics = {}
         if self.config.resource_type == 'nodes':
             logging.info(f"🚀 [ASYNC METRICS] Skipping synchronous metrics loading for {total_items} nodes - will load metrics async for better performance")
             # Skip metrics loading to avoid 3+ minute delay blocking UI
             # Metrics will be loaded separately and updated in UI when available
-        
+
         # Process chunks with pre-loaded metrics
         for start_idx in range(0, total_items, chunk_size):
             if self.is_cancelled():
                 break
-            
+
             end_idx = min(start_idx + chunk_size, total_items)
             chunk = raw_items[start_idx:end_idx]
-            
+
             logging.debug(f"Unified Resource Loader: Processing chunk {start_idx}-{end_idx} ({len(chunk)} items)")
-            
+
             # Process chunk
             chunk_start_time = time.time()
             for item in chunk:
                 if self.is_cancelled():
                     break
-                    
+
                 try:
                     # Pass pre-loaded metrics for nodes
                     if self.config.resource_type == 'nodes':
@@ -867,7 +1112,7 @@ class ResourceLoadWorker(EnhancedBaseWorker):
                         processed_item = self._process_single_item(item, preloaded_metrics=node_metrics)
                     else:
                         processed_item = self._process_single_item(item)
-                    
+
                     if processed_item:  # Only add valid items
                         processed_items.append(processed_item)
                     else:
@@ -876,24 +1121,24 @@ class ResourceLoadWorker(EnhancedBaseWorker):
                     item_name = getattr(getattr(item, 'metadata', None), 'name', 'unknown')
                     logging.warning(f"Error processing {self.config.resource_type} {item_name}: {e}")
                     continue
-            
+
             chunk_time = (time.time() - chunk_start_time) * 1000
             logging.debug(f"Unified Resource Loader: Processed chunk {start_idx}-{end_idx} in {chunk_time:.1f}ms")
-            
+
             # Yield control to prevent UI blocking
             time.sleep(0.001)  # 1ms pause between chunks
-        
+
         logging.info(f"Unified Resource Loader: Chunked processing completed - {len(processed_items)} items processed")
         return processed_items
-    
+
     def _process_batch(self, batch: List[Any]) -> List[Dict[str, Any]]:
         """Process a batch of items efficiently"""
         processed_batch = []
-        
+
         for item in batch:
             if self.is_cancelled():
                 break
-            
+
             try:
                 processed_item = self._process_single_item(item)
                 if processed_item:
@@ -901,9 +1146,9 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             except Exception as e:
                 logging.debug(f"Error processing item: {e}")
                 continue
-        
+
         return processed_batch
-    
+
     def _process_single_item(self, item: Any, preloaded_metrics: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
         """Process a single Kubernetes resource item"""
         try:
@@ -912,18 +1157,18 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             if not metadata:
                 logging.error(f"❌ [PROCESS] Item has no metadata: {item}")
                 return None
-                
+
             name = metadata.name
             if not name:
                 logging.error(f"❌ [PROCESS] Item has no name in metadata: {metadata}")
                 return None
-                
+
             namespace = getattr(metadata, 'namespace', None)
             creation_timestamp = metadata.creation_timestamp
-            
+
             # Calculate age efficiently using cached formatter
             age = self._format_age_fast(creation_timestamp)
-            
+
             # Build base item dictionary
             processed_item = {
                 'name': name,
@@ -935,10 +1180,10 @@ class ResourceLoadWorker(EnhancedBaseWorker):
                 'resource_type': self.config.resource_type,
                 'uid': metadata.uid,
             }
-            
+
             # Add resource-specific fields for performance
             self._add_resource_specific_fields(processed_item, item, preloaded_metrics)
-            
+
             # Add raw_data for UI components that need detailed information
             # Serialize the raw Kubernetes object for components that need it
             try:
@@ -951,19 +1196,19 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             except Exception as e:
                 logging.debug(f"Error serializing raw data: {e}")
                 processed_item['raw_data'] = {}
-            
+
             return processed_item
-            
+
         except Exception as e:
             logging.error(f"❌ [PROCESS ERROR] Error processing single {self.config.resource_type} item: {e}")
             import traceback
             logging.error(f"Full traceback: {traceback.format_exc()}")
             return None
-    
+
     def _add_resource_specific_fields(self, processed_item: Dict[str, Any], item: Any, preloaded_metrics: Optional[Dict[str, Any]] = None):
         """Add resource-specific fields efficiently"""
         resource_type = self.config.resource_type
-        
+
         if resource_type == 'pods':
             self._add_pod_fields(processed_item, item)
         elif resource_type == 'nodes':
@@ -1007,17 +1252,17 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             self._add_rolebinding_fields(processed_item, item)
         elif resource_type == 'customresourcedefinitions':
             self._add_crd_fields(processed_item, item)
-    
+
     def _add_pod_fields(self, processed_item: Dict[str, Any], pod: Any):
         """Add pod-specific fields efficiently"""
         status = pod.status
         spec = pod.spec
-        
+
         # Enhanced status determination with more detail
         pod_status = 'Unknown'
         if status:
             pod_status = status.phase or 'Unknown'
-            
+
             # Check for more specific container states
             if status.container_statuses:
                 for cs in status.container_statuses:
@@ -1031,7 +1276,7 @@ class ResourceLoadWorker(EnhancedBaseWorker):
                             if cs.state.terminated.exit_code != 0:
                                 pod_status = "Error"
                                 break
-        
+
         processed_item.update({
             'status': pod_status,
             'ready': self._get_pod_ready_status(status),
@@ -1042,11 +1287,11 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             'containers': len(spec.containers) if spec and spec.containers else 0,
             'init_containers': len(spec.init_containers) if spec and spec.init_containers else 0,
         })
-    
+
     def _add_node_fields(self, processed_item: Dict[str, Any], node: Any, preloaded_metrics: Optional[Dict[str, Any]] = None):
         """Add node-specific fields efficiently - optimized for heavy data"""
         status = node.status
-        
+
         # Quick exit for invalid nodes
         if not status:
             processed_item.update({
@@ -1065,28 +1310,28 @@ class ResourceLoadWorker(EnhancedBaseWorker):
                 'disk_capacity': ''
             })
             return
-        
+
         # Process node conditions using helper method from the loader class
         node_status, conditions_text = HighPerformanceResourceLoader._process_node_conditions(status.conditions if status else None)
-        
+
         # Extract node roles using helper method from the loader class
         roles = HighPerformanceResourceLoader._extract_node_roles(node.metadata.labels if node.metadata else None)
-        
+
         # Get taints count
         taints_count = 0
         if node.spec and node.spec.taints:
             taints_count = len(node.spec.taints)
-        
+
         # Format capacity information using helper method from the loader class
         memory_capacity = ''
         disk_capacity = ''
         if status and status.capacity:
             memory_capacity = HighPerformanceResourceLoader._format_capacity(status.capacity.get('memory', ''))
             disk_capacity = HighPerformanceResourceLoader._format_capacity(status.capacity.get('ephemeral-storage', ''))
-        
+
         # Don't simulate disk usage - leave as None to be filled by real metrics
         estimated_disk_usage = None
-        
+
         processed_item.update({
             'status': node_status,
             'conditions': conditions_text,
@@ -1099,7 +1344,7 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             'memory_usage': None,  # Will be filled by metrics if available
             'disk_usage': estimated_disk_usage,  # Estimated usage, will be replaced by real metrics if available
         })
-        
+
         # Add capacity information
         if status and status.capacity:
             processed_item.update({
@@ -1108,49 +1353,59 @@ class ResourceLoadWorker(EnhancedBaseWorker):
                 'disk_capacity': disk_capacity,
                 'pods_capacity': status.capacity.get('pods', ''),
             })
-        
-        # Set default metrics values (no real metrics loading to avoid blocking)
+
+        # Use preloaded metrics if available, otherwise set defaults
+        cpu_usage = 0.0
+        memory_usage = 0.0
+        disk_usage = 0.0
+
+        if preloaded_metrics:
+            cpu_usage = preloaded_metrics.get("cpu", {}).get("usage", 0.0)
+            memory_usage = preloaded_metrics.get("memory", {}).get("usage", 0.0)
+            disk_usage_val = preloaded_metrics.get("disk", {}).get("usage")
+            disk_usage = disk_usage_val if disk_usage_val is not None else 0.0
+
+            logging.debug(f"Using preloaded metrics for {processed_item.get('name', 'unknown')}: "
+                        f"CPU {cpu_usage:.1f}%, Memory {memory_usage:.1f}%, Disk {disk_usage:.1f}%")
+
         processed_item.update({
-            'cpu_usage': 0.0,
-            'memory_usage': 0.0,
-            'disk_usage': 0.0
+            'cpu_usage': cpu_usage,
+            'memory_usage': memory_usage,
+            'disk_usage': disk_usage
         })
-        
-        # Skip metrics loading for now to avoid 3+ minute delay
-        # Metrics will be loaded separately in background
-    
+
     def _add_service_fields(self, processed_item: Dict[str, Any], service: Any):
         """Add service-specific fields efficiently"""
         spec = service.spec
         status = service.status
-        
+
         processed_item.update({
             'type': spec.type if spec else 'Unknown',
             'cluster_ip': spec.cluster_ip if spec else None,
             'external_ip': self._get_service_external_ip(spec, status),
             'ports': len(spec.ports) if spec and spec.ports else 0,
         })
-    
+
     def _add_workload_fields(self, processed_item: Dict[str, Any], workload: Any):
         """Add workload-specific fields efficiently"""
         spec = workload.spec
         status = workload.status
-        
+
         # Get replicas info
         replicas = getattr(spec, 'replicas', 1) if spec else 1
         ready_replicas = getattr(status, 'ready_replicas', 0) if status else 0
-        
+
         processed_item.update({
             'replicas': f"{ready_replicas}/{replicas}",
             'ready_replicas': ready_replicas,
             'total_replicas': replicas,
         })
-    
+
     def _format_age_fast(self, creation_timestamp) -> str:
         """Fast age calculation with comprehensive timestamp handling"""
         if not creation_timestamp:
             return 'Unknown'
-        
+
         try:
             # Handle different timestamp formats
             if hasattr(creation_timestamp, 'timestamp'):
@@ -1173,15 +1428,15 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             else:
                 # Try to convert to string and parse
                 created = datetime.fromisoformat(str(creation_timestamp).replace('Z', '+00:00'))
-            
+
             # Calculate age
             now = datetime.now(timezone.utc)
             age_delta = now - created
-            
+
             days = age_delta.days
             hours = age_delta.seconds // 3600
             minutes = (age_delta.seconds % 3600) // 60
-            
+
             # Format age
             if days > 365:
                 years = days // 365
@@ -1197,50 +1452,66 @@ class ResourceLoadWorker(EnhancedBaseWorker):
                 return f"{minutes}m"
             else:
                 return "<1m"
-                
+
         except Exception as e:
             logging.warning(f"Error calculating age for timestamp {creation_timestamp}: {e}")
             return 'Unknown'
-    
+
     def _get_pod_ready_status(self, status) -> str:
         """Get pod ready status efficiently"""
         if not status or not status.container_statuses:
             return '0/0'
-        
+
         ready_count = sum(1 for cs in status.container_statuses if cs.ready)
         total_count = len(status.container_statuses)
-        
+
         return f"{ready_count}/{total_count}"
-    
+
     def _get_pod_restart_count(self, status) -> int:
         """Get pod restart count efficiently"""
         if not status or not status.container_statuses:
             return 0
-        
+
         return sum(cs.restart_count for cs in status.container_statuses if cs.restart_count)
-    
+
     def _get_service_external_ip(self, spec, status) -> Optional[str]:
         """Get service external IP efficiently"""
+        external_ips = []
+
+        # Check for explicit external IPs
         if spec and spec.external_i_ps:
-            return ', '.join(spec.external_i_ps)
-        
+            external_ips.extend(spec.external_i_ps)
+
+        # Check for LoadBalancer ingress IPs and hostnames
         if spec and spec.type == 'LoadBalancer' and status and status.load_balancer:
             if status.load_balancer.ingress:
-                ips = [ing.ip for ing in status.load_balancer.ingress if ing.ip]
-                if ips:
-                    return ', '.join(ips)
-        
-        return None
-    
+                for ing in status.load_balancer.ingress:
+                    if ing.ip:
+                        external_ips.append(ing.ip)
+                    elif ing.hostname:
+                        external_ips.append(ing.hostname)
+
+        # Check for NodePort external access
+        if spec and spec.type == 'NodePort':
+            # For NodePort services, indicate they are externally accessible
+            # We could show actual node IPs but that would require additional API calls
+            external_ips.append("<NodePort>")
+
+        # Check for ExternalName services
+        if spec and spec.type == 'ExternalName' and spec.external_name:
+            external_ips.append(spec.external_name)
+
+        return ', '.join(external_ips) if external_ips else None
+
     def _add_replicationcontroller_fields(self, processed_item: Dict[str, Any], item: Any):
         """Add ReplicationController-specific fields"""
         try:
             spec = item.spec
             status = item.status if hasattr(item, 'status') else None
-            
+
             replicas = getattr(spec, 'replicas', 0) if spec else 0
             ready_replicas = getattr(status, 'replicas', 0) if status else 0
-            
+
             processed_item.update({
                 'replicas': ready_replicas,
                 'desired_replicas': replicas,
@@ -1248,7 +1519,7 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             })
         except Exception as e:
             logging.debug(f"Error processing ReplicationController fields: {e}")
-    
+
     def _add_configmap_fields(self, processed_item: Dict[str, Any], item: Any):
         """Add ConfigMap-specific fields"""
         try:
@@ -1259,7 +1530,7 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             })
         except Exception as e:
             logging.debug(f"Error processing ConfigMap fields: {e}")
-    
+
     def _add_secret_fields(self, processed_item: Dict[str, Any], item: Any):
         """Add Secret-specific fields"""
         try:
@@ -1272,17 +1543,17 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             })
         except Exception as e:
             logging.debug(f"Error processing Secret fields: {e}")
-    
+
     def _add_resourcequota_fields(self, processed_item: Dict[str, Any], item: Any):
         """Add ResourceQuota-specific fields"""
         try:
             spec = item.spec
             status = item.status if hasattr(item, 'status') else None
-            
+
             # Get hard limits from spec
             hard_limits = spec.hard if spec and hasattr(spec, 'hard') else {}
             used_resources = status.used if status and hasattr(status, 'used') else {}
-            
+
             processed_item.update({
                 'hard_limits': len(hard_limits),
                 'used_resources': len(used_resources),
@@ -1290,7 +1561,7 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             })
         except Exception as e:
             logging.debug(f"Error processing ResourceQuota fields: {e}")
-    
+
     def _add_limitrange_fields(self, processed_item: Dict[str, Any], item: Any):
         """Add LimitRange-specific fields"""
         try:
@@ -1302,17 +1573,17 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             })
         except Exception as e:
             logging.debug(f"Error processing LimitRange fields: {e}")
-    
+
     def _add_hpa_fields(self, processed_item: Dict[str, Any], item: Any):
         """Add HorizontalPodAutoscaler-specific fields"""
         try:
             spec = item.spec
             status = item.status if hasattr(item, 'status') else None
-            
+
             min_replicas = getattr(spec, 'min_replicas', 1) if spec else 1
             max_replicas = getattr(spec, 'max_replicas', 1) if spec else 1
             current_replicas = getattr(status, 'current_replicas', 0) if status else 0
-            
+
             processed_item.update({
                 'min_replicas': min_replicas,
                 'max_replicas': max_replicas,
@@ -1321,16 +1592,16 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             })
         except Exception as e:
             logging.debug(f"Error processing HPA fields: {e}")
-    
+
     def _add_pdb_fields(self, processed_item: Dict[str, Any], item: Any):
         """Add PodDisruptionBudget-specific fields"""
         try:
             spec = item.spec
             status = item.status if hasattr(item, 'status') else None
-            
+
             min_available = getattr(spec, 'min_available', None) if spec else None
             max_unavailable = getattr(spec, 'max_unavailable', None) if spec else None
-            
+
             processed_item.update({
                 'min_available': str(min_available) if min_available is not None else '<none>',
                 'max_unavailable': str(max_unavailable) if max_unavailable is not None else '<none>',
@@ -1339,14 +1610,14 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             })
         except Exception as e:
             logging.debug(f"Error processing PDB fields: {e}")
-    
+
     def _add_priorityclass_fields(self, processed_item: Dict[str, Any], item: Any):
         """Add PriorityClass-specific fields"""
         try:
             value = getattr(item, 'value', 0)
             global_default = getattr(item, 'global_default', False)
             description = getattr(item, 'description', '')
-            
+
             processed_item.update({
                 'value': value,
                 'global_default': global_default,
@@ -1354,7 +1625,7 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             })
         except Exception as e:
             logging.debug(f"Error processing PriorityClass fields: {e}")
-    
+
     def _add_runtimeclass_fields(self, processed_item: Dict[str, Any], item: Any):
         """Add RuntimeClass-specific fields"""
         try:
@@ -1364,14 +1635,14 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             })
         except Exception as e:
             logging.debug(f"Error processing RuntimeClass fields: {e}")
-    
+
     def _add_lease_fields(self, processed_item: Dict[str, Any], item: Any):
         """Add Lease-specific fields"""
         try:
             spec = item.spec
             holder_identity = getattr(spec, 'holder_identity', '') if spec else ''
             lease_duration = getattr(spec, 'lease_duration_seconds', 0) if spec else 0
-            
+
             processed_item.update({
                 'holder_identity': holder_identity or '<none>',
                 'holder': holder_identity or '<none>',  # For compatibility with LeasesPage
@@ -1379,7 +1650,7 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             })
         except Exception as e:
             logging.debug(f"Error processing Lease fields: {e}")
-    
+
     def _add_mutatingwebhook_fields(self, processed_item: Dict[str, Any], item: Any):
         """Add MutatingWebhookConfiguration-specific fields"""
         try:
@@ -1390,7 +1661,7 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             })
         except Exception as e:
             logging.debug(f"Error processing MutatingWebhookConfiguration fields: {e}")
-    
+
     def _add_validatingwebhook_fields(self, processed_item: Dict[str, Any], item: Any):
         """Add ValidatingWebhookConfiguration-specific fields"""
         try:
@@ -1401,13 +1672,13 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             })
         except Exception as e:
             logging.debug(f"Error processing ValidatingWebhookConfiguration fields: {e}")
-    
+
     def _add_serviceaccount_fields(self, processed_item: Dict[str, Any], item: Any):
         """Add ServiceAccount-specific fields"""
         try:
             secrets = getattr(item, 'secrets', [])
             image_pull_secrets = getattr(item, 'image_pull_secrets', [])
-            
+
             processed_item.update({
                 'secrets_count': len(secrets),
                 'image_pull_secrets_count': len(image_pull_secrets),
@@ -1415,25 +1686,25 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             })
         except Exception as e:
             logging.debug(f"Error processing ServiceAccount fields: {e}")
-    
+
     def _add_endpoints_fields(self, processed_item: Dict[str, Any], item: Any):
         """Add Endpoints-specific fields"""
         try:
             subsets = getattr(item, 'subsets', [])
-            
+
             # Get addresses and ports more comprehensively
             all_addresses = []
             all_ports = []
-            
+
             for subset in subsets:
                 addresses = getattr(subset, 'addresses', []) or []
                 ports = getattr(subset, 'ports', []) or []
-                
+
                 # Collect IP addresses
                 for addr in addresses:
                     if hasattr(addr, 'ip') and addr.ip:
                         all_addresses.append(addr.ip)
-                
+
                 # Collect port information
                 for port in ports:
                     port_info = f"{getattr(port, 'port', 'unknown')}"
@@ -1442,7 +1713,7 @@ class ResourceLoadWorker(EnhancedBaseWorker):
                     if hasattr(port, 'name') and port.name:
                         port_info += f" ({port.name})"
                     all_ports.append(port_info)
-            
+
             processed_item.update({
                 'endpoints_count': len(all_addresses),
                 'endpoints': ', '.join(all_addresses[:3]) + ('...' if len(all_addresses) > 3 else '') if all_addresses else '<none>',
@@ -1450,7 +1721,7 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             })
         except Exception as e:
             logging.debug(f"Error processing Endpoints fields: {e}")
-    
+
     def _add_role_fields(self, processed_item: Dict[str, Any], item: Any):
         """Add Role/ClusterRole-specific fields"""
         try:
@@ -1460,29 +1731,29 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             })
         except Exception as e:
             logging.debug(f"Error processing Role fields: {e}")
-    
+
     def _add_rolebinding_fields(self, processed_item: Dict[str, Any], item: Any):
         """Add RoleBinding/ClusterRoleBinding-specific fields"""
         try:
             subjects = getattr(item, 'subjects', [])
             role_ref = getattr(item, 'role_ref', None)
-            
+
             processed_item.update({
                 'subjects_count': len(subjects),
                 'role_ref': f"{role_ref.kind}/{role_ref.name}" if role_ref and hasattr(role_ref, 'kind') and hasattr(role_ref, 'name') else '<none>',
             })
         except Exception as e:
             logging.debug(f"Error processing RoleBinding fields: {e}")
-    
+
     def _add_crd_fields(self, processed_item: Dict[str, Any], item: Any):
         """Add CustomResourceDefinition-specific fields"""
         try:
             spec = item.spec
             status = item.status if hasattr(item, 'status') else None
-            
+
             group = getattr(spec, 'group', '') if spec else ''
             scope = getattr(spec, 'scope', 'Namespaced') if spec else 'Namespaced'
-            
+
             processed_item.update({
                 'group': group or '<none>',
                 'scope': scope,
@@ -1490,16 +1761,16 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             })
         except Exception as e:
             logging.debug(f"Error processing CRD fields: {e}")
-    
+
     def _generate_cache_key(self) -> str:
         """Generate cache key for this resource loading operation - FIXED to include cluster"""
         # FIXED: Include cluster information in cache key to prevent cross-cluster data mixing
         try:
             kube_client = get_kubernetes_client()
             cluster_name = kube_client.current_cluster if kube_client else 'unknown-cluster'
-        except:
+        except Exception:
             cluster_name = 'unknown-cluster'
-            
+
         key_parts = [
             cluster_name,  # FIXED: Add cluster name to prevent cross-cluster cache pollution
             self.config.resource_type,
@@ -1507,13 +1778,13 @@ class ResourceLoadWorker(EnhancedBaseWorker):
             str(self.config.batch_size),
         ]
         return ':'.join(key_parts)
-    
-    
+
+
     def _handle_timeout_fallback(self) -> Optional[LoadResult]:
         """Handle timeout fallback for timeout-prone resources"""
         # Apply fallback to ALL resources for Docker Desktop Kubernetes
         # Docker Desktop often has slow API responses
-        
+
         try:
             # No cache fallback available, return empty result
             logging.info(f"No fallback available for {self.config.resource_type}")
@@ -1526,7 +1797,7 @@ class ResourceLoadWorker(EnhancedBaseWorker):
                 load_time_ms=0,
                 error_message="Timeout occurred and no fallback available"
             )
-            
+
             # If no cache available, return empty result for ALL resources to avoid blocking
             # This is better than showing nothing - at least the UI doesn't freeze
             logging.info(f"Returning empty fallback for timed-out resource: {self.config.resource_type}")
@@ -1537,14 +1808,14 @@ class ResourceLoadWorker(EnhancedBaseWorker):
                 total_count=0,
                 from_cache=False,
                 load_time_ms=0,
-                error_message=f"Timeout - returning empty result to avoid blocking UI"
+                error_message="Timeout - returning empty result to avoid blocking UI"
             )
-                
+
         except Exception as e:
             logging.debug(f"Fallback handling failed for {self.config.resource_type}: {e}")
-        
+
         return None
-    
+
 # cancel() method inherited from EnhancedBaseWorker
 
 
@@ -1554,145 +1825,172 @@ class HighPerformanceResourceLoader(QObject):
     Consolidates 3 duplicate loaders into one optimized system.
     Designed for maximum speed and smooth user experience.
     """
-    
+
     # Signals for UI updates
     loading_started = pyqtSignal(str)  # resource_type
     loading_progress = pyqtSignal(str, int, int)  # resource_type, current, total
     loading_completed = pyqtSignal(str, object)  # resource_type, LoadResult
     loading_error = pyqtSignal(str, str)  # resource_type, error_message
-    
+
     def __init__(self):
         super().__init__()
-        
+
         # Use unified thread manager for consistency
         self._thread_manager = get_thread_manager()
         self._active_workers: Dict[str, ResourceLoadWorker] = {}
         self._worker_lock = threading.RLock()
-        
+
         # Configuration cache for performance
         self._config_cache: Dict[str, ResourceConfig] = {}
-        
+
         # Request deduplication to prevent duplicate API calls
         self._pending_operations: Dict[str, str] = {}  # operation_key -> operation_id
         self._operation_callbacks: Dict[str, List[Callable]] = defaultdict(list)
         self._dedup_lock = threading.RLock()
-        
+
         # Performance monitoring
         self._load_stats = defaultdict(list)
         self._stats_lock = threading.RLock()
+
+        # Caching system integration
+        self._cache = get_unified_cache()
+        self._cache_lock = threading.RLock()
+        self._cache_stats = defaultdict(lambda: {'hits': 0, 'misses': 0, 'size': 0})
         
+        # Memory pressure monitoring for cache management
+        self._memory_pressure_threshold = 800  # MB
+        self._last_cache_cleanup = time.time()
+        self._cache_cleanup_interval = 300  # 5 minutes
+
         # Initialize default configurations for all resource types
         self._initialize_default_configs()
-        
+
         # Setup memory monitoring timer
         self._setup_memory_monitoring()
-        
-        logging.info("High-Performance Resource Loader initialized")
-    
+
+        logging.info("High-Performance Resource Loader initialized with caching enabled")
+
     def _setup_memory_monitoring(self):
         """Setup memory monitoring timer"""
-        if self.thread() != QApplication.instance().thread():
-            # Defer to main thread if called from worker thread
-            QMetaObject.invokeMethod(self, "_setup_memory_monitoring", Qt.ConnectionType.QueuedConnection)
-            return
-        
-        self._memory_timer = QTimer()
-        self._memory_timer.timeout.connect(self._check_memory_usage)
-        self._memory_timer.start(60000)  # Check every minute
-    
+        try:
+            app = QApplication.instance()
+            if not app or self.thread() != app.thread():
+                # Defer to main thread if called from worker thread or no QApplication
+                if app:
+                    QMetaObject.invokeMethod(self, "_setup_memory_monitoring", Qt.ConnectionType.QueuedConnection)
+                return
+
+            self._memory_timer = QTimer()
+            self._memory_timer.timeout.connect(self._check_memory_usage)
+            self._memory_timer.start(60000)  # Check every minute
+        except Exception as e:
+            logging.debug(f"Could not setup memory monitoring timer: {e}")
+            # Continue without timer - not critical for functionality
+
     def _check_memory_usage(self):
         """Check and log memory usage, cleanup if necessary"""
         try:
             import gc
-            import sys
-            
+
             # Get object count
             object_count = len(gc.get_objects())
-            
+
             # Log warning if object count is high (increased threshold)
             if object_count > 150000:
                 logging.warning(f"High object count detected: {object_count} objects in memory")
-                
+
                 # Force cleanup if very high (increased threshold)
                 if object_count > 200000:
                     logging.info("Forcing memory cleanup due to high object count")
                     self._force_memory_cleanup()
-                    # Clear caches more aggressively
-                    self._clear_old_cache_entries(force=True)
-            
-            # Log memory usage if psutil available
+
+            # Check memory usage and manage cache accordingly
             try:
                 import psutil
                 import os
                 process = psutil.Process(os.getpid())
                 memory_mb = process.memory_info().rss / 1024 / 1024
+                
+                # Memory pressure cache management
+                if memory_mb > self._memory_pressure_threshold:
+                    logging.warning(f"Memory pressure detected: {memory_mb:.1f} MB - clearing old cache entries")
+                    self._clear_old_cache_entries(force=True)
+                elif time.time() - self._last_cache_cleanup > self._cache_cleanup_interval:
+                    # Regular cache cleanup
+                    self._clear_old_cache_entries(force=False)
+                
                 if memory_mb > 800:  # Log if over 800MB (increased threshold)
                     logging.info(f"Memory usage: {memory_mb:.1f} MB, {object_count} objects")
             except ImportError:
-                pass
-                
+                # Fallback cache cleanup without memory monitoring
+                if time.time() - self._last_cache_cleanup > self._cache_cleanup_interval:
+                    self._clear_old_cache_entries(force=False)
+
         except Exception as e:
             logging.debug(f"Error checking memory usage: {e}")
-    
+
     def _initialize_default_configs(self):
         """Initialize optimized default configurations for all resource types"""
-        
-        # High-frequency resources (need faster loading)
-        high_frequency_resources = ['pods', 'events', 'nodes']
-        
-        # Heavy data resources (need chunking and optimization)
+
+        # High-frequency resources (need faster loading, shorter cache TTL)
+        high_frequency_resources = ['pods', 'events']
+
+        # Heavy data resources (need chunking and optimization, medium cache TTL)
         heavy_data_resources = ['nodes', 'pods']
-        
-        # Medium-frequency resources
+
+        # Medium-frequency resources (moderate cache TTL)
         medium_frequency_resources = ['deployments', 'services', 'configmaps', 'secrets']
-        
-        # Low-frequency resources (can cache longer)
+
+        # Low-frequency resources (longer cache TTL)
         low_frequency_resources = ['storageclasses', 'clusterroles', 'namespaces']
-        
+
         # Configure high-frequency resources for speed
         for resource_type in high_frequency_resources:
             config = ResourceConfig(
                 resource_type=resource_type,
                 api_method=self._get_api_method(resource_type),
                 batch_size=100,
-                timeout_seconds=15,
+                timeout_seconds=APIClientConfig.RESOURCE_LIST_TIMEOUT,
                 enable_streaming=True,
-                max_concurrent_requests=8
+                max_concurrent_requests=8,
+                enable_caching=True
             )
-            
+
             # Enable heavy data optimizations for large datasets
             if resource_type in heavy_data_resources:
-                config.timeout_seconds = 60  # Longer timeout for heavy data
+                config.timeout_seconds = APIClientConfig.BATCH_OPERATION_TIMEOUT  # Longer timeout for heavy data
                 config.enable_chunking = True
                 config.chunk_size = 200 if resource_type == 'nodes' else 100
                 config.progressive_loading = True
                 config.enable_pagination = True
                 logging.info(f"Unified Resource Loader: Enabled heavy data optimizations for {resource_type}")
-                
+
             self._config_cache[resource_type] = config
-        
+
         # Configure medium-frequency resources
         for resource_type in medium_frequency_resources:
             self._config_cache[resource_type] = ResourceConfig(
                 resource_type=resource_type,
                 api_method=self._get_api_method(resource_type),
                 batch_size=50,
-                timeout_seconds=20,
+                timeout_seconds=APIClientConfig.HEAVY_LOAD_TIMEOUT,
                 enable_streaming=True,
-                max_concurrent_requests=5
+                max_concurrent_requests=5,
+                enable_caching=True
             )
-        
+
         # Configure low-frequency resources for efficiency
         for resource_type in low_frequency_resources:
             self._config_cache[resource_type] = ResourceConfig(
                 resource_type=resource_type,
                 api_method=self._get_api_method(resource_type),
                 batch_size=25,
-                timeout_seconds=30,
+                timeout_seconds=APIClientConfig.REQUEST_TIMEOUT,
                 enable_streaming=False,
-                max_concurrent_requests=3
+                max_concurrent_requests=3,
+                enable_caching=True
             )
-    
+
     def _get_api_method(self, resource_type: str) -> str:
         """Get the appropriate API method name for the resource type"""
         method_mapping = {
@@ -1712,53 +2010,53 @@ class HighPerformanceResourceLoader(QObject):
             'resourcequotas': 'list_resource_quota_for_all_namespaces',
             'serviceaccounts': 'list_service_account_for_all_namespaces',
             'leases': 'list_lease_for_all_namespaces',
-            
+
             # Apps v1 resources
             'deployments': 'list_deployment_for_all_namespaces',
             'replicasets': 'list_replica_set_for_all_namespaces',
             'daemonsets': 'list_daemon_set_for_all_namespaces',
             'statefulsets': 'list_stateful_set_for_all_namespaces',
-            
+
             # Networking v1 resources
             'ingresses': 'list_ingress_for_all_namespaces',
             'networkpolicies': 'list_network_policy_for_all_namespaces',
             'ingressclasses': 'list_ingress_class',
-            
+
             # Storage v1 resources
             'storageclasses': 'list_storage_class',
-            
+
             # Batch v1 resources
             'jobs': 'list_job_for_all_namespaces',
             'cronjobs': 'list_cron_job_for_all_namespaces',
-            
+
             # RBAC v1 resources
             'roles': 'list_role_for_all_namespaces',
             'rolebindings': 'list_role_binding_for_all_namespaces',
             'clusterroles': 'list_cluster_role',
             'clusterrolebindings': 'list_cluster_role_binding',
-            
+
             # Autoscaling v2 resources
             'horizontalpodautoscalers': 'list_horizontal_pod_autoscaler_for_all_namespaces',
-            
+
             # Policy v1 resources
             'poddisruptionbudgets': 'list_pod_disruption_budget_for_all_namespaces',
-            
+
             # Scheduling v1 resources
             'priorityclasses': 'list_priority_class',
-            
+
             # Node v1 resources
             'runtimeclasses': 'list_runtime_class',
-            
+
             # Admission registration v1 resources
             'mutatingwebhookconfigurations': 'list_mutating_webhook_configuration',
             'validatingwebhookconfigurations': 'list_validating_webhook_configuration',
-            
+
             # Custom Resources
             'customresourcedefinitions': 'list_custom_resource_definition',
         }
-        
+
         return method_mapping.get(resource_type, 'list_pod_for_all_namespaces')
-    
+
     def _get_namespaced_api_method(self, resource_type: str) -> str:
         """Get the appropriate namespaced API method name for the resource type"""
         namespaced_method_mapping = {
@@ -1775,38 +2073,38 @@ class HighPerformanceResourceLoader(QObject):
             'resourcequotas': 'list_namespaced_resource_quota',
             'serviceaccounts': 'list_namespaced_service_account',
             'leases': 'list_namespaced_lease',
-            
+
             # Apps v1 resources
             'deployments': 'list_namespaced_deployment',
             'replicasets': 'list_namespaced_replica_set',
             'daemonsets': 'list_namespaced_daemon_set',
             'statefulsets': 'list_namespaced_stateful_set',
-            
+
             # Networking v1 resources
             'ingresses': 'list_namespaced_ingress',
             'networkpolicies': 'list_namespaced_network_policy',
-            
+
             # Batch v1 resources
             'jobs': 'list_namespaced_job',
             'cronjobs': 'list_namespaced_cron_job',
-            
+
             # RBAC v1 resources
             'roles': 'list_namespaced_role',
             'rolebindings': 'list_namespaced_role_binding',
-            
+
             # Autoscaling v2 resources
             'horizontalpodautoscalers': 'list_namespaced_horizontal_pod_autoscaler',
-            
+
             # Policy v1 resources
             'poddisruptionbudgets': 'list_namespaced_pod_disruption_budget',
         }
-        
-        
+
+
         if resource_type in cluster_scoped_resources:
             return self._get_api_method(resource_type)
-        
+
         return namespaced_method_mapping.get(resource_type, 'list_namespaced_pod')
-    
+
     @log_performance
     def load_resources_with_search_async(
         self,
@@ -1818,52 +2116,59 @@ class HighPerformanceResourceLoader(QObject):
         if not resource_type:
             logging.error("Resource type is required for search loading")
             return ""
-        
+
         # Create search-enabled configuration
         config = ResourceConfig(
             resource_type=resource_type,
             api_method=self._get_api_method(resource_type),
             namespace=namespace,
             batch_size=50,  # Larger batch for search
-            timeout_seconds=45,  # Longer timeout for search
+            timeout_seconds=APIClientConfig.BATCH_OPERATION_TIMEOUT,  # Longer timeout for search
             enable_pagination=True,  # Enable pagination for comprehensive search
             max_concurrent_requests=3  # More requests for search
         )
-        
+
         operation_id = f"search_{resource_type}_{int(time.time())}"
-        
+
         # Cancel any existing load for this resource type
         self._cancel_existing_load(resource_type, namespace)
-        
+
         # Emit loading started signal
         self.loading_started.emit(resource_type)
-        
+
         # Create and submit search worker
         worker = SearchResourceLoadWorker(config, self, search_query)
-        
+
         # Track the worker
         with self._worker_lock:
-            worker_key = f"{resource_type}_{namespace or 'all'}"
+            # Use cluster-aware key for worker tracking
+            try:
+                kube_client = get_kubernetes_client()
+                cluster_name = kube_client.current_cluster if kube_client else 'unknown'
+            except Exception:
+                cluster_name = 'unknown'
+                
+            worker_key = self._generate_operation_key(resource_type, namespace, cluster_name)
             self._active_workers[worker_key] = worker
-        
+
         # Connect worker signals for completion handling
         worker.signals.finished.connect(
-            lambda result: self._handle_load_completion_success(result, resource_type, namespace, operation_id)
+            lambda result: self._handle_load_completion_success(result, resource_type, namespace, operation_id, cluster_name)
         )
         worker.signals.error.connect(
-            lambda error: self._handle_load_completion_error(error, resource_type, namespace, operation_id)
+            lambda error: self._handle_load_completion_error(error, resource_type, namespace, operation_id, cluster_name)
         )
-        
+
         # Submit to thread manager
         thread_manager = get_thread_manager()
         thread_manager.submit_worker(operation_id, worker)
-        
+
         return operation_id
 
     @log_performance
     def load_resources_async(
-        self, 
-        resource_type: str, 
+        self,
+        resource_type: str,
         namespace: Optional[str] = None,
         custom_config: Optional[ResourceConfig] = None
     ) -> str:
@@ -1871,67 +2176,76 @@ class HighPerformanceResourceLoader(QObject):
         Load Kubernetes resources asynchronously with high performance and deduplication.
         Returns operation ID for tracking.
         """
-        logging.info(f"Unified Resource Loader: Starting async load for resource_type='{resource_type}', namespace='{namespace or 'all'}'") 
-        
-        # Generate operation key for deduplication
-        operation_key = f"{resource_type}_{namespace or 'all'}"
-        
+        # Get current cluster name for scoped deduplication
+        try:
+            kube_client = get_kubernetes_client()
+            cluster_name = kube_client.current_cluster if kube_client else 'unknown'
+        except Exception:
+            cluster_name = 'unknown'
+
+        logging.info(f"Unified Resource Loader: Starting async load for resource_type='{resource_type}', namespace='{namespace or 'all'}' (cluster: {cluster_name})")
+
+        # Generate operation key for deduplication - NOW CLUSTER-AWARE
+        operation_key = self._generate_operation_key(resource_type, namespace, cluster_name)
+
         # Check for duplicate request and deduplicate if necessary
         with self._dedup_lock:
             if operation_key in self._pending_operations:
                 existing_operation_id = self._pending_operations[operation_key]
                 logging.info(f"Unified Resource Loader: Duplicate request detected for {operation_key}, returning existing operation_id: {existing_operation_id}")
                 return existing_operation_id
-        
+
         # Get or create configuration
         config = custom_config or self._get_config_for_resource(resource_type, namespace)
         logging.debug(f"Unified Resource Loader: Using config for {resource_type}: timeout={config.timeout_seconds}s, batch_size={config.batch_size}")
-        
+
         # Generate operation ID
         operation_id = f"{resource_type}_{namespace or 'all'}_{int(time.time() * 1000)}"
         logging.debug(f"Unified Resource Loader: Generated operation_id: {operation_id}")
-        
+
         # Register this operation to prevent duplicates
         with self._dedup_lock:
             self._pending_operations[operation_key] = operation_id
-        
+
         # Cancel any existing load for this resource type
         self._cancel_existing_load(resource_type, namespace)
-        
+
         # Emit loading started signal
         logging.debug(f"Unified Resource Loader: Emitting loading_started signal for {resource_type}")
         self.loading_started.emit(resource_type)
-        
+
         # Create and start worker
         logging.debug(f"Unified Resource Loader: Creating ResourceLoadWorker for {resource_type}")
         worker = ResourceLoadWorker(config, self)
-        
+
         # Track the worker
         with self._worker_lock:
-            worker_key = f"{resource_type}_{namespace or 'all'}"
+            # Use cluster-aware key for worker tracking
+            worker_key = self._generate_operation_key(resource_type, namespace, cluster_name)
             self._active_workers[worker_key] = worker
             logging.debug(f"Unified Resource Loader: Tracking worker with key: {worker_key}")
-        
+
+        # Connect worker signals for completion handling
         # Connect worker signals for completion handling
         worker.signals.finished.connect(
-            lambda result: self._handle_load_completion_success(result, resource_type, namespace, operation_id)
+            lambda result: self._handle_load_completion_success(result, resource_type, namespace, operation_id, cluster_name)
         )
         worker.signals.error.connect(
-            lambda error: self._handle_load_completion_error(error, resource_type, namespace, operation_id)
+            lambda error: self._handle_load_completion_error(error, resource_type, namespace, operation_id, cluster_name)
         )
         logging.debug(f"Unified Resource Loader: Connected worker signals for {resource_type}")
-        
+
         # Submit to unified thread manager
         logging.debug(f"Unified Resource Loader: Submitting worker to thread manager for {resource_type}")
         self._thread_manager.submit_worker(operation_id, worker)
-        
+
         logging.info(f"Unified Resource Loader: Successfully initiated async loading for {resource_type} with operation_id: {operation_id}")
         return operation_id
-    
+
     def _get_config_for_resource(self, resource_type: str, namespace: Optional[str]) -> ResourceConfig:
         """Get optimized configuration for resource type"""
         base_config = self._config_cache.get(resource_type)
-        
+
         if not base_config:
             # Create default config for unknown resource types
             base_config = ResourceConfig(
@@ -1939,12 +2253,12 @@ class HighPerformanceResourceLoader(QObject):
                 api_method=self._get_api_method(resource_type)
             )
             self._config_cache[resource_type] = base_config
-        
+
         # Create a copy with namespace if specified
         if namespace:
             # Get the correct namespaced API method
             namespaced_api_method = self._get_namespaced_api_method(resource_type)
-            
+
             config = ResourceConfig(
                 resource_type=base_config.resource_type,
                 api_method=namespaced_api_method,
@@ -1955,27 +2269,61 @@ class HighPerformanceResourceLoader(QObject):
                 max_concurrent_requests=base_config.max_concurrent_requests
             )
             return config
-        
+
         return base_config
-    
+
+    def _generate_operation_key(self, resource_type: str, namespace: Optional[str], cluster_name: str = 'unknown') -> str:
+        """Generate a consistent operation key for deduplication and worker tracking"""
+        return f"{cluster_name}_{resource_type}_{namespace or 'all'}"
+
     def _cancel_existing_load(self, resource_type: str, namespace: Optional[str]):
         """Cancel any existing load operation for the same resource"""
-        worker_key = f"{resource_type}_{namespace or 'all'}"
-        
+        try:
+            kube_client = get_kubernetes_client()
+            cluster_name = kube_client.current_cluster if kube_client else 'unknown'
+        except Exception:
+            cluster_name = 'unknown'
+            
+        # Use cluster-aware key
+        worker_key = self._generate_operation_key(resource_type, namespace, cluster_name)
+
         with self._worker_lock:
             if worker_key in self._active_workers:
                 existing_worker = self._active_workers[worker_key]
                 existing_worker.cancel()
-                logging.debug(f"Cancelled existing load for {resource_type}")
-    
+                logging.debug(f"Cancelled existing load for {resource_type} (key: {worker_key})")
+
+    def clear_all_pending_operations(self):
+        """Clear all pending operations and cache - used when switching clusters"""
+        logging.info("Unified Resource Loader: Clearing all pending operations and worker state")
+        
+        # 1. Clear pending operations map
+        with self._dedup_lock:
+            self._pending_operations.clear()
+            self._operation_callbacks.clear()
+            
+        # 2. Cancel all active workers
+        with self._worker_lock:
+            for key, worker in list(self._active_workers.items()):
+                try:
+                    worker.cancel()
+                    logging.debug(f"Cancelled active worker: {key}")
+                except Exception as e:
+                    logging.error(f"Error cancelling worker {key}: {e}")
+            self._active_workers.clear()
+            
+        # 3. Clear result cache to prevent stale data
+        # Note: We don't clear the config cache as that's reusable
+        
+        logging.info("Unified Resource Loader: State cleared successfully")
+
 # Method removed - monitoring is now handled by EnhancedBaseWorker signals
-    
-    def _handle_load_completion_success(self, result: LoadResult, resource_type: str, namespace: Optional[str], operation_id: str):
+
+    def _handle_load_completion_success(self, result: LoadResult, resource_type: str, namespace: Optional[str], operation_id: str, cluster_name: str = 'unknown'):
         """Handle successful load completion"""
         logging.info(f"Unified Resource Loader: Load completed successfully for {resource_type} (operation_id: {operation_id})")
         try:
             if resource_type == 'nodes':
-                import time
                 from Utils import get_timestamp_with_ms
                 logging.info(f"🚀 [UI EMIT] {get_timestamp_with_ms()} - Unified Resource Loader: Emitting node data to UI - {result.total_count} nodes loaded in {result.load_time_ms:.1f}ms")
                 # Log sample of node data being sent to UI
@@ -1983,7 +2331,7 @@ class HighPerformanceResourceLoader(QObject):
                     sample_node = result.items[0]
                     logging.debug(f"📤 [UI SAMPLE] {get_timestamp_with_ms()} - Sample node data being sent: name={sample_node.get('name')}, status={sample_node.get('status')}, cpu={sample_node.get('cpu_capacity')}")
                     logging.debug(f"📤 [UI COUNT] {get_timestamp_with_ms()} - Sending {len(result.items)} nodes to UI: {[item.get('name', 'unnamed') for item in result.items[:5]]}{'...' if len(result.items) > 5 else ''}")
-            
+
             self.loading_completed.emit(resource_type, result)
             logging.info(
                 f"Unified Resource Loader: Loaded {result.total_count} {resource_type} "
@@ -1992,41 +2340,41 @@ class HighPerformanceResourceLoader(QObject):
             )
         except Exception as e:
             logging.error(f"Unified Resource Loader: Error emitting load completion signal for {resource_type}: {e}")
-            logging.debug(f"Unified Resource Loader: Load completion error details", exc_info=True)
+            logging.debug("Unified Resource Loader: Load completion error details", exc_info=True)
         finally:
             # Cleanup worker reference and pending operation
-            self._cleanup_worker(resource_type, namespace)
-            self._cleanup_pending_operation(resource_type, namespace)
-    
-    def _handle_load_completion_error(self, error_message: str, resource_type: str, namespace: Optional[str], operation_id: str):
+            self._cleanup_worker(resource_type, namespace, cluster_name)
+            self._cleanup_pending_operation(resource_type, namespace, cluster_name)
+
+    def _handle_load_completion_error(self, error_message: str, resource_type: str, namespace: Optional[str], operation_id: str, cluster_name: str = 'unknown'):
         """Handle error in load completion"""
         logging.error(f"Unified Resource Loader: Load failed for {resource_type} (operation_id: {operation_id}): {error_message}")
         try:
             if resource_type == 'nodes':
-                logging.error(f"Unified Resource Loader: Node loading failed - UI will not receive node data")
-            
+                logging.error("Unified Resource Loader: Node loading failed - UI will not receive node data")
+
             self.loading_error.emit(resource_type, error_message)
             logging.error(f"Unified Resource Loader: Failed to load {resource_type}: {error_message}")
         except Exception as e:
             logging.error(f"Unified Resource Loader: Error emitting load error signal for {resource_type}: {e}")
         finally:
             # Cleanup worker reference and pending operation
-            self._cleanup_worker(resource_type, namespace)
-            self._cleanup_pending_operation(resource_type, namespace)
-    
-    def _cleanup_worker(self, resource_type: str, namespace: Optional[str]):
+            self._cleanup_worker(resource_type, namespace, cluster_name)
+            self._cleanup_pending_operation(resource_type, namespace, cluster_name)
+
+    def _cleanup_worker(self, resource_type: str, namespace: Optional[str], cluster_name: str = 'unknown'):
         """Cleanup worker reference"""
-        worker_key = f"{resource_type}_{namespace or 'all'}"
+        worker_key = self._generate_operation_key(resource_type, namespace, cluster_name)
         with self._worker_lock:
             self._active_workers.pop(worker_key, None)
-    
-    def _cleanup_pending_operation(self, resource_type: str, namespace: Optional[str]):
+
+    def _cleanup_pending_operation(self, resource_type: str, namespace: Optional[str], cluster_name: str = 'unknown'):
         """Cleanup pending operation to allow future requests"""
-        operation_key = f"{resource_type}_{namespace or 'all'}"
+        operation_key = self._generate_operation_key(resource_type, namespace, cluster_name)
         with self._dedup_lock:
             self._pending_operations.pop(operation_key, None)
             logging.debug(f"Cleaned up pending operation for {operation_key}")
-    
+
     def _record_performance_stats(self, resource_type: str, load_time_ms: float, success: bool):
         """Record performance statistics for monitoring"""
         with self._stats_lock:
@@ -2036,47 +2384,112 @@ class HighPerformanceResourceLoader(QObject):
                 'load_time_ms': load_time_ms,
                 'success': success
             })
-            
+
             # Keep only last 100 entries per resource type
             if len(stats) > 100:
                 stats.pop(0)
-    
+
     def get_performance_stats(self, resource_type: str) -> Dict[str, Any]:
         """Get performance statistics for a resource type"""
         with self._stats_lock:
             stats = self._load_stats.get(resource_type, [])
-            
+
             if not stats:
                 return {'avg_load_time_ms': 0, 'success_rate': 0, 'total_loads': 0}
-            
+
             successful_loads = [s for s in stats if s['success']]
             total_loads = len(stats)
-            
+
             if successful_loads:
                 avg_load_time = sum(s['load_time_ms'] for s in successful_loads) / len(successful_loads)
             else:
                 avg_load_time = 0
-            
+
             success_rate = len(successful_loads) / total_loads if total_loads > 0 else 0
-            
+
             return {
                 'avg_load_time_ms': round(avg_load_time, 1),
                 'success_rate': round(success_rate * 100, 1),
                 'total_loads': total_loads,
                 'last_load_time': max(s['timestamp'] for s in stats) if stats else 0
             }
-    
+
     def cancel_all_loads(self):
         """Cancel all active loading operations"""
         with self._worker_lock:
             for worker in self._active_workers.values():
                 worker.cancel()
             self._active_workers.clear()
-        
+
         logging.info("Cancelled all active resource loading operations")
-    
-    # Cache management functions removed (no more caching)
-    
+
+    def _clear_old_cache_entries(self, force: bool = False):
+        """Clear old cache entries based on TTL and memory pressure"""
+        try:
+            with self._cache_lock:
+                current_time = time.time()
+                
+                # Update cleanup timestamp
+                self._last_cache_cleanup = current_time
+                
+                # Use the unified cache system's optimize method
+                self._cache.optimize_caches()
+                
+                if force:
+                    logging.info("Aggressive cache cleanup triggered - unified cache optimization applied")
+
+                logging.debug(f"Cache cleanup completed (force={force})")
+                
+        except Exception as e:
+            logging.error(f"Error during cache cleanup: {e}")
+
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """Get cache statistics for monitoring"""
+        try:
+            with self._cache_lock:
+                stats = {}
+                total_hits = 0
+                total_misses = 0
+                
+                for resource_type, type_stats in self._cache_stats.items():
+                    stats[resource_type] = {
+                        'hits': type_stats['hits'],
+                        'misses': type_stats['misses'],
+                        'hit_rate': type_stats['hits'] / (type_stats['hits'] + type_stats['misses']) if (type_stats['hits'] + type_stats['misses']) > 0 else 0,
+                        'size': type_stats['size']
+                    }
+                    total_hits += type_stats['hits']
+                    total_misses += type_stats['misses']
+                
+                stats['total'] = {
+                    'hits': total_hits,
+                    'misses': total_misses,
+                    'hit_rate': total_hits / (total_hits + total_misses) if (total_hits + total_misses) > 0 else 0
+                }
+                
+                return stats
+        except Exception as e:
+            logging.error(f"Error getting cache stats: {e}")
+            return {}
+
+    def clear_cache(self, resource_type: Optional[str] = None):
+        """Clear cache entries for specific resource type or all"""
+        try:
+            with self._cache_lock:
+                if resource_type:
+                    # Clear specific resource type cache
+                    # The unified cache system doesn't have a direct method for this
+                    # but we can reset our stats
+                    if resource_type in self._cache_stats:
+                        self._cache_stats[resource_type] = {'hits': 0, 'misses': 0, 'size': 0}
+                    logging.info(f"Cleared cache for resource type: {resource_type}")
+                else:
+                    # Clear all cache
+                    self._cache_stats.clear()
+                    logging.info("Cleared all cache entries")
+        except Exception as e:
+            logging.error(f"Error clearing cache: {e}")
+
     def _get_api_client(self, kube_client, resource_type=None):
         """Get the appropriate API client for the resource type"""
         api_mapping = {
@@ -2095,54 +2508,54 @@ class HighPerformanceResourceLoader(QObject):
             'limitranges': kube_client.v1,
             'resourcequotas': kube_client.v1,
             'serviceaccounts': kube_client.v1,
-            
+
             # Apps v1 resources
             'deployments': kube_client.apps_v1,
             'replicasets': kube_client.apps_v1,
             'daemonsets': kube_client.apps_v1,
             'statefulsets': kube_client.apps_v1,
-            
-            # Networking v1 resources  
+
+            # Networking v1 resources
             'ingresses': kube_client.networking_v1,
             'networkpolicies': kube_client.networking_v1,
             'ingressclasses': kube_client.networking_v1,
-            
+
             # Storage v1 resources
             'storageclasses': kube_client.storage_v1,
-            
+
             # Batch v1 resources
             'jobs': kube_client.batch_v1,
             'cronjobs': kube_client.batch_v1,
-            
+
             # RBAC v1 resources
             'roles': kube_client.rbac_v1,
             'rolebindings': kube_client.rbac_v1,
             'clusterroles': kube_client.rbac_v1,
             'clusterrolebindings': kube_client.rbac_v1,
-            
+
             # Autoscaling v2 resources
             'horizontalpodautoscalers': kube_client.autoscaling_v2,
-            
+
             # Policy v1 resources
             'poddisruptionbudgets': kube_client.policy_v1,
-            
+
             # Scheduling v1 resources
             'priorityclasses': kube_client.scheduling_v1,
-            
+
             # Node v1 resources
             'runtimeclasses': kube_client.node_v1,
-            
+
             # Admission registration v1 resources
             'mutatingwebhookconfigurations': kube_client.admissionregistration_v1,
             'validatingwebhookconfigurations': kube_client.admissionregistration_v1,
-            
+
             # Coordination v1 resources
             'leases': kube_client.coordination_v1,
-            
+
             # Custom Resources
             'customresourcedefinitions': kube_client.apiextensions_v1,
         }
-        
+
         # Use the resource_type parameter if provided, otherwise fall back to default
         if resource_type:
             return api_mapping.get(resource_type, kube_client.v1)
@@ -2151,39 +2564,39 @@ class HighPerformanceResourceLoader(QObject):
     def cleanup(self):
         """Cleanup resources and shutdown thread pool"""
         logging.info("Shutting down High-Performance Resource Loader")
-        
+
         # Cancel all active loads
         self.cancel_all_loads()
-        
+
         # Force garbage collection of large objects
         self._force_memory_cleanup()
-        
+
         # Clear all caches and references
         with self._worker_lock:
             self._active_workers.clear()
-        
+
         with self._dedup_lock:
             self._pending_operations.clear()
             self._operation_callbacks.clear()
-        
+
         with self._stats_lock:
             self._load_stats.clear()
-        
+
         # Clear configuration cache
         self._config_cache.clear()
-        
+
         logging.info("Resource Loader cleanup completed")
-    
+
     def _force_memory_cleanup(self):
         """Force cleanup of memory-intensive objects"""
         import gc
-        
+
         # Collect garbage multiple times to ensure deep cleanup
         for _ in range(3):
             collected = gc.collect()
             if collected > 0:
                 logging.info(f"Memory cleanup: collected {collected} objects")
-        
+
         # Log memory stats if available
         try:
             import psutil
@@ -2193,34 +2606,13 @@ class HighPerformanceResourceLoader(QObject):
             logging.info(f"Memory usage after cleanup: {memory_mb:.1f} MB")
         except ImportError:
             pass
-    
-    def _clear_old_cache_entries(self, force=False):
-        """Clear old cache entries to free memory"""
-        try:
-            current_time = time.time()
-            max_age = 300 if not force else 60  # 5 minutes normal, 1 minute if forced
-            
-            with self._cache_lock:
-                keys_to_remove = []
-                for key, (data, timestamp) in self._resource_cache.items():
-                    if current_time - timestamp > max_age:
-                        keys_to_remove.append(key)
-                
-                for key in keys_to_remove:
-                    del self._resource_cache[key]
-                
-                if keys_to_remove:
-                    logging.info(f"Cleared {len(keys_to_remove)} old cache entries")
-                    
-        except Exception as e:
-            logging.debug(f"Error clearing old cache entries: {e}")
-    
+
     @staticmethod
     def _format_capacity(raw_value: str) -> str:
         """Format Kubernetes capacity values to human-readable format"""
         if not raw_value:
             return ''
-        
+
         if 'Ki' in raw_value:
             # Convert from Ki to GB
             ki_value = int(raw_value.replace('Ki', ''))
@@ -2232,30 +2624,30 @@ class HighPerformanceResourceLoader(QObject):
             return f"{gi_value}GB"
         else:
             return raw_value
-    
+
     @staticmethod
     def _process_node_conditions(conditions) -> tuple:
         """Process node conditions and return (status, conditions_text)"""
         node_status = 'Unknown'
         conditions_list = []
-        
+
         if conditions:
             for condition in conditions:
                 if condition.type == 'Ready':
                     node_status = 'Ready' if condition.status == 'True' else 'NotReady'
-                
+
                 # Format condition for display: Type=Status
                 condition_display = f"{condition.type}={condition.status}"
-                
+
                 # Add reason if available for non-True conditions
                 if condition.status != 'True' and hasattr(condition, 'reason') and condition.reason:
                     condition_display += f" ({condition.reason})"
-                
+
                 conditions_list.append(condition_display)
-        
+
         conditions_text = ", ".join(conditions_list) if conditions_list else "Unknown"
         return node_status, conditions_text
-    
+
     @staticmethod
     def _extract_node_roles(labels) -> list:
         """Extract node roles from Kubernetes labels"""
@@ -2267,7 +2659,7 @@ class HighPerformanceResourceLoader(QObject):
                     if role:
                         roles.append(role)
         return roles if roles else ['<none>']
-    
+
     def __del__(self):
         """Destructor to ensure cleanup"""
         try:

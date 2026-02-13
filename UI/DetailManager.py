@@ -3,8 +3,7 @@ Optimized Detail Manager for ClusterView that handles showing and managing resou
 Improved version with better performance, error handling, and code organization.
 """
 
-from PyQt6.QtCore import QObject, pyqtSignal, Qt, QTimer
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 from typing import Optional, Dict, Any
 
 from .DetailPageComponent import DetailPageComponent
@@ -89,11 +88,38 @@ class DetailManager(QObject):
             'resourcequotas': 'resourcequota',
             'limitranges': 'limitrange',
             'replicationcontrollers': 'replicationcontroller',
+            # Additional resource type mappings (restored from original)
+            'daemonsets': 'daemonset',
+            'statefulsets': 'statefulset',
+            'cronjobs': 'cronjob',
+            'jobs': 'job',
+            'networkpolicies': 'networkpolicy',
+            'ingressclasses': 'ingressclass',
+            'storageclasses': 'storageclass',
+            'endpoints': 'endpoint',
+            'events': 'event',
+            'persistentvolumes': 'persistentvolume',
+            'persistentvolumeclaims': 'persistentvolumeclaim',
+            'configmaps': 'configmap',
+            'secrets': 'secret',
+            'ingresses': 'ingress',
+            'services': 'service',
+            'pods': 'pod',
+            'nodes': 'node',
+            'namespaces': 'namespace',
+            'deployments': 'deployment',
+            'replicasets': 'replicaset',
+            'serviceaccounts': 'serviceaccount',
+            'roles': 'role',
+            'rolebindings': 'rolebinding',
+            'clusterroles': 'clusterrole',
+            'clusterrolebindings': 'clusterrolebinding',
+            'leases': 'lease',
         }
-        
-        resource_type_singular = plural_to_singular_mapping.get(resource_type.lower(), 
+
+        resource_type_singular = plural_to_singular_mapping.get(resource_type.lower(),
                                                               resource_type.rstrip('s') if resource_type.endswith('s') else resource_type)
-        
+
         # Ensure detail page is created
         detail_page = self._ensure_detail_page()
 
@@ -109,9 +135,27 @@ class DetailManager(QObject):
             'namespace': namespace
         })
 
-        # Handle special data for events
-        if raw_data and resource_type.lower() == "event":
-            detail_page.event_raw_data = raw_data
+        # Handle special data for different resource types - CLEAR ALL FIRST
+        # Clear all raw data attributes to prevent interference between resources
+        if hasattr(detail_page, 'event_raw_data'):
+            detail_page.event_raw_data = None
+        if hasattr(detail_page, 'chart_raw_data'):
+            detail_page.chart_raw_data = None
+        if hasattr(detail_page, 'release_raw_data'):
+            detail_page.release_raw_data = None
+        if hasattr(detail_page, 'resource_raw_data'):
+            detail_page.resource_raw_data = None
+
+        # Now set the appropriate raw data if provided
+        if raw_data:
+            if resource_type.lower() == "event":
+                detail_page.event_raw_data = raw_data
+            elif resource_type.lower() in ["chart", "helmchart"]:
+                detail_page.chart_raw_data = raw_data
+            elif resource_type.lower() in ["helmrelease", "release"]:
+                detail_page.release_raw_data = raw_data
+            else:
+                detail_page.resource_raw_data = raw_data
 
         # Update height before showing
         self._update_cached_height()

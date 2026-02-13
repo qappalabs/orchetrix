@@ -3,8 +3,6 @@ import os
 import traceback
 import logging
 import time
-import webbrowser
-import requests
 import json
 import gc
 from datetime import datetime
@@ -12,7 +10,7 @@ from PyQt6.QtCore import QPoint
 
 # Set up logging first
 try:
-    from log_handler import setup_logging, log_exception
+    from log_handler import setup_logging
     log_file = setup_logging()
 except ImportError as e:
     # Fallback logging setup
@@ -36,7 +34,7 @@ try:
         QApplication, QMainWindow, QWidget, QVBoxLayout,
         QStackedWidget, QMessageBox
     )
-    from PyQt6.QtCore import Qt, QTimer, qVersion, QThread, pyqtSignal
+    from PyQt6.QtCore import Qt, QTimer, qVersion, QThread
     from PyQt6.QtGui import QFont, QIcon
 
     # Import application components
@@ -45,18 +43,18 @@ try:
     from Pages.Preferences import PreferencesWidget
     from UI.TitleBar import TitleBar
     from UI.ClusterView import ClusterView, LoadingOverlay
-    from UI.Styles import AppColors, AppStyles
-    from Utils.cluster_connector import get_cluster_connector
     from UI.DetailPageComponent import DetailPageComponent
     from UI.detail_sections.detailpage_yamlsection import DetailPageYAMLSection
 
+
     from Utils.cluster_state_manager import get_cluster_state_manager, ClusterState
-    from Utils.thread_manager import get_thread_manager, shutdown_thread_manager
+    from Utils.thread_manager import shutdown_thread_manager
     from Utils.error_handler import get_error_handler, ResourceCleaner, error_handler
+    from Utils.kubeconfig_watcher import get_kubeconfig_watcher, cleanup_kubeconfig_watcher
 
 
     logging.info("All modules imported successfully")
-    
+
 except ImportError as e:
     logging.critical(f"Failed to import application modules: {e}")
     raise
@@ -121,7 +119,7 @@ def initialize_resources():
 
 class MainWindow(QMainWindow):
     """Optimized main window with improved resource management and performance"""
-    
+
     def __init__(self):
         super().__init__()
         self.previous_page = None
@@ -148,7 +146,6 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Orchestrix")
         self.setMinimumSize(1300, 700)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
-        self.setStyleSheet(AppStyles.MAIN_STYLE)
 
         try:
             self._setup_cluster_state_manager()
@@ -169,25 +166,28 @@ class MainWindow(QMainWindow):
         if hasattr(self.home_page, 'initialize_cluster_connector'):
             self.home_page.initialize_cluster_connector()
 
+        # Initialize kubeconfig file watcher to detect external changes
+        self._setup_kubeconfig_watcher()
+
     def _periodic_cleanup(self):
         """Enhanced periodic cleanup to prevent memory leaks and performance degradation"""
         try:
             cleanup_start = time.time()
-            
+
             # Force garbage collection with statistics
             collected = gc.collect()
             if collected > 0:
                 logging.debug(f"Periodic cleanup: {collected} objects collected")
-            
+
             # Get memory usage statistics
             total_objects = len(gc.get_objects())
-            
+
             # Cleanup chart page caches if needed
             if hasattr(self, 'cluster_view') and hasattr(self.cluster_view, 'pages'):
                 charts_page = self.cluster_view.pages.get('Charts')
                 if charts_page and hasattr(charts_page, 'cleanup_cache'):
                     charts_page.cleanup_cache()
-            
+
             # Cleanup age caches from base resource pages
             try:
                 from Base_Components.base_resource_page import BaseResourcePage
@@ -196,35 +196,26 @@ class MainWindow(QMainWindow):
                     logging.debug("Cleaned base resource page age cache")
             except Exception as cache_error:
                 logging.debug(f"Could not cleanup age cache: {cache_error}")
-            
-            # Cleanup debounced updater
-            try:
-                from Utils.debounced_updater import get_debounced_updater
-                updater = get_debounced_updater()
-                # Clear old throttle history to prevent memory accumulation
-                updater.clear_throttle_history()
-            except Exception as updater_error:
-                logging.debug(f"Could not cleanup debounced updater: {updater_error}")
-            
+
             # Cleanup background workers that may be finished
             self._cleanup_finished_workers()
-            
+
             # Cleanup virtual scroll tables
             self._cleanup_virtual_scroll_tables()
-            
+
             # Monitor memory usage and log warnings if high (increased threshold)
             if total_objects > 150000:  # Increased threshold for warning
                 logging.warning(f"High object count detected: {total_objects} objects in memory")
-                
+
             cleanup_time = (time.time() - cleanup_start) * 1000
             if cleanup_time > 100:  # Log if cleanup takes too long
                 logging.warning(f"Periodic cleanup took {cleanup_time:.1f}ms")
             else:
                 logging.debug(f"Periodic cleanup completed in {cleanup_time:.1f}ms, {total_objects} objects")
-                    
+
         except Exception as e:
             logging.error(f"Error during periodic cleanup: {e}")
-            
+
     def _cleanup_finished_workers(self):
         """Clean up finished background workers"""
         try:
@@ -236,21 +227,21 @@ class MainWindow(QMainWindow):
                             page.data_worker.deleteLater()
                             page.data_worker = None
                             logging.debug(f"Cleaned up finished worker for {page_name}")
-                            
+
                     if hasattr(page, 'metrics_worker') and page.metrics_worker:
                         if page.metrics_worker.isFinished():
                             page.metrics_worker.deleteLater()
                             page.metrics_worker = None
                             logging.debug(f"Cleaned up finished metrics worker for {page_name}")
-                            
+
         except Exception as e:
             logging.debug(f"Error cleaning up finished workers: {e}")
-            
+
     def _cleanup_virtual_scroll_tables(self):
         """Clean up virtual scroll table caches"""
         try:
             from PyQt6.QtWidgets import QApplication
-            
+
             # Find all virtual scroll tables and clean them up
             for widget in QApplication.allWidgets():
                 if hasattr(widget, 'cleanup') and 'VirtualScroll' in widget.__class__.__name__:
@@ -260,7 +251,7 @@ class MainWindow(QMainWindow):
                             widget.cleanup()
                     except Exception as widget_error:
                         logging.debug(f"Error cleaning up virtual scroll widget: {widget_error}")
-                        
+
         except Exception as e:
             logging.debug(f"Error cleaning up virtual scroll tables: {e}")
 
@@ -273,6 +264,31 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logging.error(f"Failed to setup cluster state manager: {e}")
             self.cluster_state_manager = None
+
+    def _setup_kubeconfig_watcher(self):
+        """Setup kubeconfig file watcher to detect external changes"""
+        try:
+            self._kubeconfig_watcher = get_kubeconfig_watcher()
+            self._kubeconfig_watcher.kubeconfig_changed.connect(self._on_kubeconfig_changed)
+            logging.info(f"Kubeconfig watcher initialized, watching: {self._kubeconfig_watcher.get_kubeconfig_path()}")
+        except Exception as e:
+            logging.error(f"Failed to setup kubeconfig watcher: {e}")
+            self._kubeconfig_watcher = None
+
+    def _on_kubeconfig_changed(self):
+        """Handle kubeconfig file changes by refreshing cluster list"""
+        if self._shutting_down:
+            return
+        
+        logging.info("Kubeconfig changed detected, refreshing cluster list...")
+        
+        try:
+            # Refresh clusters on home page if available
+            if hasattr(self, 'home_page') and hasattr(self.home_page, 'refresh_cluster_status'):
+                self.home_page.refresh_cluster_status()
+                logging.info("Cluster list refresh triggered due to kubeconfig change")
+        except Exception as e:
+            logging.error(f"Error refreshing clusters after kubeconfig change: {e}")
 
     def resizeEvent(self, event):
         """Handle resize event"""
@@ -290,7 +306,10 @@ class MainWindow(QMainWindow):
         self.main_layout.setSpacing(0)
 
         # Initialize pages
+        # processEvents() calls keep the splash spinner animated during heavy construction
         self.home_page = OrchestrixGUI()
+        QApplication.processEvents()  # Allow splash spinner to animate
+
         self.title_bar = TitleBar(self, update_pinned_items_signal=self.home_page.update_pinned_items_signal)
         self.main_layout.addWidget(self.title_bar)
 
@@ -300,7 +319,9 @@ class MainWindow(QMainWindow):
         self.main_layout.addWidget(self.stacked_widget)
 
         # Create pages
+        QApplication.processEvents()  # Allow splash spinner to animate
         self.cluster_view = ClusterView(self)
+        QApplication.processEvents()  # Allow splash spinner to animate
         self.preferences_page = PreferencesWidget()
 
         # Add pages to stacked widget
@@ -326,6 +347,7 @@ class MainWindow(QMainWindow):
         """Set up signal connections between components"""
         self.home_page.open_cluster_signal.connect(self.switch_to_cluster_view)
         self.home_page.open_preferences_signal.connect(self.switch_to_preferences)
+        self.home_page.signals.cluster_deleted_signal.connect(self.handle_cluster_deletion)
         self.title_bar.home_btn.clicked.connect(self.switch_to_home)
         self.title_bar.settings_btn.clicked.connect(self.switch_to_preferences)
         self.preferences_page.back_signal.connect(self.handle_preferences_back)
@@ -336,6 +358,73 @@ class MainWindow(QMainWindow):
         self.preferences_page.line_numbers_changed.connect(self.update_yaml_editor_line_numbers)
         self.preferences_page.tab_size_changed.connect(self.update_yaml_editor_tab_size)
         self.preferences_page.timezone_changed.connect(self.apply_timezone_change)
+
+    def handle_cluster_deletion(self, cluster_name):
+        """Handle scenario when a cluster is deleted externally.
+        
+        If the user is currently viewing the deleted cluster, show error first
+        (blocking), then redirect to home page after user acknowledges.
+        
+        Implements UI-level deduplication as second layer of defense
+        (primary deduplication is in kubeconfig_watcher via mtime validation).
+        """
+        # UI-LEVEL DEDUPLICATION (Singleton Dialog Pattern)
+        # This prevents stacked dialogs if duplicate signals slip through
+        if not hasattr(self, '_recently_handled_deletions'):
+            self._recently_handled_deletions = set()
+        
+        if cluster_name in self._recently_handled_deletions:
+            logging.debug(f"Suppressing duplicate deletion handling for: {cluster_name}")
+            return
+        
+        # Mark as handled and auto-clear after 5 seconds
+        self._recently_handled_deletions.add(cluster_name)
+        QTimer.singleShot(5000, lambda: self._recently_handled_deletions.discard(cluster_name))
+        
+        logging.info(f"Main handling external deletion of cluster: {cluster_name}")
+        
+        # CRITICAL: Clear stale state for the deleted cluster regardless of current view
+        # This prevents "already connected" issues when cluster is recreated
+        try:
+            from Utils.cluster_state_manager import get_cluster_state_manager
+            state_manager = get_cluster_state_manager()
+            state_manager.reset_cluster_state(cluster_name)
+            logging.debug(f"Reset cluster state for deleted cluster: {cluster_name}")
+        except Exception as e:
+            logging.warning(f"Failed to reset cluster state for {cluster_name}: {e}")
+
+        try:
+            # Reset API service to force fresh connection on next attempt
+            from Services.kubernetes.api_service import get_kubernetes_api_service
+            api_service = get_kubernetes_api_service()
+            api_service.reset_clients()
+            logging.debug(f"Reset API clients after cluster deletion: {cluster_name}")
+        except Exception as e:
+            logging.warning(f"Failed to reset API clients: {e}")
+
+        try:
+            # Reset kubernetes_client's current_cluster to prevent "already connected" check
+            # This fixes the 10+ second retry delay when reconnecting to a recreated cluster
+            from Utils.kubernetes_client import get_kubernetes_client
+            kube_client = get_kubernetes_client()
+            if kube_client and hasattr(kube_client, 'current_cluster') and kube_client.current_cluster == cluster_name:
+                kube_client.current_cluster = None
+                logging.debug(f"Reset kubernetes_client.current_cluster for deleted cluster: {cluster_name}")
+        except Exception as e:
+            logging.warning(f"Failed to reset kubernetes_client: {e}")
+
+        # If we are currently viewing this cluster, show error then switch to home
+        if (self.stacked_widget.currentWidget() == self.cluster_view and 
+            hasattr(self.cluster_view, 'active_cluster') and 
+            self.cluster_view.active_cluster == cluster_name):
+            
+            logging.info(f"Current active cluster {cluster_name} was deleted - redirecting to home")
+            self.show_error_message(
+                f"The cluster '{cluster_name}' is no longer available. It may have been deleted.", 
+                context="accessing cluster"
+            )
+            self.switch_to_home()
+
 
     def show_simple_notification(self, title, message):
         """Show a simple notification"""
@@ -374,7 +463,7 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 logging.warning(f"Failed to apply timezone with tzset: {e}")
 
-            if hasattr(self.title_bar, 'update_timezone'):
+            if hasattr(self, 'title_bar') and hasattr(self.title_bar, 'update_timezone'):
                 self.title_bar.update_timezone(timezone)
 
             if hasattr(self.cluster_view, 'update_timezone_dependent_displays'):
@@ -384,7 +473,7 @@ class MainWindow(QMainWindow):
 
         except Exception as e:
             logging.error(f"Error applying timezone change: {e}")
-            self.show_error_message(f"Failed to change timezone: {str(e)}")
+            self.show_error_message(f"Failed to change timezone: {str(e)}", exc=e)
 
     def save_timezone_preference(self, timezone):
         """Save timezone preference to settings"""
@@ -443,7 +532,7 @@ class MainWindow(QMainWindow):
                             time.tzset()
                     except Exception as e:
                         logging.warning(f"Failed to apply saved timezone: {e}")
-                    
+
                     if hasattr(self.preferences_page, 'set_initial_timezone'):
                         self.preferences_page.set_initial_timezone(loaded_timezone)
 
@@ -561,18 +650,17 @@ class MainWindow(QMainWindow):
         """Handle cluster state changes with better error handling"""
         try:
             if state == ClusterState.CONNECTING:
-                # Don't show loading overlay during connection
-                pass
-                
+                logging.debug(f"Connecting to cluster: {cluster_name}")
+
             elif state == ClusterState.CONNECTED:
                 # Don't show loading message, connect silently
                 logging.info(f"Successfully connected to cluster: {cluster_name}")
-                
+
             elif state == ClusterState.ERROR:
                 # Hide any existing loading overlay on error
                 self.loading_overlay.hide_loading()
                 logging.error(f"Failed to connect to cluster: {cluster_name}")
-                
+
         except Exception as e:
             logging.error(f"Error handling cluster state change: {e}")
 
@@ -580,41 +668,41 @@ class MainWindow(QMainWindow):
         """Handle cluster switch completion with better error handling"""
         try:
             self.loading_overlay.hide_loading()
-            
+
             if success:
                 # Always switch to cluster view when switch is completed successfully
                 current_widget = self.stacked_widget.currentWidget()
                 if current_widget != self.cluster_view:
                     logging.info(f"Switching to cluster view for {cluster_name}")
                     self.stacked_widget.setCurrentWidget(self.cluster_view)
-                
+
                 # FIXED: Set active cluster without triggering another connection
                 self.cluster_view.set_active_cluster(cluster_name)
-                
+
                 # FIXED: Update title bar ONLY after successful connection
                 if hasattr(self, 'title_bar'):
                     self.title_bar.update_current_cluster(cluster_name)
                     logging.info(f"Updated title bar cluster name to: {cluster_name}")
-                
+
                 # FIXED: Post-switch operations with error handling
                 QTimer.singleShot(50, lambda: self._post_switch_operations(cluster_name))
-                
+
             else:
                 # FIXED: Better error handling - don't switch to cluster view on failure
                 error_msg = f"Failed to connect to cluster: {cluster_name}"
                 logging.error(error_msg)
                 self.show_error_message(error_msg)
-                
+
                 # FIXED: Reset title bar to previous cluster or clear it
                 if hasattr(self, 'title_bar'):
                     # Don't update title bar on failed connection
                     logging.info(f"Connection failed for {cluster_name}, keeping existing title bar")
-                
+
                 # FIXED: Stay on home page when connection fails
                 if self.stacked_widget.currentWidget() != self.home_page:
                     logging.info(f"Connection failed for {cluster_name}, staying on home page")
                     self.stacked_widget.setCurrentWidget(self.home_page)
-                    
+
         except Exception as e:
             logging.error(f"Error handling cluster switch completion: {e}")
             self.loading_overlay.hide_loading()
@@ -623,21 +711,21 @@ class MainWindow(QMainWindow):
         """Post-switch operations with better error handling"""
         try:
             # FIXED: Don't call set_active_cluster again, it was already called
-            
+
             # Update terminal panel position if visible
             if (hasattr(self.cluster_view, 'terminal_panel') and
                     self.cluster_view.terminal_panel.is_visible and
                     hasattr(self.cluster_view.terminal_panel, 'reposition')):
                 self.cluster_view.terminal_panel.reposition()
-                
+
             # Handle page change for current cluster view page
             if hasattr(self.cluster_view, 'handle_page_change'):
                 current_page = self.cluster_view.stacked_widget.currentWidget()
                 if current_page:
                     self.cluster_view.handle_page_change(current_page)
-                    
+
             logging.info(f"Post-switch operations completed for {cluster_name}")
-            
+
         except Exception as e:
             logging.error(f"Error in post-switch operations for {cluster_name}: {e}")
 
@@ -649,10 +737,10 @@ class MainWindow(QMainWindow):
                 return
 
             self.previous_page = self.stacked_widget.currentWidget()
-            
+
             # FIXED: Check actual connection state first
             cluster_state = self.cluster_state_manager.get_cluster_state(cluster_name)
-            
+
             # If already connected, switch to cluster view immediately
             if cluster_state == ClusterState.CONNECTED:
                 logging.info(f"Cluster {cluster_name} already connected, switching to cluster view")
@@ -660,11 +748,11 @@ class MainWindow(QMainWindow):
                     self.stacked_widget.setCurrentWidget(self.cluster_view)
                 self.cluster_view.set_active_cluster(cluster_name)
                 return
-            
+
             # FIXED: Only show loading overlay if we need to connect
             if cluster_state in [ClusterState.DISCONNECTED, ClusterState.ERROR, ClusterState.MANUALLY_DISCONNECTED]:
                 logging.info(f"Requesting cluster switch to: {cluster_name}")
-                
+
                 if not self.cluster_state_manager.request_cluster_switch(cluster_name):
                     error_msg = f"Could not initiate switch to {cluster_name}"
                     logging.warning(error_msg)
@@ -673,12 +761,12 @@ class MainWindow(QMainWindow):
             else:
                 # Already connecting, just wait
                 logging.info(f"Cluster {cluster_name} already connecting, waiting...")
-                
+
         except Exception as e:
             logging.error(f"Error in switch_to_cluster_view for {cluster_name}: {e}")
-            self.show_error_message(f"Error switching to cluster: {str(e)}")
+            self.show_error_message(f"Error switching to cluster: {str(e)}", exc=e)
 
-    def show_error_message(self, error_message):
+    def show_error_message(self, error_message, context="application", exc: Exception = None):
         """Display error messages using centralized error handler"""
         if self._shutting_down:
             return
@@ -687,18 +775,18 @@ class MainWindow(QMainWindow):
             # Hide loading overlay when showing error
             if hasattr(self, 'loading_overlay'):
                 self.loading_overlay.hide_loading()
-            
+
             # Use centralized error handler with proper context
             error_handler = get_error_handler()
             error_handler.handle_error(
-                Exception(error_message), 
-                context="application", 
+                exc if exc is not None else Exception(error_message),
+                context=context,
                 show_dialog=True
             )
-            
+
         except Exception as e:
             logging.error(f"Error showing error message: {e}")
-  
+
 
     def handle_page_change(self, index):
         """Handle page changes in the stacked widget"""
@@ -722,7 +810,7 @@ class MainWindow(QMainWindow):
                 elif hasattr(active_cluster_subpage, 'load_data'):
                     active_cluster_subpage.load_data()
 
-        if hasattr(self.title_bar, 'update_context'):
+        if hasattr(self, 'title_bar') and hasattr(self.title_bar, 'update_context'):
             page_name = "Unknown"
             for name, widget_instance in self.pages.items():
                 if widget_instance == current_widget:
@@ -760,7 +848,7 @@ class MainWindow(QMainWindow):
 
             # Shutdown thread manager
             shutdown_thread_manager()
-            
+
             # Shutdown cluster operations
             self.shutdown_cluster_operations()
 
@@ -803,9 +891,23 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logging.error(f"Error in shutdown_cluster_operations: {e}")
 
+        # Cleanup kubeconfig watcher
+        try:
+            cleanup_kubeconfig_watcher()
+        except Exception as e:
+            logging.error(f"Error cleaning up kubeconfig watcher: {e}")
+
     def cleanup_ui_components(self):
         """Clean up UI components safely"""
         try:
+            # Clean up HomePage and save pinned items
+            if hasattr(self, 'home_page') and hasattr(self.home_page, 'cleanup'):
+                try:
+                    self.home_page.cleanup()
+                    logging.debug("HomePage cleanup completed")
+                except Exception as e:
+                    logging.error(f"Error during HomePage cleanup: {e}")
+
             if (hasattr(self, 'cluster_view') and
                     hasattr(self.cluster_view, 'terminal_panel')):
                 if self.cluster_view.terminal_panel.is_visible:
@@ -813,18 +915,21 @@ class MainWindow(QMainWindow):
                         self.cluster_view.terminal_panel.hide_terminal()
                     except Exception as e:
                         logging.error(f"Error hiding terminal: {e}")
-                
+
                 if hasattr(self.cluster_view.terminal_panel, 'cleanup'):
                     self.cluster_view.terminal_panel.cleanup()
 
             # Clean up main pages
             pages_to_cleanup = [self.home_page, self.cluster_view, self.preferences_page]
             for page in pages_to_cleanup:
-                if page and hasattr(page, 'cleanup_on_destroy'):
-                    try:
-                        page.cleanup_on_destroy()
-                    except Exception as e:
-                        logging.error(f"Error cleaning up page {type(page).__name__}: {e}")
+                if not page:
+                    continue
+
+                try:
+                    if hasattr(page, 'cleanup'):
+                        page.cleanup()
+                except Exception as e:
+                    logging.error(f"Error cleaning up page {type(page).__name__}: {e}")
 
         except Exception as e:
             logging.error(f"Error in cleanup_ui_components: {e}")
@@ -840,21 +945,21 @@ class MainWindow(QMainWindow):
             self.home_page, self.cluster_view, self.preferences_page,
             self.loading_overlay
         ]
-        
+
         if hasattr(self, 'cluster_view') and hasattr(self.cluster_view, 'terminal_panel'):
             widget_parents.append(self.cluster_view.terminal_panel)
 
         # Use centralized resource cleaner
         total_cleaned = ResourceCleaner.cleanup_widgets(widget_parents)
-        
+
         # Force garbage collection
         collected = ResourceCleaner.force_garbage_collection()
-        
+
         # Brief pause for cleanup to complete
         QThread.msleep(50)
-        
+
         logging.info(f"Resource cleanup completed: {total_cleaned} resources cleaned, {collected} objects collected")
-    
+
     def _disconnect_cluster_signals(self):
         """Disconnect cluster-related signals to prevent issues during shutdown"""
         try:
@@ -864,7 +969,7 @@ class MainWindow(QMainWindow):
                     self.cluster_connector.disconnect()
         except Exception as e:
             logging.error(f"Error disconnecting cluster signals: {e}")
-    
+
     def __del__(self):
         """Destructor to ensure cleanup when MainWindow is destroyed"""
         try:
@@ -890,16 +995,36 @@ def main():
 
     logging.info("Creating QApplication with consistent styling")
     app = QApplication(sys.argv)
-    
+
     # Force consistent Qt style across platforms
     app.setStyle('Fusion')  # Use Fusion style for consistency
- 
+
     # Force consistent font rendering
     app.setFont(QFont("Segoe UI", 9))
-    
-    # Apply global stylesheet with platform overrides
-    app.setStyleSheet(AppStyles.GLOBAL_PLATFORM_OVERRIDE_STYLE)
-    
+
+    # Apply theme from ThemeManager with saved preference
+    from PyQt6.QtCore import QSettings
+    from UI.ThemeManager import get_theme_manager
+
+    settings = QSettings("Orchetrix", "OX")
+    saved_theme = settings.value("theme", "Dark")
+
+    # Use singleton instance instead of creating new one
+    theme_manager = get_theme_manager()
+    theme_manager.set_theme(saved_theme)
+    theme = theme_manager.get_current_theme()
+    app.setStyleSheet(theme.get_main_style())
+
+    # Connect theme_changed signal to update app stylesheet
+    def on_theme_changed(theme_name):
+        theme = theme_manager.get_current_theme()
+        app.setStyleSheet(theme.get_main_style())
+        logging.info(f"Theme changed to {theme_name}")
+
+    theme_manager.theme_changed.connect(on_theme_changed)
+
+    logging.info(f"Applied {saved_theme} theme at startup")
+
     # Set application icon
     icon_path_ico = resource_path("Icons/logoIcon.ico")
     icon_path_png = resource_path("Icons/logoIcon.png")
@@ -996,7 +1121,7 @@ def main():
             pass
 
         return 1
-    
+
 if __name__ == "__main__":
     exit_status = 1
     try:

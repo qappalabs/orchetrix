@@ -3,7 +3,7 @@ Enhanced YAML section for DetailPage component - with actual deployment capabili
 """
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QScrollArea, QTextEdit, QLabel,
+    QWidget, QHBoxLayout, QPushButton, QTextEdit, QLabel,
     QLineEdit, QFrame
 )
 from PyQt6.QtCore import Qt, QTimer, QSize, QRect, pyqtSignal
@@ -17,67 +17,137 @@ import logging
 import re
 
 from .base_detail_section import BaseDetailSection
-from UI.Styles import AppStyles, AppColors
+from UI.Styles import AppColors
 from UI.Icons import resource_path
+import Styles.YamlSectionStyles as YAMLSectionStyles
 
 class YamlHighlighter(QSyntaxHighlighter):
-    """Syntax highlighter for YAML content with improved color scheme"""
+    """Syntax highlighter for YAML content with improved color scheme and error detection"""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.highlighting_rules = []
 
         # Format for keys
         key_format = QTextCharFormat()
-        key_format.setForeground(QColor("#569CD6"))
+        key_format.setForeground(QColor(AppColors.YAML_KEY))
         key_format.setFontWeight(QFont.Weight.Bold)
         self.highlighting_rules.append((r'^\s*[^:]+:', key_format))
 
         # Format for values
         value_format = QTextCharFormat()
-        value_format.setForeground(QColor("#CE9178"))
+        value_format.setForeground(QColor(AppColors.YAML_VALUE))
         self.highlighting_rules.append((r':\s*[^{\\[].*$', value_format))
 
         # Format for lists
         list_format = QTextCharFormat()
-        list_format.setForeground(QColor("#B5CEA8"))
+        list_format.setForeground(QColor(AppColors.YAML_LIST))
         self.highlighting_rules.append((r'^\s*-\s+', list_format))
 
         # Format for comments
         comment_format = QTextCharFormat()
-        comment_format.setForeground(QColor("#6A9955"))
+        comment_format.setForeground(QColor(AppColors.YAML_COMMENT))
         self.highlighting_rules.append((r'#.*$', comment_format))
 
         # Format for numbers
         number_format = QTextCharFormat()
-        number_format.setForeground(QColor("#B5CEA8"))
+        number_format.setForeground(QColor(AppColors.YAML_NUMBER))
         self.highlighting_rules.append((r'\b\d+\b', number_format))
 
         # Format for booleans
         boolean_format = QTextCharFormat()
-        boolean_format.setForeground(QColor("#569CD6"))
+        boolean_format.setForeground(QColor(AppColors.YAML_BOOLEAN))
         self.highlighting_rules.append((r'\b(true|false|True|False|yes|no|Yes|No)\b', boolean_format))
 
         # Format for null values
         null_format = QTextCharFormat()
-        null_format.setForeground(QColor("#569CD6"))
+        null_format.setForeground(QColor(AppColors.YAML_NULL))
         self.highlighting_rules.append((r'\b(null|Null|NULL|~)\b', null_format))
 
         # Format for strings in quotes
         string_format = QTextCharFormat()
-        string_format.setForeground(QColor("#CE9178"))
+        string_format.setForeground(QColor(AppColors.YAML_STRING))
         self.highlighting_rules.append((r'"[^"]*"', string_format))
         self.highlighting_rules.append((r"'[^']*'", string_format))
+
+        # Format for syntax errors
+        self.error_format = QTextCharFormat()
+        self.error_format.setUnderlineColor(QColor("#FF0000"))
+        self.error_format.setUnderlineStyle(QTextCharFormat.UnderlineStyle.WaveUnderline)
+        self.error_format.setForeground(QColor("#FF4444"))
 
         self.rules = [(re.compile(pattern), fmt) for pattern, fmt in self.highlighting_rules]
 
     def highlightBlock(self, text):
         """Apply highlighting to the given block of text"""
-        for regex, format in self.rules:
+        # Apply standard syntax highlighting
+        for regex, fmt in self.rules:
             matches = regex.finditer(text)
             for match in matches:
                 start = match.start()
                 length = match.end() - start
-                self.setFormat(start, length, format)
+                self.setFormat(start, length, fmt)
+
+        # Check for syntax errors in this line
+        self._highlight_yaml_errors(text)
+
+    def _highlight_yaml_errors(self, text):
+        """Highlight YAML syntax errors in real-time"""
+        # Skip empty lines, comments, and list items
+        stripped = text.strip()
+        if not stripped or stripped.startswith('#') or stripped.startswith('-'):
+            return
+
+        # Check for the specific "backend:django" type error (missing space after colon)
+        colon_match = re.search(r'^\s*(\w+):([\w-]+)', text)
+        if colon_match:
+            # Found key:value without space after colon
+            value = colon_match.group(2)
+            colon_pos = text.find(':')
+            
+            # Highlight the problematic part (from colon to end of value)
+            error_start = colon_pos
+            error_end = colon_pos + 1 + len(value)
+            self.setFormat(error_start, error_end - error_start, self.error_format)
+            return
+
+        # Check for other common YAML syntax errors
+        error_patterns = [
+            # Key without colon at end of line
+            (r'^\s*\w+\s*$', "Key without colon"),
+            # Multiple colons in key
+            (r'^\s*[^:]*:[^:]*:[^:]*:', "Multiple colons in key"),
+            # Colon without key
+            (r'^\s*:\s*', "Value without key"),
+            # Invalid indentation (tabs mixed with spaces - basic check)
+            (r'^\t+ +|\s+ \t+', "Mixed tabs and spaces"),
+        ]
+
+        for pattern, error_type in error_patterns:
+            if re.search(pattern, text):
+                # Don't highlight if this looks like a valid YAML structure
+                if pattern == r'^\s*\w+\s*$':
+                    # Check if next line is properly indented child
+                    current_block = self.currentBlock()
+                    next_block = current_block.next()
+                    if next_block.isValid():
+                        next_text = next_block.text().strip()
+                        if next_text and (next_text.startswith('- ') or ':' in next_text):
+                            continue  # This is likely valid YAML
+
+                self.setFormat(0, len(text), self.error_format)
+                break
+
+        # Additional check for malformed key-value pairs
+        if ':' in text and not re.search(r'^\s*[\w-]+\s*:\s+', text):
+            colon_pos = text.find(':')
+            if colon_pos > 0:  # Not at start of line
+                # Check if there's proper spacing
+                before_colon = text[:colon_pos].strip()
+                after_colon = text[colon_pos+1:]
+                
+                if before_colon and after_colon.strip():  # Both key and value present
+                    if not after_colon.startswith(' '):  # No space after colon
+                        self.setFormat(colon_pos, len(after_colon.split()[0]) + 1, self.error_format)
 
 class SearchWidget(QFrame):
     """Search widget for YAML editor"""
@@ -95,42 +165,7 @@ class SearchWidget(QFrame):
     def setup_ui(self):
         """Setup search widget UI"""
         self.setFixedHeight(40)
-        self.setStyleSheet(f"""
-            QFrame {{
-                background-color: {AppColors.BG_HEADER};
-                border: 1px solid {AppColors.BORDER_COLOR};
-                border-radius: 4px;
-            }}
-            QLineEdit {{
-                background-color: {AppColors.BG_DARK};
-                color: {AppColors.TEXT_LIGHT};
-                border: 1px solid {AppColors.BORDER_COLOR};
-                border-radius: 3px;
-                padding: 5px;
-                font-size: 12px;
-            }}
-            QLineEdit:focus {{
-                border: 1px solid {AppColors.ACCENT_BLUE};
-            }}
-            QPushButton {{
-                background-color: {AppColors.BG_DARK};
-                color: {AppColors.TEXT_LIGHT};
-                border: 1px solid {AppColors.BORDER_COLOR};
-                border-radius: 3px;
-                padding: 4px 8px;
-                font-size: 11px;
-            }}
-            QPushButton:hover {{
-                background-color: {AppColors.HOVER_BG_DARKER};
-            }}
-            QPushButton:pressed {{
-                background-color: {AppColors.BG_MEDIUM};
-            }}
-            QLabel {{
-                color: {AppColors.TEXT_SECONDARY};
-                font-size: 11px;
-            }}
-        """)
+        self.setStyleSheet(YAMLSectionStyles.get_search_widget_style())
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(6, 3, 6, 3)
@@ -162,7 +197,7 @@ class SearchWidget(QFrame):
 
         # Next button with icon
         self.next_button = QPushButton()
-        next_icon =resource_path("Icons/Yaml_downarrow.svg")
+        next_icon = resource_path("Icons/Yaml_downarrow.svg")
         self.next_button.setIcon(QIcon(next_icon))
         self.next_button.setIconSize(QSize(14, 14))
         self.next_button.setFixedSize(24, 24)
@@ -335,8 +370,6 @@ class YamlEditorWithLineNumbers(QTextEdit):
             return
 
         # Find all occurrences
-        flags = QTextDocument.FindFlag.FindBackward if not case_sensitive else QTextDocument.FindFlag.FindBackward | QTextDocument.FindFlag.FindCaseSensitively
-
         cursor = self.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
 
@@ -515,6 +548,9 @@ class YamlEditorWithLineNumbers(QTextEdit):
                         Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop,
                         number
                     )
+            elif block_top > visible_bottom:
+                # Early exit optimization: stop if we passed the visible area
+                break
 
             block = block.next()
             block_number += 1
@@ -555,102 +591,70 @@ class YamlEditorWithLineNumbers(QTextEdit):
 class DetailPageYAMLSection(BaseDetailSection):
     """Enhanced YAML section with actual deployment capability"""
 
+    RELOAD_DELAY_MS = 2000  # Configurable delay for post-update reload
+    MAX_RELOAD_RETRIES = 3
+
     def __init__(self, kubernetes_client, parent=None):
         super().__init__("YAML", kubernetes_client, parent)
         self.original_yaml = None
         self.yaml_edited = False
         self.is_helm_resource = False
+        self.reload_retry_count = 0
         self.setup_yaml_ui()
+
+    def _on_theme_changed(self, theme_name):
+        """Handle theme changes by updating all styling"""
+        # Update toolbar styling
+        if hasattr(self, 'yaml_toolbar'):
+            self.yaml_toolbar.setStyleSheet(YAMLSectionStyles.get_yaml_toolbar_style())
+
+        # Update button styling
+        if hasattr(self, 'yaml_edit_button'):
+            self.yaml_edit_button.setStyleSheet(YAMLSectionStyles.get_yaml_edit_button_style())
+        if hasattr(self, 'yaml_save_button'):
+            self.yaml_save_button.setStyleSheet(YAMLSectionStyles.get_yaml_save_button_style())
+        if hasattr(self, 'yaml_cancel_button'):
+            self.yaml_cancel_button.setStyleSheet(YAMLSectionStyles.get_yaml_cancel_button_style())
+        if hasattr(self, 'helm_status_label'):
+            self.helm_status_label.setStyleSheet(YAMLSectionStyles.get_helm_status_label_style())
+
+        # Update editor styling based on current mode
+        if hasattr(self, 'yaml_editor'):
+            if self.yaml_editor.isReadOnly():
+                self.yaml_editor.setStyleSheet(YAMLSectionStyles.get_yaml_editor_readonly_style())
+            else:
+                self.yaml_editor.setStyleSheet(YAMLSectionStyles.get_yaml_editor_edit_style())
 
     def setup_yaml_ui(self):
         """Setup YAML-specific UI"""
         # Create toolbar
-        yaml_toolbar = QWidget()
-        yaml_toolbar.setFixedHeight(40)
-        yaml_toolbar.setStyleSheet(f"""
-            background-color: {AppColors.BG_DARK};
-            border-bottom: 1px solid {AppColors.BORDER_COLOR};
-        """)
+        self.yaml_toolbar = QWidget()
+        self.yaml_toolbar.setFixedHeight(40)
+        self.yaml_toolbar.setStyleSheet(YAMLSectionStyles.get_yaml_toolbar_style())
 
-        toolbar_layout = QHBoxLayout(yaml_toolbar)
+        toolbar_layout = QHBoxLayout(self.yaml_toolbar)
         toolbar_layout.setContentsMargins(10, 0, 10, 0)
 
         # Edit button
         self.yaml_edit_button = QPushButton("Edit")
-        self.yaml_edit_button.setStyleSheet("""
-            QPushButton {
-                background-color: #2d2d2d;
-                color: #ffffff;
-                border: 1px solid #3d3d3d;
-                border-radius: 4px;
-                padding: 5px 15px;
-            }
-            QPushButton:hover {
-                background-color: #3d3d3d;
-            }
-            QPushButton:pressed {
-                background-color: #1e1e1e;
-            }
-            QPushButton:disabled {
-                background-color: #555555;
-                color: #888888;
-            }
-        """)
+        self.yaml_edit_button.setStyleSheet(YAMLSectionStyles.get_yaml_edit_button_style())
         self.yaml_edit_button.clicked.connect(self.toggle_yaml_edit_mode)
 
         # Save button
         self.yaml_save_button = QPushButton("Deploy")
-        self.yaml_save_button.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: #ffffff;
-                border: none;
-                border-radius: 4px;
-                padding: 5px 15px;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-            QPushButton:pressed {
-                background-color: #3d8b40;
-            }
-            QPushButton:disabled {
-                background-color: #555555;
-                color: #888888;
-            }
-        """)
+        self.yaml_save_button.setStyleSheet(YAMLSectionStyles.get_yaml_save_button_style())
         self.yaml_save_button.clicked.connect(self.save_yaml_changes)
         self.yaml_save_button.hide()
 
         # Cancel button
         self.yaml_cancel_button = QPushButton("Cancel")
-        self.yaml_cancel_button.setStyleSheet("""
-            QPushButton {
-                background-color: #f44336;
-                color: #ffffff;
-                border: none;
-                border-radius: 4px;
-                padding: 5px 15px;
-            }
-            QPushButton:hover {
-                background-color: #d32f2f;
-            }
-            QPushButton:pressed {
-                background-color: #b71c1c;
-            }
-        """)
+        self.yaml_cancel_button.setStyleSheet(YAMLSectionStyles.get_yaml_cancel_button_style())
         self.yaml_cancel_button.clicked.connect(self.cancel_yaml_edit)
         self.yaml_cancel_button.hide()
 
         # Status label for helm resources
         self.helm_status_label = QLabel("⚠️ Helm resources cannot be edited via YAML")
-        self.helm_status_label.setStyleSheet(f"""
-            QLabel {{
-                color: #ff9800;
-                font-style: italic;
-                padding: 5px;
-            }}
-        """)
+        self.helm_status_label.setStyleSheet(YAMLSectionStyles.get_helm_status_label_style())
         self.helm_status_label.hide()
 
         toolbar_layout.addWidget(self.yaml_edit_button)
@@ -670,29 +674,18 @@ class DetailPageYAMLSection(BaseDetailSection):
         # Apply syntax highlighting
         self.yaml_highlighter = YamlHighlighter(self.yaml_editor.document())
 
-        # Basic stylesheet
-        base_yaml_style = f"""
-            QTextEdit {{
-                background-color: #1E1E1E;
-                color: #D4D4D4;
-                border: none;
-                selection-background-color: #264F78;
-                selection-color: #D4D4D4;
-                padding: 20px;
-            }}
-            {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
-        """
-        self.yaml_editor.setStyleSheet(base_yaml_style)
+        # Apply theme-aware editor styling
+        self.yaml_editor.setStyleSheet(YAMLSectionStyles.get_yaml_editor_readonly_style())
 
         # Add to main layout
-        self.content_layout.addWidget(yaml_toolbar)
+        self.content_layout.addWidget(self.yaml_toolbar)
         self.content_layout.addWidget(self.yaml_editor)
 
         # Connect kubernetes client signals for updates using queued connection for thread safety
         try:
             if hasattr(self.kubernetes_client, 'resource_updated'):
                 self.kubernetes_client.resource_updated.connect(
-                    self.handle_resource_update_result, 
+                    self.handle_resource_update_result,
                     Qt.ConnectionType.QueuedConnection
                 )
                 logging.debug("YAML section: Connected to resource_updated signal with queued connection")
@@ -717,11 +710,27 @@ class DetailPageYAMLSection(BaseDetailSection):
             self.yaml_edit_button.setEnabled(True)
             self.helm_status_label.hide()
 
+    def set_raw_data(self, raw_data):
+        """Set raw data for special resources like nodes and custom resources"""
+        logging.info(f"YAML section: Received raw data for {self.resource_type}, keys: {list(raw_data.keys()) if raw_data else 'None'}")
+        self.current_data = raw_data
+        self.update_ui_with_data(raw_data)
+
     def _load_data_async(self):
         """Load overview data using Kubernetes API"""
         try:
+            # CRITICAL FIX: Check if we already have raw_data from the page (e.g., NodesPage)
+            # This prevents unnecessary API calls and empty YAML sections
+            if self.current_data is not None:
+                logging.info(f"YAML section: Using existing raw_data for {self.resource_type}/{self.resource_name}")
+                # Use the existing data directly instead of making API call
+                self.handle_data_loaded(self.current_data)
+                return
+            
+            # Only make API call if we don't have current_data
+            logging.info(f"YAML section: No raw_data available, fetching from API for {self.resource_type}/{self.resource_name}")
             self.connect_api_signals()
-            self.kubernetes_client.get_resource_detail_async(
+            self.kubernetes_client.get_resource_detail(
                 self.resource_type,
                 self.resource_name,
                 self.resource_namespace or "default"
@@ -748,14 +757,14 @@ class DetailPageYAMLSection(BaseDetailSection):
             if not data:
                 self.yaml_editor.setPlainText("# No data available for this resource")
                 return
-                
+
             # Convert snake_case back to camelCase for proper Kubernetes YAML
             kubernetes_yaml = self._convert_to_kubernetes_yaml(data)
-            
+
             # Use better YAML dump settings for readability
             yaml_text = yaml.dump(
-                kubernetes_yaml, 
-                default_flow_style=False, 
+                kubernetes_yaml,
+                default_flow_style=False,
                 sort_keys=False,
                 indent=2,
                 width=120,
@@ -763,7 +772,7 @@ class DetailPageYAMLSection(BaseDetailSection):
             )
             self.yaml_editor.setPlainText(yaml_text)
             self.original_yaml = yaml_text
-            
+
             logging.debug(f"Successfully rendered YAML for {self.resource_type}/{self.resource_name}")
 
         except Exception as e:
@@ -841,7 +850,7 @@ class DetailPageYAMLSection(BaseDetailSection):
                     'CustomResourceDefinition': 'apiextensions.k8s.io/v1',
                     # Common v1 resources
                     'ReplicationController': 'v1',
-                    'LimitRange': 'v1', 
+                    'LimitRange': 'v1',
                     'ResourceQuota': 'v1',
                     'ServiceAccount': 'v1',
                     'Endpoints': 'v1',
@@ -897,18 +906,7 @@ class DetailPageYAMLSection(BaseDetailSection):
             self.yaml_save_button.show()
             self.yaml_cancel_button.show()
 
-            self.yaml_editor.setStyleSheet(f"""
-                QTextEdit {{
-                    background-color: #1E1E1E;
-                    color: #D4D4D4;
-                    border: 1px solid #0078d7;
-                    selection-background-color: #264F78;
-                    selection-color: #D4D4D4;
-                    padding: 20px;
-                }}
-                {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
-            """)
-
+            self.yaml_editor.setStyleSheet(YAMLSectionStyles.get_yaml_editor_edit_style())
             self.original_yaml = self.yaml_editor.toPlainText()
         else:
             # Exit edit mode
@@ -917,17 +915,7 @@ class DetailPageYAMLSection(BaseDetailSection):
             self.yaml_save_button.hide()
             self.yaml_cancel_button.hide()
 
-            self.yaml_editor.setStyleSheet(f"""
-                QTextEdit {{
-                    background-color: #1E1E1E;
-                    color: #D4D4D4;
-                    border: none;
-                    selection-background-color: #264F78;
-                    selection-color: #D4D4D4;
-                    padding: 20px;
-                }}
-                {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
-            """)
+            self.yaml_editor.setStyleSheet(YAMLSectionStyles.get_yaml_editor_readonly_style())
 
     def save_yaml_changes(self):
         """Save YAML changes using Kubernetes API"""
@@ -971,7 +959,7 @@ class DetailPageYAMLSection(BaseDetailSection):
                 # Step 3: Show loading state
                 if hasattr(self, 'show_loading'):
                     self.show_loading()
-                
+
                 if hasattr(self, 'yaml_save_button') and self.yaml_save_button:
                     self.yaml_save_button.setEnabled(False)
                     self.yaml_save_button.setText("Deploying...")
@@ -1048,7 +1036,7 @@ class DetailPageYAMLSection(BaseDetailSection):
                 try:
                     # Refresh the current YAML content - now thread-safe with queued connection
                     if hasattr(self, 'load_data'):
-                        QTimer.singleShot(1000, self.load_data)
+                        self.schedule_data_reload()
                 except Exception as e:
                     logging.error(f"Error scheduling data reload: {str(e)}")
 
@@ -1091,6 +1079,32 @@ class DetailPageYAMLSection(BaseDetailSection):
 
         if not self.yaml_editor.isReadOnly():
             self.toggle_yaml_edit_mode()
+
+    def schedule_data_reload(self):
+        """Schedule a data reload with a configurable delay to allow changes to propagate"""
+        # Reset retry counter when starting a new reload sequence
+        self.reload_retry_count = 0
+        self._perform_scheduled_reload()
+
+    def _perform_scheduled_reload(self):
+        """Execute the scheduled reload and handle retries"""
+        if hasattr(self, 'load_data'):
+            logging.debug(f"YAML section: Scheduled data reload (attempt {self.reload_retry_count + 1}/{self.MAX_RELOAD_RETRIES})")
+            # Use QTimer for thread safety and delay
+            QTimer.singleShot(self.RELOAD_DELAY_MS, self.load_data)
+            
+            # Simple retry mechanism: schedule another reload if we haven't maxed out
+            # This helps catch updates that might take longer than the initial delay
+            self.reload_retry_count += 1
+            if self.reload_retry_count < self.MAX_RELOAD_RETRIES:
+                # Schedule next check with increased delay (backoff)
+                backoff_delay = self.RELOAD_DELAY_MS * (self.reload_retry_count + 1)
+                QTimer.singleShot(backoff_delay, self._check_and_reload_again)
+
+    def _check_and_reload_again(self):
+        """Helper to continue the reload sequence"""
+        if self.isVisible(): # Only reload if still visible
+            self.load_data()
 
     # Methods for preferences integration
     def update_yaml_font_size(self, font_size):

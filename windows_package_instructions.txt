@@ -1,0 +1,88 @@
+● Ah, now I understand! The issue happens when users extract/unzip your app, not during the build process. This is a different
+  problem - Windows Defender is scanning the extracted files and flagging them.
+
+  This happens because:
+
+  Why Windows Flags Extracted Apps:
+
+  1. Real-time Protection scans files as they're extracted
+  2. Unsigned executables from ZIP files are treated as suspicious
+  3. No "Mark of the Web" - Windows doesn't know the safe download source
+  4. Heuristic scanning flags the combination of:
+    - Network code (sockets, port forwarding)
+    - Terminal/SSH functionality
+    - Unsigned executable
+    - Extracted from archive
+
+  Solutions for User Extraction Issues:
+
+  Solution 1: Code Signing (Most Effective)
+
+  # Sign your executable before zipping
+  signtool.exe sign /f certificate.pfx /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 Orchetrix.exe
+
+  Solution 2: User Instructions
+
+  Provide clear instructions for users:
+
+  For Windows Defender:
+  1. Before extracting: Right-click ZIP → Properties → ✅ Unblock → OK
+  2. If flagged after extraction: Add folder to Windows Defender exclusions
+  3. Windows Security → Virus & threat protection → Exclusions → Add folder
+
+  Solution 3: Alternative Packaging
+
+  Option A: Create MSI Installer Instead of ZIP
+  # Use WiX Toolset to create proper installer
+  # MSI installers are less likely to be flagged
+
+  Option B: Self-Extracting Archive with Certificate
+  - Use tools like 7-Zip SFX or WinRAR SFX
+  - Sign the self-extractor
+
+  Solution 4: Distribution Method Changes
+
+  Option A: Windows Store
+  - No extraction needed
+  - Automatic trust
+
+  Option B: Direct Download (Not Zipped)
+  - Host the signed executable directly
+  - Users download .exe instead of .zip
+
+  Solution 5: Add Digital Signature to ZIP Metadata
+
+  Some antivirus software respects ZIP file signatures.
+
+  Immediate User Workaround Instructions:
+
+  Create a README_WINDOWS_SECURITY.txt file:
+
+  WINDOWS SECURITY NOTICE
+  =======================
+
+  If Windows Defender blocks Orchetrix after extraction:
+
+  METHOD 1 - Before Extracting:
+  1. Right-click the downloaded ZIP file
+  2. Select "Properties"
+  3. Check "Unblock" at the bottom
+  4. Click "OK"
+  5. Now extract the ZIP file
+
+  METHOD 2 - After Extraction:
+  1. Open Windows Security
+  2. Go to "Virus & threat protection"
+  3. Click "Manage settings" under Real-time protection
+  4. Click "Add or remove exclusions"
+  5. Add the Orchetrix folder as an exclusion
+
+  METHOD 3 - Restore from Quarantine:
+  1. Open Windows Security
+  2. Go to "Protection history"
+  3. Find Orchetrix in the list
+  4. Click "Actions" → "Restore"
+
+  This is a false positive. Orchetrix is safe Kubernetes management software.
+
+  The code signing certificate is still your best long-term solution, but these workarounds will help users in the meantime.

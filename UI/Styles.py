@@ -1,5 +1,7 @@
 from PyQt6.QtCore import QSize
 import os
+from UI.ThemeManager import get_theme_manager
+
 
 class AppColors:
     # Base colors
@@ -22,15 +24,28 @@ class AppColors:
 
     # Accent colors
     ACCENT_BLUE = "#0095ff"
+    ACCENT_BLUE_HOVER = "#0086e7"
+    ACCENT_BLUE_PRESSED = "#0063b1"
     ACCENT_GREEN = "#4CAF50"
     ACCENT_ORANGE = "#FF5733"
     ACCENT_RED = "#E81123"
     ACCENT_PURPLE = "#8C33FF"
+    
+    # YAML Syntax Colors
+    YAML_KEY = "#569CD6"
+    YAML_VALUE = "#CE9178"
+    YAML_LIST = "#B5CEA8"
+    YAML_COMMENT = "#6A9955"
+    YAML_NUMBER = "#B5CEA8"
+    YAML_BOOLEAN = "#569CD6"
+    YAML_NULL = "#569CD6"
+    YAML_STRING = "#CE9178"
 
     # Border colors
     BORDER_COLOR = "#2d2d2d"
     BORDER_LIGHT = "#454545"
     BORDER_DARK = "#2a2a2a"
+    BORDER_SUBTLE = "#2d2d2d"  # Same as BORDER_COLOR for backward compatibility
 
     # UI element colors
     CARD_BG = "#1e1e1e"
@@ -42,7 +57,17 @@ class AppColors:
     HOVER_BG = "rgba(255, 255, 255, 0.1)"
     HOVER_BG_DARKER = "rgba(255, 255, 255, 0.05)"
     SELECTED_BG = "rgba(33, 150, 243, 0.2)"
+    SIDEBAR_ACTIVE_BG = HOVER_BG  # Alias - dark theme keeps existing behavior
+    SIDEBAR_ACTIVE_TEXT = TEXT_LIGHT  # Alias - dark theme active text stays white
+    SIDEBAR_HOVER_BG = HOVER_BG  # Alias - dark theme hover stays the same
     DANGER_HOVER_BG = "rgba(255, 68, 68, 0.1)"
+    DANGER_PRESSED_BG = "#C41019"  # Darker red for pressed state
+    SUCCESS_HOVER_BG = "#43A047"  # Darker green for hover state
+    SUCCESS_PRESSED_BG = "#388E3C"  # Even darker green for pressed state
+
+    # Overlay colors
+    OVERLAY_BG_COLOR = "rgba(0, 0, 0, 0.7)"
+    OVERLAY_TEXT_COLOR = TEXT_LIGHT
 
     # Status colors
     STATUS_ACTIVE = "#4CAF50"    # Green
@@ -51,8 +76,18 @@ class AppColors:
     STATUS_PENDING = "#FFA500"    # Orange
     STATUS_WARNING = "#FFC107"
     STATUS_PROGRESS = "#969efa"
-    STATUS_ERROR= STATUS_DISCONNECTED
+    STATUS_INFO = "#2196F3"      # Blue - for informational status
+    STATUS_ERROR = STATUS_DISCONNECTED
 
+    # Text on accent colors
+    TEXT_ON_ACCENT = "#ffffff"  # White text on accent backgrounds
+
+    # Button colors
+    BUTTON_BG = "#2d2d2d"  # Dark button background
+    BUTTON_TEXT = "#ffffff"  # Light text on dark buttons
+    BUTTON_HOVER_BG = "#3d3d3d"  # Dark hover background
+    BUTTON_DISABLED_BG = "#1a1a1a"  # Disabled button background
+    BUTTON_DISABLED_TEXT = "#888888"  # Disabled button text
 
     SEARCH_BAR_HEIGHT = 30
     SEARCH_BAR_MIN_WIDTH = 200
@@ -124,7 +159,23 @@ class AppConstants:
 
 
 class AppStyles:
-    
+
+    CLUSTER_DISABLED_BTN_STYLE = """
+        QPushButton {
+            background-color: rgba(42, 42, 42, 0.6);
+            color: rgba(102, 102, 102, 0.6);
+            border: 1px solid rgba(68, 68, 68, 0.6);
+            border-radius: 4px;
+            padding: 8px 16px;
+            font-weight: normal;
+        }
+        QPushButton:disabled {
+            background-color: rgba(42, 42, 42, 0.5);
+            color: rgba(85, 85, 85, 0.5);
+            border: 1px solid rgba(51, 51, 51, 0.5);
+        }
+    """
+
     # Main application style
     MAIN_STYLE = f"""
         QMainWindow, QWidget {{
@@ -415,6 +466,7 @@ class AppStyles:
             padding: 40px 0px;
         }}
     """
+    
     TABLE_STYLE = f"""
         QTableWidget {{
             background-color: {AppColors.CARD_BG};
@@ -450,7 +502,7 @@ class AppStyles:
         
         QHeaderView::section {{
             background-color: {AppColors.HEADER_BG};
-            color: {AppColors.TEXT_SECONDARY};
+            color: {AppColors.TEXT_LIGHT};
             padding: 10px 8px;
             border: none;
             border-bottom: 1px solid {AppColors.BORDER_COLOR};
@@ -491,7 +543,7 @@ class AppStyles:
     CUSTOM_HEADER_STYLE = f"""
         QHeaderView::section {{
             background-color: {AppColors.HEADER_BG};
-            color: {AppColors.TEXT_SECONDARY};
+            color: {AppColors.TEXT_LIGHT};
             padding: 8px;
             border: none;
             border-bottom: 1px solid {AppColors.BORDER_COLOR};
@@ -701,7 +753,7 @@ class AppStyles:
         /* Force consistent header styling */
         QHeaderView::section {{
             background-color: {AppColors.HEADER_BG} !important;
-            color: {AppColors.TEXT_SECONDARY} !important;
+            color: {AppColors.TEXT_LIGHT} !important;
             border: none !important;
             border-bottom: 1px solid {AppColors.BORDER_COLOR} !important;
             padding: 8px !important;
@@ -792,137 +844,6 @@ class AppStyles:
         }}
     """
 
-    # TREE_WIDGET_STYLE = f"""
-    #     QTreeWidget {{
-    #         background-color: {AppColors.BG_DARK};
-    #         border: none;
-    #         outline: none;
-    #         font-size: 13px;
-    #         gridline-color: {AppColors.BORDER_DARK};
-    #         margin: 0;
-    #         padding: 0;
-    #     }}
-    #     QTreeWidget::item {{
-    #         padding: 6px 4px;
-    #         background-color: transparent;
-    #     }}
-    #     QTreeWidget::item:hover {{
-    #         background-color: rgba(53, 132, 228, 0.15);
-    #     }}
-    #     QHeaderView::section {{
-    #         background-color: {AppColors.TABLE_HEADER};
-    #         color: {AppColors.TEXT_LIGHT};
-    #         padding: 8px 8px;
-    #         border-right: 1px solid {AppColors.BORDER_DARK};
-    #         border-bottom: 1px solid {AppColors.BORDER_DARK};
-    #         border-left: 1px solid {AppColors.BORDER_DARK};
-    #         border-top: none;
-    #         border-left: none;
-    #         text-align: left;
-    #         font-weight: bold;
-    #     }}
-    #     QHeaderView::section:first {{
-    #         border-left: 1px solid {AppColors.BORDER_DARK};  /* Changed from 'border-left: none;' to add left border */
-    #     }}
-    #     QHeaderView::section:last {{
-    #         padding: 0;
-    #         text-align: center;
-    #         width: {AppConstants.SIZES["ACTION_WIDTH"]}px;
-    #         max-width: {AppConstants.SIZES["ACTION_WIDTH"]}px;
-    #         min-width: {AppConstants.SIZES["ACTION_WIDTH"]}px;
-    #     }}
-    #     QTreeWidget::item:selected {{
-    #         background-color: rgba(53, 132, 228, 0.15);
-    #     }}
-    #     QTreeWidget::branch {{
-    #         border: none;
-    #         border-image: none;
-    #         outline: none;
-    #     }}
-    #     {UNIFIED_SCROLL_BAR_STYLE}
-    # """
-
- # Enhanced tree widget style for HomePage
-    TREE_WIDGET_STYLE = f"""
-        QTreeWidget {{
-            background-color: {AppColors.BG_DARK};
-            border: none;
-            outline: none;
-            font-size: 13px;
-            gridline-color: {AppColors.BORDER_DARK};
-            margin: 0;
-            padding: 0;
-            selection-background-color: rgba(53, 132, 228, 0.15);
-            alternate-background-color: transparent;
-        }}
-        
-        QTreeWidget::item {{
-            padding: 6px 4px;
-            background-color: transparent;
-            border: none;
-            outline: none;
-        }}
-        
-        QTreeWidget::item:hover {{
-            background-color: rgba(53, 132, 228, 0.10);
-        }}
-        
-        QTreeWidget::item:selected {{
-            background-color: rgba(53, 132, 228, 0.15);
-            color: {AppColors.TEXT_LIGHT};
-        }}
-        
-        QTreeWidget::item:selected:hover {{
-            background-color: rgba(53, 132, 228, 0.20);
-        }}
-        
-        QHeaderView::section {{
-            background-color: {AppColors.TABLE_HEADER};
-            color: {AppColors.TEXT_LIGHT};
-            padding: 8px 8px;
-            border-right: 1px solid {AppColors.BORDER_DARK};
-            border-bottom: 1px solid {AppColors.BORDER_DARK};
-            border-top: none;
-            border-left: 1px solid {AppColors.BORDER_DARK};
-            text-align: left;
-            font-weight: bold;
-        }}
-        
-        QHeaderView::section:first {{
-            border-left: 1px solid {AppColors.BORDER_DARK};
-        }}
-        
-        QHeaderView::section:last {{
-            padding: 0;
-            text-align: center;
-            width: {AppConstants.SIZES["ACTION_WIDTH"]}px;
-            max-width: {AppConstants.SIZES["ACTION_WIDTH"]}px;
-            min-width: {AppConstants.SIZES["ACTION_WIDTH"]}px;
-        }}
-        
-        QHeaderView::section:hover {{
-            background-color: {AppColors.BG_MEDIUM};
-        }}
-        
-        /* Hide sort indicators completely */
-        QHeaderView::down-arrow, QHeaderView::up-arrow {{
-            image: none;
-            width: 0px;
-            height: 0px;
-            border: none;
-            subcontrol-origin: content;
-            subcontrol-position: right;
-        }}
-        
-        QTreeWidget::branch {{
-            border: none;
-            border-image: none;
-            outline: none;
-        }}
-        
-        {UNIFIED_SCROLL_BAR_STYLE}
-    """
-
     HEADER_STYLE = f"""
         #header {{
             background-color: {AppColors.BG_HEADER};
@@ -934,95 +855,6 @@ class AppStyles:
         #sidebar_content {{
             background-color: {AppColors.BG_SIDEBAR};
             border-top: 1px solid {AppColors.BORDER_COLOR};
-        }}
-    """
-
-    SIDEBAR_BUTTON_STYLE = f"""
-        QPushButton {{
-            background-color: transparent;
-            color: {AppColors.TEXT_SUBTLE};
-            text-align: left;
-            padding: 10px 20px;
-            border: none;
-            font-size: 14px;
-        }}
-        QPushButton:hover {{
-            background-color: {AppColors.HOVER_BG};
-            color: {AppColors.TEXT_LIGHT};
-        }}
-        QPushButton:checked {{
-            background-color: {AppColors.HOVER_BG};
-            color: {AppColors.TEXT_LIGHT};
-            padding-left: 17px;
-        }}
-    """
-
-    SIDEBAR_CONTAINER_STYLE = f"""
-        QWidget {{
-            background-color: {AppColors.BG_SIDEBAR};
-            border-right: 2px solid {AppColors.BORDER_COLOR};
-        }}
-    """
-
-    TITLE_BAR_STYLE = f"""
-        QWidget {{
-            background-color: {AppColors.BG_DARK};
-            color: {AppColors.TEXT_LIGHT};
-        }}
-    """
-
-    TITLE_BAR_BOTTOM_FRAME_STYLE = f"""
-        QFrame {{
-            background-color: {AppColors.BORDER_COLOR};
-            min-height: 1px;
-            max-height: 1px;
-        }}
-    """
-
-    PANEL_STYLE = f"""
-        QWidget {{
-            background-color: {AppColors.CARD_BG};
-            border-radius: 4px;
-            border: 1px solid {AppColors.BORDER_COLOR};
-        }}
-    """
-
-    STATUS_BOX_STYLE = f"""
-        #statusBox {{
-            background-color: {AppColors.CARD_BG};
-            border-radius: 5px;
-            border: 1px solid {AppColors.BORDER_COLOR};
-        }}
-        #statusBox:hover {{
-            background-color: {AppColors.HOVER_BG_DARKER};
-            border: 1px solid {AppColors.BORDER_COLOR};
-        }}
-    """
-
-    STATUS_ICON_STYLE = f"""
-        QLabel {{
-            background-color: {AppColors.STATUS_ACTIVE};
-            color: {AppColors.TEXT_LIGHT};
-            font-size: 40px;
-            border-radius: 40px;
-            qproperty-alignment: AlignCenter;
-        }}
-    """
-
-    STATUS_TITLE_STYLE = f"""
-        QLabel {{
-            color: {AppColors.TEXT_LIGHT};
-            font-size: 16px;
-            font-weight: 500;
-            margin-top: 16px;
-        }}
-    """
-
-    STATUS_SUBTITLE_STYLE = f"""
-        QLabel {{
-            color: {AppColors.TEXT_SECONDARY};
-            font-size: 14px;
-            margin-top: 4px;
         }}
     """
 
@@ -1109,16 +941,16 @@ class AppStyles:
         }}
     """
 
-    CLUSTER_STATUS_BOX_STYLE = f"""
-        #statusBox {{
+    CLUSTER_STATUS_BOX_STYLE = """
+        #statusBox {
             background-color: #262626;
             border-radius: 5px;
             border: 1px solid transparent;
-        }}
-        #statusBox:hover {{
+        }
+        #statusBox:hover {
             background-color: #333333;
             border: 1px solid #4d4d4d;
-        }}
+        }
     """
 
     CLUSTER_RESOURCE_TITLE_STYLE = f"""
@@ -1246,56 +1078,6 @@ class AppStyles:
     RELEASES_DEFAULT_CELL_STYLE = f"""
         color: {AppColors.TEXT_TABLE};
         text-align: center;
-    """
-
-    # TitleBar-specific styles
-    TITLE_BAR_ICON_BUTTON_STYLE = f"""
-        QToolButton {{
-            background-color: transparent;
-            color: {AppColors.TEXT_LIGHT};
-            border: none;
-            font-size: 16px;
-        }}
-        QToolButton:hover {{
-            background-color: {AppColors.HOVER_BG};
-            border-radius: 4px;
-        }}
-    """
-
-    TITLE_BAR_WINDOW_BUTTON_STYLE = f"""
-        QToolButton {{
-            background-color: transparent;
-            color: {AppColors.TEXT_SECONDARY};
-            border: none;
-            font-size: 10px;
-            min-width: 46px;
-            min-height: 30px;
-            padding: 0px;
-            margin: 0px;
-        }}
-        QToolButton:hover {{
-            background-color: rgba(255, 255, 255, 0.1); /* Subtle hover effect */
-            color: {AppColors.TEXT_LIGHT};
-            border-radius: 0px; /* No rounded corners */
-        }}
-    """
-
-    TITLE_BAR_CLOSE_BUTTON_STYLE = f"""
-        QToolButton {{
-            background-color: transparent;
-            color: {AppColors.TEXT_SECONDARY};
-            border: none;
-            font-size: 10px;
-            min-width: 46px;
-            min-height: 30px;
-            padding: 0px;
-            margin: 0px;
-        }}
-        QToolButton:hover {{
-            background-color: #E81123; /* Bright red on hover for close button */
-            color: white;
-            border-radius: 0px; /* No rounded corners */
-        }}
     """
 
     # ================================
@@ -1438,9 +1220,8 @@ class AppStyles:
     """
 
     # Deprecated terminal styles - kept for backwards compatibility
-    # (These can be removed once all references are updated)
-    TERMINAL_OUTPUT_STYLE = TERMINAL_TEXTEDIT  # Alias for backwards compatibility
-    TERMINAL_INPUT_STYLE = f"""
+    TERMINAL_OUTPUT_STYLE = TERMINAL_TEXTEDIT
+    TERMINAL_INPUT_STYLE = """
         QTextEdit {{
             background-color: #252525;
             color: #E0E0E0;
@@ -1451,9 +1232,8 @@ class AppStyles:
         }}
     """
 
-    TERMINAL_WRAPPER_STYLE = TERMINAL_WRAPPER  # Alias for backwards compatibility
-
-    TERMINAL_HEADER_STYLE = TERMINAL_HEADER_CONTENT  # Alias for backwards compatibility
+    TERMINAL_WRAPPER_STYLE = TERMINAL_WRAPPER
+    TERMINAL_HEADER_STYLE = TERMINAL_HEADER_CONTENT
 
     TERMINAL_HEADER_TITLE_STYLE = f"""
         QLabel {{
@@ -1463,7 +1243,7 @@ class AppStyles:
         }}
     """
 
-    TERMINAL_HEADER_BUTTON_STYLE = TERMINAL_HEADER_BUTTON  # Alias for backwards compatibility
+    TERMINAL_HEADER_BUTTON_STYLE = TERMINAL_HEADER_BUTTON
 
     TERMINAL_TABS_CONTAINER_STYLE = f"""
         QWidget {{
@@ -1489,11 +1269,9 @@ class AppStyles:
         }}
     """
 
-    TERMINAL_TAB_LABEL_STYLE = TERMINAL_TAB_LABEL  # Alias for backwards compatibility
-
-    TERMINAL_TAB_CLOSE_BUTTON_STYLE = TERMINAL_TAB_CLOSE_BUTTON  # Alias for backwards compatibility
-
-    TERMINAL_TAB_BUTTON_STYLE = TERMINAL_TAB_BUTTON  # Alias for backwards compatibility
+    TERMINAL_TAB_LABEL_STYLE = TERMINAL_TAB_LABEL
+    TERMINAL_TAB_CLOSE_BUTTON_STYLE = TERMINAL_TAB_CLOSE_BUTTON
+    TERMINAL_TAB_BUTTON_STYLE = TERMINAL_TAB_BUTTON
 
     # Splash Screen Styles
     SPLASH_CENTER_CONTAINER_STYLE = """
@@ -1511,7 +1289,7 @@ class AppStyles:
     """
 
     SPLASH_ANIMATION_FALLBACK_STYLE = """
-        background-color: #1E1E2E; 
+        background-color: #1E1E2E;
         border-radius: 10px;
         background-image: linear-gradient(135deg, #1E1E2E 0%, #2D2D44 100%);
     """
@@ -1566,7 +1344,7 @@ class AppStyles:
     """
 
     # Sidebar-specific styles
-    NAV_MENU_DROPDOWN_STYLE = f"""
+    NAV_MENU_DROPDOWN_STYLE = """
         QMenu {{
             background-color: #2d2d2d;
             border: 1px solid #444444;
@@ -1598,7 +1376,7 @@ class AppStyles:
         }}
     """
 
-    SIDEBAR_TOGGLE_BUTTON_STYLE = f"""
+    SIDEBAR_TOGGLE_BUTTON_STYLE = """
         QToolButton {{
             background-color: transparent;
             border-top: none;
@@ -1657,29 +1435,29 @@ class AppStyles:
 
     SIDEBAR_BORDER_STYLE = "color: #444444;"
 
-    SIDEBAR_CONTROLS_STYLE = f"""
+    SIDEBAR_CONTROLS_STYLE = """
         QWidget#sidebar_controls {{
         }}
     """
 
     # Icon-specific styles (from Icons.py)
     TEXT_ICON_SIZE = QSize(24, 24)
-    TEXT_ICON_COLOR = AppColors.TEXT_LIGHT  # Previously hardcoded as #ffffff
-    TEXT_ICON_FONT_SIZE = 12  # Previously size.width() // 2, now fixed for consistency
+    TEXT_ICON_COLOR = AppColors.TEXT_LIGHT
+    TEXT_ICON_FONT_SIZE = 12
 
     TAG_ICON_SIZE = QSize(28, 16)
     TAG_ICON_RADIUS = 2
-    TAG_ICON_TEXT_COLOR = "black"  # Kept as original hardcoded value
+    TAG_ICON_TEXT_COLOR = "black"
 
     LOGO_ICON_SIZE = QSize(24, 24)
     LOGO_ICON_RADIUS = 6
-    LOGO_TEXT_COLOR = "black"  # Kept as original hardcoded value
-    LOGO_START_COLOR = "#FF8A00"  # Original default
-    LOGO_END_COLOR = "#FF5722"    # Original default
+    LOGO_TEXT_COLOR = "black"
+    LOGO_START_COLOR = "#FF8A00"
+    LOGO_END_COLOR = "#FF5722"
 
     APP_LOGO_SIZE = QSize(120, 30)
 
-    # Header-specific styles (from Header.py)
+    # Header-specific styles
     SEARCH_BAR_HEIGHT = 28
     SEARCH_BAR_MIN_WIDTH = 300
 
@@ -1742,12 +1520,12 @@ class AppStyles:
     """
     FILTER_BUTTON_ARROW_STYLE = f"color: {AppColors.TEXT_SECONDARY}; background: transparent;"
 
-    # Detail Page-specific styles (from detail_page_component.py)
+    # Detail Page-specific styles
     DETAIL_PAGE_WIDTH = 450
     DETAIL_PAGE_MIN_WIDTH = 400
     DETAIL_PAGE_MAX_WIDTH = 800
     DETAIL_PAGE_SHADOW_BLUR_RADIUS = 20
-    DETAIL_PAGE_SHADOW_COLOR = (0, 0, 0, 180)  # QColor tuple (r, g, b, a)
+    DETAIL_PAGE_SHADOW_COLOR = (0, 0, 0, 180)
     DETAIL_PAGE_SHADOW_OFFSET_X = -5
     DETAIL_PAGE_SHADOW_OFFSET_Y = 0
     DETAIL_PAGE_STYLE = f"""
@@ -1843,7 +1621,7 @@ class AppStyles:
         font-weight: bold;
         color: {AppColors.STATUS_WARNING};
     """
-    DETAIL_PAGE_STATUS_VALUE_SUCCEEDED_STYLE = f"""
+    DETAIL_PAGE_STATUS_VALUE_SUCCEEDED_STYLE = """
         font-size: 14px;
         font-weight: bold;
         color: #2196F3;
@@ -1927,14 +1705,14 @@ class AppStyles:
         color: {AppColors.STATUS_WARNING};
         font-weight: bold;
     """
-    DETAIL_PAGE_EVENT_REASON_STYLE = f"""
+    DETAIL_PAGE_EVENT_REASON_STYLE = """
         color: #4A9EFF;
         font-weight: bold;
     """
     DETAIL_PAGE_EVENT_AGE_STYLE = f"""
         color: {AppColors.TEXT_SUBTLE};
     """
-    DETAIL_PAGE_EVENT_MESSAGE_STYLE = f"""
+    DETAIL_PAGE_EVENT_MESSAGE_STYLE = """
         color: #E0E0E0;
     """
 
@@ -1959,21 +1737,21 @@ class AppStyles:
         try:
             from UI.Icons import resource_path
             down_arrow_icon = resource_path("Icons/down_btn.svg")
-            
+
             return f"""
-            QComboBox {{ 
-                background-color: #2d2d2d; 
-                color: #ffffff; 
+            QComboBox {{
+                background-color: #2d2d2d;
+                color: #ffffff;
                 border: 1px solid #3d3d3d;
-                border-radius: 4px; 
-                padding: 5px 10px; 
-                font-size: 13px; 
+                border-radius: 4px;
+                padding: 5px 10px;
+                font-size: 13px;
             }}
-            QComboBox:hover {{ 
-                border: 1px solid #555555; 
+            QComboBox:hover {{
+                border: 1px solid #555555;
             }}
-            QComboBox::drop-down {{ 
-                border: none; 
+            QComboBox::drop-down {{
+                border: none;
                 width: 20px;
                 subcontrol-origin: padding;
                 subcontrol-position: top right;
@@ -1987,9 +1765,9 @@ class AppStyles:
             QComboBox::down-arrow:hover {{
                 opacity: 0.8;
             }}
-            QComboBox QAbstractItemView {{ 
-                background-color: #2d2d2d; 
-                color: #ffffff; 
+            QComboBox QAbstractItemView {{
+                background-color: #2d2d2d;
+                color: #ffffff;
                 selection-background-color: #0078d7;
                 border: none;
                 outline: none;
@@ -2000,36 +1778,83 @@ class AppStyles:
                 background-color: #2d2d2d;
             }}
             """
-        except Exception as e:
-            # Fallback to style without icon if there are issues
+        except (ImportError, FileNotFoundError, OSError, AttributeError):
             return AppStyles.COMBO_BOX_STYLE
 
+    @staticmethod
+    def get_input_field_style():
+        """Generate input field style for QLineEdit and QSpinBox"""
+        return f"""
+            QLineEdit, QSpinBox {{
+                background-color: {AppColors.HEADER_BG};
+                border: 1px solid {AppColors.BORDER_DARK};
+                border-radius: 4px;
+                padding: 8px 12px;
+                color: {AppColors.TEXT_LIGHT};
+                font-size: 13px;
+            }}
+            QLineEdit:focus, QSpinBox:focus {{
+                border: 1px solid {AppColors.ACCENT_BLUE};
+            }}
+            QLineEdit:hover, QSpinBox:hover {{
+                border: 1px solid #555555;
+            }}
+            QLineEdit:disabled, QSpinBox:disabled {{
+                background-color: {AppColors.BG_DARK};
+                color: {AppColors.TEXT_SUBTLE};
+            }}
+        """
 
-    COMBO_BOX_STYLE = f"""
-        QComboBox {{ 
-            background-color: #2d2d2d; 
-            color: #ffffff; 
+    @staticmethod
+    def get_text_edit_style():
+        """Generate text edit style for QTextEdit"""
+        return f"""
+            QTextEdit {{
+                background-color: {AppColors.HEADER_BG};
+                border: 1px solid {AppColors.BORDER_DARK};
+                border-radius: 4px;
+                padding: 8px;
+                color: {AppColors.TEXT_LIGHT};
+                font-size: 13px;
+                font-family: 'Consolas', 'Monaco', monospace;
+            }}
+            QTextEdit:focus {{
+                border: 1px solid {AppColors.ACCENT_BLUE};
+            }}
+            QTextEdit:hover {{
+                border: 1px solid #555555;
+            }}
+        """
+
+    COMBO_BOX_STYLE = """
+        QComboBox {{
+            background-color: #2d2d2d;
+            color: #ffffff;
             border: 1px solid #3d3d3d;
-            border-radius: 4px; 
-            padding: 5px 10px; 
-            font-size: 13px; 
+            border-radius: 4px;
+            padding: 5px 10px;
+            font-size: 13px;
         }}
-        QComboBox:hover {{ 
-            border: 1px solid #555555; 
+        QComboBox:hover {{
+            border: 1px solid #555555;
         }}
-
-        QComboBox::drop-down {{ 
-            border: none; 
-            width: 20px; 
-        }}
-        QComboBox::down-arrow {{ 
-            width: 0px;
-            height: 0px;
+        QComboBox::drop-down {{
             border: none;
+            width: 20px;
+            subcontrol-origin: padding;
+            subcontrol-position: top right;
         }}
-        QComboBox QAbstractItemView {{ 
-            background-color: #2d2d2d; 
-            color: #ffffff; 
+        QComboBox::down-arrow {{
+            width: 12px;
+            height: 12px;
+            margin-right: 4px;
+        }}
+        QComboBox::down-arrow:hover {{
+            opacity: 0.8;
+        }}
+        QComboBox QAbstractItemView {{
+            background-color: #2d2d2d;
+            color: #ffffff;
             selection-background-color: #0078d7;
             border: none;
             outline: none;
@@ -2039,7 +1864,7 @@ class AppStyles:
             border: none;
             background-color: #2d2d2d;
         }}
-        """
+    """
 
     @staticmethod
     def get_base_checkbox_style():
@@ -2048,7 +1873,7 @@ class AppStyles:
             from UI.Icons import resource_path
             unchecked_path = resource_path("Icons/check_box_unchecked.svg")
             checked_path = resource_path("Icons/check_box_checked.svg")
-            
+
             return f"""
             QCheckBox {{
                 margin: 0px;
@@ -2058,7 +1883,7 @@ class AppStyles:
                 border: none;
                 outline: none;
                 width: 16px;
-                height: 16px;   
+                height: 16px;
                 max-width: 16px;
                 max-height: 16px;
                 min-width: 16px;
@@ -2086,8 +1911,7 @@ class AppStyles:
                 opacity: 0.8;
             }}
             """
-        except Exception as e:
-            # Fallback to basic style without icons if there are issues
+        except (ImportError, FileNotFoundError, OSError, AttributeError):
             return f"""
             QCheckBox {{
                 margin: 0px;
@@ -2109,7 +1933,7 @@ class AppStyles:
                 border-color: {AppColors.ACCENT_BLUE};
             }}
             """
-    
+
     # Keep backward compatibility
     BASE_CHECKBOX_STYLE = ""  # Will be set after class definition
 
@@ -2119,8 +1943,6 @@ class AppStyles:
         border-radius: 8px;
         border: 1px solid {AppColors.BORDER_COLOR};
     """
-
-    # Add these two constants to your AppStyles class
 
     DETAIL_PAGE_OVERVIEW_STYLE = f"""
         QScrollArea {{
@@ -2139,6 +1961,7 @@ class AppStyles:
         }}
         {UNIFIED_SCROLL_BAR_STYLE}
     """
+
 
 class EnhancedStyles:
     # Typography hierarchy
@@ -2235,31 +2058,31 @@ class EnhancedStyles:
 
 class StyleLoader:
     """Lazy loading style manager to improve performance"""
-    
+
     def __init__(self):
         self._loaded_styles = {}
         self._style_cache = {}
-    
+
     def get_style(self, style_name):
         """Get a style with caching"""
         if style_name in self._style_cache:
             return self._style_cache[style_name]
-        
+
         # Get style from AppStyles
         style = getattr(AppStyles, style_name, None)
         if style:
             self._style_cache[style_name] = style
             return style
-        
+
         return ""
-    
+
     def get_component_styles(self, component_name):
         """Get styles for a specific component"""
         if component_name in self._loaded_styles:
             return self._loaded_styles[component_name]
-        
+
         styles = {}
-        
+
         # Component-specific style mapping
         component_styles = {
             'table': ['TABLE_STYLE', 'TABLE_HEADER_STYLE', 'TABLE_ROW_STYLE'],
@@ -2269,14 +2092,14 @@ class StyleLoader:
             'sidebar': ['SIDEBAR_STYLE', 'SIDEBAR_BUTTON_STYLE'],
             'main': ['MAIN_STYLE', 'TITLE_STYLE', 'COUNT_STYLE']
         }
-        
+
         if component_name in component_styles:
             for style_name in component_styles[component_name]:
                 styles[style_name] = self.get_style(style_name)
-        
+
         self._loaded_styles[component_name] = styles
         return styles
-    
+
     def clear_cache(self):
         """Clear style cache"""
         self._style_cache.clear()
@@ -2286,18 +2109,124 @@ class StyleLoader:
 # Global style loader instance
 _style_loader = StyleLoader()
 
+
 def get_style_loader():
     """Get the global style loader instance"""
     return _style_loader
 
+
 def get_component_styles(component_name):
     """Convenience function to get component styles"""
     return _style_loader.get_component_styles(component_name)
+
 
 # Convenience function for backward compatibility
 def get_dropdown_style_with_icon():
     """Generate dropdown style with properly resolved icon path"""
     return AppStyles.get_dropdown_style_with_icon()
 
+
 # Set the BASE_CHECKBOX_STYLE after class definition
 AppStyles.BASE_CHECKBOX_STYLE = AppStyles.get_base_checkbox_style()
+
+# THEME-AWARE STYLE FUNCTIONS
+# These functions return theme-aware styles by delegating to ThemeManager.
+# Use these instead of the hardcoded AppStyles constants for theme support.
+# The hardcoded constants above are kept for backward compatibility.
+
+def get_table_style():
+    """Get theme-aware table style"""
+    return get_theme_manager().get_current_theme().get_table_style()
+
+def get_menu_style():
+    """Get theme-aware menu style"""
+    return get_theme_manager().get_current_theme().get_menu_style()
+
+def get_action_button_style():
+    """Get theme-aware action button style (HOME_ACTION_BUTTON_STYLE equivalent)"""
+    return get_theme_manager().get_current_theme().get_action_button_style()
+
+def get_custom_header_style():
+    """Get theme-aware custom header style (CUSTOM_HEADER_STYLE equivalent)"""
+    theme = get_theme_manager().get_current_theme()
+    return f"""
+        QHeaderView::section {{
+            background-color: {theme.colors.TABLE_HEADER};
+            color: {theme.colors.TEXT_LIGHT};
+            padding: 8px;
+            border: none;
+            border-bottom: 1px solid {theme.colors.BORDER_COLOR};
+            font-size: 12px;
+            text-align: center;
+        }}
+        QHeaderView::section:hover {{
+            background-color: {theme.colors.BG_MEDIUM};
+        }}
+    """
+
+def get_checkbox_style():
+    """Get theme-aware checkbox style (CHECKBOX_STYLE equivalent)"""
+    theme = get_theme_manager().get_current_theme()
+    return f"""
+        QWidget {{
+            background-color: {theme.colors.CARD_BG};
+        }}
+        QCheckBox {{
+            spacing: 3px;
+            background: transparent;
+        }}
+        QCheckBox::indicator {{
+            width: 14px;
+            height: 14px;
+            border: 1px solid {theme.colors.TEXT_SECONDARY};
+            border-radius: 3px;
+            background: transparent;
+        }}
+        QCheckBox::indicator:checked {{
+            background-color: {theme.colors.ACCENT_BLUE};
+            border-color: {theme.colors.ACCENT_BLUE};
+        }}
+        QCheckBox::indicator:hover {{
+            border-color: {theme.colors.ACCENT_BLUE};
+        }}
+    """
+
+def get_action_container_style():
+    """Get theme-aware action container style (ACTION_CONTAINER_STYLE equivalent)"""
+    return """
+        background-color: transparent;
+        border: none;
+        margin: 0;
+        padding: 0;
+    """
+
+# Status color functions - shared across all resource pages
+def get_status_active_color():
+    """Get theme-aware status active/success color (green)
+    Used for: Active namespaces, Ready nodes, Running pods, Healthy deployments"""
+    theme = get_theme_manager().get_current_theme()
+    return theme.colors.STATUS_ACTIVE
+
+def get_status_warning_color():
+    """Get theme-aware status warning color (orange)
+    Used for: Terminating namespaces, Pending pods, Updating deployments"""
+    theme = get_theme_manager().get_current_theme()
+    return theme.colors.STATUS_WARNING
+
+def get_status_error_color():
+    """Get theme-aware status error/failed color (red)
+    Used for: Failed namespaces, Not Ready nodes, Failed pods, Unhealthy deployments"""
+    theme = get_theme_manager().get_current_theme()
+    return theme.colors.STATUS_ERROR
+
+def get_status_info_color():
+    """Get theme-aware status info color (blue)
+    Used for: Informational status indicators"""
+    theme = get_theme_manager().get_current_theme()
+    return theme.colors.STATUS_INFO
+
+def get_status_disconnected_color():
+    """Get theme-aware status disconnected color (red)
+    Used for: Disconnected/unavailable resources"""
+    theme = get_theme_manager().get_current_theme()
+    return theme.colors.STATUS_DISCONNECTED

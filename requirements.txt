@@ -2,6 +2,7 @@ altgraph==0.17.4
 cachetools==5.5.2
 certifi==2025.6.15
 charset-normalizer==3.4.2
+deepdiff==8.6.1
 durationpy==0.10
 google-auth==2.40.3
 idna==3.10
@@ -9,8 +10,9 @@ kubernetes==32.0.1
 oauthlib==3.3.1
 packaging==25.0
 pefile==2023.2.7
-pillow==11.2.1
-psutil==7.0.0
+pillow==11.3.0
+# Optional dependencies (not required for basic functionality)
+# psutil==7.0.0  # Optional: Used only in unused performance_config.py for system resource detection
 pyasn1==0.6.1
 pyasn1-modules==0.4.2
 pyinstaller==6.14.1
@@ -21,11 +23,11 @@ PyQt6-sip==13.10.0
 python-dateutil==2.9.0.post0
 pywin32-ctypes==0.2.3
 PyYAML==6.0.2
-requests==2.32.3
+requests==2.32.5
 requests-oauthlib==2.0.0
 rsa==4.9.1
 setuptools==80.9.0
 six==1.17.0
-urllib3==2.5.0
+urllib3==2.6.3
 websocket-client==1.8.0
 wheel==0.45.1

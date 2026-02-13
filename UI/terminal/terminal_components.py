@@ -11,21 +11,28 @@ import shutil
 import logging
 from datetime import datetime
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QToolButton, QSizePolicy, QLineEdit,
-    QFileDialog, QComboBox, QLabel
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QToolButton,
+    QSizePolicy,
+    QLineEdit,
+    QFileDialog,
+    QComboBox,
 )
 from PyQt6.QtGui import QIcon
 from PyQt6.QtCore import Qt, QSize
 
-from UI.Styles import AppStyles, AppColors
+from UI.Styles import AppStyles
 from UI.Icons import resource_path
+from UI.ThemeAwarePage import ThemeAwareMixin
 from .terminal_constants import StyleConstants
 
 
-class ResizeHandle(QWidget):
+class ResizeHandle(QWidget, ThemeAwareMixin):
     """
     Resize handle widget for terminal panel resizing.
-    
+
     This widget provides a draggable handle that allows users to resize
     the terminal panel vertically by dragging.
     """
@@ -39,17 +46,21 @@ class ResizeHandle(QWidget):
         self.drag_start_y = 0
         self.drag_start_height = 0
 
+    def _on_theme_changed(self, theme_name):
+        """Handle theme changes - refresh resize handle styling"""
+        self.setStyleSheet(StyleConstants.RESIZE_HANDLE)
+
     def mousePressEvent(self, event):
         """Handle mouse press events to start dragging."""
         if event.button() == Qt.MouseButton.LeftButton:
             self.is_dragging = True
             self.drag_start_y = event.globalPosition().y()
-            
+
             # Find the terminal panel parent
             terminal_panel = self.parent()
-            while terminal_panel and not hasattr(terminal_panel, 'normal_height'):
+            while terminal_panel and not hasattr(terminal_panel, "normal_height"):
                 terminal_panel = terminal_panel.parent()
-            
+
             self.terminal_panel = terminal_panel
             self.drag_start_height = terminal_panel.height() if terminal_panel else 0
             event.accept()
@@ -60,10 +71,12 @@ class ResizeHandle(QWidget):
             delta = self.drag_start_y - event.globalPosition().y()
             top_level_window = self.terminal_panel.window()
             parent_height = top_level_window.height() if top_level_window else 1080
-            new_height = max(150, min(self.drag_start_height + delta, parent_height - 50))
+            new_height = max(
+                150, min(self.drag_start_height + delta, parent_height - 50)
+            )
             self.terminal_panel.setFixedHeight(int(new_height))
             self.terminal_panel.normal_height = int(new_height)
-            if hasattr(self.terminal_panel, 'reposition'):
+            if hasattr(self.terminal_panel, "reposition"):
                 self.terminal_panel.reposition()
             event.accept()
 
@@ -75,10 +88,10 @@ class ResizeHandle(QWidget):
             event.accept()
 
 
-class UnifiedTerminalHeader(QWidget):
+class UnifiedTerminalHeader(QWidget, ThemeAwareMixin):
     """
     Unified header widget for terminal management.
-    
+
     This widget provides the main interface for terminal operations including
     tab management, shell selection, search functionality, and various terminal actions.
     """
@@ -89,47 +102,75 @@ class UnifiedTerminalHeader(QWidget):
         self.edit_mode = False
         self.current_file = None
         self.available_shells = self._detect_available_shells()
-        self.selected_shell = self.available_shells[0][1] if self.available_shells else '/bin/bash'  # Store path only
+        self.selected_shell = (
+            self.available_shells[0][1] if self.available_shells else "/bin/bash"
+        )  # Store path only
         self.setup_ui()
+
+    def _on_theme_changed(self, theme_name):
+        """Handle theme changes - refresh all UI components"""
+        # Update header content styling
+        self.header_content.setStyleSheet(StyleConstants.HEADER_CONTENT)
+
+        # Update search input styling
+        self.search_input.setStyleSheet(StyleConstants.SEARCH_INPUT)
+
+        # Update shell dropdown styling
+        self.shell_dropdown.setStyleSheet(AppStyles.get_dropdown_style_with_icon())
+
+        # Update all buttons styling
+        for btn in (
+            self.new_tab_btn,
+            self.refresh_btn,
+            self.download_btn,
+            self.save_btn,
+            self.maximize_btn,
+            self.close_btn,
+        ):
+            btn.setStyleSheet(AppStyles.TERMINAL_HEADER_BUTTON)
 
     def _detect_available_shells(self):
         """
         Detect available shells on the system.
-        
+
         Returns:
             list: List of tuples (display_name, shell_path)
         """
         os_name = platform.system()
         shells = []
-        default_shell = os.environ.get('SHELL', '/bin/bash') if os_name != 'Windows' else 'powershell.exe'
+        default_shell = (
+            os.environ.get("SHELL", "/bin/bash")
+            if os_name != "Windows"
+            else "powershell.exe"
+        )
 
-        if os_name == 'Windows':
+        if os_name == "Windows":
             candidates = [
-                ('PowerShell', 'powershell.exe'),
-                ('PowerShell Core', 'pwsh.exe'),
-                ('Command Prompt', 'cmd.exe')
+                ("PowerShell", "powershell.exe"),
+                ("PowerShell Core", "pwsh.exe"),
+                ("Command Prompt", "cmd.exe"),
             ]
             for name, shell in candidates:
                 if shutil.which(shell):
                     shells.append((name, shutil.which(shell)))
         else:
             candidates = [
-                ('Bash', '/bin/bash'),
-                ('Zsh', '/bin/zsh'),
-                ('Fish', '/bin/fish'),
-                ('PowerShell Core', 'pwsh'),
-                ('Sh', '/bin/sh')
+                ("Bash", "/bin/bash"),
+                ("Zsh", "/bin/zsh"),
+                ("Fish", "/bin/fish"),
+                ("PowerShell Core", "pwsh"),
+                ("Sh", "/bin/sh"),
             ]
             for name, shell in candidates:
                 if shutil.which(shell):
                     shells.append((name, shutil.which(shell)))
-            
+
             # Also check system shells file
             try:
-                with open('/etc/shells', 'r') as f:
+                with open("/etc/shells", "r") as f:
                     for line in f:
                         line = line.strip()
-                        if line and not line.startswith('#') and shutil.which(line):
+                        if line and not line.startswith("#") and shutil.which(line):
                             shell_name = os.path.basename(line)
                             if not any(s[1] == line for s in shells):
                                 shells.append((shell_name.capitalize(), line))
@@ -162,7 +203,9 @@ class UnifiedTerminalHeader(QWidget):
 
         # Tabs container
         self.tabs_container = QWidget()
-        self.tabs_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.tabs_container.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        )
         self.tabs_layout = QHBoxLayout(self.tabs_container)
         self.tabs_layout.setContentsMargins(0, 0, 0, 0)
         self.tabs_layout.setSpacing(0)
@@ -195,19 +238,46 @@ class UnifiedTerminalHeader(QWidget):
         # Create buttons
         buttons = [
             ("Icons/terminal_add.svg", "New Terminal", self.add_new_tab),
-            ("Icons/terminal_refresh.svg", "Refresh Terminal / Refresh Logs", self.refresh_terminal),
-            ("Icons/terminal_download.svg", "Download Terminal Output / Download Logs", self.download_terminal_output),
+            (
+                "Icons/terminal_refresh.svg",
+                "Refresh Terminal / Refresh Logs",
+                self.refresh_terminal,
+            ),
+            (
+                "Icons/terminal_download.svg",
+                "Download Terminal Output / Download Logs",
+                self.download_terminal_output,
+            ),
             ("💾", "Save File", self.save_current_file),
-            ("Icons/terminal_up_down.svg", "Maximize/Restore Terminal", self.toggle_maximize),
-            ("Icons/terminal_close.svg", "Hide Terminal Panel", self.hide_terminal)
+            (
+                "Icons/terminal_up_down.svg",
+                "Maximize/Restore Terminal",
+                self.toggle_maximize,
+            ),
+            ("Icons/terminal_close.svg", "Hide Terminal Panel", self.hide_terminal),
         ]
-        
-        self.new_tab_btn, self.refresh_btn, self.download_btn, self.save_btn, self.maximize_btn, self.close_btn = [
-            self.create_header_button(text, tooltip, callback) for text, tooltip, callback in buttons
+
+        (
+            self.new_tab_btn,
+            self.refresh_btn,
+            self.download_btn,
+            self.save_btn,
+            self.maximize_btn,
+            self.close_btn,
+        ) = [
+            self.create_header_button(text, tooltip, callback)
+            for text, tooltip, callback in buttons
         ]
         self.save_btn.hide()
 
-        for btn in (self.new_tab_btn, self.refresh_btn, self.download_btn, self.save_btn, self.maximize_btn, self.close_btn):
+        for btn in (
+            self.new_tab_btn,
+            self.refresh_btn,
+            self.download_btn,
+            self.save_btn,
+            self.maximize_btn,
+            self.close_btn,
+        ):
             self.controls_layout.addWidget(btn)
 
         # Add components to main layout
@@ -229,23 +299,27 @@ class UnifiedTerminalHeader(QWidget):
         if self._is_active_tab_logs():
             # Search in logs
             active_logs = self._get_active_logs_tab()
-            if active_logs and hasattr(active_logs, 'set_search_filter'):
+            if active_logs and hasattr(active_logs, "set_search_filter"):
                 active_logs.set_search_filter(text)
         else:
             # Search in terminal output
             active_terminal = self._get_active_terminal_widget()
-            if active_terminal and hasattr(active_terminal, 'search_in_terminal'):
+            if active_terminal and hasattr(active_terminal, "search_in_terminal"):
                 active_terminal.search_in_terminal(text)
 
     def _get_active_terminal_widget(self):
         """Get the active terminal widget."""
         try:
-            if (self.parent_terminal and
-                    hasattr(self.parent_terminal, 'active_terminal_index') and
-                    self.parent_terminal.active_terminal_index < len(self.parent_terminal.terminal_tabs)):
-
-                active_tab_data = self.parent_terminal.terminal_tabs[self.parent_terminal.active_terminal_index]
-                return active_tab_data.get('terminal_widget')
+            if (
+                self.parent_terminal
+                and hasattr(self.parent_terminal, "active_terminal_index")
+                and self.parent_terminal.active_terminal_index
+                < len(self.parent_terminal.terminal_tabs)
+            ):
+                active_tab_data = self.parent_terminal.terminal_tabs[
+                    self.parent_terminal.active_terminal_index
+                ]
+                return active_tab_data.get("terminal_widget")
         except Exception as e:
             logging.error(f"Error getting active terminal widget: {e}")
         return None
@@ -276,12 +350,16 @@ class UnifiedTerminalHeader(QWidget):
     def _is_active_tab_logs(self):
         """Check if the active tab is a logs tab."""
         try:
-            if (self.parent_terminal and
-                    hasattr(self.parent_terminal, 'active_terminal_index') and
-                    self.parent_terminal.active_terminal_index < len(self.parent_terminal.terminal_tabs)):
-
-                active_tab_data = self.parent_terminal.terminal_tabs[self.parent_terminal.active_terminal_index]
-                return active_tab_data.get('is_logs_tab', False)
+            if (
+                self.parent_terminal
+                and hasattr(self.parent_terminal, "active_terminal_index")
+                and self.parent_terminal.active_terminal_index
+                < len(self.parent_terminal.terminal_tabs)
+            ):
+                active_tab_data = self.parent_terminal.terminal_tabs[
+                    self.parent_terminal.active_terminal_index
+                ]
+                return active_tab_data.get("is_logs_tab", False)
         except Exception as e:
             logging.error(f"Error checking if active tab is logs: {e}")
         return False
@@ -289,13 +367,17 @@ class UnifiedTerminalHeader(QWidget):
     def _get_active_logs_tab(self):
         """Get the active logs tab viewer."""
         try:
-            if (self.parent_terminal and
-                    hasattr(self.parent_terminal, 'active_terminal_index') and
-                    self.parent_terminal.active_terminal_index < len(self.parent_terminal.terminal_tabs)):
-
-                active_tab_data = self.parent_terminal.terminal_tabs[self.parent_terminal.active_terminal_index]
-                if active_tab_data.get('is_logs_tab', False):
-                    return active_tab_data.get('logs_viewer')
+            if (
+                self.parent_terminal
+                and hasattr(self.parent_terminal, "active_terminal_index")
+                and self.parent_terminal.active_terminal_index
+                < len(self.parent_terminal.terminal_tabs)
+            ):
+                active_tab_data = self.parent_terminal.terminal_tabs[
+                    self.parent_terminal.active_terminal_index
+                ]
+                if active_tab_data.get("is_logs_tab", False):
+                    return active_tab_data.get("logs_viewer")
         except Exception as e:
             logging.error(f"Error getting active logs tab: {e}")
         return None
@@ -325,18 +407,18 @@ class UnifiedTerminalHeader(QWidget):
         elif self._is_active_tab_logs():
             # Refresh logs
             active_logs = self._get_active_logs_tab()
-            if active_logs and hasattr(active_logs, 'refresh_logs'):
+            if active_logs and hasattr(active_logs, "refresh_logs"):
                 active_logs.refresh_logs()
         else:
             # Refresh terminal
-            if hasattr(self.parent_terminal, 'restart_active_terminal'):
+            if hasattr(self.parent_terminal, "restart_active_terminal"):
                 self.parent_terminal.restart_active_terminal()
 
     def refresh_ssh_session(self):
         """Refresh/reconnect SSH session."""
         if self._is_active_tab_ssh():
             active_ssh = self._get_active_ssh_tab()
-            if active_ssh and hasattr(active_ssh, 'init_ssh_session'):
+            if active_ssh and hasattr(active_ssh, "init_ssh_session"):
                 active_ssh.cleanup_ssh_session()
                 active_ssh.init_ssh_session()
 
@@ -354,34 +436,36 @@ class UnifiedTerminalHeader(QWidget):
                 self._download_logs(active_logs)
         else:
             # Download terminal output
-            if hasattr(self.parent_terminal, 'download_terminal_output'):
+            if hasattr(self.parent_terminal, "download_terminal_output"):
                 self.parent_terminal.download_terminal_output()
 
     def _download_ssh_session(self, ssh_terminal):
         """Download SSH session content."""
         try:
             # Get SSH session content
-            if hasattr(ssh_terminal, 'toPlainText'):
+            if hasattr(ssh_terminal, "toPlainText"):
                 session_content = ssh_terminal.toPlainText()
 
                 # Get pod name for filename
-                pod_name = getattr(ssh_terminal, 'pod_name', 'unknown-pod')
-                namespace = getattr(ssh_terminal, 'namespace', 'default')
+                pod_name = getattr(ssh_terminal, "pod_name", "unknown-pod")
+                namespace = getattr(ssh_terminal, "namespace", "default")
 
                 # Open file dialog
                 filename, _ = QFileDialog.getSaveFileName(
                     self.parent_terminal,
                     f"Save SSH Session for {pod_name}",
                     f"{pod_name}_{namespace}_ssh_session.txt",
-                    "Text Files (*.txt);;All Files (*)"
+                    "Text Files (*.txt);;All Files (*)",
                 )
 
                 if filename:
-                    with open(filename, 'w', encoding='utf-8') as f:
+                    with open(filename, "w", encoding="utf-8") as f:
                         f.write(f"# SSH Session for Pod: {pod_name}\n")
                         f.write(f"# Namespace: {namespace}\n")
-                        f.write(f"# Downloaded: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                        f.write("# " + "="*50 + "\n\n")
+                        f.write(
+                            f"# Downloaded: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                        )
+                        f.write("# " + "=" * 50 + "\n\n")
                         f.write(session_content)
 
                     print(f"SSH session saved to: {filename}")
@@ -392,12 +476,16 @@ class UnifiedTerminalHeader(QWidget):
     def _is_active_tab_ssh(self):
         """Check if the active tab is an SSH tab."""
         try:
-            if (self.parent_terminal and
-                    hasattr(self.parent_terminal, 'active_terminal_index') and
-                    self.parent_terminal.active_terminal_index < len(self.parent_terminal.terminal_tabs)):
-
-                active_tab_data = self.parent_terminal.terminal_tabs[self.parent_terminal.active_terminal_index]
-                return active_tab_data.get('is_ssh_tab', False)
+            if (
+                self.parent_terminal
+                and hasattr(self.parent_terminal, "active_terminal_index")
+                and self.parent_terminal.active_terminal_index
+                < len(self.parent_terminal.terminal_tabs)
+            ):
+                active_tab_data = self.parent_terminal.terminal_tabs[
+                    self.parent_terminal.active_terminal_index
+                ]
+                return active_tab_data.get("is_ssh_tab", False)
         except Exception as e:
             logging.error(f"Error checking if active tab is SSH: {e}")
         return False
@@ -405,13 +493,17 @@ class UnifiedTerminalHeader(QWidget):
     def _get_active_ssh_tab(self):
         """Get the active SSH tab widget."""
         try:
-            if (self.parent_terminal and
-                    hasattr(self.parent_terminal, 'active_terminal_index') and
-                    self.parent_terminal.active_terminal_index < len(self.parent_terminal.terminal_tabs)):
-
-                active_tab_data = self.parent_terminal.terminal_tabs[self.parent_terminal.active_terminal_index]
-                if active_tab_data.get('is_ssh_tab', False):
-                    return active_tab_data.get('terminal_widget')
+            if (
+                self.parent_terminal
+                and hasattr(self.parent_terminal, "active_terminal_index")
+                and self.parent_terminal.active_terminal_index
+                < len(self.parent_terminal.terminal_tabs)
+            ):
+                active_tab_data = self.parent_terminal.terminal_tabs[
+                    self.parent_terminal.active_terminal_index
+                ]
+                if active_tab_data.get("is_ssh_tab", False):
+                    return active_tab_data.get("terminal_widget")
         except Exception as e:
             logging.error(f"Error getting active SSH tab: {e}")
         return None
@@ -419,7 +511,7 @@ class UnifiedTerminalHeader(QWidget):
     def create_header_button(self, text, tooltip, callback):
         """Create a header button with icon or text."""
         button = QToolButton()
-        if text.endswith('.svg'):
+        if text.endswith(".svg"):
             button.setIcon(QIcon(resource_path(text)))
             button.setIconSize(QSize(10, 10))
         else:
@@ -433,7 +525,7 @@ class UnifiedTerminalHeader(QWidget):
 
     def add_new_tab(self):
         """Add a new terminal tab."""
-        if hasattr(self.parent_terminal, 'add_terminal_tab'):
+        if hasattr(self.parent_terminal, "add_terminal_tab"):
             self.parent_terminal.add_terminal_tab(shell=self.selected_shell)
 
     def enter_edit_mode(self, file_path):
@@ -444,12 +536,14 @@ class UnifiedTerminalHeader(QWidget):
         self.refresh_btn.setText("✖")
         self.refresh_btn.setToolTip("Cancel Editing")
         if self._active_terminal_widget():
-            self._active_terminal_widget().start_edit_mode(file_path, self.read_file_content(file_path))
+            self._active_terminal_widget().start_edit_mode(
+                file_path, self.read_file_content(file_path)
+            )
 
     def read_file_content(self, file_path):
         """Read file content for editing."""
         try:
-            with open(file_path, 'r') as f:
+            with open(file_path, "r") as f:
                 return f.read()
         except Exception as e:
             return f"# Error reading file: {str(e)}\n"
@@ -466,59 +560,81 @@ class UnifiedTerminalHeader(QWidget):
 
     def save_current_file(self):
         """Save the currently edited file."""
-        if not self.edit_mode or not self.current_file or not self._active_terminal_widget():
+        if (
+            not self.edit_mode
+            or not self.current_file
+            or not self._active_terminal_widget()
+        ):
             return
-            
+
         terminal_widget = self._active_terminal_widget()
         content = terminal_widget.toPlainText()
         start_marker = f"# Editing {self.current_file}\n"
         end_marker = "\n# COMMANDS:"
         start_idx = content.find(start_marker)
-        
+
         if start_idx >= 0:
             start_idx += len(start_marker)
             end_idx = content.find(end_marker, start_idx)
             if end_idx >= 0:
                 file_content = content[start_idx:end_idx].strip()
                 try:
-                    with open(self.current_file, 'w') as f:
+                    with open(self.current_file, "w") as f:
                         f.write(file_content)
-                    terminal_widget.append_output(f"\n# File saved successfully: {self.current_file}\n", "#4CAF50")
-                    terminal_widget.append_output(f"\n$ kubectl apply -f {self.current_file}\n")
-                    terminal_widget.commandEntered.emit(f"kubectl apply -f {self.current_file}")
+                    terminal_widget.append_output(
+                        f"\n# File saved successfully: {self.current_file}\n",
+                        StyleConstants.get_success_color(),
+                    )
+                    terminal_widget.append_output(
+                        f"\n$ kubectl apply -f {self.current_file}\n"
+                    )
+                    terminal_widget.commandEntered.emit(
+                        f"kubectl apply -f {self.current_file}"
+                    )
                     self.exit_edit_mode()
                 except Exception as e:
-                    terminal_widget.append_output(f"\n# Error saving file: {str(e)}\n", "#FF6B68")
+                    terminal_widget.append_output(
+                        f"\n# Error saving file: {str(e)}\n",
+                        StyleConstants.get_error_color(),
+                    )
             else:
-                terminal_widget.append_output("\n# Could not determine file content bounds\n", "#FF6B68")
+                terminal_widget.append_output(
+                    "\n# Could not determine file content bounds\n",
+                    StyleConstants.get_error_color(),
+                )
         else:
-            terminal_widget.append_output("\n# Could not determine file content bounds\n", "#FF6B68")
+            terminal_widget.append_output(
+                "\n# Could not determine file content bounds\n",
+                StyleConstants.get_error_color(),
+            )
 
     def _download_logs(self, logs_viewer):
         """Download logs from logs viewer."""
         try:
             # Get logs content
-            if hasattr(logs_viewer, 'logs_display') and logs_viewer.logs_display:
+            if hasattr(logs_viewer, "logs_display") and logs_viewer.logs_display:
                 logs_content = logs_viewer.logs_display.toPlainText()
 
                 # Get pod name for filename
-                pod_name = getattr(logs_viewer, 'pod_name', 'unknown-pod')
-                namespace = getattr(logs_viewer, 'namespace', 'default')
+                pod_name = getattr(logs_viewer, "pod_name", "unknown-pod")
+                namespace = getattr(logs_viewer, "namespace", "default")
 
                 # Open file dialog
                 filename, _ = QFileDialog.getSaveFileName(
                     self.parent_terminal,
                     f"Save Logs for {pod_name}",
                     f"{pod_name}_{namespace}_logs.txt",
-                    "Text Files (*.txt);;All Files (*)"
+                    "Text Files (*.txt);;All Files (*)",
                 )
 
                 if filename:
-                    with open(filename, 'w', encoding='utf-8') as f:
+                    with open(filename, "w", encoding="utf-8") as f:
                         f.write(f"# Logs for Pod: {pod_name}\n")
                         f.write(f"# Namespace: {namespace}\n")
-                        f.write(f"# Downloaded: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                        f.write("# " + "="*50 + "\n\n")
+                        f.write(
+                            f"# Downloaded: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                        )
+                        f.write("# " + "=" * 50 + "\n\n")
                         f.write(logs_content)
 
                     print(f"Logs saved to: {filename}")
@@ -528,14 +644,20 @@ class UnifiedTerminalHeader(QWidget):
 
     def toggle_maximize(self):
         """Toggle terminal maximize/restore state."""
-        if hasattr(self.parent_terminal, 'toggle_maximize'):
+        if hasattr(self.parent_terminal, "toggle_maximize"):
             self.parent_terminal.toggle_maximize()
-            self.maximize_btn.setIcon(QIcon(resource_path("Icons/terminal_up_down.svg")))
-            self.maximize_btn.setToolTip("Restore Terminal" if self.parent_terminal.is_maximized else "Maximize Terminal")
+            self.maximize_btn.setIcon(
+                QIcon(resource_path("Icons/terminal_up_down.svg"))
+            )
+            self.maximize_btn.setToolTip(
+                "Restore Terminal"
+                if self.parent_terminal.is_maximized
+                else "Maximize Terminal"
+            )
 
     def hide_terminal(self):
         """Hide the terminal panel."""
-        if hasattr(self.parent_terminal, 'hide_terminal'):
+        if hasattr(self.parent_terminal, "hide_terminal"):
             self.parent_terminal.hide_terminal()
 
     def add_tab(self, tab_container):
@@ -560,6 +682,10 @@ class UnifiedTerminalHeader(QWidget):
 
     def _active_terminal_widget(self):
         """Get the currently active terminal widget."""
-        if self.parent_terminal and self.parent_terminal.active_terminal_index < len(self.parent_terminal.terminal_tabs):
-            return self.parent_terminal.terminal_tabs[self.parent_terminal.active_terminal_index].get('terminal_widget')
+        if self.parent_terminal and self.parent_terminal.active_terminal_index < len(
+            self.parent_terminal.terminal_tabs
+        ):
+            return self.parent_terminal.terminal_tabs[
+                self.parent_terminal.active_terminal_index
+            ].get("terminal_widget")
         return None

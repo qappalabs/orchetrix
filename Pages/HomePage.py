@@ -1,20 +1,25 @@
-from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
                              QLabel, QPushButton, QLineEdit, QTreeWidget,
-                             QTreeWidgetItem, QFrame, QMenu, QHeaderView,QApplication,
-                             QMessageBox, QToolButton)
+                             QTreeWidgetItem, QFrame, QMenu, QHeaderView, QApplication,
+                             QMessageBox, QToolButton, QGraphicsOpacityEffect)
 from PyQt6.QtCore import Qt, QObject, pyqtSignal, QPoint, QSize, QTimer
-from PyQt6.QtGui import QColor, QPainter, QIcon, QMouseEvent, QFont, QPixmap # Added QPixmap
+from PyQt6.QtGui import QColor, QPainter, QIcon, QFont, QPixmap
 
-from UI.Styles import AppColors, AppStyles, AppConstants
+from UI.Styles import AppConstants
+import Styles.HomePageStyles as HomePageStyles
+from UI.ThemeAwarePage import ThemeAwareMainWindow
+from UI.ThemeManager import get_theme_manager
 from Utils.kubernetes_client import get_kubernetes_client
 from Utils.cluster_connector import get_cluster_connector
+from Utils.pin_storage import get_pin_storage_manager
 import logging
 from collections import defaultdict
-from log_handler import method_logger, class_logger
+from log_handler import class_logger
 import webbrowser  # Added for opening URLs
+import os  # Added for os.path.basename
 
 from math import sin, cos
-from UI.Icons import resource_path  # Add this import at the top of the file
+from UI.Icons import Icons, resource_path
 
 # Global icon cache to prevent redundant operations
 ICON_CACHE = {}
@@ -25,6 +30,7 @@ class HomePageSignals(QObject):
     open_cluster_signal = pyqtSignal(str)
     open_preferences_signal = pyqtSignal()
     update_pinned_items_signal = pyqtSignal(list)  # Signal for pinned items
+    cluster_deleted_signal = pyqtSignal(str)  # Signal when a cluster is deleted externally
 
 class CircularCheckmark(QLabel):
     """Visual indicator for active/successful status"""
@@ -76,7 +82,7 @@ class LoadingIndicator(QWidget):
             x = center.x() + radius * cos(angle * 3.14159 / 180)
             y = center.y() + radius * sin(angle * 3.14159 / 180)
 
-            color = QColor(AppColors.ACCENT_GREEN)
+            color = QColor(get_theme_manager().get_current_theme().colors.ACCENT_GREEN)
             color.setAlphaF(opacity)
             painter.setBrush(color)
 
@@ -122,7 +128,7 @@ class SmallLoadingIndicator(QWidget):
             x = center.x() + radius * cos(angle_rad)
             y = center.y() + radius * sin(angle_rad)
 
-            color = QColor(AppColors.ACCENT_GREEN)
+            color = QColor(get_theme_manager().get_current_theme().colors.ACCENT_GREEN)
             color.setAlphaF(opacity)
             painter.setBrush(color)
 
@@ -140,20 +146,30 @@ class SidebarButton(QPushButton):
     """Customized button for sidebar navigation"""
     def __init__(self, text, icon_text, icon_path=None, parent=None):
         super().__init__(text, parent)
+        self.icon_name = None
         if icon_path:
-            resolved_path = resource_path(icon_path)
-            self.setIcon(QIcon(resolved_path))
-            self.setIconSize(QSize(AppConstants.SIZES["ICON_SIZE"], AppConstants.SIZES["ICON_SIZE"]))
+            # Store the basename (e.g. "browse.svg") for theme lookups
+            self.icon_name = os.path.basename(icon_path)
+            self.update_theme_icon()
             self.setText(f" {text}")
         else:
             self.setText(f"{icon_text}  {text}")
         self.setCheckable(True)
         self.setFlat(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setStyleSheet(AppStyles.SIDEBAR_BUTTON_STYLE)
+        self.setStyleSheet(HomePageStyles.get_sidebar_button_style())
+
+    def update_theme_icon(self):
+        """Update icon based on current theme"""
+        if self.icon_name:
+            theme_name = get_theme_manager().get_current_theme_name() or "Dark"
+            icon = Icons.get_theme_icon(self.icon_name, theme_name)
+            if not icon.isNull():
+                self.setIcon(icon)
+                self.setIconSize(QSize(AppConstants.SIZES["ICON_SIZE"], AppConstants.SIZES["ICON_SIZE"]))
 
 @class_logger(log_level=logging.INFO, exclude_methods=['__init__', 'set_cluster_icon', 'context_menu_requested', 'open_cluster_signal', 'open_preferences_signal', 'update_pinned_items_signal'])
-class OrchestrixGUI(QMainWindow):
+class OrchestrixGUI(ThemeAwareMainWindow):
     def __init__(self):
         super().__init__()
         self.signals = HomePageSignals()
@@ -168,23 +184,22 @@ class OrchestrixGUI(QMainWindow):
             from Utils.cluster_state_manager import get_cluster_state_manager
             self.cluster_state_manager = get_cluster_state_manager()
             logging.info("Cluster state manager initialized in HomePage")
-            
+
             # FIXED: Connect to cluster state manager signals for better status tracking
             if self.cluster_state_manager:
                 self.cluster_state_manager.state_changed.connect(self._on_cluster_state_changed)
                 self.cluster_state_manager.switch_completed.connect(self._on_cluster_switch_completed)
-                
+
         except Exception as e:
             logging.error(f"Failed to initialize cluster state manager in HomePage: {e}")
             self.cluster_state_manager = None
 
         # Connect signals with error handling
         self._connect_signals()
-        
+
         self.setWindowTitle("Kubernetes Manager")
         self.setGeometry(100, 100, 1300, 700)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
-        self.setStyleSheet(AppStyles.MAIN_STYLE)
 
         self.current_view = "Browse All"
         self.search_filter = ""
@@ -192,7 +207,12 @@ class OrchestrixGUI(QMainWindow):
         self.tree_widget = None
         self.browser_label = None
         self.items_label = None
-        self.pinned_items = set()
+
+        # Initialize pin storage manager
+        self.pin_storage = get_pin_storage_manager()
+        # Load saved pinned items
+        self.pinned_items = self.pin_storage.load_pinned_items()
+        logging.info(f"Loaded {len(self.pinned_items)} pinned items: {list(self.pinned_items)}")
 
         self.connecting_clusters = set()
         self.waiting_for_cluster_load = None
@@ -208,29 +228,72 @@ class OrchestrixGUI(QMainWindow):
         ]
         self.next_color_index = 0
         # --- End of new properties ---
- 
+
         self._pending_updates = []
         self._update_timer = QTimer(self)  # Fixed: Added self as parent
         self._update_timer.timeout.connect(self._process_pending_updates)
         self._update_timer.setSingleShot(True)
 
+        self.setup_theme_connections()
         self.init_data_model()
         self.setup_ui()
         self.update_content_view("Browse All")
+
+        # Emit initial pinned items to title bar
+        QTimer.singleShot(50, lambda: self.update_pinned_items_signal.emit(list(self.pinned_items)))
         QTimer.singleShot(100, self.load_kubernetes_clusters)
-        
+
         # Set up periodic cluster status refresh (every 5 minutes for Docker Desktop)
         self.cluster_refresh_timer = QTimer(self)  # Fixed: Added self as parent
         self.cluster_refresh_timer.timeout.connect(self.refresh_cluster_status)
         self.cluster_refresh_timer.start(300000)  # 5 minutes - much less aggressive
         logging.info("HomePage: Set up periodic cluster status refresh (5min interval)")
 
+    def setup_theme_connections(self):
+        """Setup connections for theme changes"""
+        # Connect using the ThemeManager's singleton instance
+        get_theme_manager().theme_changed.connect(self._on_theme_changed)
+
+    def _on_theme_changed(self, theme_name):
+        """Handle theme change event"""
+        try:
+            logging.info(f"HomePage handling theme change to: {theme_name}")
+            
+            # 1. Update Sidebar Icons
+            if hasattr(self, 'sidebar_buttons'):
+                for btn in self.sidebar_buttons:
+                    if hasattr(btn, 'update_theme_icon'):
+                        btn.update_theme_icon()
+                    btn.setStyleSheet(HomePageStyles.get_sidebar_button_style())
+
+            # 2. Update Styles for Main Components
+            if hasattr(self, 'sidebar'):
+                self.sidebar.setStyleSheet(HomePageStyles.get_sidebar_container_style())
+            if hasattr(self, 'top_bar'):
+                self.top_bar.setStyleSheet(HomePageStyles.get_top_bar_style())
+            if hasattr(self, 'browser_label'):
+                self.browser_label.setStyleSheet(HomePageStyles.get_browser_label_style())
+            if hasattr(self, 'items_label'):
+                self.items_label.setStyleSheet(HomePageStyles.get_items_label_style())
+            if hasattr(self, 'search'):
+                self.search.setStyleSheet(HomePageStyles.get_search_style())
+            if hasattr(self, 'table_container'):
+                self.table_container.setStyleSheet(HomePageStyles.get_content_area_style())
+            if hasattr(self, 'tree_widget') and self.tree_widget:
+                self.tree_widget.setStyleSheet(HomePageStyles.get_tree_widget_style())
+                self.tree_widget.setHeaderHidden(False)  # Force refresh header
+
+            # 3. Refresh Content (Status colors etc)
+            self.update_content_view(self.current_view)
+        except Exception as e:
+            logging.error(f"Error handling theme change in HomePage: {e}")
+
     def _connect_signals(self):
         """Connect signals with error handling"""
         try:
             self.kube_client.clusters_loaded.connect(self.on_clusters_loaded)
             self.kube_client.error_occurred.connect(self.show_error_message)
-            
+
             self.cluster_connector.connection_started.connect(self.on_cluster_connection_started)
             self.cluster_connector.connection_complete.connect(self.on_cluster_connection_complete)
             # Comment out duplicate error handling - kube_client.error_occurred already handles this
@@ -242,7 +305,7 @@ class OrchestrixGUI(QMainWindow):
             self.cluster_connector.issues_data_loaded.connect(self.check_cluster_data_loaded)
         except Exception as e:
             logging.error(f"Error connecting signals: {e}")
-            
+
     def get_cluster_color(self, cluster_name: str) -> QColor:
         """Get cached cluster color"""
         if cluster_name not in self.cluster_colors_cache:
@@ -254,31 +317,31 @@ class OrchestrixGUI(QMainWindow):
     def create_colored_icon(self, icon_path: str, color: QColor, size: int) -> QPixmap:
         """Create colored icon with caching"""
         cache_key = f"{icon_path}_{color.name()}_{size}"
-        
+
         if cache_key in COLORED_ICON_CACHE:
             return COLORED_ICON_CACHE[cache_key]
-        
+
         try:
             # Check if base icon is cached
             if icon_path not in ICON_CACHE:
                 resolved_path = resource_path(icon_path)
                 ICON_CACHE[icon_path] = QPixmap(resolved_path)
-            
+
             original_pixmap = ICON_CACHE[icon_path]
             if original_pixmap.isNull():
                 return QPixmap()
-            
+
             # Scale the icon
             scaled_pixmap = original_pixmap.scaled(
                 size, size,
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation
             )
-            
+
             # Create colored version
             colored_pixmap = QPixmap(scaled_pixmap.size())
             colored_pixmap.fill(Qt.GlobalColor.transparent)
-            
+
             painter = QPainter(colored_pixmap)
             try:
                 painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -288,11 +351,11 @@ class OrchestrixGUI(QMainWindow):
                 painter.fillRect(colored_pixmap.rect(), color)
             finally:
                 painter.end()
-            
+
             # Cache the result
             COLORED_ICON_CACHE[cache_key] = colored_pixmap
             return colored_pixmap
-            
+
         except Exception as e:
             logging.error(f"Error creating colored icon for {icon_path}: {e}")
             return QPixmap()
@@ -300,15 +363,15 @@ class OrchestrixGUI(QMainWindow):
     def handle_disconnect_item(self, item):
         """Optimized disconnect handler with batch updates"""
         original_name = item.data(0, Qt.ItemDataRole.UserRole)
-        
+
         logging.info(f"Disconnecting cluster: {original_name}")
-        
+
         # Queue status update
         self._queue_cluster_update(original_name, {"status": "disconnect"})
-        
+
         # Clean up cluster connector data asynchronously
         QTimer.singleShot(0, lambda: self._cleanup_cluster_data(original_name))
-        
+
         # Notify cluster state manager
         if self.cluster_state_manager:
             try:
@@ -316,7 +379,7 @@ class OrchestrixGUI(QMainWindow):
                 logging.info(f"Notified cluster state manager about disconnect: {original_name}")
             except Exception as e:
                 logging.error(f"Error notifying cluster state manager: {e}")
-        
+
         # Process updates with small delay to batch multiple operations
         self._schedule_batch_update()
 
@@ -333,22 +396,22 @@ class OrchestrixGUI(QMainWindow):
         """Process all pending updates in batch"""
         if not self._pending_updates:
             return
-        
+
         # Group updates by cluster
         updates_by_cluster = defaultdict(dict)
         for cluster_name, updates in self._pending_updates:
             updates_by_cluster[cluster_name].update(updates)
-        
+
         # Apply updates
         for view_type in self.all_data:
             for item in self.all_data[view_type]:
                 cluster_name = item.get("name")
                 if cluster_name in updates_by_cluster:
                     item.update(updates_by_cluster[cluster_name])
-        
+
         # Clear pending updates
         self._pending_updates.clear()
-        
+
         # Update view once
         self.update_content_view(self.current_view)
 
@@ -357,26 +420,26 @@ class OrchestrixGUI(QMainWindow):
         try:
             if hasattr(self.cluster_connector, 'data_cache') and cluster_name in self.cluster_connector.data_cache:
                 del self.cluster_connector.data_cache[cluster_name]
-                
+
             if hasattr(self.cluster_connector, 'loading_complete') and cluster_name in self.cluster_connector.loading_complete:
                 del self.cluster_connector.loading_complete[cluster_name]
-                
-            if (hasattr(self.cluster_connector, 'kube_client') and 
+
+            if (hasattr(self.cluster_connector, 'kube_client') and
                 hasattr(self.cluster_connector.kube_client, 'current_cluster') and
                 self.cluster_connector.kube_client.current_cluster == cluster_name):
                 self.cluster_connector.stop_polling()
                 self.cluster_connector.kube_client.current_cluster = None
-                
+
             if hasattr(self.cluster_connector, 'disconnect_cluster'):
                 self.cluster_connector.disconnect_cluster(cluster_name)
-                
+
             # Remove from connecting clusters set
             self.connecting_clusters.discard(cluster_name)
-            
+
             # Reset waiting for cluster load
             if self.waiting_for_cluster_load == cluster_name:
                 self.waiting_for_cluster_load = None
-                
+
         except Exception as e:
             logging.error(f"Error during cluster cleanup for {cluster_name}: {e}")
 
@@ -384,20 +447,20 @@ class OrchestrixGUI(QMainWindow):
         """Update content view with optimized rendering"""
         self.current_view = view_type
         self.browser_label.setText(view_type)
-        
+
         # Update sidebar buttons efficiently
         for button in self.sidebar_buttons:
             button.setChecked(view_type in button.text())
-        
+
         self.filter_content(self.search_filter)
 
     def filter_content(self, search_text=None):
         """Optimized content filtering with batch updates"""
         if search_text is not None:
             self.search_filter = search_text
-            
+
         view_data = self.all_data[self.current_view]
-        
+
         # Efficient filtering
         if self.search_filter:
             search_term = self.search_filter.lower()
@@ -409,10 +472,10 @@ class OrchestrixGUI(QMainWindow):
             ]
         else:
             filtered_data = view_data
-        
+
         # Update count
         self.items_label.setText(f"{len(filtered_data)} item{'s' if len(filtered_data) != 1 else ''}")
-        
+
         # Batch update table
         self._batch_update_table(filtered_data)
 
@@ -421,18 +484,18 @@ class OrchestrixGUI(QMainWindow):
         self.tree_widget.setUpdatesEnabled(False)
         try:
             self.tree_widget.clear()
-            
+
             # # Pre-allocate rows
             # self.tree_widget.setRowCount(len(data))
-            
+
             # Add items in batch
             for i, item in enumerate(data):
                 self.add_table_item(**{k: item[k] for k in ["name", "kind", "source", "label", "status", "badge_color"]}, original_data=item)
-                
+
                 # Process events periodically for large datasets
                 if i % 100 == 0:
                     QApplication.processEvents()
-                    
+
         finally:
             self.tree_widget.setUpdatesEnabled(True)
 
@@ -440,7 +503,7 @@ class OrchestrixGUI(QMainWindow):
         """Load clusters asynchronously"""
         logging.info("HomePage: Loading Kubernetes clusters...")
         self.kube_client.load_clusters_async()
-        
+
     def refresh_cluster_status(self):
         """Force refresh of cluster status"""
         logging.info("HomePage: Forcing cluster status refresh...")
@@ -449,8 +512,28 @@ class OrchestrixGUI(QMainWindow):
     def on_clusters_loaded(self, clusters):
         """Handle loaded clusters with batch updates"""
         logging.info(f"HomePage: Received {len(clusters)} clusters from kubernetes client")
-        updates = []
         
+        # Get list of new cluster names
+        new_cluster_names = {c.name for c in clusters}
+        
+        # Identify and remove deleted clusters
+        for view_type in self.all_data:
+            view_items = self.all_data[view_type]
+            # Iterate copy to allow modification
+            for item in view_items[:]: 
+                name = item.get("name")
+                kind = item.get("kind")
+                if kind == "Kubernetes Cluster" and name not in new_cluster_names:
+                    logging.info(f"HomePage: Cluster {name} was deleted/removed from config")
+                    view_items.remove(item)
+                    
+                    # If this was the waiting cluster, clear it
+                    if self.waiting_for_cluster_load == name:
+                        self.waiting_for_cluster_load = None
+                        
+                    # Emit signal so main.py can redirect if needed
+                    self.signals.cluster_deleted_signal.emit(name)
+
         for cluster in clusters:
             logging.debug(f"HomePage: Processing cluster {cluster.name} with status {cluster.status}")
             # FIXED: Check actual cluster state instead of just cluster.status
@@ -458,7 +541,7 @@ class OrchestrixGUI(QMainWindow):
             if self.cluster_state_manager:
                 from Utils.cluster_state_manager import ClusterState
                 cluster_state = self.cluster_state_manager.get_cluster_state(cluster.name)
-                
+
                 if cluster_state == ClusterState.CONNECTED:
                     actual_status = "connected"
                 elif cluster_state == ClusterState.CONNECTING:
@@ -469,9 +552,9 @@ class OrchestrixGUI(QMainWindow):
             else:
                 # Use the cluster's actual status from the service
                 actual_status = cluster.status if cluster.status in ["available", "connected", "connecting"] else "available"
-            
+
             logging.debug(f"HomePage: Final status for {cluster.name}: {actual_status} (original: {cluster.status})")
-            
+
             cluster_data = {
                 "name": cluster.name,
                 "kind": cluster.kind,
@@ -482,7 +565,7 @@ class OrchestrixGUI(QMainWindow):
                 "action": self.navigate_to_cluster,
                 "cluster_data": cluster
             }
-            
+
             # Check if cluster exists
             exists = False
             for item in self.all_data["Browse All"]:
@@ -490,43 +573,45 @@ class OrchestrixGUI(QMainWindow):
                     item.update(cluster_data)
                     exists = True
                     break
-                    
+
             if not exists:
                 self.all_data["Browse All"].append(cluster_data)
-        
+
         # Update filtered views
         self.update_filtered_views()
         self.update_content_view(self.current_view)
+
+        # Emit pinned items signal to update title bar
         self.update_pinned_items_signal.emit(list(self.pinned_items))
 
     def _on_cluster_state_changed(self, cluster_name, state):
         """Handle cluster state changes from cluster state manager"""
         try:
             from Utils.cluster_state_manager import ClusterState
-            
+
             # FIXED: Update status mapping to properly reflect cluster states
             status_mapping = {
                 ClusterState.DISCONNECTED: "available",
-                ClusterState.CONNECTING: "connecting", 
+                ClusterState.CONNECTING: "connecting",
                 ClusterState.CONNECTED: "connected",
                 ClusterState.ERROR: "available",  # Error state shows as available to allow retry
                 ClusterState.MANUALLY_DISCONNECTED: "available"  # Manual disconnect shows as available to allow reconnect
             }
-            
+
             new_status = status_mapping.get(state, "available")
-            
+
             for view_type in self.all_data:
                 for item in self.all_data[view_type]:
                     if item.get("name") == cluster_name:
                         item["status"] = new_status
                         logging.info(f"Updated HomePage status for {cluster_name}: {new_status}")
                         break
-            
+
             self.update_content_view(self.current_view)
-            
+
         except Exception as e:
             logging.error(f"Error handling cluster state change in HomePage: {e}")
-    
+
     def _on_cluster_switch_completed(self, cluster_name, success):
         """Handle cluster switch completion"""
         try:
@@ -543,12 +628,12 @@ class OrchestrixGUI(QMainWindow):
                 for view_type in self.all_data:
                     for item in self.all_data[view_type]:
                         if item.get("name") == cluster_name:
-                            item["status"] = "available" 
+                            item["status"] = "available"
                             logging.info(f"Cluster {cluster_name} connection failed, status reset to available")
                             break
-            
+
             self.update_content_view(self.current_view)
-            
+
         except Exception as e:
             logging.error(f"Error handling cluster switch completion in HomePage: {e}")
 
@@ -579,7 +664,7 @@ class OrchestrixGUI(QMainWindow):
                 if item.get("name") == cluster_name:
                     item["status"] = "connecting"
         self.update_content_view(self.current_view)
-        
+
         # Add a timeout to check if connection completes within reasonable time
         QTimer.singleShot(10000, lambda: self._check_connection_timeout(cluster_name))
 
@@ -600,31 +685,31 @@ class OrchestrixGUI(QMainWindow):
                             self.waiting_for_cluster_load = None
                         logging.info(f"HomePage: Set {cluster_name} status to available on failure")
         self.update_content_view(self.current_view)
-        
+
     def _check_connection_timeout(self, cluster_name):
         """Check if connection is stuck and try to recover"""
         try:
             # If cluster is still in connecting state after timeout, check actual state
             if cluster_name in self.connecting_clusters or self.waiting_for_cluster_load == cluster_name:
                 logging.warning(f"HomePage: Connection timeout for {cluster_name}, checking actual state")
-                
+
                 # Check if cluster is actually connected via state manager
                 if self.cluster_state_manager:
                     from Utils.cluster_state_manager import ClusterState
                     actual_state = self.cluster_state_manager.get_cluster_state(cluster_name)
-                    
+
                     if actual_state == ClusterState.CONNECTED:
                         logging.info(f"HomePage: {cluster_name} is actually connected, updating UI")
                         # Force update to connected state
                         self.connecting_clusters.discard(cluster_name)
                         self.waiting_for_cluster_load = None
-                        
+
                         for view_type in self.all_data:
                             for item in self.all_data[view_type]:
                                 if item.get("name") == cluster_name:
                                     item["status"] = "connected"
                                     logging.info(f"HomePage: Forced {cluster_name} status to connected")
-                        
+
                         self.update_content_view(self.current_view)
                         # Emit signal to switch to cluster view
                         QTimer.singleShot(100, lambda: self.open_cluster_signal.emit(cluster_name))
@@ -634,14 +719,14 @@ class OrchestrixGUI(QMainWindow):
                         self.connecting_clusters.discard(cluster_name)
                         if self.waiting_for_cluster_load == cluster_name:
                             self.waiting_for_cluster_load = None
-                            
+
                         for view_type in self.all_data:
                             for item in self.all_data[view_type]:
                                 if item.get("name") == cluster_name:
                                     item["status"] = "available"
-                        
+
                         self.update_content_view(self.current_view)
-                        
+
         except Exception as e:
             logging.error(f"Error in connection timeout check for {cluster_name}: {e}")
 
@@ -651,37 +736,37 @@ class OrchestrixGUI(QMainWindow):
             # Clean up the message
             if not error_message:
                 error_message = "An unknown error occurred."
-            
+
             error_message = str(error_message).strip()
-            
+
             # Check if this error is for a cancelled cluster connection
             # Extract cluster name from error message if possible
             cancelled_cluster = None
             for view_type in self.all_data:
                 for item in self.all_data[view_type]:
                     cluster_name = item.get("name", "")
-                    if (cluster_name in error_message and 
-                        item.get("status") == "available" and 
+                    if (cluster_name in error_message and
+                        item.get("status") == "available" and
                         cluster_name not in self.connecting_clusters):
                         cancelled_cluster = cluster_name
                         break
-            
+
             if cancelled_cluster:
                 logging.info(f"Suppressing error for cancelled cluster {cancelled_cluster}: {error_message}")
                 return
-            
+
             # Log for debugging
             logging.error(f"HomePage error: {error_message}")
-            
+
             # Use centralized error handler - this prevents duplicate dialogs
             from Utils.error_handler import get_error_handler
             error_handler = get_error_handler()
             error_handler.handle_error(
-                Exception(error_message), 
-                context="cluster connection", 
+                Exception(error_message),
+                context="cluster connection",
                 show_dialog=True
             )
-            
+
         except Exception as e:
             logging.error(f"Error in centralized error handling: {e}")
             # Only show fallback if centralized handler fails
@@ -701,7 +786,7 @@ class OrchestrixGUI(QMainWindow):
 
         # --- Modified Name column widget to include cluster icon ---
         name_widget = QWidget()
-        name_widget.setStyleSheet("background: transparent; padding: 0px; margin: 0px;")
+        name_widget.setStyleSheet(HomePageStyles.TRANSPARENT_WIDGET)
         name_widget.setCursor(Qt.CursorShape.PointingHandCursor)
         name_layout = QHBoxLayout(name_widget)
         name_layout.setContentsMargins(0, 0, 0, 0)
@@ -730,10 +815,8 @@ class OrchestrixGUI(QMainWindow):
                 print(f"Error processing cluster icon for {name}: {e}")
 
         name_label = QLabel(name if not badge_color else item_text)
-        font = QFont("Segoe UI", 10)
-        font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
-        name_label.setFont(font)
-        name_label.setStyleSheet("color: #FFFFFF; background: transparent; padding: 0px; margin: 0px;")
+        name_label.setFont(HomePageStyles.get_cell_font())
+        name_label.setStyleSheet(HomePageStyles.get_cell_label_style())
         name_layout.addWidget(name_label)
 
         if original_data and 'cluster_data' in original_data:
@@ -742,10 +825,7 @@ class OrchestrixGUI(QMainWindow):
             pin_icon_path = resource_path("Icons/pin.svg") if name not in self.pinned_items else resource_path("Icons/unpin.svg")
             pin_btn.setIcon(QIcon(pin_icon_path))
             pin_btn.setIconSize(QSize(16, 16))
-            pin_btn.setStyleSheet("""
-                QPushButton { background: transparent; border: none; padding: 0px; margin: 0px; }
-                QPushButton:hover { background: #3e3e3e; }
-            """)
+            pin_btn.setStyleSheet(HomePageStyles.get_pin_button_style())
             pin_btn.clicked.connect(lambda checked=False, n=name: self.toggle_pin_item(n))
             name_layout.addWidget(pin_btn)
 
@@ -755,66 +835,54 @@ class OrchestrixGUI(QMainWindow):
 
         # Kind column (column 1)
         kind_widget = QWidget()
-        kind_widget.setStyleSheet("background: transparent; padding: 0px; margin: 0px;")
+        kind_widget.setStyleSheet(HomePageStyles.TRANSPARENT_WIDGET)
         kind_widget.setCursor(Qt.CursorShape.PointingHandCursor)
         kind_layout = QHBoxLayout(kind_widget)
         kind_layout.setContentsMargins(8, 0, 8, 0)  # Add some padding
         kind_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
         kind_label = QLabel(kind)
-        font = QFont("Segoe UI", 10)
-        font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
-        kind_label.setFont(font)
-        kind_label.setStyleSheet("color: #FFFFFF; background: transparent; padding: 0px; margin: 0px;")
+        kind_label.setFont(HomePageStyles.get_cell_font())
+        kind_label.setStyleSheet(HomePageStyles.get_cell_label_style())
         kind_layout.addWidget(kind_label)
         self.tree_widget.setItemWidget(item, 1, kind_widget)
 
         # Source column (column 2)
         source_widget = QWidget()
-        source_widget.setStyleSheet("background: transparent; padding: 0px; margin: 0px;")
+        source_widget.setStyleSheet(HomePageStyles.TRANSPARENT_WIDGET)
         source_widget.setCursor(Qt.CursorShape.PointingHandCursor)
         source_layout = QHBoxLayout(source_widget)
         source_layout.setContentsMargins(8, 0, 8, 0)  # Add some padding
         source_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
         source_label = QLabel(source)
-        font = QFont("Segoe UI", 10)
-        font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
-        source_label.setFont(font)
-        source_label.setStyleSheet("color: #FFFFFF; background: transparent; padding: 0px; margin: 0px;")
+        source_label.setFont(HomePageStyles.get_cell_font())
+        source_label.setStyleSheet(HomePageStyles.get_cell_label_style())
         source_layout.addWidget(source_label)
         self.tree_widget.setItemWidget(item, 2, source_widget)
 
         # Label column (column 3)
         label_widget = QWidget()
-        label_widget.setStyleSheet("background: transparent; padding: 0px; margin: 0px;")
+        label_widget.setStyleSheet(HomePageStyles.TRANSPARENT_WIDGET)
         label_widget.setCursor(Qt.CursorShape.PointingHandCursor)
         label_layout = QHBoxLayout(label_widget)
         label_layout.setContentsMargins(8, 0, 8, 0)  # Add some padding
         label_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
         label_label = QLabel(label)
-        font = QFont("Segoe UI", 10)
-        font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
-        label_label.setFont(font)
-        label_label.setStyleSheet("color: #FFFFFF; background: transparent; padding: 0px; margin: 0px;")
+        label_label.setFont(HomePageStyles.get_cell_font())
+        label_label.setStyleSheet(HomePageStyles.get_cell_label_style())
         label_layout.addWidget(label_label)
         self.tree_widget.setItemWidget(item, 3, label_widget)
 
         # --- END of new custom widgets for Kind, Source, and Label ---
 
-        status_colors = {
-            "available": AppColors.STATUS_AVAILABLE,
-            "active": AppColors.STATUS_ACTIVE,
-            "connected": AppColors.STATUS_AVAILABLE,
-            "disconnect": AppColors.STATUS_DISCONNECTED,
-            "connecting": AppColors.STATUS_WARNING,
-            "loading": AppColors.STATUS_WARNING
-        }
+        # Status colors now use theme-aware ACCENT colors
+        # Removed hardcoded status_colors dict - using HomePageStyles.get_status_color() instead
 
         status_widget = QWidget()
         status_widget.setObjectName("statusCell")
-        status_widget.setStyleSheet("QWidget#statusCell { background: transparent; }")
+        status_widget.setStyleSheet(HomePageStyles.STATUS_CELL)
         status_widget.setCursor(Qt.CursorShape.PointingHandCursor)
         status_layout = QHBoxLayout(status_widget)
         status_layout.setContentsMargins(5, 0, 0, 0)
@@ -827,54 +895,66 @@ class OrchestrixGUI(QMainWindow):
                 status_layout.addWidget(loading_indicator)
                 status_text = "Connecting..." if status == "connecting" else "Loading data..."
                 status_label = QLabel(status_text)
-                status_label.setStyleSheet(f"color: {status_colors.get(status, AppColors.STATUS_DISCONNECTED)}; background: transparent;")
+                status_color = HomePageStyles.get_status_color(status)
+                status_label.setStyleSheet(HomePageStyles.get_status_label_style(status_color))
                 status_layout.addWidget(status_label)
             else:
-                if status == "available": status_text = "Available"
-                elif status in ["active", "connected"]: status_text = "Connected"
-                elif status == "disconnect": status_text = "Disconnected"
-                else: status_text = status.capitalize()
+                if status == "available":
+                    status_text = "Available"
+                elif status in ["active", "connected"]:
+                    status_text = "Connected"
+                elif status == "disconnect":
+                    status_text = "Disconnected"
+                else:
+                    status_text = status.capitalize()
                 status_label = QLabel(status_text)
-                status_label.setStyleSheet(f"color: {status_colors.get(status, AppColors.STATUS_DISCONNECTED)}; background: transparent;")
+                status_color = HomePageStyles.get_status_color(status)
+                status_label.setStyleSheet(HomePageStyles.get_status_label_style(status_color))
                 status_layout.addWidget(status_label)
         else:
             status_text = status
             status_label = QLabel(status_text)
-            status_label.setStyleSheet(f"color: {status_colors.get(status, AppColors.STATUS_DISCONNECTED)}; background: transparent;")
+            status_color = HomePageStyles.get_status_color(status)
+            status_label.setStyleSheet(HomePageStyles.get_status_label_style(status_color))
             status_layout.addWidget(status_label)
         self.tree_widget.setItemWidget(item, 4, status_widget)
 
         action_widget = QWidget()
         action_widget.setFixedWidth(AppConstants.SIZES["ACTION_WIDTH"])
-        action_widget.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
+        action_widget.setStyleSheet(HomePageStyles.get_action_container_style())
         action_layout = QHBoxLayout(action_widget)
         action_layout.setContentsMargins(0, 0, 0, 0)
         action_layout.setSpacing(0)
         action_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         menu_btn = QToolButton()
-        icon = QIcon(resource_path("Icons/Moreaction_Button.svg"))
+        # Use theme-aware icon
+        theme_name = get_theme_manager().get_current_theme_name() or "Dark"
+        icon = Icons.get_theme_icon("Moreaction_Button.svg", theme_name)
         menu_btn.setIcon(icon)
         menu_btn.setIconSize(QSize(AppConstants.SIZES["ICON_SIZE"], AppConstants.SIZES["ICON_SIZE"]))
         menu_btn.setText("")
         menu_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         menu_btn.setFixedWidth(AppConstants.SIZES["ACTION_WIDTH"])
         menu_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        menu_btn.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE)
+        menu_btn.setStyleSheet(HomePageStyles.get_home_action_button_style())
         menu_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
 
         if status in ["connecting", "loading"] and (name in self.connecting_clusters or self.waiting_for_cluster_load == name):
             menu_btn.setEnabled(False)
-            menu_btn.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE + " QToolButton:disabled { opacity: 0.5; background-color: transparent; }")
+            opacity_effect = QGraphicsOpacityEffect(menu_btn)
+            opacity_effect.setOpacity(0.5)
+            menu_btn.setGraphicsEffect(opacity_effect)
         else:
             menu = QMenu(action_widget)
-            menu.setStyleSheet(AppStyles.MENU_STYLE)
+            menu.setStyleSheet(HomePageStyles.get_menu_style())
             if status == "available" and is_cluster:
                 open_action = menu.addAction("Open")
                 connect_action = menu.addAction("Connect")
                 delete_action = menu.addAction("Delete")
             elif status in ["active", "connected"]:
                 open_action = menu.addAction("Open")
-                if is_cluster: disconnect_action = menu.addAction("Disconnect")
+                if is_cluster:
+                    disconnect_action = menu.addAction("Disconnect")
                 delete_action = menu.addAction("Delete")
             elif status == "disconnect" and is_cluster:
                 connect_action = menu.addAction("Connect")
@@ -886,21 +966,32 @@ class OrchestrixGUI(QMainWindow):
             def show_menu():
                 pos = menu_btn.mapToGlobal(QPoint(0, menu_btn.height()))
                 action = menu.exec(pos)
-                if action is None: return
+                if action is None:
+                    return
                 if status == "available" and is_cluster:
-                    if action == open_action: self.handle_open_item(item)
-                    elif action == connect_action: self.handle_connect_item(item)
-                    elif action == delete_action: self.handle_delete_item(item)
+                    if action == open_action:
+                        self.handle_open_item(item)
+                    elif action == connect_action:
+                        self.handle_connect_item(item)
+                    elif action == delete_action:
+                        self.handle_delete_item(item)
                 elif status in ["active", "connected"]:
-                    if action == open_action: self.handle_open_item(item)
-                    elif is_cluster and 'disconnect_action' in locals() and action == disconnect_action: self.handle_disconnect_item(item)
-                    elif action == delete_action: self.handle_delete_item(item)
+                    if action == open_action:
+                        self.handle_open_item(item)
+                    elif is_cluster and 'disconnect_action' in locals() and action == disconnect_action:
+                        self.handle_disconnect_item(item)
+                    elif action == delete_action:
+                        self.handle_delete_item(item)
                 elif status == "disconnect" and is_cluster:
-                    if action == connect_action: self.handle_connect_item(item)
-                    elif action == delete_action: self.handle_delete_item(item)
+                    if action == connect_action:
+                        self.handle_connect_item(item)
+                    elif action == delete_action:
+                        self.handle_delete_item(item)
                 else:
-                    if action == open_action: self.handle_open_item(item)
-                    elif action == delete_action: self.handle_delete_item(item)
+                    if action == open_action:
+                        self.handle_open_item(item)
+                    elif action == delete_action:
+                        self.handle_delete_item(item)
             menu_btn.clicked.connect(show_menu)
         action_layout.addWidget(menu_btn)
         self.tree_widget.setItemWidget(item, 5, action_widget)
@@ -917,7 +1008,15 @@ class OrchestrixGUI(QMainWindow):
     def create_colored_icon_alternative(self, icon_path: str, color: QColor, size: int) -> QPixmap:
         """
         Alternative method using QIcon for better SVG handling.
+        Includes caching for performance.
         """
+        # Create cache key using immutable values
+        cache_key = (icon_path, color.rgba(), size)
+        
+        # Check cache first
+        if cache_key in COLORED_ICON_CACHE:
+            return COLORED_ICON_CACHE[cache_key]
+        
         try:
             # Create QIcon from the SVG file
             icon = QIcon(resource_path(icon_path))
@@ -943,10 +1042,12 @@ class OrchestrixGUI(QMainWindow):
                 painter.fillRect(colored_pixmap.rect(), color)
             finally:
                 painter.end()
-            
+
+            # Cache the result
+            COLORED_ICON_CACHE[cache_key] = colored_pixmap
             return colored_pixmap
         except Exception as e:
-            print(f"Error creating colored icon alternative for {icon_path}: {e}")
+            logging.error(f"Error creating colored icon alternative for {icon_path}: {e}")
             return QPixmap()
 
     def init_data_model(self):
@@ -955,7 +1056,7 @@ class OrchestrixGUI(QMainWindow):
                 {"name": "Settings", "kind": "General", "source": "app", "label": "",
                  "status": "active", "badge_color": None, "action": self.navigate_to_preferences},
                 {"name": "OxW Orchetrix Website", "kind": "Weblinks", "source": "local", "label": "",
-                 "status": "available", "badge_color": "#f0ad4e", "action": self.open_web_link, 
+                 "status": "available", "badge_color": "#f0ad4e", "action": self.open_web_link,
                  "url": "https://www.orchetrix.com/home"},
                 {"name": "OxD Orchetrix Documentation", "kind": "Weblinks", "source": "local", "label": "",
                  "status": "available", "badge_color": "#ecd06f", "action": self.open_web_link,
@@ -980,12 +1081,15 @@ class OrchestrixGUI(QMainWindow):
             self.all_data[view_name] = [item for item in self.all_data["Browse All"] if filter_func(item)]
 
     def handle_item_single_click(self, item, column):
-        original_name = item.data(0, Qt.ItemDataRole.UserRole)
+        item.data(0, Qt.ItemDataRole.UserRole)
         original_data = item.data(0, Qt.ItemDataRole.UserRole + 1)
-        if not original_data: return
-        if "Cluster" in original_data.get("kind", ""): self.navigate_to_cluster(original_data)
+        if not original_data:
+            return
+        if "Cluster" in original_data.get("kind", ""):
+            self.navigate_to_cluster(original_data)
         else:
-            if original_data.get("action"): original_data["action"](original_data)
+            if original_data.get("action"):
+                original_data["action"](original_data)
 
     def create_table_widget(self):
         tree_widget = QTreeWidget()
@@ -993,15 +1097,17 @@ class OrchestrixGUI(QMainWindow):
         tree_widget.setHeaderLabels(["Name", "Kind", "Source", "Label", "Status", ""])
         tree_widget.setHeaderHidden(False)
         column_widths = [300, 180, 150, 120, 120, AppConstants.SIZES["ACTION_WIDTH"]]
-        for i, width in enumerate(column_widths): tree_widget.setColumnWidth(i, width)
+        for i, width in enumerate(column_widths):
+            tree_widget.setColumnWidth(i, width)
         header = tree_widget.header()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for i in range(1, len(column_widths)): header.setSectionResizeMode(i, QHeaderView.ResizeMode.Fixed)
+        for i in range(1, len(column_widths)):
+            header.setSectionResizeMode(i, QHeaderView.ResizeMode.Fixed)
         header.resizeSection(5, AppConstants.SIZES["ACTION_WIDTH"])
         font = QFont("Segoe UI", 13)
         font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
         tree_widget.setFont(font)
-        tree_widget.setStyleSheet(AppStyles.TREE_WIDGET_STYLE)
+        tree_widget.setStyleSheet(HomePageStyles.get_tree_widget_style())
         tree_widget.setIconSize(QSize(20, 20))
         tree_widget.setIndentation(0)
         tree_widget.setAlternatingRowColors(False)
@@ -1014,13 +1120,15 @@ class OrchestrixGUI(QMainWindow):
 
     def _find_data_item(self, view, original_name):
         for data_item in self.all_data[view]:
-            if data_item["name"] == original_name: return data_item
+            if data_item["name"] == original_name:
+                return data_item
         return None
 
     def handle_open_item(self, item):
-        original_name = item.data(0, Qt.ItemDataRole.UserRole)
+        item.data(0, Qt.ItemDataRole.UserRole)
         original_data = item.data(0, Qt.ItemDataRole.UserRole + 1)
-        if original_data and original_data["action"]: original_data["action"](original_data)
+        if original_data and original_data["action"]:
+            original_data["action"](original_data)
 
     def handle_connect_item(self, item):
         original_name = item.data(0, Qt.ItemDataRole.UserRole)
@@ -1029,10 +1137,11 @@ class OrchestrixGUI(QMainWindow):
             # Update UI to show connecting state
             for view_type in self.all_data:
                 for d_item in self.all_data[view_type]: # renamed item to d_item to avoid conflict
-                    if d_item["name"] == original_name: d_item["status"] = "connecting"
+                    if d_item["name"] == original_name:
+                        d_item["status"] = "connecting"
             self.connecting_clusters.add(original_name)
             self.update_content_view(self.current_view)
-            
+
             # FIXED: Use the same connection flow as direct click to ensure consistent error handling
             # Let the main window handle the connection through cluster state manager
             QTimer.singleShot(100, lambda: self.open_cluster_signal.emit(original_name))
@@ -1041,34 +1150,34 @@ class OrchestrixGUI(QMainWindow):
         """Disconnect from a specific cluster"""
         try:
             logging.info(f"Disconnecting from cluster: {cluster_name}")
-            
+
             # Stop any workers for this cluster
             self._stop_workers_for_cluster(cluster_name)
-            
+
             # Update connection state
             self.connection_states[cluster_name] = "disconnected"
-            
+
             # Clean up cached data
             if cluster_name in self.data_cache:
                 del self.data_cache[cluster_name]
                 logging.info(f"Cleared data cache for {cluster_name}")
-            
+
             if cluster_name in self.loading_complete:
                 del self.loading_complete[cluster_name]
                 logging.info(f"Cleared loading complete flag for {cluster_name}")
-            
+
             # Stop polling and reset current cluster if this is the current cluster
-            if (hasattr(self.kube_client, 'current_cluster') and 
+            if (hasattr(self.kube_client, 'current_cluster') and
                 self.kube_client.current_cluster == cluster_name):
                 self.stop_polling()
                 self.kube_client.current_cluster = None
                 logging.info(f"Stopped polling and reset current cluster for {cluster_name}")
-                
+
             # Reset current cluster in the connector itself
             if hasattr(self, 'current_cluster') and self.current_cluster == cluster_name:
                 self.current_cluster = None
                 logging.info(f"Reset cluster connector current_cluster for {cluster_name}")
-                
+
         except Exception as e:
             logging.error(f"Error disconnecting from cluster {cluster_name}: {e}")
 
@@ -1090,12 +1199,12 @@ class OrchestrixGUI(QMainWindow):
     def navigate_to_cluster(self, item):
         cluster_name = item["name"]
         cluster_status = item["status"]
-        
+
         # Prevent multiple connection attempts - check both local and global state
-        if cluster_status in ["connecting", "loading"]: 
+        if cluster_status in ["connecting", "loading"]:
             logging.info(f"Cluster {cluster_name} already {cluster_status}, ignoring duplicate click")
             return
-            
+
         # Check if any other cluster is currently connecting - cancel it and connect to new one
         connecting_clusters = []
         for view_type in self.all_data:
@@ -1105,39 +1214,39 @@ class OrchestrixGUI(QMainWindow):
                     logging.info(f"Cancelling connection to {data_item.get('name')} to switch to {cluster_name}")
                     # Reset the previous cluster status
                     data_item["status"] = "available"
-        
+
         # Remove from connecting clusters set and update UI
         for old_cluster in connecting_clusters:
             self.connecting_clusters.discard(old_cluster)
             if self.waiting_for_cluster_load == old_cluster:
                 self.waiting_for_cluster_load = None
-        
+
         # Update UI to reflect cancellation of previous connections
         if connecting_clusters:
             self.update_content_view(self.current_view)
-        
+
         # FIXED: Check actual cluster state before proceeding
         if self.cluster_state_manager:
             from Utils.cluster_state_manager import ClusterState
             actual_state = self.cluster_state_manager.get_cluster_state(cluster_name)
-            
+
             # If already connected, go directly to cluster view
             if actual_state == ClusterState.CONNECTED:
                 logging.info(f"Cluster {cluster_name} already connected, opening cluster view")
                 self.open_cluster_signal.emit(cluster_name)
                 return
-        
+
         # Update UI to show connecting state for any non-connected cluster
         for view_type in self.all_data:
             for data_item in self.all_data[view_type]:
-                if data_item["name"] == cluster_name: 
+                if data_item["name"] == cluster_name:
                     data_item["status"] = "connecting"
                     logging.info(f"HomePage: Set {cluster_name} status to connecting")
-        
+
         self.connecting_clusters.add(cluster_name)
         self.update_content_view(self.current_view)
         logging.info(f"HomePage: Updated UI to show {cluster_name} as connecting")
-        
+
         # FIXED: Only emit signal to main window, don't call cluster_connector directly
         # Let the main window handle the connection through cluster state manager
         self.open_cluster_signal.emit(cluster_name)
@@ -1154,11 +1263,11 @@ class OrchestrixGUI(QMainWindow):
                 # Fallback mapping for backward compatibility
                 url_mapping = {
                     "OxW Orchetrix Website": "https://www.orchetrix.com/home",
-                    "OxD Orchetrix Documentation": "https://www.orchetrix.com/documentation", 
+                    "OxD Orchetrix Documentation": "https://www.orchetrix.com/documentation",
                     "OxOB Orchetrix Official blog": "https://www.orchetrix.com/blogs",
                     "KD Kubernetes Document": "https://kubernetes.io/docs/home/"
                 }
-                
+
                 item_name = item.get("name", "")
                 if item_name in url_mapping:
                     url = url_mapping[item_name]
@@ -1168,15 +1277,15 @@ class OrchestrixGUI(QMainWindow):
                     logging.warning(f"No URL found for web link: {item_name}")
                     # Show a message to the user
                     QMessageBox.warning(
-                        self, 
-                        "URL Not Found", 
+                        self,
+                        "URL Not Found",
                         f"No URL configured for '{item_name}'"
                     )
         except Exception as e:
             logging.error(f"Error opening web link: {e}")
             QMessageBox.critical(
-                self, 
-                "Error Opening Link", 
+                self,
+                "Error Opening Link",
                 f"Failed to open web link: {str(e)}"
             )
 
@@ -1198,7 +1307,7 @@ class OrchestrixGUI(QMainWindow):
     def create_sidebar(self):
         self.sidebar = QWidget()
         self.sidebar.setFixedWidth(AppConstants.SIZES["SIDEBAR_WIDTH"])
-        self.sidebar.setStyleSheet(AppStyles.SIDEBAR_CONTAINER_STYLE)
+        self.sidebar.setStyleSheet(HomePageStyles.get_sidebar_container_style())
         self.sidebar_layout = QVBoxLayout(self.sidebar)
         self.sidebar_layout.setContentsMargins(0, 0, 0, 0)
         self.sidebar_layout.setSpacing(2)
@@ -1229,17 +1338,17 @@ class OrchestrixGUI(QMainWindow):
     def create_top_bar(self):
         self.top_bar = QWidget()
         self.top_bar.setFixedHeight(AppConstants.SIZES["TOPBAR_HEIGHT"])
-        self.top_bar.setStyleSheet(AppStyles.TOP_BAR_STYLE)
+        self.top_bar.setStyleSheet(HomePageStyles.get_top_bar_style())
         self.top_bar_layout = QHBoxLayout(self.top_bar)
         self.top_bar_layout.setContentsMargins(10, 0, 10, 0)
         self.browser_label = QLabel("Browse All")
-        self.browser_label.setStyleSheet(AppStyles.BROWSER_LABEL_STYLE)
+        self.browser_label.setStyleSheet(HomePageStyles.get_browser_label_style())
         self.items_label = QLabel("9 items")
-        self.items_label.setStyleSheet(AppStyles.ITEMS_LABEL_STYLE)
+        self.items_label.setStyleSheet(HomePageStyles.get_items_label_style())
         self.search = QLineEdit()
         self.search.setPlaceholderText("Search...")
         self.search.setFixedWidth(300)
-        self.search.setStyleSheet(AppStyles.SEARCH_STYLE)
+        self.search.setStyleSheet(HomePageStyles.get_search_style())
         self.search.textChanged.connect(self.filter_content)
         self.top_bar_layout.addWidget(self.browser_label)
         self.top_bar_layout.addWidget(self.items_label)
@@ -1254,7 +1363,7 @@ class OrchestrixGUI(QMainWindow):
         self.main_content_layout.setSpacing(0)
         self.table_container = QFrame()
         self.table_container.setFrameShape(QFrame.Shape.NoFrame)
-        self.table_container.setStyleSheet(AppStyles.CONTENT_AREA_STYLE)
+        self.table_container.setStyleSheet(HomePageStyles.get_content_area_style())
         self.table_container_layout = QVBoxLayout(self.table_container)
         self.table_container_layout.setContentsMargins(0, 0, 0, 0)
         self.table_container_layout.setSpacing(0)
@@ -1264,7 +1373,8 @@ class OrchestrixGUI(QMainWindow):
         self.content_layout.addWidget(self.main_content)
 
     def fix_action_column_width(self):
-        if not hasattr(self, 'tree_widget') or self.tree_widget is None: return
+        if not hasattr(self, 'tree_widget') or self.tree_widget is None:
+            return
         header = self.tree_widget.header()
         header.setStretchLastSection(False)
         action_column_width = AppConstants.SIZES["ACTION_WIDTH"]
@@ -1304,11 +1414,21 @@ class OrchestrixGUI(QMainWindow):
             # print(f"Debug: Item {name} not found with cluster_data for pinning.")
             return
 
-
-        if name in self.pinned_items:
+        # Toggle pin state
+        was_pinned = name in self.pinned_items
+        if was_pinned:
             self.pinned_items.remove(name)
+            logging.info(f"Unpinned item: {name}")
         else:
             self.pinned_items.add(name)
+            logging.info(f"Pinned item: {name}")
+
+        # Save to persistent storage
+        try:
+            self.pin_storage.save_pinned_items(self.pinned_items)
+            logging.info(f"Saved pinned items to storage. Total pins: {len(self.pinned_items)}")
+        except Exception as e:
+            logging.error(f"Failed to save pinned items: {e}")
 
         self.update_pinned_items_signal.emit(list(self.pinned_items))
         # No need to call update_content_view here, as only the icon of the pin button changes.
@@ -1328,10 +1448,19 @@ class OrchestrixGUI(QMainWindow):
                             child_widget.setIcon(QIcon(current_pin_icon_path))
                             break # Found and updated the pin button
 
-        def cleanup(self):
-            """Cleanup resources"""
-            ICON_CACHE.clear()
-            COLORED_ICON_CACHE.clear()
-            if self._update_timer.isActive():
-                self._update_timer.stop()
+    def cleanup(self):
+        """Cleanup resources and save pin data"""
+        try:
+            # Save pinned items before cleanup
+            if hasattr(self, 'pin_storage') and hasattr(self, 'pinned_items'):
+                self.pin_storage.save_pinned_items(self.pinned_items)
+                logging.info("Saved pinned items during cleanup")
+        except Exception as e:
+            logging.error(f"Failed to save pinned items during cleanup: {e}")
+
+        ICON_CACHE.clear()
+        COLORED_ICON_CACHE.clear()
+        if hasattr(self, '_update_timer') and self._update_timer.isActive():
+            self._update_timer.stop()
+        if hasattr(self, '_pending_updates'):
             self._pending_updates.clear()

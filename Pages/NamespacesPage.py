@@ -2,47 +2,30 @@
 Dynamic implementation of the Namespaces page with live Kubernetes data using API.
 """
 
+import re
 from PyQt6.QtWidgets import (
-    QHeaderView, QWidget, QLabel, QHBoxLayout, QPushButton, QInputDialog, QMessageBox, QLayout
+    QHeaderView, QWidget, QHBoxLayout, QPushButton, QInputDialog, QMessageBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTimer
 from PyQt6.QtGui import QColor
 
-from Base_Components.base_components import SortableTableWidgetItem
+from Base_Components.base_components import SortableTableWidgetItem, StatusLabel
 from Base_Components.base_resource_page import BaseResourcePage
-from UI.Styles import AppStyles, AppColors
+from UI.Styles import AppColors
+from UI.ThemeManager import get_theme_manager
+from Utils.data_formatters import parse_age_to_seconds
+from Styles.NamespacesPageStyles import get_add_namespace_button_style
 from Utils.kubernetes_client import get_kubernetes_client
+from Services.kubernetes.api_config import APIClientConfig
 from kubernetes.client.rest import ApiException
 from kubernetes import client
 import datetime
 import logging
+from Utils.thread_manager import is_shutdown_requested
 
-class StatusLabel(QWidget):
-    """Widget that displays a status with consistent styling and background handling."""
-    clicked = pyqtSignal()
-
-    def __init__(self, status_text, color=None, parent=None):
-        super().__init__(parent)
-
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        self.label = QLabel(status_text)
-        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        if color:
-            self.label.setStyleSheet(f"color: {QColor(color).name()}; background-color: transparent;")
-
-        layout.addWidget(self.label)
-        self.setStyleSheet("background-color: transparent;")
-
-    def mousePressEvent(self, event):
-        self.clicked.emit()
-        super().mousePressEvent(event)
 
 class NamespaceOperationThread(QThread):
-    """Thread for performing namespace operations asynchronously"""
+    """Thread for performing namespace operations asynchronously with cooperative cancellation"""
     operation_completed = pyqtSignal(bool, str)  # success, message
 
     def __init__(self, operation, namespace_name=None, parent=None):
@@ -50,9 +33,17 @@ class NamespaceOperationThread(QThread):
         self.operation = operation
         self.namespace_name = namespace_name
         self.kube_client = get_kubernetes_client()
+        self._stop_requested = False
+
+    def stop(self):
+        """Request the thread to stop cooperatively"""
+        self._stop_requested = True
+        self.requestInterruption()
 
     def run(self):
         try:
+            if is_shutdown_requested() or self.isInterruptionRequested():
+                return
             if self.operation == "create":
                 self._create_namespace()
             elif self.operation == "delete":
@@ -60,11 +51,16 @@ class NamespaceOperationThread(QThread):
             elif self.operation == "refresh":
                 self._refresh_namespaces()
         except Exception as e:
-            self.operation_completed.emit(False, str(e))
+            if not self._stop_requested:
+                self.operation_completed.emit(False, str(e))
 
     def _create_namespace(self):
         """Create a new namespace"""
         try:
+            # Check for interruption before starting
+            if self._stop_requested or self.isInterruptionRequested():
+                return
+
             if not self.kube_client.v1:
                 self.operation_completed.emit(False, "Kubernetes client not initialized")
                 return
@@ -74,36 +70,62 @@ class NamespaceOperationThread(QThread):
                 metadata=client.V1ObjectMeta(name=self.namespace_name)
             )
 
-            # Create the namespace
-            self.kube_client.v1.create_namespace(body=namespace_body)
+            # Check for interruption before API call
+            if self._stop_requested or self.isInterruptionRequested():
+                return
+
+            # Create the namespace with timeout
+            self.kube_client.v1.create_namespace(body=namespace_body, _request_timeout=APIClientConfig.NAMESPACE_OPERATION_TIMEOUT)
+            
+            # Check for interruption after API call
+            if self._stop_requested or self.isInterruptionRequested():
+                return
+                
             self.operation_completed.emit(True, f"Namespace '{self.namespace_name}' created successfully")
 
         except ApiException as e:
-            if e.status == 409:
-                self.operation_completed.emit(False, f"Namespace '{self.namespace_name}' already exists")
-            else:
-                self.operation_completed.emit(False, f"API error: {e.reason}")
+            if not self._stop_requested:
+                if e.status == 409:
+                    self.operation_completed.emit(False, f"Namespace '{self.namespace_name}' already exists")
+                else:
+                    self.operation_completed.emit(False, f"API error: {e.reason}")
         except Exception as e:
-            self.operation_completed.emit(False, f"Failed to create namespace: {str(e)}")
+            if not self._stop_requested:
+                self.operation_completed.emit(False, f"Failed to create namespace: {str(e)}")
 
     def _delete_namespace(self):
         """Delete a namespace"""
         try:
+            # Check for interruption before starting
+            if self._stop_requested or self.isInterruptionRequested():
+                return
+
             if not self.kube_client.v1:
                 self.operation_completed.emit(False, "Kubernetes client not initialized")
                 return
 
-            # Delete the namespace
-            self.kube_client.v1.delete_namespace(name=self.namespace_name)
+            # Check for interruption before API call
+            if self._stop_requested or self.isInterruptionRequested():
+                return
+
+            # Delete the namespace with timeout
+            self.kube_client.v1.delete_namespace(name=self.namespace_name, _request_timeout=APIClientConfig.NAMESPACE_OPERATION_TIMEOUT)
+            
+            # Check for interruption after API call
+            if self._stop_requested or self.isInterruptionRequested():
+                return
+                
             self.operation_completed.emit(True, f"Namespace '{self.namespace_name}' deletion initiated")
 
         except ApiException as e:
-            if e.status == 404:
-                self.operation_completed.emit(False, f"Namespace '{self.namespace_name}' not found")
-            else:
-                self.operation_completed.emit(False, f"API error: {e.reason}")
+            if not self._stop_requested:
+                if e.status == 404:
+                    self.operation_completed.emit(False, f"Namespace '{self.namespace_name}' not found")
+                else:
+                    self.operation_completed.emit(False, f"API error: {e.reason}")
         except Exception as e:
-            self.operation_completed.emit(False, f"Failed to delete namespace: {str(e)}")
+            if not self._stop_requested:
+                self.operation_completed.emit(False, f"Failed to delete namespace: {str(e)}")
 
 class NamespacesPage(BaseResourcePage):
     """
@@ -116,7 +138,9 @@ class NamespacesPage(BaseResourcePage):
         self.show_namespace_dropdown = False  # Namespaces are cluster-scoped
         self.kube_client = get_kubernetes_client()
         self.operation_thread = None
-        self.setup_page_ui()
+        
+        # Defer UI setup to ensure base class is fully initialized
+        QTimer.singleShot(0, self.setup_page_ui)
 
     def setup_page_ui(self):
         headers = ["", "Name", "Labels", "Age", "Status", ""]
@@ -138,25 +162,9 @@ class NamespacesPage(BaseResourcePage):
                     break
 
         if button_layout:
-            # Create the Add NewNameSpace button
+            # Create the Add NewNameSpace button with theme-aware styling
             self.add_namespace_button = QPushButton("Add Namespaces")
-            try:
-                self.add_namespace_button.setStyleSheet(AppStyles.BUTTON_STYLE)
-            except AttributeError:
-                self.add_namespace_button.setStyleSheet("""
-                    QPushButton {
-                        background-color: #3d3d3d;
-                        color: white;
-                        padding: 5px 15px;
-                        border-radius: 2px;
-                    }
-                    QPushButton:hover {
-                        background-color: #333333;
-                    }
-                    QPushButton:pressed {
-                        background-color: #388E3C;
-                    }
-                """)
+            self.add_namespace_button.setStyleSheet(get_add_namespace_button_style())
             self.add_namespace_button.clicked.connect(self.add_new_namespace)
 
             # Insert before Refresh button
@@ -172,19 +180,29 @@ class NamespacesPage(BaseResourcePage):
             else:
                 button_layout.addWidget(self.add_namespace_button)
 
-        self.table.setStyleSheet(AppStyles.TABLE_STYLE)
-        self.table.horizontalHeader().setStyleSheet(AppStyles.CUSTOM_HEADER_STYLE)
+        # Table styling is already handled by BaseResourcePage
         self.configure_columns()
+
+        # Connect to theme changes
+        theme_manager = get_theme_manager()
+        theme_manager.theme_changed.connect(self._on_theme_changed)
+
+    def _on_theme_changed(self, theme_name):
+        """Update styles when theme changes"""
+        # Call parent to handle all inherited theme-aware widgets
+        super()._on_theme_changed(theme_name)
         
-        # Add delete selected button
+        # Only handle NamespacesPage-specific widgets
+        if hasattr(self, 'add_namespace_button'):
+            self.add_namespace_button.setStyleSheet(get_add_namespace_button_style())
 
     def configure_columns(self):
         """Configure column widths for full screen utilization"""
         if not self.table:
             return
-        
+
         header = self.table.horizontalHeader()
-        
+
         # Column specifications with optimized default widths
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
@@ -194,7 +212,7 @@ class NamespacesPage(BaseResourcePage):
             (4, 80, "stretch"),      # Status - stretch to fill remaining space
             (5, 40, "fixed")        # Actions
         ]
-        
+
         # Apply column configuration
         for col_index, default_width, resize_type in column_specs:
             if col_index < self.table.columnCount():
@@ -207,15 +225,15 @@ class NamespacesPage(BaseResourcePage):
                 elif resize_type == "stretch":
                     header.setSectionResizeMode(col_index, QHeaderView.ResizeMode.Stretch)
                     self.table.setColumnWidth(col_index, default_width)
-        
+
         # Ensure full width utilization after configuration
         QTimer.singleShot(100, self._ensure_full_width_utilization)
     def populate_resource_row(self, row, resource):
         self.table.setRowHeight(row, 40)
         resource_name = resource["name"]
 
+        # Checkbox styling is already handled by BaseResourcePage
         checkbox_container = self._create_checkbox_container(row, resource_name)
-        checkbox_container.setStyleSheet(AppStyles.CHECKBOX_STYLE)
         self.table.setCellWidget(row, 0, checkbox_container)
 
         raw_data = resource.get("raw_data", {})
@@ -229,11 +247,7 @@ class NamespacesPage(BaseResourcePage):
             cell_col = col + 1
 
             if col == 2:
-                try:
-                    num = int(value.replace('d', '').replace('h', '').replace('m', ''))
-                except ValueError:
-                    num = 0
-                item = SortableTableWidgetItem(value, num)
+                item = SortableTableWidgetItem(value, parse_age_to_seconds(value))
             else:
                 item = SortableTableWidgetItem(value)
 
@@ -258,15 +272,13 @@ class NamespacesPage(BaseResourcePage):
         status_widget.clicked.connect(lambda: self.table.selectRow(row))
         self.table.setCellWidget(row, status_col, status_widget)
 
-        # Replace the action button creation section with this:
+        # Action button styling is already handled by BaseResourcePage
         action_button = self._create_action_button(row, resource["name"], "")
-        action_button.setStyleSheet(AppStyles.ACTION_BUTTON_STYLE)
 
         # Connect the action button to handle the click properly
         action_button.clicked.connect(lambda checked, name=resource_name: self._handle_action_button_click(name))
 
         action_container = self._create_action_container(row, action_button)
-        action_container.setStyleSheet(AppStyles.ACTION_CONTAINER_STYLE)
         self.table.setCellWidget(row, len(columns) + 2, action_container)
 
     def refresh_table(self):
@@ -274,10 +286,10 @@ class NamespacesPage(BaseResourcePage):
         try:
             # Clear table before loading
             self.clear_table()
-            
+
             # Use base class async loading method
             self.load_data()
-            
+
         except Exception as e:
             logging.error(f"Error refreshing namespace table: {e}")
             QMessageBox.critical(self, "Error", f"Unexpected error while refreshing: {str(e)}")
@@ -322,9 +334,23 @@ class NamespacesPage(BaseResourcePage):
                 QMessageBox.warning(self, "Invalid Name", "Namespace name cannot be empty")
                 return
 
-            # Check for valid namespace name (basic validation)
-            if not namespace_name.replace('-', '').replace('.', '').isalnum():
-                QMessageBox.warning(self, "Invalid Name", "Namespace name can only contain alphanumeric characters, hyphens, and periods")
+            # RFC1123 namespace name validation for Kubernetes
+            # Rules: lowercase alphanumerics, hyphens; 1-63 chars; start/end with alphanumeric
+            rfc1123_pattern = r'^[a-z0-9]([a-z0-9\-]*[a-z0-9])?$'
+
+            if len(namespace_name) > 63:
+                QMessageBox.warning(self, "Invalid Name", "Namespace name must be 63 characters or fewer")
+                return
+
+            if not re.match(rfc1123_pattern, namespace_name):
+                QMessageBox.warning(
+                    self,
+                    "Invalid Name",
+                    "Namespace name must:\n"
+                    "• Be lowercase alphanumeric and hyphens\n"
+                    "• Start and end with an alphanumeric character\n"
+                    "• Be 1-63 characters long"
+                )
                 return
 
             # Start the operation in a separate thread
@@ -488,17 +514,27 @@ class NamespacesPage(BaseResourcePage):
         self._delete_namespace(resource_name)
 
     def closeEvent(self, event):
-        """Clean up when the widget is closed"""
+        """Clean up when the widget is closed with proper thread cancellation"""
         # Stop any running operations
         if hasattr(self, 'operation_thread') and self.operation_thread and self.operation_thread.isRunning():
             try:
-                self.operation_thread.quit()
-                self.operation_thread.wait(1000)
+                # Request cooperative cancellation
+                self.operation_thread.stop()
+                
+                # Wait for graceful shutdown (2 seconds)
+                if not self.operation_thread.wait(2000):
+                    # Thread didn't stop gracefully, log warning and terminate as last resort
+                    logging.warning("Operation thread did not stop gracefully, terminating...")
+                    self.operation_thread.terminate()
+                    # Wait briefly for termination to complete
+                    self.operation_thread.wait(500)
+                else:
+                    logging.debug("Operation thread stopped gracefully")
             except Exception as e:
                 logging.error(f"Error stopping operation thread: {e}")
 
         super().closeEvent(event)
-    
+
     def load_data(self):
         """Load namespace data using async resource loader"""
         try:
@@ -507,7 +543,7 @@ class NamespacesPage(BaseResourcePage):
         except Exception as e:
             logging.error(f"Error in load_data: {e}")
             QMessageBox.critical(self, "Error", f"Failed to load namespaces: {str(e)}")
-    
+
     def force_load_data(self):
         """Force load namespace data using async resource loader"""
         try:

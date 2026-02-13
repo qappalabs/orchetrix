@@ -42,12 +42,30 @@ def collect_ui_files():
 icon_data = collect_icons()
 ui_data = collect_ui_files()
 def collect_data_files():
-    """Collect all necessary data files"""
+    """Collect only essential data files (excluding logs, sample screenshots, and development files)"""
     data_files = []
     
-    # Add resource directories
-    resource_dirs = ['Icons', 'Images', 'UI', 'Pages', 'Utils', 'Services', 'Base_Components']
-    for dir_name in resource_dirs:
+    # Add Icons directory (essential for UI)
+    if os.path.exists('Icons') and os.path.isdir('Icons'):
+        data_files.append(('Icons', 'Icons'))
+    
+    # Add only essential images (exclude screenshot samples)
+    if os.path.exists('Images') and os.path.isdir('Images'):
+        essential_images = [
+            'Orchetrix_splash.png',  # App splash screen
+            'SignupBG.png',          # Background
+            'checkmark.png',         # UI element
+            'github_icon.png',       # Icon
+            'google_icon.png'        # Icon
+        ]
+        for img in essential_images:
+            img_path = os.path.join('Images', img)
+            if os.path.exists(img_path):
+                data_files.append((img_path, 'Images'))
+    
+    # Add code directories (these don't contain data files)
+    code_dirs = ['UI', 'Pages', 'Utils', 'Services', 'Base_Components']
+    for dir_name in code_dirs:
         if os.path.exists(dir_name) and os.path.isdir(dir_name):
             data_files.append((dir_name, dir_name))
     
@@ -57,7 +75,8 @@ hidden_imports = [
     'PyQt6', 'PyQt6.QtCore', 'PyQt6.QtGui', 'PyQt6.QtWidgets', 'PyQt6.QtSvg',
     'kubernetes', 'kubernetes.client', 'kubernetes.config', 'kubernetes.stream',
     'yaml', 'requests', 'psutil', 'logging', 'json', 'datetime', 'threading',
-    'subprocess', 'tempfile', 'shutil', 'base64', 'ssl', 'socket'
+    'tempfile', 'shutil', 'base64', 'ssl', 'socket', 'subprocess', 'time',
+    'dataclasses', 'functools', 'select', 'asyncio'
 ]
 
 a = Analysis(
@@ -69,7 +88,19 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=[
+        # Python modules to exclude from bundle (excludes applies only to Python modules)
+        # PyInstaller excludes the package and all submodules when given top-level name
+        'matplotlib',
+        'pandas',
+        'numpy',
+        'scipy',
+
+        # Development/testing modules (not needed in production)
+        'IPython', 'jupyter', 'notebook',
+        'tkinter', 'unittest', 'test', 'tests',
+        'distutils', 'setuptools', 'sphinx', 'docutils'
+    ],
     noarchive=False,
     optimize=0,
 )
@@ -88,7 +119,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -96,6 +127,11 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=icon_path if icon_path and os.path.exists(icon_path) else None,
+    # Additional Windows configuration to prevent subprocess terminal windows
+    runtime_tmpdir=None,
+    # Ensure subprocess calls don't create visible windows
+    uac_admin=False,
+    uac_uiaccess=False,
 )
 
 coll = COLLECT(
@@ -103,7 +139,7 @@ coll = COLLECT(
     a.binaries,
     a.datas,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     name='Orchetrix',
 )

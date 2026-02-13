@@ -6,16 +6,16 @@ the core terminal functionality for input/output handling.
 """
 
 import logging
-from datetime import datetime
 from PyQt6.QtWidgets import QTextEdit, QApplication, QMenu
 from PyQt6.QtGui import QAction, QColor, QTextCursor, QFont, QTextCharFormat, QKeySequence
 from PyQt6.QtCore import Qt, pyqtSignal
 
-from UI.Styles import AppStyles
-from .terminal_constants import StyleConstants, CommandConstants
+from Utils.kubernetes_client import get_kubernetes_client
+from .terminal_constants import StyleConstants
+from UI.ThemeAwarePage import ThemeAwareMixin
 
 
-class UnifiedTerminalWidget(QTextEdit):
+class UnifiedTerminalWidget(QTextEdit, ThemeAwareMixin):
     """
     Unified terminal widget for input and output handling.
     
@@ -23,7 +23,7 @@ class UnifiedTerminalWidget(QTextEdit):
     input validation, search functionality, and proper text formatting.
     Supports both regular terminal operations and edit mode for file editing.
     """
-    
+
     commandEntered = pyqtSignal(str)
 
     def __init__(self, parent=None):
@@ -42,7 +42,7 @@ class UnifiedTerminalWidget(QTextEdit):
         self.font_family = "Monospace"
         self.copy_paste_enabled = False
         self.search_highlights = []  # Store search highlight positions
-        self.terminal_bg_color = QColor("#1E1E1E")  # Store terminal background color
+        self.terminal_bg_color = QColor(StyleConstants.get_terminal_background_color())
         self.setup_ui()
         self.update_prompt_with_working_directory()
         self.append_prompt()
@@ -107,7 +107,7 @@ class UnifiedTerminalWidget(QTextEdit):
         terminal_panel = self.parent()
         while terminal_panel and not hasattr(terminal_panel, 'working_directory'):
             terminal_panel = terminal_panel.parent()
-        
+
         if terminal_panel and hasattr(terminal_panel, 'working_directory'):
             self.current_prompt = f"PS {terminal_panel.working_directory} > "
         else:
@@ -130,7 +130,7 @@ class UnifiedTerminalWidget(QTextEdit):
 
             # Create text format with proper background
             char_format = QTextCharFormat()
-            char_format.setForeground(QColor(color or "#E0E0E0"))
+            char_format.setForeground(QColor(color or StyleConstants.get_terminal_text_color()))
             char_format.setBackground(self.terminal_bg_color)  # Ensure background is set
 
             # Apply format and insert text
@@ -173,14 +173,14 @@ class UnifiedTerminalWidget(QTextEdit):
             terminal_panel = self.parent()
             while terminal_panel and not hasattr(terminal_panel, 'working_directory'):
                 terminal_panel = terminal_panel.parent()
-            
+
             if terminal_panel and hasattr(terminal_panel, 'working_directory'):
                 # Find terminal tab index for welcome message
                 tab_index = 0
                 if hasattr(terminal_panel, 'terminal_tabs'):
-                    tab_index = next((i for i, tab_data in enumerate(terminal_panel.terminal_tabs) 
+                    tab_index = next((i for i, tab_data in enumerate(terminal_panel.terminal_tabs)
                                     if tab_data.get('terminal_widget') == self), 0)
-                
+
                 welcome_msg = (
                     f"Kubernetes Terminal {tab_index + 1}\n"
                     f"Working directory: {terminal_panel.working_directory}\n"
@@ -247,7 +247,7 @@ class UnifiedTerminalWidget(QTextEdit):
             tail_menu = QMenu("📜 Show Lines", self)
             for lines in [50, 100, 200, 500, 1000]:
                 action = QAction(f"Last {lines} lines", self)
-                action.triggered.connect(lambda checked, l=lines: self._refresh_logs_with_lines(l))
+                action.triggered.connect(lambda checked, n=lines: self._refresh_logs_with_lines(n))
                 tail_menu.addAction(action)
             menu.addMenu(tail_menu)
 
@@ -421,7 +421,6 @@ class UnifiedTerminalWidget(QTextEdit):
                 return logs_info['logs_viewer'].header.containers
 
             # Fallback: Get containers directly from Kubernetes API
-            from Utils.kubernetes_client import get_kubernetes_client
             kube_client = get_kubernetes_client()
 
             if kube_client and kube_client.v1:
@@ -618,7 +617,7 @@ class UnifiedTerminalWidget(QTextEdit):
                 self.history_index -= 1
                 recalled_command = self.command_history[self.history_index]
                 self.current_input = recalled_command
-                self.setTextColor(QColor("#E0E0E0"))
+                self.setTextColor(QColor(StyleConstants.get_terminal_text_color()))
                 self.insertPlainText(recalled_command)
                 self.input_position = cursor.position() - len(recalled_command)
                 cursor.movePosition(QTextCursor.MoveOperation.End)
@@ -628,7 +627,7 @@ class UnifiedTerminalWidget(QTextEdit):
                 self.history_index += 1
                 recalled_command = self.command_history[self.history_index]
                 self.current_input = recalled_command
-                self.setTextColor(QColor("#E0E0E0"))
+                self.setTextColor(QColor(StyleConstants.get_terminal_text_color()))
                 self.insertPlainText(recalled_command)
                 self.input_position = cursor.position() - len(recalled_command)
                 cursor.movePosition(QTextCursor.MoveOperation.End)
@@ -723,9 +722,10 @@ class UnifiedTerminalWidget(QTextEdit):
                     original_format.setBackground(self.terminal_bg_color)
 
                 # Create new format preserving colors but adding highlight
+                highlight_colors = StyleConstants.get_search_highlight_colors()
                 highlight_format = QTextCharFormat(original_format)
-                highlight_format.setBackground(QColor("#FFFF00"))  # Yellow background
-                highlight_format.setForeground(QColor("#000000"))  # Black text for visibility
+                highlight_format.setBackground(QColor(highlight_colors['background']))
+                highlight_format.setForeground(QColor(highlight_colors['foreground']))
 
                 # Apply the highlight
                 cursor.setCharFormat(highlight_format)
@@ -788,3 +788,33 @@ class UnifiedTerminalWidget(QTextEdit):
         if cursor_pos < self.edit_start_pos or cursor_pos > self.edit_end_pos:
             cursor.setPosition(min(max(cursor_pos, self.edit_start_pos), self.edit_end_pos))
             self.setTextCursor(cursor)
+
+    def _on_theme_changed(self, theme_name):
+        """Handle theme changes - refresh search highlights with new colors"""
+        if not self.is_valid:
+            return
+            
+        try:
+            # If there are active search highlights, refresh them with new theme colors
+            if self.search_highlights:
+                # Store current search highlights info
+                highlight_positions = [(h['start'], h['end']) for h in self.search_highlights]
+                
+                # Clear current highlights
+                self.clear_terminal_search()
+                
+                # Re-apply highlights with new theme colors
+                if highlight_positions:
+                    # Get the search text from the first highlight (assuming all highlights are for the same search)
+                    document = self.document()
+                    text_content = document.toPlainText()
+                    if highlight_positions:
+                        start_pos = highlight_positions[0][0]
+                        end_pos = highlight_positions[0][1]
+                        if start_pos < len(text_content) and end_pos <= len(text_content):
+                            search_text = text_content[start_pos:end_pos]
+                            # Re-apply search with new theme colors
+                            self.search_in_terminal(search_text)
+                            
+        except Exception as e:
+            logging.error(f"Error handling theme change in terminal: {e}")

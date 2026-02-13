@@ -1,12 +1,16 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QToolButton, QLabel,
-                             QGraphicsDropShadowEffect, QMenu, QToolTip, QSizePolicy,
+                             QGraphicsDropShadowEffect, QGraphicsColorizeEffect, QMenu, QToolTip, QSizePolicy,
                              QFrame, QLayout)
 from PyQt6.QtCore import Qt, QSize, QPropertyAnimation, QEasingCurve, QEvent, QTimer, QPoint, QRect
-from PyQt6.QtGui import QIcon, QFont, QColor, QAction, QPixmap
+from PyQt6.QtGui import QIcon, QFont, QColor, QAction, QPixmap, QPainter
 
-from UI.Styles import AppColors, AppStyles
-from UI.Icons import Icons
 import logging
+import platform
+
+import Styles.SidebarStyles as SidebarStyles
+from UI.Icons import Icons, resource_path
+from UI.ThemeAwarePage import ThemeAwareMixin
+from UI.ThemeManager import get_theme_manager
 
 class NavMenuDropdown(QMenu):
     def __init__(self, parent=None):
@@ -17,12 +21,11 @@ class NavMenuDropdown(QMenu):
         # Remove problematic attributes that cause Windows layered window errors
         # self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
-        self.setStyleSheet(AppStyles.NAV_MENU_DROPDOWN_STYLE)
+        self.setStyleSheet(SidebarStyles.get_nav_menu_dropdown_style())
 
         # Only add shadow effect on non-Windows platforms or disable it entirely
         # to avoid UpdateLayeredWindowIndirect errors
         try:
-            import platform
             if platform.system() != "Windows":
                 shadow = QGraphicsDropShadowEffect(self)
                 shadow.setColor(QColor(0, 0, 0, 100))
@@ -39,11 +42,10 @@ class SidebarToggleButton(QToolButton):
         self.setFixedSize(30, 30)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolTip("Toggle Sidebar")
-        self.setStyleSheet(AppStyles.SIDEBAR_TOGGLE_BUTTON_STYLE)
+        self.setStyleSheet(SidebarStyles.get_sidebar_toggle_button_style())
         self.expanded = True
 
         try:
-            from UI.Icons import resource_path  # Import the resource_path function
             back_icon_path = resource_path("Icons/back.svg")
             forward_icon_path = resource_path("Icons/forward.svg")
 
@@ -64,6 +66,26 @@ class SidebarToggleButton(QToolButton):
         # Set the initial icon
         self.update_icon()
         self.setIconSize(QSize(24, 24))
+
+        # Load theme-aware icons on startup
+        theme_name = get_theme_manager().get_current_theme_name() or "Dark"
+        self.update_theme_icons(theme_name)
+
+    def update_theme_icons(self, theme_name):
+        """Reload icons based on the current theme"""
+        # Load both icons for the current theme
+        self.expanded_icon = Icons.get_theme_icon("back.svg", theme_name)
+        self.collapsed_icon = Icons.get_theme_icon("forward.svg", theme_name)
+
+        # Verify if icons loaded successfully
+        if self.expanded_icon.isNull() or self.collapsed_icon.isNull():
+            logging.warning(f"Failed to load sidebar theme icons for {theme_name}")
+            # Fallback to text-based icons
+            self.expanded_icon = None
+            self.collapsed_icon = None
+
+        # Refresh the button's current display
+        self.update_icon()
 
     def toggle_expanded(self):
         self.expanded = not self.expanded
@@ -105,13 +127,26 @@ class NavIconButton(QToolButton):
         # Store the fallback icon text (emoji)
         self.icon_text = getattr(Icons, icon_id.upper(), "⚙️") if isinstance(icon_id, str) else "⚙️"
 
-        # Try to load the icon
-        self.icon = Icons.get_icon(icon_id)
+        # Load theme-aware icon on startup
+        theme_name = get_theme_manager().get_current_theme_name() or "Dark"
+        self.icon = Icons.get_theme_icon_by_id(icon_id, theme_name)
         self.icon_loaded = not self.icon.isNull()
 
         self.setup_ui()
         if self.has_dropdown:
             self.setup_dropdown()
+
+    def update_theme_icons(self, theme_name):
+        """Update the icon using the standardized Icons helper"""
+        # Get the correct icon from the central manager
+        new_icon = Icons.get_theme_icon_by_id(self.icon_id, theme_name)
+
+        # Apply it
+        if new_icon and not new_icon.isNull():
+            self.icon = new_icon
+            self.icon_loaded = True
+            if hasattr(self, 'icon_label') and self.icon_label:
+                self.icon_label.setPixmap(self.icon.pixmap(QSize(20, 20)))
 
     def setup_ui(self):
         self.setFixedHeight(40)
@@ -136,32 +171,32 @@ class NavIconButton(QToolButton):
             layout.setSpacing(8)  # Space between icon and text
 
             # Create icon label
-            icon_label = QLabel()
-            icon_label.setFixedWidth(20)
-            icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.icon_label = QLabel()
+            self.icon_label.setFixedWidth(20)
+            self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
             # Set icon if loaded, otherwise set emoji text
             if self.icon_loaded:
                 pixmap = self.icon.pixmap(QSize(20, 20))
-                icon_label.setPixmap(pixmap)
+                self.icon_label.setPixmap(pixmap)
             else:
-                icon_label.setText(self.icon_text)
+                self.icon_label.setText(self.icon_text)
 
             # Add text label
-            text_label = QLabel(self.item_text)
-            text_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-            text_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-            text_label.setFont(QFont("Segoe UI", 14))
+            self.text_label = QLabel(self.item_text)
+            self.text_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            self.text_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            self.text_label.setFont(QFont("Segoe UI", 14))
 
             # Apply styles to labels - don't override background for coming soon
             if self.coming_soon:
                 # For coming soon buttons, use same text color as regular buttons
-                text_color = AppColors.TEXT_SECONDARY
-                icon_label.setStyleSheet(f"color: {text_color}; background: transparent; font-size: 14px;")
-                text_label.setStyleSheet(f"color: {text_color}; background: transparent; font-size: 14px;")
+                text_color = SidebarStyles.get_text_subtle()
+                self.icon_label.setStyleSheet(f"color: {text_color}; background: transparent; font-size: 14px;")
+                self.text_label.setStyleSheet(f"color: {text_color}; background: transparent; font-size: 14px;")
             else:
-                icon_label.setStyleSheet(AppStyles.NAV_ICON_BUTTON_ICON_LABEL_STYLE + "; font-size: 14px;")
-                text_label.setStyleSheet(AppStyles.NAV_ICON_BUTTON_TEXT_LABEL_STYLE + "; font-size: 14px;")
+                self.icon_label.setStyleSheet(SidebarStyles.get_nav_icon_button_icon_label_style() + "; font-size: 14px;")
+                self.text_label.setStyleSheet(SidebarStyles.get_nav_icon_button_text_label_style() + "; font-size: 14px;")
 
             # Add coming soon indicator if needed
             if self.coming_soon:
@@ -182,8 +217,8 @@ class NavIconButton(QToolButton):
                 coming_soon_label.setStyleSheet("background: transparent;")
 
                 # Add all widgets to layout
-                layout.addWidget(icon_label)
-                layout.addWidget(text_label)
+                layout.addWidget(self.icon_label)
+                layout.addWidget(self.text_label)
                 layout.addWidget(coming_soon_label)
 
             elif self.has_dropdown:
@@ -194,13 +229,13 @@ class NavIconButton(QToolButton):
                 if self.coming_soon:
                     dropdown_label.setStyleSheet("color: inherit; background: transparent;")
                 else:
-                    dropdown_label.setStyleSheet(AppStyles.NAV_ICON_BUTTON_DROPDOWN_LABEL_STYLE)
-                layout.addWidget(icon_label)
-                layout.addWidget(text_label)
+                    dropdown_label.setStyleSheet(SidebarStyles.get_nav_icon_button_dropdown_label_style())
+                layout.addWidget(self.icon_label)
+                layout.addWidget(self.text_label)
                 layout.addWidget(dropdown_label)
             else:
-                layout.addWidget(icon_label)
-                layout.addWidget(text_label)
+                layout.addWidget(self.icon_label)
+                layout.addWidget(self.text_label)
                 layout.addStretch()  # Push content to the left
 
             # Set empty text so the layout manages the content
@@ -218,23 +253,24 @@ class NavIconButton(QToolButton):
             layout.setSpacing(0)
 
             # Create centered icon label
-            icon_label = QLabel()
-            icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.icon_label = QLabel()
+            self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.text_label = None  # No text label in collapsed state
 
             # Set icon if loaded, otherwise set emoji text
             if self.icon_loaded:
                 pixmap = self.icon.pixmap(QSize(20, 20))
-                icon_label.setPixmap(pixmap)
+                self.icon_label.setPixmap(pixmap)
             else:
-                icon_label.setText(self.icon_text)
+                self.icon_label.setText(self.icon_text)
 
             if self.coming_soon:
-                icon_label.setStyleSheet(f"color: {AppColors.TEXT_SECONDARY}; background: transparent;")
+                self.icon_label.setStyleSheet(f"color: {SidebarStyles.get_text_subtle()}; background: transparent;")
             else:
-                icon_label.setStyleSheet(AppStyles.NAV_ICON_BUTTON_ICON_LABEL_STYLE)
+                self.icon_label.setStyleSheet(SidebarStyles.get_nav_icon_button_icon_label_style())
 
             # Add the icon label to the centered layout
-            layout.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(self.icon_label, 0, Qt.AlignmentFlag.AlignCenter)
 
             # Clear button's own icon/text since we're using a layout
             self.setText("")
@@ -369,13 +405,46 @@ class NavIconButton(QToolButton):
                               "Cluster Role Bindings", "Role Bindings"]
             elif self.item_text == "Custom Resources":
                 menu_items = ["Definitions"]
+                # Add dynamic CRD entries
+                if hasattr(self.parent_window, 'get_available_crds'):
+                    try:
+                        crds = self.parent_window.get_available_crds()
+                        logging.info(f"Sidebar: Got {len(crds) if crds else 0} CRDs for dropdown")
+                        if crds:
+                            menu_items.append("---")  # Separator
+                            for crd in crds:
+                                # Use the kind name for display
+                                kind = crd.get("kind", crd.get("name", "Unknown"))
+                                logging.info(f"Adding CRD to dropdown: {kind}")
+                                menu_items.append(kind)
+                        else:
+                            # If no CRDs available now, try to load the Definitions page first
+                            if (hasattr(self.parent_window, '_ensure_page_loaded') and
+                                hasattr(self.parent_window, 'stacked_widget')):
+                                try:
+                                    self.parent_window._ensure_page_loaded("Definitions")
+                                    # Try again after loading
+                                    crds = self.parent_window.get_available_crds()
+                                    if crds:
+                                        menu_items.append("---")  # Separator
+                                        for crd in crds:
+                                            kind = crd.get("kind", crd.get("name", "Unknown"))
+                                            menu_items.append(kind)
+                                except Exception as load_e:
+                                    logging.debug(f"Could not load Definitions page for CRDs: {load_e}")
+                    except Exception as e:
+                        logging.warning(f"Failed to load CRDs for sidebar: {e}")
             else:
                 menu_items = []
 
             for item in menu_items:
-                action = self.dropdown_menu.addAction(item)
-                action.triggered.connect(lambda checked=False, item_name=item:
-                                         self.parent_window.handle_dropdown_selection(item_name))
+                if item == "---":
+                    # Add separator
+                    self.dropdown_menu.addSeparator()
+                else:
+                    action = self.dropdown_menu.addAction(item)
+                    action.triggered.connect(lambda checked=False, item_name=item:
+                                             self.parent_window.handle_dropdown_selection(item_name))
 
         except Exception as e:
             logging.error(f"Error setting up dropdown for {self.item_text}: {e}")
@@ -385,8 +454,9 @@ class NavIconButton(QToolButton):
         """Clear all dropdown signal connections"""
         for connection in self._dropdown_connections:
             try:
-                connection.disconnect()
-            except (TypeError, RuntimeError):
+                if hasattr(connection, 'disconnect'):
+                    connection.disconnect()
+            except (TypeError, RuntimeError, AttributeError):
                 pass  # Connection already broken or doesn't exist
         self._dropdown_connections.clear()
 
@@ -396,6 +466,11 @@ class NavIconButton(QToolButton):
             return
 
         try:
+            # For Custom Resources, refresh the dropdown content to include latest CRDs
+            if self.item_text == "Custom Resources":
+                logging.info("Refreshing Custom Resources dropdown before showing...")
+                self.setup_dropdown()
+
             self.dropdown_open = True
             self.update_style()
 
@@ -437,29 +512,50 @@ class NavIconButton(QToolButton):
 
     def update_style(self):
         if self.expanded:
-            self.setStyleSheet(AppStyles.NAV_ICON_BUTTON_EXPANDED_STYLE.format(
+            self.setStyleSheet(SidebarStyles.get_nav_icon_button_expanded_style(
                 background_color=self.get_background_color(),
-                hover_background_color=AppColors.HOVER_BG,
                 text_color=self.get_text_color()
             ))
         else:
-            self.setStyleSheet(AppStyles.NAV_ICON_BUTTON_COLLAPSED_STYLE.format(
+            self.setStyleSheet(SidebarStyles.get_nav_icon_button_collapsed_style(
                 background_color=self.get_background_color(),
-                hover_background_color=AppColors.HOVER_BG,
                 text_color=self.get_text_color()
             ))
+
+        # Update label colors based on active state (skip for coming_soon buttons)
+        if not self.coming_soon:
+            text_color = self.get_text_color()
+            font_weight = "bold" if self.is_active else "normal"
+            if hasattr(self, 'icon_label') and self.icon_label:
+                self.icon_label.setStyleSheet(f"background-color: transparent; color: {text_color}; font-size: 14px; font-weight: {font_weight};")
+                # Apply exact color tint to icon when active using QPainter
+                if self.icon_loaded:
+                    if self.is_active:
+                        # Create a colored copy preserving the original alpha channel
+                        original_pixmap = self.icon.pixmap(QSize(20, 20))
+                        colored_pixmap = QPixmap(original_pixmap)
+                        painter = QPainter(colored_pixmap)
+                        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+                        painter.fillRect(colored_pixmap.rect(), QColor(SidebarStyles.get_sidebar_active_text()))
+                        painter.end()
+                        self.icon_label.setPixmap(colored_pixmap)
+                    else:
+                        # Restore original icon
+                        self.icon_label.setPixmap(self.icon.pixmap(QSize(20, 20)))
+            if hasattr(self, 'text_label') and self.text_label:
+                self.text_label.setStyleSheet(f"background-color: transparent; color: {text_color}; font-size: 14px; font-weight: {font_weight};")
 
     def get_background_color(self):
         if self.coming_soon:
             return "rgba(255, 149, 0, 0.15)"  # Orange tint for coming soon
         elif self.is_active:
-            return AppColors.HOVER_BG
+            return SidebarStyles.get_sidebar_active_bg()
         return "transparent"
 
     def get_text_color(self):
         if self.is_active:
-            return AppColors.TEXT_LIGHT
-        return AppColors.TEXT_SECONDARY
+            return SidebarStyles.get_sidebar_active_text()
+        return SidebarStyles.get_text_subtle()
 
     def eventFilter(self, obj, event):
         if event.type() == QEvent.Type.Enter:
@@ -499,8 +595,18 @@ class NavIconButton(QToolButton):
         except Exception:
             pass  # Ignore errors during cleanup
 
+    def refresh_dropdown(self):
+        """Refresh the dropdown menu (useful for dynamic content like CRDs)"""
+        if self.has_dropdown and self.item_text == "Custom Resources":
+            logging.info(f"Refreshing dropdown for {self.item_text}")
+            # Force cleanup and recreation of dropdown
+            if self.dropdown_menu:
+                self.dropdown_menu.deleteLater()
+                self.dropdown_menu = None
+            self.setup_dropdown()
 
-class Sidebar(QWidget):
+
+class Sidebar(ThemeAwareMixin, QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.parent_window = parent
@@ -512,6 +618,37 @@ class Sidebar(QWidget):
 
         # Initialize the UI
         self.setup_ui()
+
+    def _on_theme_changed(self, theme_name):
+        """Refresh all sidebar styles when theme changes"""
+        logging.info(f"Sidebar: Theme changed to {theme_name}, refreshing styles")
+
+        # Refresh sidebar container
+        if hasattr(self, 'content_widget'):
+            self.content_widget.setStyleSheet(SidebarStyles.get_sidebar_style())
+
+        # Refresh border
+        if hasattr(self, 'border'):
+            self.border.setStyleSheet(SidebarStyles.get_sidebar_border_style())
+
+        # Refresh toggle button
+        if hasattr(self, 'toggle_btn'):
+            self.toggle_btn.setStyleSheet(SidebarStyles.get_sidebar_toggle_button_style())
+            self.toggle_btn.update_theme_icons(theme_name)
+
+        # Refresh sidebar controls (toggle area)
+        if hasattr(self, 'sidebar_controls'):
+            self.sidebar_controls.setStyleSheet(SidebarStyles.get_sidebar_controls_style())
+
+        # Refresh all nav buttons
+        if hasattr(self, 'nav_buttons'):
+            for button in self.nav_buttons:
+                button.update_style()
+                # Update theme-specific icons for nav buttons
+                button.update_theme_icons(theme_name)
+                # Also refresh dropdown menu if it exists
+                if hasattr(button, 'dropdown_menu') and button.dropdown_menu:
+                    button.dropdown_menu.setStyleSheet(SidebarStyles.get_nav_menu_dropdown_style())
 
     def setup_ui(self):
         # Main container layout
@@ -530,7 +667,7 @@ class Sidebar(QWidget):
             self.content_widget.setFixedWidth(self.sidebar_width_collapsed)
 
         # Apply basic styles
-        self.content_widget.setStyleSheet(AppStyles.SIDEBAR_STYLE)
+        self.content_widget.setStyleSheet(SidebarStyles.get_sidebar_style())
 
         # Create the vertical layout for sidebar content
         self.sidebar_layout = QVBoxLayout(self.content_widget)
@@ -542,7 +679,7 @@ class Sidebar(QWidget):
         self.border.setFrameShape(QFrame.Shape.VLine)
         self.border.setFrameShadow(QFrame.Shadow.Plain)
         self.border.setLineWidth(1)
-        self.border.setStyleSheet(AppStyles.SIDEBAR_BORDER_STYLE)
+        self.border.setStyleSheet(SidebarStyles.get_sidebar_border_style())
 
         # Add the sidebar content and border to the main layout
         main_layout.addWidget(self.content_widget)
@@ -561,11 +698,11 @@ class Sidebar(QWidget):
         self.create_utility_buttons()
 
     def create_toggle_controls(self):
-        sidebar_controls = QWidget()
-        sidebar_controls.setObjectName("sidebar_controls")
-        sidebar_controls.setFixedHeight(40)
-        sidebar_controls.setStyleSheet(AppStyles.SIDEBAR_CONTROLS_STYLE)
-        controls_layout = QHBoxLayout(sidebar_controls)
+        self.sidebar_controls = QWidget()
+        self.sidebar_controls.setObjectName("sidebar_controls")
+        self.sidebar_controls.setFixedHeight(40)
+        self.sidebar_controls.setStyleSheet(SidebarStyles.get_sidebar_controls_style())
+        controls_layout = QHBoxLayout(self.sidebar_controls)
 
         # Set margins to position the toggle button correctly
         if self.sidebar_expanded:
@@ -578,7 +715,7 @@ class Sidebar(QWidget):
         self.toggle_btn.clicked.connect(self.toggle_sidebar)
         controls_layout.addWidget(self.toggle_btn)
 
-        self.sidebar_layout.addWidget(sidebar_controls)
+        self.sidebar_layout.addWidget(self.sidebar_controls)
 
     def create_nav_buttons(self):
         self.nav_buttons = []
@@ -591,7 +728,7 @@ class Sidebar(QWidget):
             ("config", "Config", False, True),
             ("network", "Network", False, True),
             ("storage", "Storage", False, True),
-            ("helm", "Helm", False, True, True),
+            ("helm", "Helm", False, True, False),
             ("access_control", "Access Control", False, True),
             ("custom_resources", "Custom Resources", False, True),
             ("namespaces", "Namespaces", False),
@@ -663,13 +800,13 @@ class Sidebar(QWidget):
         divider.setFrameShape(QFrame.Shape.HLine)
         divider.setFrameShadow(QFrame.Shadow.Sunken)
         divider.setLineWidth(1)
-        divider.setStyleSheet(f"background-color: {AppColors.BORDER_LIGHT}; margin: 8px 10px;")
+        divider.setStyleSheet(SidebarStyles.get_divider_style())
         self.sidebar_layout.addWidget(divider)
 
         # Create utility buttons
         compare_btn = NavIconButton(
             "compare", "Compare", False, False,
-            self.parent_window, self.sidebar_expanded, coming_soon=True  # Add this parameter
+            self.parent_window, self.sidebar_expanded, coming_soon=False
         )
 
         # Terminal button - special handling
@@ -722,3 +859,10 @@ class Sidebar(QWidget):
         # Update all nav buttons
         for btn in self.nav_buttons:
             btn.set_expanded(self.sidebar_expanded)
+
+    def refresh_custom_resources_dropdown(self):
+        """Refresh the Custom Resources dropdown to include newly loaded CRDs"""
+        for button in self.nav_buttons:
+            if button.item_text == "Custom Resources" and button.has_dropdown:
+                button.refresh_dropdown()
+                break

@@ -1,7 +1,7 @@
 """
 Logs components - Split from TerminalPanel.py
 
-This module contains the LogsHeaderWidget, LogsStreamWorker, and EnhancedLogsViewer 
+This module contains the LogsHeaderWidget, LogsStreamWorker, and EnhancedLogsViewer
 classes which provide comprehensive log viewing functionality for Kubernetes pods.
 """
 
@@ -10,19 +10,26 @@ from datetime import datetime
 from kubernetes import watch
 from kubernetes.client.rest import ApiException
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QComboBox, 
+    QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QComboBox,
     QCheckBox, QLabel
 )
 from PyQt6.QtGui import QFont, QColor, QTextCharFormat, QTextCursor
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 
-from UI.Styles import AppStyles
+from Styles.logs_componentsStyles import (
+    get_logs_header_widget_style,
+    get_pod_info_label_style,
+    get_search_results_label_style,
+    get_logs_display_style,
+    get_status_indicator_style,
+    get_status_indicator_style_with_color,
+)
 
 
 class LogsHeaderWidget(QWidget):
     """
     Simplified header widget for logs viewer.
-    
+
     This widget provides controls for log viewing including container selection,
     tail lines configuration, follow mode toggle, and search results display.
     """
@@ -43,54 +50,9 @@ class LogsHeaderWidget(QWidget):
     def setup_ui(self):
         """Setup the simplified header UI components with fixed layout."""
         self.setFixedHeight(50)
-        self.setStyleSheet("""
-            QWidget {
-                background-color: #2d2d2d;
-                border-bottom: 1px solid #3d3d3d;
-            }
-            QComboBox {
-                background-color: #1e1e1e;
-                border: 1px solid #555;
-                border-radius: 4px;
-                padding: 4px 8px;
-                color: white;
-                font-size: 12px;
-                min-width: 80px;
-                max-height: 24px;
-            }
-            QComboBox::drop-down {
-                border: none;
-                width: 20px;
-            }
-            QComboBox::down-arrow {
-                image: none;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #2d2d2d;
-                color: white;
-                selection-background-color: #2196F3;
-            }
-            QCheckBox {
-                color: white;
-                font-size: 12px;
-                padding: 2px;
-            }
-            QCheckBox::indicator {
-                width: 16px;
-                height: 16px;
-                border: 2px solid #666;
-                border-radius: 3px;
-                background: transparent;
-            }
-            QCheckBox::indicator:checked {
-                background-color: #2196F3;
-                border-color: #2196F3;
-            }
-            QLabel {
-                color: white;
-                font-size: 12px;
-            }
-        """)
+        self.setObjectName("logsHeader")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setStyleSheet(get_logs_header_widget_style())
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(10, 8, 10, 8)
@@ -102,7 +64,7 @@ class LogsHeaderWidget(QWidget):
 
         # Pod info - compact
         self.pod_info = QLabel(f"📋 {self._truncate_name(self.pod_name, 20)}")
-        self.pod_info.setStyleSheet("font-weight: bold; color: #4CAF50; font-size: 11px;")
+        self.pod_info.setStyleSheet(get_pod_info_label_style())
         self.pod_info.setToolTip(f"Pod: {self.pod_name}\nNamespace: {self.namespace}")
         controls_row.addWidget(self.pod_info)
 
@@ -139,7 +101,7 @@ class LogsHeaderWidget(QWidget):
 
         # Search results label (updated by terminal header search)
         self.search_results_label = QLabel("")
-        self.search_results_label.setStyleSheet("color: #4CAF50; font-size: 10px; font-weight: bold;")
+        self.search_results_label.setStyleSheet(get_search_results_label_style())
         controls_row.addWidget(self.search_results_label)
 
         main_layout.addLayout(controls_row)
@@ -195,7 +157,7 @@ class LogsHeaderWidget(QWidget):
 class LogsStreamWorker(QThread):
     """
     Worker thread for streaming logs from Kubernetes API.
-    
+
     This thread handles the continuous streaming of pod logs from the Kubernetes API,
     processing both initial logs and real-time updates when follow mode is enabled.
     """
@@ -340,9 +302,9 @@ class LogsStreamWorker(QThread):
 class EnhancedLogsViewer(QWidget):
     """
     Enhanced logs viewer with search highlighting and improved functionality.
-    
+
     This widget provides a comprehensive log viewing experience with features like
-    real-time streaming, search and highlighting, container selection, and 
+    real-time streaming, search and highlighting, container selection, and
     configurable display options.
     """
 
@@ -390,33 +352,14 @@ class EnhancedLogsViewer(QWidget):
         # Set font for logs
         font = QFont("Consolas", 9)
         self.logs_display.setFont(font)
-        self.logs_display.setStyleSheet(f"""
-            QTextEdit {{
-                background-color: #1e1e1e;
-                color: #e0e0e0;
-                border: none;
-                selection-background-color: #264F78;
-                padding: 8px;
-            }}
-            {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
-        """)
+        self.logs_display.setStyleSheet(get_logs_display_style())
 
         content_layout.addWidget(self.logs_display)
 
         # Status indicator at bottom with transparent background
         self.status_indicator = QLabel()
         self.status_indicator.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.status_indicator.setStyleSheet("""
-            QLabel {
-                background-color: rgba(45, 45, 45, 0.8);
-                color: #4CAF50;
-                font-size: 11px;
-                font-weight: bold;
-                padding: 4px 8px;
-                border-radius: 4px;
-                margin: 4px;
-            }
-        """)
+        self.status_indicator.setStyleSheet(get_status_indicator_style())
         self.status_indicator.setVisible(False)
         content_layout.addWidget(self.status_indicator)
 
@@ -616,17 +559,7 @@ class EnhancedLogsViewer(QWidget):
     def show_status_indicator(self, text, color):
         """Show status indicator at bottom."""
         self.status_indicator.setText(text)
-        self.status_indicator.setStyleSheet(f"""
-            QLabel {{
-                background-color: rgba(45, 45, 45, 0.8);
-                color: {color};
-                font-size: 11px;
-                font-weight: bold;
-                padding: 4px 8px;
-                border-radius: 4px;
-                margin: 4px;
-            }}
-        """)
+        self.status_indicator.setStyleSheet(get_status_indicator_style_with_color(color))
         self.status_indicator.setVisible(True)
 
         # Hide after 3 seconds

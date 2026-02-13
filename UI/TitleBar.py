@@ -5,17 +5,115 @@ import logging
 project_root = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(project_root)
 
-from PyQt6.QtCore import Qt, QPoint, QEvent, QSize
-from PyQt6.QtGui import QFont, QLinearGradient, QPainter, QColor, QPixmap, QIcon, QPainterPath, QCursor, QAction
-from PyQt6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QLabel, QToolButton, QPushButton, QFrame, QLineEdit, QMenu, QSpacerItem, QWidgetAction
+from PyQt6.QtCore import Qt, QPoint, QEvent, QSize, QPropertyAnimation, QEasingCurve, pyqtProperty, QRectF  # noqa: E402
+from PyQt6.QtGui import QFont, QLinearGradient, QPainter, QColor, QPixmap, QIcon, QPainterPath, QCursor, QAction  # noqa: E402
+from PyQt6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QLabel, QToolButton, QFrame, QLineEdit, QMenu, QSpacerItem, QWidgetAction, QAbstractButton  # noqa: E402
 
-from UI.Styles import AppColors, AppStyles
-from UI.Icons import Icons
+from Styles import TitleBarStyles  # noqa: E402
+from UI.Icons import Icons, resource_path  # noqa: E402
+from UI.ThemeAwarePage import ThemeAwareMixin  # noqa: E402
+from UI.ThemeManager import get_theme_manager  # noqa: E402
 
-class TitleBar(QWidget):
-    def __init__(self, parent=None, update_pinned_items_signal=None):
+class ThemeToggle(QAbstractButton):
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self.parent = parent
+        self.setCheckable(True)
+        self.setFixedSize(52, 28)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        
+        # Colors
+        self._track_color_light = QColor("#E0E0E0")
+        self._track_color_dark = QColor("#404040")
+        self._handle_color = QColor("#FFFFFF")
+        
+        self._position = 0.0
+        self._anim = QPropertyAnimation(self, b"position", self)
+        self._anim.setDuration(300)
+        self._anim.setEasingCurve(QEasingCurve.Type.InOutQuart)
+        
+        # Load icons
+        try:
+            self._sun_icon = QIcon(resource_path("Icons/sun.svg"))
+            self._moon_icon = QIcon(resource_path("Icons/moon.svg"))
+        except Exception as e:
+            logging.error(f"Failed to load toggle icons: {e}")
+            self._sun_icon = QIcon()
+            self._moon_icon = QIcon()
+            
+        self.toggled.connect(self.start_animation)
+
+    @pyqtProperty(float)
+    def position(self):
+        return self._position
+
+    @position.setter
+    def position(self, pos):
+        self._position = pos
+        self.update()
+
+    def start_animation(self, checked):
+        self._anim.stop()
+        self._anim.setEndValue(1.0 if checked else 0.0)
+        self._anim.start()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        rect = self.rect()
+        track_rect = QRectF(rect).adjusted(2, 2, -2, -2)
+        corner_radius = track_rect.height() / 2
+        
+        # Draw Track
+        # Interpolate track color based on position
+        color = self._interpolate_color(self._track_color_light, self._track_color_dark, self._position)
+        
+        p.setBrush(color)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawRoundedRect(track_rect, corner_radius, corner_radius)
+        
+        # Draw Handle
+        handle_height = track_rect.height() - 4
+        handle_width = handle_height
+        
+        start_x = track_rect.left() + 2
+        end_x = track_rect.right() - handle_width - 2
+        
+        current_x = start_x + (end_x - start_x) * self._position
+        handle_rect = QRectF(current_x, track_rect.top() + 2, handle_width, handle_height)
+        
+        p.setBrush(self._handle_color)
+        p.drawEllipse(handle_rect)
+        
+        # Draw Icon inside handle
+        icon_rect = handle_rect.adjusted(3, 3, -3, -3)
+        icon_target = icon_rect.toRect()
+        
+        if self._position < 0.5:
+            # Draw Sun (fade out as we move right)
+            opacity = 1.0 - (self._position * 2)
+            if opacity > 0:
+                p.setOpacity(opacity)
+                self._sun_icon.paint(p, icon_target)
+        else:
+            # Draw Moon (fade in as we move right)
+            opacity = (self._position - 0.5) * 2
+            if opacity > 0:
+                p.setOpacity(opacity)
+                self._moon_icon.paint(p, icon_target)
+                
+    def _interpolate_color(self, start, end, progress):
+        r = start.red() + (end.red() - start.red()) * progress
+        g = start.green() + (end.green() - start.green()) * progress
+        b = start.blue() + (end.blue() - start.blue()) * progress
+        return QColor(int(r), int(g), int(b))
+
+
+
+class TitleBar(ThemeAwareMixin, QWidget):
+    def __init__(self, parent=None, update_pinned_items_signal=None):
+        self._parent_window = parent
+        super().__init__(parent)
         self.setFixedHeight(40)
 
         # Define consistent icon sizes
@@ -40,13 +138,15 @@ class TitleBar(QWidget):
 
         self.setup_ui()
         self.old_pos = None
+        self.drag_position = None
+        self.double_click_in_progress = False
         self.dropdown_menu = None
         self.search_input = None  # Instance variable for the search input
         self.search_action = None  # Instance variable for the search action
 
     def setup_ui(self):
         # Apply title bar style from Styles.py
-        self.setStyleSheet(AppStyles.TITLE_BAR_STYLE)
+        self.setStyleSheet(TitleBarStyles.get_title_bar_style())
 
         # Create a container widget with vertical layout
         container = QWidget(self)
@@ -65,7 +165,6 @@ class TitleBar(QWidget):
         self.logo_label.setFixedSize(self.logo_icon_size)
 
         try:
-            from UI.Icons import resource_path  # Import the resource_path function
             logo_path = resource_path("Icons/logoIcon.png")
             pixmap = QPixmap(logo_path)
             if not pixmap.isNull():
@@ -92,58 +191,26 @@ class TitleBar(QWidget):
         # Icon label for cluster icon
         self.pinned_clusters_icon = QLabel()
         self.pinned_clusters_icon.setFixedSize(16, 16)
-        self.pinned_clusters_icon.setStyleSheet("""
-            QLabel {
-                background-color: #2A2A2A;
-                border: none;
-                margin: 0px;
-            }
-        """)
+        self.pinned_clusters_icon.setStyleSheet(TitleBarStyles.get_pinned_cluster_icon_style())
         self.pinned_clusters_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.pinned_clusters_icon.hide()  # Hidden by default
 
         # Label for "Pinned Clusters" text or current cluster name
         self.pinned_clusters_label = QLabel("Pinned Clusters")
-        self.pinned_clusters_label.setStyleSheet("""
-            QLabel {
-                background-color: #2A2A2A;
-                color: #FFFFFF;
-                padding: 0px 4px;
-                font-size: 14px;
-                font-family: 'Segoe UI', sans-serif;
-                border: none;
-                margin: 0px;
-            }
-        """)
+        self.pinned_clusters_label.setStyleSheet(TitleBarStyles.get_pinned_cluster_label_style())
         self.pinned_clusters_label.setFixedHeight(30)
 
-        # Button for the ▼ arrow
+        # Button for the arrow
         self.pinned_clusters_arrow_btn = QToolButton()
         self.pinned_clusters_arrow_btn.setFixedSize(30, 30)
         self.pinned_clusters_arrow_btn.setIcon(self.create_down_arrow_icon())
         self.pinned_clusters_arrow_btn.setIconSize(QSize(10, 10))
-        self.pinned_clusters_arrow_btn.setStyleSheet("""
-            QToolButton {
-                background-color: #2A2A2A;
-                border: none;
-                border-left: 1px solid #4A4A4A;
-                border-radius: 0 4px 4px 0;
-                margin: 0px;
-            }
-            QToolButton:hover {
-                background-color: #3e3e3e;
-            }
-        """)
+        self.pinned_clusters_arrow_btn.setStyleSheet(TitleBarStyles.get_pinned_cluster_arrow_style())
         self.pinned_clusters_arrow_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.pinned_clusters_arrow_btn.clicked.connect(self.toggle_pinned_clusters_dropdown)
 
         # Container widget styling
-        self.pinned_clusters_container.setStyleSheet("""
-            QWidget {
-                background-color: #2A2A2A;
-                border-radius: 4px;
-            }
-        """)
+        self.pinned_clusters_container.setStyleSheet(TitleBarStyles.get_pinned_cluster_container_style())
 
         # Add widgets to layout in correct order
         pinned_layout.addWidget(self.pinned_clusters_icon)
@@ -151,19 +218,32 @@ class TitleBar(QWidget):
         pinned_layout.addStretch()
         pinned_layout.addWidget(self.pinned_clusters_arrow_btn)
 
+        # Theme Toggle
+        self.theme_toggle = ThemeToggle(self)
+        self.theme_toggle.clicked.connect(self.toggle_theme)
+        
+        # Initialize state
+        current_theme = get_theme_manager().get_current_theme_name()
+        is_dark = current_theme == "Dark"
+        # Block signals to prevent double-triggering logic, though toggle logic handles it
+        self.theme_toggle.blockSignals(True)
+        self.theme_toggle.setChecked(is_dark)
+        self.theme_toggle.position = 1.0 if is_dark else 0.0 
+        self.theme_toggle.blockSignals(False)
+
         # Settings icon on the right (removed troubleshoot, notifications, and profile)
         self.settings_btn = self.create_icon_button("preferences", "Settings")
 
         # Window control buttons
         self.minimize_btn = self.create_window_control_button("minimize", "Minimize")
-        self.minimize_btn.clicked.connect(self.parent.showMinimized)
+        self.minimize_btn.clicked.connect(self._parent_window.showMinimized)
 
         self.maximize_btn = self.create_window_control_button("maximize", "Maximize")
         self.maximize_btn.clicked.connect(self.toggle_maximize)
 
         self.close_btn = self.create_window_control_button("close", "Close")
-        self.close_btn.clicked.connect(self.parent.close)
-        self.close_btn.setStyleSheet(AppStyles.TITLE_BAR_CLOSE_BUTTON_STYLE)
+        self.close_btn.clicked.connect(self._parent_window.close)
+        self.close_btn.setStyleSheet(TitleBarStyles.get_close_button_style())
 
         # Add widgets to layout (removed troubleshoot_btn, notifications_btn, and profile_btn)
         layout.addWidget(self.logo_label)
@@ -171,6 +251,8 @@ class TitleBar(QWidget):
         layout.addSpacerItem(QSpacerItem(90, 0))
         layout.addWidget(self.pinned_clusters_container)
         layout.addStretch(1)
+        layout.addWidget(self.theme_toggle)
+        layout.addSpacing(10)
         layout.addWidget(self.settings_btn)
         layout.addWidget(self.minimize_btn)
         layout.addWidget(self.maximize_btn)
@@ -180,10 +262,10 @@ class TitleBar(QWidget):
         container_layout.addWidget(content)
 
         # Create a frame for the bottom border
-        bottom_frame = QFrame()
-        bottom_frame.setFixedHeight(2)
-        bottom_frame.setStyleSheet(f"background-color: {AppColors.BORDER_COLOR};")
-        container_layout.addWidget(bottom_frame)
+        self.bottom_frame = QFrame()
+        self.bottom_frame.setFixedHeight(2)
+        self.bottom_frame.setStyleSheet(TitleBarStyles.get_title_bar_bottom_frame_style())
+        container_layout.addWidget(self.bottom_frame)
 
         # Set up the main layout for this widget
         main_layout = QVBoxLayout(self)
@@ -197,7 +279,7 @@ class TitleBar(QWidget):
         # Connect the pinned items signal if provided - with proper tracking
         if self.update_pinned_items_signal:
             self._connect_signal_safely(
-                self.update_pinned_items_signal, 
+                self.update_pinned_items_signal,
                 self.update_pinned_dropdown
             )
 
@@ -207,6 +289,82 @@ class TitleBar(QWidget):
                 self.open_cluster_signal,
                 self.update_current_cluster
             )
+
+    def _on_theme_changed(self, theme_name):
+        """Re-apply all styles when theme changes"""
+        self.setStyleSheet(TitleBarStyles.get_title_bar_style())
+        self.pinned_clusters_icon.setStyleSheet(TitleBarStyles.get_pinned_cluster_icon_style())
+        self.pinned_clusters_label.setStyleSheet(TitleBarStyles.get_pinned_cluster_label_style())
+        self.pinned_clusters_arrow_btn.setStyleSheet(TitleBarStyles.get_pinned_cluster_arrow_style())
+        self.pinned_clusters_container.setStyleSheet(TitleBarStyles.get_pinned_cluster_container_style())
+        self.close_btn.setStyleSheet(TitleBarStyles.get_close_button_style())
+        self.home_btn.setStyleSheet(TitleBarStyles.get_icon_button_style())
+        self.settings_btn.setStyleSheet(TitleBarStyles.get_icon_button_style())
+        self.minimize_btn.setStyleSheet(TitleBarStyles.get_window_control_style())
+        self.maximize_btn.setStyleSheet(TitleBarStyles.get_window_control_style())
+        if hasattr(self, 'bottom_frame'):
+            self.bottom_frame.setStyleSheet(TitleBarStyles.get_title_bar_bottom_frame_style())
+        if self.dropdown_menu:
+            self.dropdown_menu.setStyleSheet(TitleBarStyles.get_dropdown_menu_style())
+        if self.search_input:
+            self.search_input.setStyleSheet(TitleBarStyles.get_search_input_style())
+
+        # Update icons based on the active theme using theme-specific assets
+        theme_folder = theme_name.lower() if isinstance(theme_name, str) else "dark"
+
+        # Home and Settings buttons use 18x18 icons
+        if hasattr(self, 'home_btn'):
+            home_icon = Icons.get_theme_icon("home.svg", theme_folder)
+            if not home_icon.isNull():
+                self.home_btn.setIcon(home_icon)
+                self.home_btn.setIconSize(self.normal_icon_size)
+
+        if hasattr(self, 'settings_btn'):
+            prefs_icon = Icons.get_theme_icon("preferences.svg", theme_folder)
+            if not prefs_icon.isNull():
+                self.settings_btn.setIcon(prefs_icon)
+                self.settings_btn.setIconSize(self.normal_icon_size)
+
+        # Window control buttons use 10x10 icons
+        if hasattr(self, 'minimize_btn'):
+            min_icon = Icons.get_theme_icon("minimize.svg", theme_folder)
+            if not min_icon.isNull():
+                self.minimize_btn.setIcon(min_icon)
+                self.minimize_btn.setIconSize(QSize(10, 10))
+
+        if hasattr(self, 'close_btn'):
+            close_icon = Icons.get_theme_icon("close.svg", theme_folder)
+            if not close_icon.isNull():
+                self.close_btn.setIcon(close_icon)
+                self.close_btn.setIconSize(QSize(10, 10))
+
+        # Maximize button needs smart sizing based on state
+        if hasattr(self, 'maximize_btn'):
+            is_maximized = bool(self._parent_window and self._parent_window.isMaximized())
+            max_filename = "maximize_active.svg" if is_maximized else "maximize.svg"
+            max_icon = Icons.get_theme_icon(max_filename, theme_folder)
+
+            # Use original sizing: 10x10 for windowed, 18x18 for maximized
+            current_size = self.window_ctrl_size if is_maximized else QSize(10, 10)
+
+            if not max_icon.isNull():
+                self.maximize_btn.setIcon(max_icon)
+                self.maximize_btn.setIconSize(current_size)
+        
+        # Sync toggle state if theme changed externally (e.g. from Preferences)
+        if hasattr(self, 'theme_toggle'):
+            is_dark = theme_name == "Dark"
+            if self.theme_toggle.isChecked() != is_dark:
+                self.theme_toggle.blockSignals(True)
+                self.theme_toggle.setChecked(is_dark)
+                self.theme_toggle.position = 1.0 if is_dark else 0.0
+                self.theme_toggle.blockSignals(False)
+
+    def toggle_theme(self):
+        """Toggle between Light and Dark themes"""
+        is_dark = self.theme_toggle.isChecked()
+        new_theme = "Dark" if is_dark else "Light"
+        get_theme_manager().set_theme(new_theme)
 
     def update_current_cluster(self, cluster_name):
         """Update the pinned clusters label with the selected cluster name and icon"""
@@ -232,8 +390,8 @@ class TitleBar(QWidget):
         """Get cluster icon using the HomePage's color system"""
         try:
             # Access the HomePage's color and icon creation methods
-            if hasattr(self.parent, 'home_page'):
-                home_page = self.parent.home_page
+            if hasattr(self._parent_window, 'home_page'):
+                home_page = self._parent_window.home_page
 
                 # Get the cluster color using existing system
                 cluster_color = home_page.get_cluster_color(cluster_name)
@@ -242,7 +400,7 @@ class TitleBar(QWidget):
                 colored_pixmap = home_page.create_colored_icon(
                     "Icons/Cluster_Logo.svg",
                     cluster_color,
-                    16  # Changed from 20 to 16
+                    16
                 )
 
                 return colored_pixmap
@@ -282,10 +440,8 @@ class TitleBar(QWidget):
         if self.dropdown_menu and self.dropdown_menu.isVisible():
             self.dropdown_menu.hide()
             # Keep the current cluster name displayed when closing dropdown
-            # No need to reset the label here as it should maintain its current state
         else:
             self.create_or_update_dropdown()
-            # Remove the line that was setting label to "Pinned Clusters"
             # The label should maintain the current cluster name
             if self.search_input:
                 self.search_input.setFocus()  # Set focus to the search input when opening
@@ -294,39 +450,14 @@ class TitleBar(QWidget):
         """Create or update the dropdown menu with search input and pinned items"""
         if not self.dropdown_menu:
             self.dropdown_menu = QMenu(self)
-            self.dropdown_menu.setStyleSheet("""
-                QMenu {
-                    background-color: #2A2A2A;
-                    color: #FFFFFF;
-                    border: 1px solid #4A4A4A;
-                    padding: 5px;
-                }
-                QMenu::item {
-                    padding: 5px 20px;
-                }
-                QMenu::item:selected {
-                    background-color: #4A9EFF;
-                }
-            """)
+            self.dropdown_menu.setStyleSheet(TitleBarStyles.get_dropdown_menu_style())
 
         # Initialize or reuse the search input and action
         if not self.search_input:
             self.search_input = QLineEdit(self)  # Set parent to self to prevent deletion
             self.search_input.setPlaceholderText("Search...")
             self.search_input.setFixedWidth(287)  # Match the width of pinned_clusters_container
-            self.search_input.setStyleSheet("""
-                QLineEdit {
-                    background-color: #2A2A2A;
-                    color: #FFFFFF;
-                    border: 1px solid #4A4A4A;
-                    border-radius: 4px;
-                    padding: 5px;
-                    margin-bottom: 5px;
-                }
-                QLineEdit[placeholderText="Search..."] {
-                    color: #999999;
-                }
-            """)
+            self.search_input.setStyleSheet(TitleBarStyles.get_search_input_style())
             self.search_input.textChanged.connect(self.filter_pinned_items)
             self.search_action = QWidgetAction(self)  # Set parent to self to prevent deletion
             self.search_action.setDefaultWidget(self.search_input)
@@ -396,105 +527,90 @@ class TitleBar(QWidget):
             self.pinned_clusters_icon.hide()
 
         # Emit signal to open cluster
-        if self.open_cluster_signal and hasattr(self.parent.home_page, 'all_data'):
-            for view_type in self.parent.home_page.all_data:
-                for data_item in self.parent.home_page.all_data[view_type]:
+        if self.open_cluster_signal and hasattr(self._parent_window.home_page, 'all_data'):
+            for view_type in self._parent_window.home_page.all_data:
+                for data_item in self._parent_window.home_page.all_data[view_type]:
                     if data_item.get("name") == item and "Cluster" in data_item.get("kind", ""):
                         self.open_cluster_signal.emit(item)
                         break
         self.dropdown_menu.hide()
 
     def create_icon_button(self, icon_id, tooltip, fallback_icon=None):
-        """Create a tool button with the specified icon and tooltip"""
+        """Create a tool button with the specified icon and tooltip.
+
+        For TitleBar icons, we make them theme-aware by asking ThemeManager for the
+        current theme name and loading Icons/<theme>/<icon_id>.svg when available.
+        """
         btn = QToolButton()
         btn.setFixedSize(30, 30)
         btn.setToolTip(tooltip)
         btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
 
-        icon = Icons.get_icon(icon_id)
+        # Determine current theme name ("Light" / "Dark") and map to folder name
+        theme_name = get_theme_manager().get_current_theme_name()
+        theme_folder = theme_name.lower() if isinstance(theme_name, str) else "dark"
 
-        if not icon.isNull():
-            btn.setIcon(icon)
-            btn.setIconSize(self.normal_icon_size)
-            btn.setText("")
-        elif fallback_icon is not None:
-            btn.setIcon(fallback_icon)
+        # Try theme-specific icon first: Icons/<theme>/<icon_id>.svg
+        themed_icon = Icons.get_theme_icon(f"{icon_id}.svg", theme_folder)
+
+        if not themed_icon.isNull():
+            btn.setIcon(themed_icon)
             btn.setIconSize(self.normal_icon_size)
             btn.setText("")
         else:
-            fallback_text = getattr(Icons, icon_id.upper(), "⚙️") if isinstance(icon_id, str) else "⚙️"
-            btn.setText(fallback_text)
+            # Fallback to existing, non-themed icon lookup behaviour
+            icon = Icons.get_icon(icon_id)
 
-        btn.setStyleSheet(AppStyles.TITLE_BAR_ICON_BUTTON_STYLE)
+            if not icon.isNull():
+                btn.setIcon(icon)
+                btn.setIconSize(self.normal_icon_size)
+                btn.setText("")
+            elif fallback_icon is not None:
+                btn.setIcon(fallback_icon)
+                btn.setIconSize(self.normal_icon_size)
+                btn.setText("")
+            else:
+                fallback_text = getattr(Icons, icon_id.upper(), "") if isinstance(icon_id, str) else ""
+                btn.setText(fallback_text)
+
+        btn.setStyleSheet(TitleBarStyles.get_icon_button_style())
         return btn
 
+    def _get_window_control_fallback_text(self, icon_id):
+        """Get fallback text for window control buttons when icon is unavailable"""
+        if icon_id == "minimize":
+            return "-"
+        elif icon_id == "maximize":
+            return "[]" if not self._parent_window or not self._parent_window.isMaximized() else "="
+        elif icon_id == "close":
+            return "X"
+        else:
+            return getattr(Icons, icon_id.upper(), "") if isinstance(icon_id, str) else ""
+
     def create_window_control_button(self, icon_id, tooltip):
-        """Create a window control button with minimal style"""
+        """Create a window control button with minimal style, using theme-aware icons."""
         btn = QToolButton()
         btn.setFixedSize(46, 30)
         btn.setToolTip(tooltip)
 
-        icon = Icons.get_icon(icon_id)
+        # Determine current theme and try theme-specific icon first
+        theme_name = get_theme_manager().get_current_theme_name()
+        theme_folder = theme_name.lower() if isinstance(theme_name, str) else "dark"
+        icon = Icons.get_theme_icon(f"{icon_id}.svg", theme_folder)
 
         if not icon.isNull():
             btn.setIcon(icon)
             btn.setIconSize(QSize(10, 10))
             btn.setText("")
         else:
-            fallback_text = ""
-            font_size = 9
-
-            if icon_id == "minimize":
-                fallback_text = "—"
-            elif icon_id == "maximize":
-                fallback_text = "□" if not self.parent or not self.parent.isMaximized() else "❐"
-            elif icon_id == "close":
-                fallback_text = "✕"
-            else:
-                fallback_text = getattr(Icons, icon_id.upper(), "⚙️") if isinstance(icon_id, str) else "⚙️"
-
-            btn.setText(fallback_text)
-            btn.setFont(QFont("Segoe UI", font_size))
+            btn.setText(self._get_window_control_fallback_text(icon_id))
+            btn.setFont(QFont("Segoe UI", 9))
 
         if icon_id == "close":
-            btn.setStyleSheet(AppStyles.TITLE_BAR_CLOSE_BUTTON_STYLE)
+            btn.setStyleSheet(TitleBarStyles.get_close_button_style())
         else:
-            btn.setStyleSheet(AppStyles.TITLE_BAR_WINDOW_BUTTON_STYLE)
+            btn.setStyleSheet(TitleBarStyles.get_window_control_style())
 
-        return btn
-
-    def create_window_button(self, icon_id, tooltip, size=14, icon_size=None):
-        """Create a small window control button with light color"""
-        btn = QPushButton()
-        btn.setFixedSize(size, size)
-        btn.setToolTip(tooltip)
-
-        if icon_size is None:
-            icon_size = self.window_ctrl_size
-
-        icon = Icons.get_icon(icon_id)
-
-        if not icon.isNull():
-            btn.setIcon(icon)
-            btn.setIconSize(icon_size)
-            btn.setText("")
-        else:
-            fallback_text = ""
-            font_size = 9
-
-            if icon_id == "minimize":
-                fallback_text = "─"
-            elif icon_id == "maximize":
-                fallback_text = "□" if not self.parent or not self.parent.isMaximized() else "❐"
-            elif icon_id == "close":
-                fallback_text = "✕"
-            else:
-                fallback_text = getattr(Icons, icon_id.upper(), "⚙️") if isinstance(icon_id, str) else "⚙️"
-
-            btn.setText(fallback_text)
-            btn.setFont(QFont("Segoe UI", font_size))
-
-        btn.setStyleSheet(AppStyles.TITLE_BAR_WINDOW_BUTTON_STYLE)
         return btn
 
     def create_back_icon(self):
@@ -572,8 +688,8 @@ class TitleBar(QWidget):
 
     def navigate_to_home(self):
         """Navigate to the home page and reset cluster label"""
-        if hasattr(self.parent, 'switch_to_home'):
-            self.parent.switch_to_home()
+        if hasattr(self._parent_window, 'switch_to_home'):
+            self._parent_window.switch_to_home()
             self.current_cluster = None
             self.pinned_clusters_label.setText("Pinned Clusters")
             self.pinned_clusters_icon.hide()
@@ -585,47 +701,49 @@ class TitleBar(QWidget):
         return super().eventFilter(obj, event)
 
     def toggle_maximize(self):
-        if self.parent.isMaximized():
-            self.parent.showNormal()
-            icon = Icons.get_icon("maximize")
+        theme_name = get_theme_manager().get_current_theme_name()
+        theme_folder = theme_name.lower() if isinstance(theme_name, str) else "dark"
+
+        if self._parent_window.isMaximized():
+            self._parent_window.showNormal()
+            icon = Icons.get_theme_icon("maximize.svg", theme_folder)
             if not icon.isNull():
                 self.maximize_btn.setIcon(icon)
                 self.maximize_btn.setIconSize(QSize(10, 10))
                 self.maximize_btn.setText("")
             else:
-                self.maximize_btn.setText("□")
+                self.maximize_btn.setText("[]")
                 self.maximize_btn.setFont(QFont("Segoe UI", 9))
-            self.maximize_btn.setStyleSheet(AppStyles.TITLE_BAR_WINDOW_BUTTON_STYLE)
+            self.maximize_btn.setStyleSheet(TitleBarStyles.get_window_control_style())
         else:
-            self.parent.showMaximized()
-            icon = Icons.get_icon("maximize_active")
+            self._parent_window.showMaximized()
+            icon = Icons.get_theme_icon("maximize_active.svg", theme_folder)
             if not icon.isNull():
                 self.maximize_btn.setIcon(icon)
                 self.maximize_btn.setIconSize(self.window_ctrl_size)
                 self.maximize_btn.setText("")
             else:
-                self.maximize_btn.setText("⧉")
+                self.maximize_btn.setText("=")
                 self.maximize_btn.setFont(QFont("Segoe UI", 9))
-            self.maximize_btn.setStyleSheet(AppStyles.TITLE_BAR_WINDOW_BUTTON_STYLE)
+            self.maximize_btn.setStyleSheet(TitleBarStyles.get_window_control_style())
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self.drag_position = event.globalPosition().toPoint()
 
     def mouseDoubleClickEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton and self.parent:
+        if event.button() == Qt.MouseButton.LeftButton and self._parent_window:
             self.double_click_in_progress = True
-            if self.parent.isMaximized():
-                self.parent.showNormal()
+            if self._parent_window.isMaximized():
+                self._parent_window.showNormal()
                 self.update_maximize_button_icon(False)
                 cursor_pos = event.globalPosition().toPoint()
-                window_pos = self.parent.pos()
                 local_pos = event.position().toPoint()
                 new_window_pos = cursor_pos - local_pos
-                self.parent.move(new_window_pos)
+                self._parent_window.move(new_window_pos)
                 self.drag_position = cursor_pos
             else:
-                self.parent.showMaximized()
+                self._parent_window.showMaximized()
                 self.update_maximize_button_icon(True)
                 self.drag_position = None
             event.accept()
@@ -633,10 +751,10 @@ class TitleBar(QWidget):
     def mouseMoveEvent(self, event):
         if (self.drag_position is not None and
                 event.buttons() == Qt.MouseButton.LeftButton and
-                self.parent and
-                not self.parent.isMaximized()):
+                self._parent_window and
+                not self._parent_window.isMaximized()):
             delta = event.globalPosition().toPoint() - self.drag_position
-            self.parent.move(self.parent.pos() + delta)
+            self._parent_window.move(self._parent_window.pos() + delta)
             self.drag_position = event.globalPosition().toPoint()
 
     def mouseReleaseEvent(self, event):
@@ -645,16 +763,22 @@ class TitleBar(QWidget):
             self.double_click_in_progress = False
 
     def update_maximize_button_icon(self, is_maximized):
-        icon_id = "maximize_active" if is_maximized else "maximize"
-        icon = Icons.get_icon(icon_id)
+        theme_name = get_theme_manager().get_current_theme_name()
+        theme_folder = theme_name.lower() if isinstance(theme_name, str) else "dark"
+
+        icon_filename = "maximize_active.svg" if is_maximized else "maximize.svg"
+        icon = Icons.get_theme_icon(icon_filename, theme_folder)
+
         if not icon.isNull():
             self.maximize_btn.setIcon(icon)
-            self.maximize_btn.setIconSize(QSize(10, 10))
+            # Use original sizing: 10x10 for windowed, 18x18 for maximized
+            current_size = self.window_ctrl_size if is_maximized else QSize(10, 10)
+            self.maximize_btn.setIconSize(current_size)
             self.maximize_btn.setText("")
         else:
-            self.maximize_btn.setText("⧉" if is_maximized else "□")
+            self.maximize_btn.setText("=" if is_maximized else "[]")
             self.maximize_btn.setFont(QFont("Segoe UI", 9))
-        self.maximize_btn.setStyleSheet(AppStyles.TITLE_BAR_WINDOW_BUTTON_STYLE)
+        self.maximize_btn.setStyleSheet(TitleBarStyles.get_window_control_style())
 
     def update_pinned_dropdown(self, pinned_items):
         """Update the pinned items list from HomePage"""
@@ -673,10 +797,10 @@ class TitleBar(QWidget):
         except (RuntimeError, TypeError):
             # No existing connection or signal is invalid
             pass
-        
+
         try:
             # Connect the signal to the slot
-            connection = signal.connect(slot)
+            signal.connect(slot)
             # Store the connection info for later cleanup
             self._signal_connections.append((signal, slot))
             logging.debug(f"Connected signal to {slot.__name__}")
