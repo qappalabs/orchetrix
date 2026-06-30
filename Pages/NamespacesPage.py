@@ -4,7 +4,7 @@ Dynamic implementation of the Namespaces page with live Kubernetes data using AP
 
 import re
 from PyQt6.QtWidgets import (
-    QHeaderView, QWidget, QHBoxLayout, QPushButton, QInputDialog, QMessageBox
+    QHeaderView, QWidget, QHBoxLayout, QPushButton, QInputDialog, QMessageBox, QMenu
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTimer
 from PyQt6.QtGui import QColor
@@ -139,8 +139,8 @@ class NamespacesPage(BaseResourcePage):
         self.kube_client = get_kubernetes_client()
         self.operation_thread = None
         
-        # Defer UI setup to ensure base class is fully initialized
-        QTimer.singleShot(0, self.setup_page_ui)
+        # Setup UI immediately
+        self.setup_page_ui()
 
     def setup_page_ui(self):
         headers = ["", "Name", "Labels", "Age", "Status", ""]
@@ -209,7 +209,7 @@ class NamespacesPage(BaseResourcePage):
             (1, 180, "interactive"), # Name
             (2, 260, "interactive"),  # Labels
             (3, 60, "interactive"),  # Age
-            (4, 80, "stretch"),      # Status - stretch to fill remaining space
+            (4, 80, "interactive"),  # Status
             (5, 40, "fixed")        # Actions
         ]
 
@@ -228,8 +228,12 @@ class NamespacesPage(BaseResourcePage):
 
         # Ensure full width utilization after configuration
         QTimer.singleShot(100, self._ensure_full_width_utilization)
+
+
+
+
     def populate_resource_row(self, row, resource):
-        self.table.setRowHeight(row, 40)
+        self.table.setRowHeight(row, 42)
         resource_name = resource["name"]
 
         # Checkbox styling is already handled by BaseResourcePage
@@ -386,8 +390,6 @@ class NamespacesPage(BaseResourcePage):
 
     def _handle_action_button_click(self, resource_name):
         """Handle action button click to show context menu with edit and delete options"""
-        from PyQt6.QtWidgets import QMenu
-
         menu = QMenu(self)
 
         # Add edit action

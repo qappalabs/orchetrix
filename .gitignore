@@ -17,6 +17,10 @@ version.txt
 logs
 data
 
+# Crash diagnostics (runtime artifacts, never commit)
+crash_trace.log
+crash_trace.log.*
+
 # Distribution / packaging
 dist/
 build/

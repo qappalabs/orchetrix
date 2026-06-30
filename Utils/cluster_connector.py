@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Tuple, Any, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from PyQt6.QtCore import QObject, pyqtSignal, QTimer, Qt
+from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot, QTimer, Qt, QMetaObject
 from enum import Enum
 
 from Utils.kubernetes_client import get_kubernetes_client
@@ -19,7 +19,12 @@ from Utils.enhanced_worker import EnhancedBaseWorker
 from Utils.thread_manager import get_thread_manager
 from Utils.unified_resource_loader import get_unified_resource_loader
 from Utils.unified_cache_system import get_unified_cache
+from Utils.data_formatters import parse_age_to_seconds, format_age
 from log_handler import class_logger
+
+# Maximum age (in seconds) for events included in the issues cache.
+# Events older than this threshold are excluded by _event_item_to_issue.
+_EVENT_MAX_AGE_SECONDS = 86400  # 24 hours
 
 
 @dataclass
@@ -265,6 +270,17 @@ class EnhancedClusterConnector(QObject):
         self._metrics_timer = QTimer()
         self._issues_timer = QTimer()
         self._cleanup_timer = QTimer()
+        self._events_watch_active = False  # True when watch replaces issues polling
+        self._events_debounce_timer = QTimer()  # Coalesces rapid event deltas
+        self._events_debounce_timer.setSingleShot(True)
+        self._events_debounce_timer.setInterval(3000)  # 3 s quiet window
+        # Shared-Informer-style incremental cache: only holds Warning/Error events
+        # updated one item at a time by on_added/on_modified/on_deleted handlers.
+        self._issues_delta_cache: Dict[str, Dict] = {}  # keyed by event uid
+        # Lock that must be held for all reads and writes of _issues_delta_cache.
+        # The watch callbacks run on a background thread; _flush_events_update
+        # runs on the main thread — both must synchronise through this lock.
+        self._issues_delta_lock = threading.Lock()
 
         # Load detection for dynamic polling
         self._cluster_load_level = "normal"  # normal, heavy, critical
@@ -283,6 +299,10 @@ class EnhancedClusterConnector(QObject):
         self._issues_default_interval = 60000
         self._metrics_success_count = 0
         self._issues_success_count = 0
+        self._polling_paused = False
+
+        # RBAC watch permission — True until proven otherwise by _check_watch_permission()
+        self._watch_verb_allowed = True
 
         # Shutdown management
         self._shutting_down = False
@@ -294,7 +314,7 @@ class EnhancedClusterConnector(QObject):
         self._connect_client_signals()
         self._connect_resource_loader_signals()
 
-        logging.info("Enhanced Cluster Connector initialized")
+        logging.info("Cluster Connector initialized")
 
     def _setup_timers(self):
         """Initialize and configure timers"""
@@ -302,7 +322,6 @@ class EnhancedClusterConnector(QObject):
         from PyQt6.QtWidgets import QApplication
         if self.thread() != QApplication.instance().thread():
             logging.warning("ClusterConnector timers being created from non-main thread - deferring to main thread")
-            from PyQt6.QtCore import QMetaObject
             QMetaObject.invokeMethod(self, "_setup_timers_on_main_thread", Qt.ConnectionType.QueuedConnection)
             return
 
@@ -312,10 +331,14 @@ class EnhancedClusterConnector(QObject):
         # Issues polling timer
         self._issues_timer.timeout.connect(self._poll_issues)
 
+        # Events watch debounce timer — flushes coalesced deltas every 3 s
+        self._events_debounce_timer.timeout.connect(self._flush_events_update)
+
         # Cache cleanup timer - reduced frequency for better performance
         self._cleanup_timer.timeout.connect(self._cleanup_cache)
         self._cleanup_timer.start(300000)  # Cleanup every 5 minutes instead of 1 minute
 
+    @pyqtSlot()
     def _setup_timers_on_main_thread(self):
         """Setup timers on main thread - called via QMetaObject.invokeMethod"""
         self._setup_timers()
@@ -350,7 +373,7 @@ class EnhancedClusterConnector(QObject):
             unified_loader.loading_completed.connect(self._handle_resource_loading_completed)
             unified_loader.loading_error.connect(self._handle_resource_loading_error)
 
-            logging.info("Connected to unified resource loader signals")
+            logging.debug("Connected to unified resource loader signals")
         except Exception as e:
             logging.error(f"Error connecting resource loader signals: {e}")
 
@@ -362,7 +385,7 @@ class EnhancedClusterConnector(QObject):
                 # No need to process again - just emit the processed data
                 nodes_data = load_result.items
 
-                logging.info(f"Received {len(nodes_data)} processed nodes from unified loader")
+                logging.debug(f"Received {len(nodes_data)} processed nodes from unified loader")
 
                 # Only cache and emit non-empty node data
                 # Empty results could be from transient issues (cluster disconnect, API error)
@@ -374,7 +397,7 @@ class EnhancedClusterConnector(QObject):
                         self._cache.cache_resources('cluster_data', cache_key, nodes_data)
 
                     self.node_data_loaded.emit(nodes_data)
-                    logging.info(f"Emitted {len(nodes_data)} processed nodes to UI")
+                    logging.debug(f"Emitted {len(nodes_data)} processed nodes to UI")
                 else:
                     logging.warning("Received empty nodes data from unified loader - not caching or emitting")
 
@@ -474,11 +497,71 @@ class EnhancedClusterConnector(QObject):
         # Report success to health monitor
         if success:
             self.health_monitor.report_success(cluster_name)
+            # Check whether the cluster allows the 'watch' verb.  If not, the
+            # ResourceWatchManager would silently fail, so we degrade gracefully
+            # to polling-only mode before starting data loading.
+            self._update_watch_permission(cluster_name)
             self._start_data_loading(cluster_name)
             self._start_polling()
         else:
             # Report failure (managed in _handle_connection_error but added here for completeness)
             self.health_monitor.report_failure(cluster_name, message)
+
+    def _check_watch_permission(self) -> bool:
+        """Query SelfSubjectAccessReview to check if the 'watch' verb is allowed on events.
+
+        'events' is the resource actually used by the watch that has no fallback:
+        if the events watch is denied it dies silently on its background thread
+        (start_watch never raises) while issues polling stays suppressed, leaving
+        the issues view permanently empty.  The node watch — gated by the same
+        flag — always has an unconditional LIST path, so probing events is the
+        decision that matters.  Returns True when the check passes or when the
+        API itself is unavailable (fail-open so we don't break clusters that
+        don't expose the authorization API).
+        """
+        try:
+            from kubernetes.client import (
+                AuthorizationV1Api,
+                V1SelfSubjectAccessReview,
+                V1SelfSubjectAccessReviewSpec,
+                V1ResourceAttributes,
+            )
+            auth_api = AuthorizationV1Api(self.kube_client.v1.api_client)
+            review = V1SelfSubjectAccessReview(
+                spec=V1SelfSubjectAccessReviewSpec(
+                    resource_attributes=V1ResourceAttributes(
+                        verb='watch',
+                        resource='events',
+                        group='',
+                    )
+                )
+            )
+            response = auth_api.create_self_subject_access_review(review)
+            allowed = getattr(response.status, 'allowed', True)
+            logging.info(f"RBAC watch permission check: {'allowed' if allowed else 'DENIED'}")
+            return allowed
+        except Exception as e:
+            # Fail open — if we can't check, assume watch is allowed
+            logging.debug(f"RBAC watch permission check failed (assuming allowed): {e}")
+            return True
+
+    def _update_watch_permission(self, cluster_name: str) -> None:
+        """Check watch RBAC permission and update self._watch_verb_allowed.
+
+        Centralises the check-log-assign pattern that is needed both after a
+        fresh connection (_handle_connection_complete) and when re-initialising
+        the data pipeline for an already-connected cluster
+        (initialize_data_pipeline).
+        """
+        watch_allowed = self._check_watch_permission()
+        if not watch_allowed:
+            logging.warning(
+                f"Cluster {cluster_name}: 'watch' verb denied by RBAC — "
+                "falling back to polling-only mode"
+            )
+            self._watch_verb_allowed = False
+        else:
+            self._watch_verb_allowed = True
 
     def _handle_connection_error(self, cluster_name: str, error_message: str) -> None:
         """Handle connection errors"""
@@ -498,12 +581,23 @@ class EnhancedClusterConnector(QObject):
         # Load cluster info
         self._start_data_worker("cluster_info", cluster_name)
 
-        # Load nodes
+        # Start node watch stream only when the 'watch' verb is allowed.
+        # _watch_verb_allowed is set by _update_watch_permission() during connection.
+        if self._watch_verb_allowed:
+            try:
+                unified_loader = get_unified_resource_loader()
+                unified_loader.start_node_watch()
+            except Exception as e:
+                logging.warning(f"Failed to start node watch, falling back to LIST: {e}")
+        else:
+            logging.info("Skipping node watch — watch verb denied by RBAC, using LIST polling")
+
+        # Load nodes (will use watch cache if available, else LIST)
         self._start_data_worker("nodes", cluster_name, self._process_nodes_data)
 
-        # Start metrics and issues loading (via signals)
+        # Metrics via signal; issues initial fetch is deferred to _start_polling
+        # so it can be skipped when the events watch provides live data instead.
         self._start_data_worker("metrics", cluster_name)
-        self._start_data_worker("issues", cluster_name)
 
     def _start_data_worker(self, data_type: str, cluster_name: str, processor: Callable = None) -> None:
         """Start a data loading worker"""
@@ -609,23 +703,9 @@ class EnhancedClusterConnector(QObject):
         """Format memory capacity for display"""
         if not memory_str:
             return ""
-
-        try:
-            if "Ki" in memory_str:
-                memory_ki = int(memory_str.replace("Ki", ""))
-                memory_gb = round(memory_ki / 1024 / 1024, 1)
-                return f"{memory_gb}GB"
-            elif "Mi" in memory_str:
-                memory_mi = int(memory_str.replace("Mi", ""))
-                memory_gb = round(memory_mi / 1024, 1)
-                return f"{memory_gb}GB"
-            elif "Gi" in memory_str:
-                memory_gi = int(memory_str.replace("Gi", ""))
-                return f"{memory_gi}GB"
-        except (ValueError, TypeError):
-            pass
-
-        return memory_str
+        from Utils.data_formatters import parse_memory_value
+        parsed = parse_memory_value(memory_str)
+        return parsed.formatted if parsed.value else memory_str
 
     def _format_storage_capacity(self, storage_str: str) -> str:
         """Format storage capacity for display"""
@@ -644,31 +724,10 @@ class EnhancedClusterConnector(QObject):
 
     def _calculate_age(self, creation_timestamp) -> str:
         """Calculate age string from creation timestamp"""
-        try:
-            if hasattr(creation_timestamp, 'timestamp'):
-                created = datetime.fromtimestamp(creation_timestamp.timestamp(), tz=timezone.utc)
-            else:
-                created = creation_timestamp
-
-            now = datetime.now(timezone.utc)
-            age_delta = now - created
-
-            days = age_delta.days
-            hours = age_delta.seconds // 3600
-            minutes = (age_delta.seconds % 3600) // 60
-
-            if days > 0:
-                return f"{days}d"
-            elif hours > 0:
-                return f"{hours}h"
-            else:
-                return f"{minutes}m"
-        except Exception as e:
-            logging.error(f"Error calculating age: {e}")
-            return "Unknown"
+        return format_age(creation_timestamp)
 
     def _start_polling(self) -> None:
-        """Start polling for metrics and issues with adaptive intervals"""
+        """Start polling for metrics; replace issues polling with an events watch."""
         with self._polling_lock:
             if self._polling_active or self._shutting_down:
                 return
@@ -682,12 +741,45 @@ class EnhancedClusterConnector(QObject):
                 self._metrics_timer.start(current_intervals["metrics"])
                 logging.info(f"Started metrics polling every {current_intervals['metrics']}ms ({self._cluster_load_level} load)")
 
-            if hasattr(self, '_issues_timer') and self._issues_timer:
-                self._issues_timer.start(current_intervals["issues"])
-                logging.info(f"Started issues polling every {current_intervals['issues']}ms ({self._cluster_load_level} load)")
+            # Replace issues polling with a server-filtered events watch.
+            # field_selector keeps only Warning/Error events on the wire.
+            # Delta handlers (Shared Informer pattern) update _issues_delta_cache
+            # one item at a time — no full-list copies on each delta.
+            # Only start the events watch when RBAC allows the 'watch' verb
+            # (_watch_verb_allowed is set by _update_watch_permission during
+            # connection). If watch is denied, start_watch can fail silently
+            # while issues polling stays suppressed, leaving the issues view
+            # empty — so we fall through to polling, matching the node watch.
+            if self._watch_verb_allowed:
+                try:
+                    unified_loader = get_unified_resource_loader()
+                    unified_loader.start_watch(
+                        'events',
+                        list_kwargs={'field_selector': 'type!=Normal'},
+                        on_added=self._on_event_added,
+                        on_modified=self._on_event_modified,
+                        on_deleted=self._on_event_deleted,
+                    )
+                    self._events_watch_active = True
+                    logging.info("Events watch started (field_selector=type!=Normal) — "
+                                 "issues polling timer suppressed")
+                except Exception as e:
+                    logging.warning(f"Failed to start events watch, falling back to issues polling: {e}")
+                    self._events_watch_active = False
+            else:
+                logging.info("Skipping events watch — watch verb denied by RBAC, using issues polling")
+                self._events_watch_active = False
+
+            if not self._events_watch_active:
+                # No events watch — fire a one-time snapshot fetch then start the timer
+                if self.current_cluster:
+                    self._start_data_worker("issues", self.current_cluster)
+                if hasattr(self, '_issues_timer') and self._issues_timer:
+                    self._issues_timer.start(current_intervals["issues"])
+                    logging.info(f"Started issues polling every {current_intervals['issues']}ms ({self._cluster_load_level} load)")
 
     def _stop_polling(self) -> None:
-        """Stop all polling"""
+        """Stop all polling and tear down the events watch if active."""
         with self._polling_lock:
             self._polling_active = False
             if hasattr(self, '_metrics_timer') and self._metrics_timer:
@@ -695,9 +787,51 @@ class EnhancedClusterConnector(QObject):
             if hasattr(self, '_issues_timer') and self._issues_timer:
                 self._issues_timer.stop()
 
+        if self._events_watch_active:
+            try:
+                unified_loader = get_unified_resource_loader()
+                unified_loader.stop_watch('events')
+            except Exception as e:
+                logging.debug(f"Error stopping events watch: {e}")
+            finally:
+                self._events_watch_active = False
+                self._events_debounce_timer.stop()  # cancel any pending flush racing the cache clear
+                with self._issues_delta_lock:
+                    self._issues_delta_cache.clear()
+
     def stop_polling(self) -> None:
         """Public method to stop all polling - calls internal _stop_polling"""
         self._stop_polling()
+
+    def pause_polling(self) -> None:
+        """Pause polling timers while UI is not visible. Preserves polling state
+        so resume_polling() can restart at the correct adaptive interval.
+        The events watch keeps running in the background regardless of visibility."""
+        with self._polling_lock:
+            if not self._polling_active:
+                return
+            self._polling_paused = True
+            if hasattr(self, '_metrics_timer') and self._metrics_timer:
+                self._metrics_timer.stop()
+            # Only stop issues timer when not using the watch stream
+            if not self._events_watch_active and hasattr(self, '_issues_timer') and self._issues_timer:
+                self._issues_timer.stop()
+            logging.debug("Connector polling paused (UI not visible)")
+
+    def resume_polling(self) -> None:
+        """Resume polling timers when UI becomes visible again."""
+        with self._polling_lock:
+            if not self._polling_active or not self._polling_paused:
+                return
+            self._polling_paused = False
+
+            current_intervals = self._poll_intervals[self._cluster_load_level]
+            if hasattr(self, '_metrics_timer') and self._metrics_timer:
+                self._metrics_timer.start(current_intervals["metrics"])
+            # Only restart issues timer when not using the watch stream
+            if not self._events_watch_active and hasattr(self, '_issues_timer') and self._issues_timer:
+                self._issues_timer.start(current_intervals["issues"])
+            logging.debug(f"Connector polling resumed ({self._cluster_load_level} load)")
 
     def _poll_metrics(self) -> None:
         """Poll for cluster metrics with load detection"""
@@ -748,6 +882,145 @@ class EnhancedClusterConnector(QObject):
             logging.warning(f"Error polling issues: {e}")
             # Increase polling interval on errors
             self._adjust_polling_on_error("issues")
+
+    # ── Shared-Informer delta handlers for the events watch ──────────────────
+
+    def _event_item_to_issue(self, item: dict) -> Optional[dict]:
+        """Convert a single processed event item to the ClusterPage issues format.
+        Returns None if the event should be excluded (Normal type or too old)."""
+        raw = item.get('raw_data') or {}
+        event_type = raw.get('type') or ''
+
+        # Server-side field_selector already blocks Normal events; guard anyway.
+        if event_type == 'Normal':
+            return None
+
+        created = item.get('created')
+        if created:
+            try:
+                now = datetime.now(timezone.utc)
+                if not getattr(created, 'tzinfo', None):
+                    created = created.replace(tzinfo=timezone.utc)
+                if (now - created).total_seconds() > _EVENT_MAX_AGE_SECONDS:
+                    return None
+            except Exception:
+                pass
+
+        involved = raw.get('involvedObject') or {}
+        obj_ref = (
+            f"{involved.get('kind', '')}/{involved.get('name', '')}"
+            if involved else item.get('name', 'Unknown')
+        )
+        return {
+            'type': event_type or 'Warning',
+            'reason': raw.get('reason') or 'Unknown',
+            'message': (raw.get('message') or 'No message')[:200],
+            'object': obj_ref,
+            'age': item.get('age', 'Unknown'),
+            'namespace': item.get('namespace') or 'default',
+            '_uid': item.get('uid') or item.get('name', ''),
+            # Kept so _flush_events_update can re-check the TTL for entries that
+            # are added once and never updated. 'age' is frozen at insert time
+            # and cannot be used for this.
+            '_created': created,
+        }
+
+    @pyqtSlot()
+    def _start_events_debounce_timer(self) -> None:
+        """Start (or restart) the debounce timer on the main thread.
+
+        Must only be called on the thread that owns _events_debounce_timer.
+        The delta handlers dispatch here via QMetaObject.invokeMethod with
+        QueuedConnection so the call is always delivered to the main thread.
+        """
+        self._events_debounce_timer.start()
+
+    def _on_event_added(self, item: dict) -> None:
+        """AddFunc: insert one event into the incremental issues cache."""
+        if self._shutting_down or not self._events_watch_active:
+            return
+        uid = item.get('uid') or item.get('name', '')
+        if not uid:
+            return
+        issue = self._event_item_to_issue(item)
+        with self._issues_delta_lock:
+            if issue:
+                self._issues_delta_cache[uid] = issue
+        # Marshal timer.start() to the main thread — QTimer must only be
+        # started from its owning thread; this callback runs on the watcher thread.
+        QMetaObject.invokeMethod(self, "_start_events_debounce_timer", Qt.ConnectionType.QueuedConnection)
+
+    def _on_event_modified(self, item: dict) -> None:
+        """UpdateFunc: update one event in the incremental issues cache."""
+        if self._shutting_down or not self._events_watch_active:
+            return
+        uid = item.get('uid') or item.get('name', '')
+        if not uid:
+            return
+        issue = self._event_item_to_issue(item)
+        with self._issues_delta_lock:
+            if issue:
+                self._issues_delta_cache[uid] = issue
+            else:
+                # Event may have aged out — remove it
+                self._issues_delta_cache.pop(uid, None)
+        QMetaObject.invokeMethod(self, "_start_events_debounce_timer", Qt.ConnectionType.QueuedConnection)
+
+    def _on_event_deleted(self, uid: str) -> None:
+        """DeleteFunc: remove one event from the incremental issues cache."""
+        if self._shutting_down or not self._events_watch_active:
+            return
+        with self._issues_delta_lock:
+            self._issues_delta_cache.pop(uid, None)
+        QMetaObject.invokeMethod(self, "_start_events_debounce_timer", Qt.ConnectionType.QueuedConnection)
+
+    def _flush_events_update(self) -> None:
+        """Debounce callback: prune stale entries then emit the issues cache to the UI."""
+        if self._shutting_down:
+            return
+        try:
+            # Snapshot the cache under the lock (minimal hold time) so that
+            # watcher-thread mutations don't race with iteration here.
+            # First prune entries whose creation time is now past the max age:
+            # an event added once and never updated would otherwise outlive the
+            # TTL applied in _event_item_to_issue.
+            now = datetime.now(timezone.utc)
+            with self._issues_delta_lock:
+                expired = []
+                for uid, issue in self._issues_delta_cache.items():
+                    created = issue.get('_created')
+                    if not created:
+                        continue
+                    try:
+                        if not getattr(created, 'tzinfo', None):
+                            created = created.replace(tzinfo=timezone.utc)
+                        if (now - created).total_seconds() > _EVENT_MAX_AGE_SECONDS:
+                            expired.append(uid)
+                            continue
+                        # Refresh the displayed age (and the sort key). The
+                        # stored value is frozen at insert time because age-only
+                        # MODIFIED events are filtered out by _VOLATILE_KEYS in
+                        # the watch loop, so without this the UI age would never
+                        # advance for long-lived warnings.
+                        issue['age'] = format_age(created)
+                    except Exception:
+                        pass
+                for uid in expired:
+                    self._issues_delta_cache.pop(uid, None)
+                # Emit even when empty so the UI clears after the last event is
+                # deleted or aged out (do not early-return on an empty cache).
+                snapshot = list(self._issues_delta_cache.values())
+
+            # Sort by parsed age (ascending = newest first).
+            # parse_age_to_seconds returns 0 for unparseable strings; those
+            # sort first which is an acceptable fallback for ambiguous ages.
+            issues = sorted(
+                snapshot,
+                key=lambda x: parse_age_to_seconds(x.get('age', ''))
+            )[:50]
+            self._handle_issues_update(issues)
+        except Exception as e:
+            logging.debug(f"ClusterConnector: error flushing events update: {e}")
 
     def _update_load_level(self, poll_type: str, poll_time_ms: float):
         """Update cluster load level based on polling performance"""
@@ -883,6 +1156,13 @@ class EnhancedClusterConnector(QObject):
                 self._current_cluster = None
                 self._stop_polling()
 
+                # Stop all watch streams
+                try:
+                    unified_loader = get_unified_resource_loader()
+                    unified_loader.stop_all_watches()
+                except Exception as e:
+                    logging.debug(f"Error stopping watches: {e}")
+
         # Clear cache for this cluster
         # Clear cache for this cluster using specific keys
         self._cache.clear_resource_cache('metrics', f'{cluster_name}:metrics')
@@ -897,7 +1177,7 @@ class EnhancedClusterConnector(QObject):
         try:
             unified_loader = get_unified_resource_loader()
             operation_id = unified_loader.load_resources_async('nodes')
-            logging.info(f"Started loading nodes, operation_id: {operation_id}")
+            logging.debug(f"Started loading nodes, operation_id: {operation_id}")
         except Exception as e:
             error_msg = f"Failed to load nodes: {e}"
             logging.error(error_msg)
@@ -907,7 +1187,7 @@ class EnhancedClusterConnector(QObject):
         """Load cluster metrics data"""
         try:
             if hasattr(self.kube_client, 'get_cluster_metrics_async'):
-                logging.info("Loading cluster metrics...")
+                logging.debug("Loading cluster metrics...")
                 self.kube_client.get_cluster_metrics_async()
             else:
                 logging.warning("Kubernetes client does not support metrics loading")
@@ -920,7 +1200,7 @@ class EnhancedClusterConnector(QObject):
         """Load cluster issues data"""
         try:
             if hasattr(self.kube_client, 'get_cluster_issues_async'):
-                logging.info("Loading cluster issues...")
+                logging.debug("Loading cluster issues...")
                 self.kube_client.get_cluster_issues_async()
             else:
                 logging.warning("Kubernetes client does not support issues loading")
@@ -980,13 +1260,43 @@ class EnhancedClusterConnector(QObject):
                     self._connection_states[cluster_name] = ConnectionState(cluster_name)
                 self._connection_states[cluster_name].update_state(connected=True)
 
+    def initialize_data_pipeline(self, cluster_name: str) -> None:
+        """Initialize data loading and polling for an already-connected cluster.
+
+        Called by ClusterStateManager after a successful cluster switch to restart
+        watch streams, data workers, and polling that were stopped when the old
+        cluster was disconnected. Without this, pages would show empty data until
+        the user manually refreshes.
+        """
+        if self._shutting_down:
+            return
+
+        logging.info(f"Initializing data pipeline for cluster: {cluster_name}")
+
+        # Check watch permission and start data loading
+        self._update_watch_permission(cluster_name)
+
+        self._start_data_loading(cluster_name)
+        self._start_polling()
+
     def cleanup(self) -> None:
         """Cleanup all resources"""
         logging.info("Starting Enhanced Cluster Connector cleanup")
         self._shutting_down = True
 
-        # Stop polling
+        # Stop polling (also tears down the events watch)
         self._stop_polling()
+
+        # Tear down the node watch started in _start_data_loading. _stop_polling
+        # only stops the events watch, so without this the node watch stream
+        # outlives the connector at shutdown. Guarded by the same flag used to
+        # start it; refcounted stop_node_watch is a no-op if already detached.
+        if self._watch_verb_allowed:
+            try:
+                get_unified_resource_loader().stop_node_watch()
+            except Exception as e:
+                logging.debug(f"Error stopping node watch during cleanup: {e}")
+
         if hasattr(self, '_cleanup_timer') and self._cleanup_timer:
             self._cleanup_timer.stop()
 

@@ -39,9 +39,6 @@ class ConfigMapsPage(BaseResourcePage):
         # Configure column widths
         self.configure_columns()
 
-        # Delete button is now automatically added by BaseResourcePage
-
-
     def configure_columns(self):
         """Configure column widths for full screen utilization"""
         if not self.table:
@@ -52,11 +49,11 @@ class ConfigMapsPage(BaseResourcePage):
         # Column specifications with optimized default widths
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
-            (1, 160, "interactive"), # Name
-            (2, 100, "interactive"),  # Namespace
-            (3, 180, "interactive"),  # Key
-            (4, 80, "stretch"),      # Age - stretch to fill remaining space
-            (5, 40, "fixed")        # Actions
+            (1, 160, "stretch"),     # Name - stretch to fill remaining space
+            (2, 100, "interactive"), # Namespace
+            (3, 180, "interactive"), # Key
+            (4, 80, "interactive"),  # Age
+            (5, 40, "fixed")         # Actions
         ]
 
         # Apply column configuration
@@ -74,12 +71,29 @@ class ConfigMapsPage(BaseResourcePage):
         # Ensure full width utilization after configuration
         QTimer.singleShot(100, self._ensure_full_width_utilization)
 
+    def _auto_resize_columns(self, max_col_widths=None, min_col_widths=None):
+        """Override to provide explicit widths for columns where headers are clipping."""
+        explicit_mins = {
+            # 0 is Checkbox
+            1: 120,  # Name - lower floor
+            2: 120,  # Namespace
+            3: 100,  # Keys
+            4: 60,   # Age
+            5: 40,   # Actions
+        }
+        
+        # Merge with any caller overrides
+        if min_col_widths:
+            explicit_mins.update(min_col_widths)
+            
+        super()._auto_resize_columns(max_col_widths=max_col_widths, min_col_widths=explicit_mins)
+
     def populate_resource_row(self, row, resource):
         """
         Populate a single row with ConfigMap data
         """
         # Set row height
-        self.table.setRowHeight(row, 40)
+        self.table.setRowHeight(row, 42)
 
         # Create checkbox for row selection - styling handled by BaseResourcePage
         resource_name = resource["name"]

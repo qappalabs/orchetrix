@@ -4,7 +4,6 @@ Base Resource Page - Main base class for Kubernetes resource pages
 Consolidated from multiple duplicate implementations for better maintainability
 """
 
-import datetime
 import gc
 import logging
 import re
@@ -12,6 +11,7 @@ import threading
 import time
 from functools import partial
 from typing import List, Dict
+from Utils.qt_utils import is_valid
 
 from PyQt6.QtWidgets import (
     QWidget,
@@ -19,7 +19,6 @@ from PyQt6.QtWidgets import (
     QLabel,
     QHBoxLayout,
     QPushButton,
-    QApplication,
     QTableWidgetItem,
     QAbstractItemView,
     QStackedWidget,
@@ -29,13 +28,16 @@ from PyQt6.QtWidgets import (
     QToolButton,
     QMenu,
     QTableWidget,
+    QFrame,
+    QSizePolicy,
+    QGraphicsDropShadowEffect,
 )
 from PyQt6.QtGui import QColor, QIcon
-from PyQt6.QtCore import Qt, QTimer, QSize, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, QSize, pyqtSignal, QObject, QEvent
 
 from Base_Components.base_components import BaseTablePage, CustomHeader
 from .resource_deleters import ResourceDeleterThread, BatchResourceDeleterThread
-from .virtual_scroll_table import VirtualScrollTable
+from .virtual_scroll_table import VirtualScrollTable, HighPerformanceDelegate
 from .resource_page_style_manager import ResourcePageStyleManager
 from .resource_deletion_manager import ResourceDeletionManager
 from .resource_search_handler import ResourceSearchHandler
@@ -55,6 +57,7 @@ from Utils.debounced_updater import get_debounced_updater
 from Utils.resource_utils import singularize_resource_type
 
 from log_handler import class_logger
+from Base_Components.table_diff_engine import RowCache, compute_diff
 
 # Constants for performance tuning - optimized for large datasets
 BATCH_SIZE = 100  # Increased batch size for better large data performance
@@ -85,6 +88,17 @@ class BaseResourcePage(BaseTablePage):
     all_items_loaded_signal = pyqtSignal()
     load_more_complete = pyqtSignal()
 
+    # Subclasses with synthetic resource_type values (e.g. "helmreleases",
+    # "portforwarding") or no real K8s API resource should set this to False.
+    # When False, the inherited search bar will not call the unified loader;
+    # if the subclass also defines local_search(query), the bar routes there
+    # instead, otherwise it is hidden.
+    uses_unified_search = True
+
+    # If True, the diff-based in-place watch update is bypassed.
+    # Useful for high-velocity resource logs/events that thrash the cache.
+    REQUIRES_FULL_RESET = False
+
     # Use bounded cache system instead of unbounded class variables
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -98,8 +112,6 @@ class BaseResourcePage(BaseTablePage):
         self.namespace_label = None
         self._delete_btn = None
         self.loading_thread = None
-        self.delete_thread = None
-        self.batch_delete_thread = None
         # Performance optimizations for large datasets
         self.is_loading_initial = False
         self.is_loading_more = False
@@ -117,6 +129,10 @@ class BaseResourcePage(BaseTablePage):
         self._current_search_query = None  # Add current search query tracking
         # Cache system removed
         self._shutting_down = False
+        # ── Diff-engine row cache ─────────────────────────────────────
+        # UID-keyed cache of projected row data.  Rebuilt on full loads;
+        # diffed on watch-driven updates to emit surgical table mutations.
+        self._row_cache = RowCache()
         # Thread safety
         self._data_lock = threading.RLock()  # Allow recursive locking
         self._loading_lock = threading.Lock()
@@ -125,6 +141,13 @@ class BaseResourcePage(BaseTablePage):
         # Use unified debounced updater instead of individual timers
         self._debounced_updater = get_debounced_updater()
         self.kube_client = get_kubernetes_client()
+        # Phase 4: subscribe the namespace dropdown to live ADDED/DELETED
+        # signals so namespaces created or deleted out-of-band (kubectl,
+        # CI/CD, controllers) flow into every page without an app restart.
+        # The initial bulk load via _namespaces_loaded gate stays in place
+        # for cheap cross-page navigation — these signals just keep it
+        # in sync afterward.
+        self._connect_namespace_lifecycle_signals()
         self._message_widget_container = None
         self._table_stack = None
         # Loading spinner overlay
@@ -133,6 +156,19 @@ class BaseResourcePage(BaseTablePage):
         self._spinner_type = "circular"  # Default spinner type, can be overridden
         # Track if data has been loaded at least once
         self._initial_load_done = False
+        # Generation counter for stale-signal rejection.  Incremented on every
+        # context change (namespace switch, cluster switch).  Watch emissions
+        # carry the generation they were started under; the receiver slot
+        # discards any payload whose generation doesn't match the current one.
+        self._watch_generation = 0
+        # True while this page currently holds a reference-counted subscription
+        # to its watch stream.  _start_resource_watch is reached more than once
+        # per visit (showEvent + the cluster-change restart timer + the
+        # namespace-change restart), so this guard ensures exactly one
+        # start_watch/stop_watch pair per visit — otherwise the loader's
+        # refcount corrupts and the page generation races ahead of the watch's,
+        # silently discarding every live update.
+        self._holds_watch_ref = False
         # Helper Managers
         self.style_manager = ResourcePageStyleManager
         self.deletion_manager = ResourceDeletionManager(self)
@@ -142,13 +178,30 @@ class BaseResourcePage(BaseTablePage):
         """Override showEvent to automatically load data when page becomes visible"""
         super().showEvent(event)
         self._was_hidden = False
+        # Phase 5: synchronously validate namespace_filter against the live
+        # cluster BEFORE starting the watch.  Without this, pages that were
+        # hidden when a namespace was deleted out-of-band would retain
+        # their stale filter, fire a watch into a dead namespace, and burn
+        # cycles in the loader's exponential-backoff loop until the user
+        # manually switched.  Cheap O(1) set check against the daemon's
+        # authoritative cache.
+        self._validate_namespace_filter_against_cluster()
+        # Start (or re-use) the watch stream for this resource type.
+        # If a watch is already running and has cached data, _start_resource_watch
+        # will render from cache immediately — no API call needed.
+        self._start_resource_watch()
         # Load immediately for better performance
         self._handle_normal_show_event()
 
     def hideEvent(self, event):
-        """Track when page is hidden to skip signals while navigated away."""
+        """Stop the watch when the page is hidden to free resources."""
         super().hideEvent(event)
         self._was_hidden = True
+        # Stop the watch — daemon threads, HTTP connections, and cache dicts
+        # accumulate for every page the user has ever visited otherwise.
+        # SWR (_get_stale_cached_items) provides instant render on return,
+        # so the user sees cached data immediately while the new LIST completes.
+        self._stop_resource_watch()
 
     def _handle_normal_show_event(self):
         # Load namespaces dynamically - check if they need refreshing after cluster change
@@ -198,25 +251,165 @@ class BaseResourcePage(BaseTablePage):
             self._last_load_time = time.time()  # Track load time
             self.load_data()
 
+    def _start_resource_watch(self):
+        """Acquire (or refresh) this page's reference-counted watch stream.
+
+        Reached more than once per visit (showEvent, the cluster-change restart
+        timer, namespace-change restart), so it is guarded by _holds_watch_ref:
+        a fresh subscription is acquired — and the generation counter bumped —
+        only on the first call.  Subsequent calls while the ref is held just
+        re-render from cache, which keeps the page generation in lockstep with
+        the running watch.  start_watch is reference counted and adopts our
+        generation, so an already-active shared stream (e.g. one pre-started by
+        the cluster connector) starts emitting under our generation instead of
+        having its updates silently discarded.
+        """
+        if not hasattr(self, 'resource_type') or not self.resource_type:
+            return
+        skip_types = {'charts', 'helmreleases', 'portforwarding'}
+        if self.resource_type in skip_types or not getattr(self, 'uses_unified_search', True):
+            return
+        try:
+            from Utils.unified_resource_loader import cluster_scoped_resources
+            loader = get_unified_resource_loader()
+            namespace = getattr(self, 'namespace_filter', 'All Namespaces')
+            if namespace == 'All Namespaces' or self.resource_type in cluster_scoped_resources:
+                watch_ns = None
+            else:
+                watch_ns = namespace
+
+            if getattr(self, '_holds_watch_ref', False):
+                held_ns = getattr(self, '_current_watch_ns', None)
+                if watch_ns == held_ns:
+                    # Already subscribed to this exact stream — don't re-bump the
+                    # generation or double-count the refcount.  Just refresh.
+                    cached = loader.get_watch_cached_items(self.resource_type, watch_ns)
+                    if cached:
+                        self._render_from_cache(cached)
+                    return
+                # Namespace changed without an explicit stop — release the stale
+                # reference before acquiring the new one (defensive; the normal
+                # ns-change path stops first).
+                loader.stop_watch(self.resource_type, held_ns)
+                self._holds_watch_ref = False
+
+            self._watch_generation += 1
+            # Reference counted: starts a new stream tagged with our generation,
+            # or registers us on an existing one and adopts our generation.
+            # State flags are set AFTER a successful start so a raised exception
+            # leaves _holds_watch_ref=False and allows the next show() to retry.
+            loader.start_watch(self.resource_type, watch_ns,
+                               generation=self._watch_generation)
+            self._current_watch_ns = watch_ns
+            self._holds_watch_ref = True
+
+            # If the stream we joined already had cached data, render instantly.
+            cached = loader.get_watch_cached_items(self.resource_type, watch_ns)
+            if cached:
+                logging.debug(
+                    f"{self.__class__.__name__}: rendering {len(cached)} cached "
+                    f"{self.resource_type} items instantly (watch already active)"
+                )
+                self._render_from_cache(cached)
+        except Exception as e:
+            logging.debug(f"Could not start watch for {self.resource_type}: {e}")
+
+    def _render_from_cache(self, cached_items: list):
+        """Render data from the watch cache without an API call."""
+        result = LoadResult(
+            success=True,
+            resource_type=self.resource_type,
+            items=cached_items,
+            total_count=len(cached_items),
+            load_time_ms=0,
+            from_cache=True,
+            metadata={'generation': self._watch_generation},
+        )
+        self._on_unified_resources_loaded(self.resource_type, result)
+
+    def _stop_resource_watch(self):
+        """Release this page's reference to the watch stream.
+
+        Called from hideEvent (page navigated away) and before namespace
+        changes.  Reference counted in the loader, so this only tears the
+        stream down if no other consumer (e.g. the connector daemon) still
+        holds it.  Guarded by _holds_watch_ref so a stray stop without a
+        matching start cannot underflow the loader's refcount, and the flag is
+        cleared up-front so each acquire maps to exactly one release.  stop()
+        does NOT join the daemon thread, so this returns instantly.
+        """
+        if not getattr(self, '_holds_watch_ref', False):
+            return
+        self._holds_watch_ref = False
+        watch_ns = getattr(self, '_current_watch_ns', None)
+        if not hasattr(self, 'resource_type') or not self.resource_type:
+            return
+        skip_types = {'charts', 'helmreleases', 'portforwarding'}
+        if self.resource_type in skip_types or not getattr(self, 'uses_unified_search', True):
+            return
+        try:
+            loader = get_unified_resource_loader()
+            loader.stop_watch(self.resource_type, watch_ns)
+        except Exception:
+            pass
+
+    @property
+    def watch_namespace(self):
+        """Public read accessor for the page's current watch namespace.
+
+        Returns the namespace string the active watch is keyed on, or None
+        for cluster-scoped resources / "All Namespaces".  Use this from
+        other modules instead of reading _current_watch_ns directly so the
+        underlying storage can evolve without breaking external callers.
+        """
+        return getattr(self, '_current_watch_ns', None)
+
     def setup_ui(self, title, headers, sortable_columns=None):
         page_main_layout = QVBoxLayout(self)
         page_main_layout.setContentsMargins(16, 16, 16, 16)
         page_main_layout.setSpacing(16)
         header_controls_layout = QHBoxLayout()
+        # Stored so subclasses can insert page-specific header widgets without
+        # traversing the layout tree or matching button text (see PodsPage).
+        self.header_layout = header_controls_layout
         self._create_title_and_count(header_controls_layout, title)
         page_main_layout.addLayout(header_controls_layout)
         self._add_controls_to_header(header_controls_layout)
         self._table_stack = QStackedWidget()
         page_main_layout.addWidget(self._table_stack)
+        page_main_layout.setStretchFactor(self._table_stack, 10)
+        
         self.table = self._create_table(headers, sortable_columns)
-        self._table_stack.addWidget(self.table)
+        self.table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        
+        self.table_container = QFrame()
+        self.table_container.setObjectName("table_container")
+        self.table_container.setStyleSheet(BaseTablePageStyles.get_table_container_style())
+        self.table_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        
+        shadow = QGraphicsDropShadowEffect(self.table_container)
+        shadow.setBlurRadius(8)
+        shadow.setOffset(0, 1)
+        shadow.setColor(QColor(0, 0, 0, 40))
+        self.table_container.setGraphicsEffect(shadow)
+        
+        card_layout = QVBoxLayout(self.table_container)
+        card_layout.setContentsMargins(0, 0, 0, 0)
+        card_layout.setSpacing(0)
+        card_layout.addWidget(self.table)
+        
+        self._table_stack.addWidget(self.table_container)
+        
         # Create a dedicated container for messages (empty / error)
         self._message_widget_container = QWidget()
         message_container_layout = QVBoxLayout(self._message_widget_container)
         message_container_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         message_container_layout.setContentsMargins(20, 20, 20, 20)
         self._table_stack.addWidget(self._message_widget_container)
-        self._table_stack.setCurrentWidget(self.table)
+        
+        self._table_stack.setCurrentWidget(self.table_container)
+        self._table_stack.currentChanged.connect(self._on_stack_changed)
+            
         self.select_all_checkbox = self._create_select_all_checkbox()
         self._add_select_all_to_header()
         if hasattr(self, "table") and self.table:
@@ -228,34 +421,14 @@ class BaseResourcePage(BaseTablePage):
         self.installEventFilter(self)
         return page_main_layout
 
-    def _format_age(self, timestamp):
-        if not timestamp:
-            return "Unknown"
-        # Calculate age directly (no caching)
-        try:
-            if isinstance(timestamp, str):
-                created_time = datetime.datetime.fromisoformat(
-                    timestamp.replace("Z", "+00:00")
-                )
-                if created_time.tzinfo is None:
-                    created_time = created_time.replace(tzinfo=datetime.timezone.utc)
-            else:
-                created_time = timestamp.replace(tzinfo=datetime.timezone.utc)
-            now = datetime.datetime.now(datetime.timezone.utc)
-            diff = now - created_time
-            days = diff.days
-            hours, remainder = divmod(diff.seconds, 3600)
-            minutes, _ = divmod(remainder, 60)
-            if days > 0:
-                result = f"{days}d"
-            elif hours > 0:
-                result = f"{hours}h"
-            else:
-                result = f"{minutes}m"
-            return result
-        except Exception as e:
-            logging.error(f"Error formatting age: {e}")
-            return "Unknown"
+    def _on_stack_changed(self, index):
+        """Adjust UI when switching between table and message views."""
+        for i in range(self._table_stack.count()):
+            widget = self._table_stack.widget(i)
+            policy = widget.sizePolicy()
+            policy.setVerticalPolicy(QSizePolicy.Policy.Expanding if i == index else QSizePolicy.Policy.Ignored)
+            widget.setSizePolicy(policy)
+        self._table_stack.adjustSize()
 
     def _manage_memory_usage(self):
         try:
@@ -348,6 +521,24 @@ class BaseResourcePage(BaseTablePage):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._resize_loading_overlay()
+
+        # Re-fit columns to the new viewport width (e.g. after maximise).
+        if not hasattr(self, '_resize_col_timer'):
+            self._resize_col_timer = QTimer(self)
+            self._resize_col_timer.setSingleShot(True)
+            self._resize_col_timer.timeout.connect(self._on_resize_refit_columns)
+        self._resize_col_timer.start(200)
+
+    def _on_resize_refit_columns(self):
+        """Called after window resize settles; re-runs Phase 2 viewport-fit only."""
+        try:
+            if not self.table or not is_valid(self.table):
+                return
+            if self.table.rowCount() == 0:
+                return
+            self._auto_resize_columns()
+        except Exception:
+            pass
 
     def _create_title_and_count(self, layout, title_text):
         """Create title and count labels (theme-aware colors, same sizes)"""
@@ -520,14 +711,14 @@ class BaseResourcePage(BaseTablePage):
                 if default_index >= 0:
                     self.namespace_combo.setCurrentIndex(default_index)
                     self.namespace_filter = "default"
-                    logging.info(
+                    logging.debug(
                         f"Set namespace dropdown to 'default' (index {default_index})"
                     )
                 else:
                     # If no default namespace, use "All Namespaces"
                     self.namespace_combo.setCurrentIndex(0)
                     self.namespace_filter = "All Namespaces"
-                    logging.info(
+                    logging.debug(
                         "Set namespace dropdown to 'All Namespaces' (no default found)"
                     )
             else:
@@ -535,19 +726,19 @@ class BaseResourcePage(BaseTablePage):
                 current_index = self.namespace_combo.findText(self.namespace_filter)
                 if current_index >= 0:
                     self.namespace_combo.setCurrentIndex(current_index)
-                    logging.info(
+                    logging.debug(
                         f"Restored namespace dropdown to '{self.namespace_filter}' (index {current_index})"
                     )
                 else:
                     # Fallback to All Namespaces if current filter not found
                     self.namespace_combo.setCurrentIndex(0)
                     self.namespace_filter = "All Namespaces"
-                    logging.info("Fallback: Set namespace dropdown to 'All Namespaces'")
+                    logging.debug("Fallback: Set namespace dropdown to 'All Namespaces'")
             # Reconnect the signal after setting the dropdown
             self.namespace_combo.currentTextChanged.connect(self._on_namespace_changed)
             # Re - enable the dropdown after successful loading
             self.namespace_combo.setEnabled(True)
-            logging.info(
+            logging.debug(
                 f"Loaded {len(namespaces)} namespaces into dropdown, current filter: {self.namespace_filter}"
             )
         except Exception as e:
@@ -568,6 +759,182 @@ class BaseResourcePage(BaseTablePage):
         self._namespaces_loaded = False  # Reset the flag
         self._load_namespaces_async()
 
+    # ── Phase 5: pre-show namespace_filter validation ──────────────────────
+
+    def _validate_namespace_filter_against_cluster(self):
+        """Reset a stale namespace_filter to 'default' before the watch starts.
+
+        Called from showEvent.  The reactive Phase 4 slot only catches
+        deletions while a page is live; pages hidden during the deletion
+        retain their stale filter and would otherwise fire a watch into a
+        nonexistent namespace.  This synchronous gate closes that gap.
+
+        Cheap: O(1) set membership against the kubernetes_client's
+        authoritative _known_namespaces cache, which is maintained by the
+        app-lifetime namespace watch daemon.
+
+        Skips validation when:
+          - the current filter is a sentinel value ('default' / 'All Namespaces')
+            because both are always safe targets
+          - the cluster's namespace cache is empty (early startup, pre-connect)
+            because we cannot distinguish "namespace gone" from "we don't
+            know yet"
+        """
+        try:
+            current = getattr(self, "namespace_filter", None)
+            if not current or current in ("default", "All Namespaces"):
+                return
+            kc = getattr(self, "kube_client", None)
+            if kc is None or not hasattr(kc, "get_known_namespaces"):
+                return
+            live = kc.get_known_namespaces()
+            if not live:
+                # Daemon hasn't populated yet — don't false-positive every
+                # filter as dead on first cluster connect.
+                return
+            if current in live:
+                return
+            # Namespace was deleted out-of-band while this page was hidden.
+            logging.info(
+                f"{self.__class__.__name__}: namespace_filter "
+                f"'{current}' is no longer present in the cluster; "
+                f"falling back to 'default' before starting watch."
+            )
+            self.namespace_filter = "default"
+            # Sync the visible combo selection if it has been built.  Block
+            # the changed-signal so we don't trigger an extra reload — the
+            # caller (showEvent) is about to start the watch anyway.
+            if getattr(self, "namespace_combo", None) is not None:
+                idx = self.namespace_combo.findText("default")
+                if idx >= 0:
+                    # Block currentTextChanged: setCurrentIndex would
+                    # otherwise fire _on_namespace_changed, which calls
+                    # _stop_resource_watch + force_load_data — but showEvent
+                    # is about to call _start_resource_watch immediately
+                    # after this validation returns.  Without this guard
+                    # we'd get a stop-start-stop-start cycle on every
+                    # stale-filter reset.  Load-bearing — do not remove.
+                    self.namespace_combo.blockSignals(True)
+                    try:
+                        self.namespace_combo.setCurrentIndex(idx)
+                    finally:
+                        self.namespace_combo.blockSignals(False)
+        except Exception as e:
+            logging.debug(f"namespace_filter validation failed: {e}")
+
+    # ── Phase 4: live namespace dropdown subscriptions ─────────────────────
+
+    def _connect_namespace_lifecycle_signals(self):
+        """Subscribe the dropdown to namespace_added / namespace_deleted on
+        the kubernetes_client.  The app-lifetime namespace watch daemon (see
+        KubernetesClient.ensure_namespace_watch) drives both signals, so
+        out-of-band kubectl create/delete propagates here automatically.
+        """
+        try:
+            if self.kube_client is None:
+                return
+            if hasattr(self.kube_client, "namespace_added_signal"):
+                self.kube_client.namespace_added_signal.connect(
+                    self._add_namespace_to_dropdown
+                )
+            if hasattr(self.kube_client, "namespace_deleted_signal"):
+                self.kube_client.namespace_deleted_signal.connect(
+                    self._remove_namespace_from_dropdown
+                )
+        except Exception as e:
+            logging.debug(f"namespace signal connect failed: {e}")
+
+    def _add_namespace_to_dropdown(self, namespace_name: str):
+        """Insert a newly-created namespace into the dropdown if not present.
+
+        Defensively guarded against pre-init states (combo not yet built)
+        and torn-down receivers.
+        """
+        try:
+            if not is_valid(self):
+                return
+            if not self.namespace_combo or not namespace_name:
+                return
+            if self.namespace_combo.findText(namespace_name) != -1:
+                return  # Already present — bulk-load or duplicate event.
+            self.namespace_combo.blockSignals(True)
+            try:
+                self.namespace_combo.addItem(namespace_name)
+            finally:
+                self.namespace_combo.blockSignals(False)
+            logging.debug(
+                f"{self.__class__.__name__}: added namespace '{namespace_name}' to dropdown"
+            )
+        except Exception as e:
+            logging.debug(f"_add_namespace_to_dropdown failed: {e}")
+
+    def _remove_namespace_from_dropdown(self, namespace_name: str):
+        """Remove a deleted namespace from the dropdown.
+
+        Critical safety: if the deleted namespace was the active filter,
+        fall back to 'default' (or 'All Namespaces' if no default exists)
+        and force a table reload so the page stops querying a context
+        the cluster has already purged.  Without this guard the page
+        would cascade 404s on every refresh.
+        """
+        try:
+            if not is_valid(self):
+                return
+            if not self.namespace_combo or not namespace_name:
+                return
+            idx = self.namespace_combo.findText(namespace_name)
+            if idx == -1:
+                return
+            was_active = (
+                getattr(self, "namespace_filter", None) == namespace_name
+            )
+            self.namespace_combo.blockSignals(True)
+            try:
+                self.namespace_combo.removeItem(idx)
+            finally:
+                self.namespace_combo.blockSignals(False)
+            logging.debug(
+                f"{self.__class__.__name__}: removed namespace "
+                f"'{namespace_name}' from dropdown"
+            )
+            if was_active:
+                # Fall back to a known-safe filter and reload.  Prefer the
+                # real 'default' namespace if it still exists; otherwise
+                # use 'All Namespaces'.
+                fallback = "default"
+                if self.namespace_combo.findText(fallback) == -1:
+                    fallback = "All Namespaces"
+                logging.warning(
+                    f"{self.__class__.__name__}: active namespace "
+                    f"'{namespace_name}' deleted out-of-band; falling "
+                    f"back to '{fallback}'."
+                )
+                # Position the combo on the fallback with signals blocked so we
+                # invoke the namespace-change handler exactly once below (rather
+                # than letting setCurrentIndex fire it implicitly).
+                fallback_idx = self.namespace_combo.findText(fallback)
+                if fallback_idx != -1:
+                    self.namespace_combo.blockSignals(True)
+                    try:
+                        self.namespace_combo.setCurrentIndex(fallback_idx)
+                    finally:
+                        self.namespace_combo.blockSignals(False)
+                # Delegate to the namespace-change handler so the live watch is
+                # unsubscribed from the deleted namespace and re-subscribed to
+                # the fallback.  It also sets namespace_filter, resets pagination
+                # and reloads the table.  namespace_filter is intentionally left
+                # at the (deleted) value here so the handler's old==new guard
+                # does not short-circuit the restart.
+                if getattr(self, "namespace_filter", None) != fallback:
+                    try:
+                        self._on_namespace_changed(fallback)
+                    except Exception as e:
+                        logging.debug(
+                            f"namespace-change restart after ns delete failed: {e}"
+                        )
+        except Exception as e:
+            logging.debug(f"_remove_namespace_from_dropdown failed: {e}")
+
     def _on_namespace_changed(self, namespace):
         if namespace == "Loading namespaces...":
             return  # Ignore the loading placeholder
@@ -576,10 +943,14 @@ class BaseResourcePage(BaseTablePage):
         if old_namespace == namespace:
             logging.debug(f"Namespace unchanged ({namespace}), skipping reload")
             return
-        logging.info(f"Namespace changed from '{old_namespace}' to '{namespace}'")
+        logging.debug(f"Namespace changed from '{old_namespace}' to '{namespace}'")
+        # Stop watch for old namespace, start watch for new namespace
+        self._stop_resource_watch()
         # Cache system removed - no cache clearing needed
         # Update namespace filter BEFORE clearing resources
         self.namespace_filter = namespace
+        # Start watch for new namespace scope
+        self._start_resource_watch()
         # Reset pagination state
         self.current_continue_token = None
         self.all_data_loaded = False
@@ -621,13 +992,42 @@ class BaseResourcePage(BaseTablePage):
             delay_ms=SCROLL_DEBOUNCE_MS,
         )
 
+    def _render_more_visible_rows(self):
+        """Append the next batch of already-in-memory rows to the table.
+        
+        Used for lazy rendering of large datasets: all data is already loaded into
+        self.resources but only the first 200 rows are drawn initially. This method
+        appends the next 100 rows on each scroll-to-bottom event without clearing
+        and re-rendering the entire table.
+        """
+        try:
+            currently_rendered = self.table.rowCount()
+            total_in_memory = len(self.resources)
+            if currently_rendered >= total_in_memory:
+                return  # All in-memory rows are already rendered
+            next_batch = self.resources[currently_rendered : currently_rendered + 100]
+            if next_batch:
+                logging.debug(
+                    f"Lazy render: appending rows {currently_rendered}–"
+                    f"{currently_rendered + len(next_batch) - 1} "
+                    f"(total in memory: {total_in_memory})"
+                )
+                self._render_resources_batch(next_batch, append=True)
+        except Exception as e:
+            logging.error(f"Error in _render_more_visible_rows: {e}")
+
     def _handle_scroll_debounced(self):
         if not self.table or self.is_loading_more:
             return
         scrollbar = self.table.verticalScrollBar()
         if scrollbar.value() >= scrollbar.maximum() - 10:  # Near bottom
+            # Priority 1: render more already-loaded rows (lazy visual render for
+            # large datasets where all data is in self.resources but only 200 are drawn)
+            if self._large_dataset_mode and self.table.rowCount() < len(self.resources):
+                self._render_more_visible_rows()
+                return
+            # Priority 2: load next backend batch from _remaining_resources (>2000 items)
             if self._large_dataset_mode and self._remaining_resources:
-                # For large datasets, load next batch from memory
                 self._load_more_data_batch()
             elif not self.all_data_loaded and self.current_continue_token:
                 # For normal pagination, use traditional method
@@ -644,6 +1044,17 @@ class BaseResourcePage(BaseTablePage):
         self._start_loading_thread(continue_token=self.current_continue_token)
 
     def _start_loading_thread(self, continue_token=None):
+        # Bypass unified loader completely for resource types that don't use it
+        if not getattr(self, "uses_unified_search", True):
+            if type(self).load_data is not BaseResourcePage.load_data:
+                try:
+                    self.load_data(load_more=bool(continue_token))
+                except TypeError:
+                    self.load_data()
+            else:
+                logging.error(f"{self.__class__.__name__} sets uses_unified_search=False but lacks a custom load_data()")
+            return
+
         # Cancel any existing loading
         if (
             hasattr(self, "loading_thread")
@@ -678,6 +1089,24 @@ class BaseResourcePage(BaseTablePage):
                 return
             # Skip if page is hidden (navigated away)
             if getattr(self, "_was_hidden", False):
+                # Surfacing this at WARNING because dropped signals during
+                # active-page time means UI staleness.  If you see this in the
+                # log for a page you're looking at, _was_hidden got stuck.
+                logging.warning(
+                    f"{self.__class__.__name__}: dropping {resource_type} signal "
+                    f"({len(result.items or [])} items) — _was_hidden=True"
+                )
+                return
+            # Generation counter validation gate — reject stale signals that
+            # were already queued in the Qt event loop before a namespace or
+            # context change.  Signals without a generation tag (e.g. from
+            # non-watch worker loads) are always accepted.
+            sig_gen = result.metadata.get('generation') if result.metadata else None
+            if sig_gen is not None and sig_gen != self._watch_generation:
+                logging.debug(
+                    f"{self.__class__.__name__}: discarding stale {resource_type} "
+                    f"signal (gen {sig_gen} != current {self._watch_generation})"
+                )
                 return
             if not result.success:
                 self._on_unified_loading_error(
@@ -689,16 +1118,26 @@ class BaseResourcePage(BaseTablePage):
             # If result is empty, it means we genuinely have no items (e.g. empty namespace)
             # We do NOT restore backup here, because this is a SUCCESS handler.
             # Backup restoration is only for ERRORS (handled in _on_unified_loading_error).
-            # Clear backup on successful non-empty load
-            if resources and hasattr(self, "_backup_resources"):
+            # Clear backup on any successful load (including empty results) so
+            # stale rows from a previous namespace are not restored on a later error.
+            if hasattr(self, "_backup_resources"):
                 self._backup_resources = []
-            # Check if we have a large dataset
+            # Check if we have a large dataset.  Only log on transition into
+            # large-dataset mode (or back out) — otherwise every count tick
+            # during steady-state churn produces an identical "Activating
+            # optimizations" INFO line (~100 per minute on busy event pages).
             self._total_item_count = len(resources)
+            was_large_dataset_mode = getattr(self, "_large_dataset_mode", False)
             self._large_dataset_mode = self._total_item_count > LARGE_DATASET_THRESHOLD
-            if self._large_dataset_mode:
+            if self._large_dataset_mode and not was_large_dataset_mode:
                 logging.info(
                     f"Large dataset detected: {self._total_item_count} items. Activating optimizations."
                 )
+            elif not self._large_dataset_mode and was_large_dataset_mode:
+                logging.info(
+                    f"Dataset shrank below threshold ({self._total_item_count} items). Deactivating optimizations."
+                )
+            if self._large_dataset_mode:
                 # For large datasets, only load the first batch
                 self.resources = resources[:MAX_ITEMS_IN_MEMORY]
                 self._loaded_item_count = len(self.resources)
@@ -711,7 +1150,29 @@ class BaseResourcePage(BaseTablePage):
                 self._loaded_item_count = len(self.resources)
                 self.all_data_loaded = True
                 self._remaining_resources = []
-            # Always display resources, even if empty
+            # Always display resources, even if empty.
+            # Watch-driven updates (load_time_ms == 0) use an efficient in-place
+            # path that avoids clearing and rebuilding the entire table.
+            is_watch_update = result.load_time_ms == 0 and self._initial_load_done
+
+            if is_watch_update:
+                # ── UI-side coalescing ──
+                # Multiple watch signals queue up as QMetaCallEvents.  The main
+                # thread processes them sequentially, but rendering 95 rows for
+                # EVERY signal (~50ms each × 50 signals = 2.5s freeze) is fatal.
+                # Instead, we store the latest data and schedule a single deferred
+                # render via QTimer.  All intermediate signals just update the
+                # stored reference — O(1) per signal, zero rendering.
+                self._pending_watch_data = self.resources
+                self.items_count.setText(f"{self._total_item_count} items")
+                self._schedule_watch_render()
+                # Complete the non-rendering bookkeeping
+                self.is_loading_initial = False
+                self.is_loading_more = False
+                self.hide_loading_indicator()
+                return
+
+            # Non-watch path: initial load, full refresh — render immediately
             self._display_resources(self.resources)
             # Update items count directly from the result to avoid timing issues
             # with self.resources not being set when duplicate requests occur
@@ -723,10 +1184,13 @@ class BaseResourcePage(BaseTablePage):
             self.hide_loading_indicator()
             self.all_items_loaded_signal.emit()
             self.load_more_complete.emit()
-            # Log performance info
-            logging.info(
-                f"Loaded {len(result.items or [])}/{self._total_item_count} {resource_type} in {result.load_time_ms:.1f}ms"
-            )
+            # Log performance info — only real API calls (load_time_ms > 0) at INFO;
+            # watch/cache updates (0ms) are debug-only to avoid event-driven noise.
+            msg = f"Loaded {len(result.items or [])}/{self._total_item_count} {resource_type} in {result.load_time_ms:.1f}ms"
+            if result.load_time_ms > 0:
+                logging.info(msg)
+            else:
+                logging.debug(msg)
         except Exception as e:
             logging.error(f"Error processing unified resources: {e}")
             self._on_unified_loading_error(resource_type, str(e))
@@ -790,9 +1254,14 @@ class BaseResourcePage(BaseTablePage):
 
     def _display_resources(self, resources):
         if not resources:
+            self._row_cache = RowCache()  # clear cache for empty state
             self._show_empty_message()
             return
-        self._table_stack.setCurrentWidget(self.table)
+        if self._table_stack:
+            if hasattr(self, 'table_container') and self.table_container:
+                self._table_stack.setCurrentWidget(self.table_container)
+            else:
+                self._table_stack.setCurrentWidget(self.table)
         # Clear previous selections when displaying new data
         self.selected_items.clear()
         # Log performance info for large datasets
@@ -802,50 +1271,356 @@ class BaseResourcePage(BaseTablePage):
             )
         # Optimized rendering for all datasets
         self._render_resources_batch(resources)
+        # ── Rebuild row cache after full render ──────────────────────
+        # This populates the diff engine's baseline so subsequent watch
+        # updates can compute surgical diffs instead of full rebuilds.
+        self._rebuild_row_cache(resources)
 
     def _render_resources_batch(self, resources, append=False):
         if not append:
             self.clear_table()
         if not resources:
             return
-        # Disable sorting during batch rendering for better performance
-        self.table.setSortingEnabled(False)
-        start_row = self.table.rowCount() if append else 0
-        # Set row count all at once instead of inserting one by one
-        total_rows = start_row + len(resources)
-        self.table.setRowCount(total_rows)
-        # Handle large datasets efficiently
-        if len(resources) > 500:
-            # For large datasets, render only visible items
-            batch_size = 100  # Larger batches for better performance with large data
-            # Limit initial render to 200 items
-            for i in range(0, min(200, len(resources)), batch_size):
-                batch = resources[i : i + batch_size]
-                for j, resource in enumerate(batch):
-                    row = start_row + i + j
-                    if hasattr(self, "populate_resource_row"):
-                        self.populate_resource_row(row, resource)
-                    else:
-                        self._populate_resource_row(row, resource)
-                # Process events every other batch for large datasets
-                if i % (batch_size * 2) == 0:
-                    QApplication.processEvents()
+        # Suppress per-row layout recalculations and repaints while populating.
+        # All visual updates are flushed in a single frame when re-enabled.
+        self.table.setUpdatesEnabled(False)
+        try:
+            # Disable sorting during batch rendering for better performance
+            self.table.setSortingEnabled(False)
+            start_row = self.table.rowCount() if append else 0
+            # Handle large datasets efficiently
+            if len(resources) > 500:
+                # For large datasets, render only the first visible batch.
+                # FIXED: Only allocate rows we actually populate — prevents blank row slots
+                # that were caused by setRowCount(N) + loop capped at 200.
+                render_count = min(200, len(resources))
+                self.table.setRowCount(start_row + render_count)
+                batch_size = 100
+                for i in range(0, render_count, batch_size):
+                    batch = resources[i : i + batch_size]
+                    for j, resource in enumerate(batch):
+                        row = start_row + i + j
+                        if hasattr(self, "populate_resource_row"):
+                            self.populate_resource_row(row, resource)
+                        else:
+                            self._populate_resource_row(row, resource)
+            else:
+                # For smaller datasets, render all rows normally
+                self.table.setRowCount(start_row + len(resources))
+                batch_size = 50
+                for i in range(0, len(resources), batch_size):
+                    batch = resources[i : i + batch_size]
+                    for j, resource in enumerate(batch):
+                        row = start_row + i + j
+                        if hasattr(self, "populate_resource_row"):
+                            self.populate_resource_row(row, resource)
+                        else:
+                            self._populate_resource_row(row, resource)
+            # Re-enable sorting after all rows are added
+            self.table.setSortingEnabled(True)
+        finally:
+            self.table.setUpdatesEnabled(True)
+        # Schedule layout updates
+        QTimer.singleShot(10, self._update_table_height)
+        QTimer.singleShot(150, self._auto_resize_columns)
+
+    # ── Watch-update coalescing ──────────────────────────────────────────
+    # The watch thread emits signals that queue as QMetaCallEvents.  The
+    # main thread processes them FIFO, BEFORE timer events.  Without
+    # coalescing, 50 queued signals → 50 full table re-renders → 2.5s
+    # UI freeze.  The QTimer below ensures at most one render per 300ms
+    # window.
+
+    _WATCH_RENDER_INTERVAL_MS = 300  # coalesce window
+
+    def _schedule_watch_render(self):
+        """Schedule a deferred render of the latest watch data.
+
+        If a timer is already ticking, this is a no-op — the pending data
+        reference was already updated by the caller.  When the timer fires,
+        _flush_watch_render will render the *most recent* snapshot.
+        """
+        if not hasattr(self, '_watch_render_timer') or self._watch_render_timer is None:
+            self._watch_render_timer = QTimer(self)
+            self._watch_render_timer.setSingleShot(True)
+            self._watch_render_timer.timeout.connect(self._flush_watch_render)
+        # Only start if not already running — avoids resetting the window
+        if not self._watch_render_timer.isActive():
+            self._watch_render_timer.start(self._WATCH_RENDER_INTERVAL_MS)
+
+    def _flush_watch_render(self):
+        """Called by QTimer — render the latest watch snapshot exactly once."""
+        data = getattr(self, '_pending_watch_data', None)
+        if data is None:
+            return
+        self._pending_watch_data = None
+        logging.debug(f"_flush_watch_render: rendering {len(data)} items")
+        if data:
+            self._apply_watch_update(data)
         else:
-            # For smaller datasets, render normally in batches
-            batch_size = 50
-            for i in range(0, len(resources), batch_size):
-                batch = resources[i : i + batch_size]
-                for j, resource in enumerate(batch):
-                    row = start_row + i + j
-                    if hasattr(self, "populate_resource_row"):
-                        self.populate_resource_row(row, resource)
-                    else:
-                        self._populate_resource_row(row, resource)
-                # Process events less frequently to reduce overhead
-            if i % (batch_size * 2) == 0:
-                QApplication.processEvents()
-        # Re - enable sorting after all rows are added
-        self.table.setSortingEnabled(True)
+            # All items deleted — show empty state
+            self._display_resources(data)
+
+    def _apply_watch_update(self, resources):
+        """Apply a watch-driven update using the diff engine for skip-detection.
+
+        Uses the diff engine to detect whether the incoming data actually
+        differs from the current table state.  If nothing changed (is_empty),
+        the rebuild is skipped entirely — this is the primary performance win,
+        avoiding ~50ms of widget churn per coalesced watch tick on idle
+        clusters.
+
+        When changes ARE detected (additions, removals, modifications), the
+        legacy full-rebuild path is used.  Surgical row-level mutations
+        (removeRow/insertRow) were found to cause index-desync and access
+        violations during theme switching, so the safe setRowCount() +
+        repopulate path is used instead.
+        """
+        if getattr(self, 'REQUIRES_FULL_RESET', False):
+            self._apply_watch_update_legacy(resources)
+            return
+
+        if not resources:
+            self._row_cache = RowCache()
+            self._show_empty_message()
+            return
+        if self._table_stack:
+            if hasattr(self, 'table_container') and self.table_container:
+                self._table_stack.setCurrentWidget(self.table_container)
+            else:
+                self._table_stack.setCurrentWidget(self.table)
+
+        # ── Build new cache and compute diff ─────────────────────────
+        new_cache = RowCache()
+        try:
+            new_cache.rebuild(resources, self._project_row_data)
+        except Exception as e:
+            logging.warning(
+                f"Diff projection failed ({e}), falling back to full rebuild"
+            )
+            self._apply_watch_update_legacy(resources)
+            return
+
+        diff = compute_diff(self._row_cache, new_cache)
+
+        if diff.is_empty:
+            # No changes at all — skip the entire rebuild.
+            # This is the main performance win: on idle clusters, watch
+            # ticks arrive every ~30s with identical data.  Without this
+            # check, each tick would destroy and recreate every widget.
+            self._row_cache = new_cache
+            return
+
+        # Changes detected — log summary at DEBUG for diagnostics
+        logging.debug(
+            f"Diff engine: {len(diff.removed)} removed, "
+            f"{len(diff.modified)} modified, {len(diff.added)} added"
+            f"{' (full reset)' if diff.is_full_reset else ''}"
+        )
+
+        # Capture scroll position before rebuild
+        scroll_pos = self.table.verticalScrollBar().value() if self.table.verticalScrollBar() else 0
+
+        # Use the safe legacy full-rebuild path for ALL changes
+        self._apply_watch_update_legacy(resources)
+
+        # Restore scroll position after rebuild
+        if self.table.verticalScrollBar() and scroll_pos > 0:
+            QTimer.singleShot(10, lambda: (
+                self.table.verticalScrollBar().setValue(scroll_pos)
+                if self.table.verticalScrollBar() else None
+            ))
+
+        # Cache is already rebuilt inside _apply_watch_update_legacy
+        QTimer.singleShot(10, self._update_table_height)
+
+    def _apply_watch_update_legacy(self, resources):
+        """Legacy full-rebuild path for watch updates.
+
+        Used when the diff engine flags is_full_reset (volumetric guard)
+        or when projection fails.  Identical to the original _apply_watch_update.
+        """
+        if not resources:
+            self._show_empty_message()
+            return
+        # Selection state (selected_items) is intentionally PRESERVED across
+        # this rebuild.  The legacy path destroys and recreates every row
+        # widget, so checkboxes return unchecked; _restore_row_selection_state()
+        # below re-applies the user's selection after repopulation and prunes
+        # entries for resources that disappeared in this update.
+        new_count = len(resources)
+        self.table.setUpdatesEnabled(False)
+        try:
+            self.table.setSortingEnabled(False)
+            # Immediately orphan every existing cell widget BEFORE repopulating.
+            # setCellWidget() only schedules the old widget for deferred
+            # deleteLater(); under heavy churn (e.g. 1000 pods appearing at
+            # once) the event loop can't drain that queue, so the old
+            # checkbox/status/action widgets stay parented to the viewport and
+            # paint as duplicates on top of the new ones until deletion catches
+            # up.  _teardown_row_widgets() calls setParent(None), removing them
+            # from the widget tree synchronously so no zombie ever paints.
+            for row in range(self.table.rowCount()):
+                self._teardown_row_widgets(row)
+            self.table.setRowCount(new_count)
+            for row, resource in enumerate(resources):
+                if hasattr(self, "populate_resource_row"):
+                    self.populate_resource_row(row, resource)
+                else:
+                    self._populate_resource_row(row, resource)
+            self.table.setSortingEnabled(True)
+        finally:
+            self.table.setUpdatesEnabled(True)
+        # Rebuild row cache after legacy full rebuild
+        self._rebuild_row_cache(resources)
+        # Re-apply preserved checkbox selections to the freshly-built rows.
+        self._restore_row_selection_state()
+        # Resize columns after updates are enabled
+        QTimer.singleShot(150, self._auto_resize_columns)
+
+    # ── Diff-engine helpers ──────────────────────────────────────────────
+
+    def _rebuild_row_cache(self, resources):
+        """Rebuild the UID-keyed row cache from a full resource list.
+
+        Called after initial loads and legacy full-rebuilds to establish
+        the baseline that subsequent watch-driven diffs compare against.
+        """
+        try:
+            self._row_cache = RowCache()
+            self._row_cache.rebuild(resources or [], self._project_row_data)
+            logging.debug(
+                f"Row cache rebuilt: {len(self._row_cache)} entries "
+                f"for {self.__class__.__name__}"
+            )
+        except Exception as e:
+            logging.warning(f"Row cache rebuild failed: {e}")
+            self._row_cache = RowCache()
+
+    def _project_row_data(self, resource):
+        """Project a raw resource dict into a flat row dict for diffing.
+
+        The base implementation extracts universally available fields.
+        Subclasses should override this to include page-specific columns
+        (e.g., pod container count, deployment conditions).
+
+        CRITICAL: This method must NEVER store visual properties (colors,
+        styles, font weights).  Only semantic/display-text values that
+        determine whether a cell has changed content.
+
+        The returned dict MUST include a "uid" key.  Resources without a
+        stable UID are skipped by the diff engine.
+        """
+        uid = self._build_uid_from_resource(resource)
+        return {
+            "uid": uid,
+            "name": resource.get("name", ""),
+            "namespace": resource.get("namespace", ""),
+            "age": resource.get("age", ""),
+            "status": resource.get("status", ""),
+            "_raw": resource,  # internal — excluded from diff comparison
+        }
+
+    def _build_uid_from_resource(self, resource):
+        """Extract or synthesize a stable UID for a resource.
+
+        Prefers the Kubernetes metadata.uid.  Falls back to a composite
+        key of (name, namespace) for resources that lack raw_data (e.g.,
+        synthetic entries from port-forwarding or helm).
+        """
+        # Try Kubernetes UID from raw API response
+        raw = resource.get("raw_data") or {}
+        uid = ""
+        if isinstance(raw, dict):
+            uid = raw.get("metadata", {}).get("uid", "")
+        # Fallback: composite key
+        if not uid:
+            name = resource.get("name", "")
+            ns = resource.get("namespace", "")
+            uid = f"{ns}/{name}" if ns else name
+        return uid
+
+    def _teardown_row_widgets(self, row_idx):
+        """Strict PyQt memory teardown for a table row.
+
+        Minimal crash-free sequence per cell widget:
+
+          1. removeCellWidget() — detach from the table cell
+          2. hide() — stop it painting over the cell immediately
+          3. deleteLater() — schedule C++ destruction on the next idle
+
+        This method previously did MORE (setParent(None) to "orphan" the widget,
+        plus a recursive blockSignals/findChildren/disconnect sweep).  Both of
+        those were proven — deterministically, via stress_harness_theme_crash.py
+        — to CAUSE the theme-toggle access violation (0xC0000005) under heavy
+        table churn:
+          • setParent(None) reparents the widget to nothing, promoting it to a
+            TOP-LEVEL widget that app.setStyleSheet() polishes mid-destruction.
+          • the recursive disconnect() sweep left the widget in a state the
+            style engine segfaulted on during the next repolish.
+        The harness A/B is unambiguous: WITH either of those the app segfaults
+        within seconds of churn+theme-toggle; with only removeCellWidget()+hide()
+        +deleteLater() it survives indefinitely.  Qt auto-disconnects a widget's
+        signals when it is destroyed, so the explicit disconnect was redundant;
+        removeCellWidget()+hide() already stop duplicate-row painting.
+        """
+        if not self.table or not hasattr(self.table, 'columnCount'):
+            return
+        try:
+            for col in range(self.table.columnCount()):
+                widget = self.table.cellWidget(row_idx, col)
+                if widget is not None:
+                    # Detach from the cell and hide so it stops painting over
+                    # the cell immediately, then schedule C++ destruction on the
+                    # next idle.  Qt auto-disconnects all of a widget's signals
+                    # when it is destroyed, so no explicit disconnect() is needed.
+                    #
+                    # Two things deliberately AVOIDED here, both proven to cause
+                    # the theme-toggle access violation (0xC0000005) under heavy
+                    # table churn via stress_harness_theme_crash.py:
+                    #   • setParent(None) — promotes the widget to a TOP-LEVEL
+                    #     orphan that app.setStyleSheet() polishes mid-destruction.
+                    #   • widget.disconnect()/findChildren()+disconnect() — the
+                    #     recursive disconnect sweep left the widget in a state
+                    #     the style engine segfaulted on during the next repolish.
+                    # removeCellWidget()+hide()+deleteLater() alone is crash-free
+                    # under the harness AND still prevents duplicate-row painting.
+                    self.table.removeCellWidget(row_idx, col)
+                    widget.hide()
+                    widget.deleteLater()
+        except Exception as e:
+            logging.debug(f"Row widget teardown error at row {row_idx}: {e}")
+
+    def _find_row_index_by_uid(self, uid):
+        """Find the current table row index for a given UID.
+
+        Walks the row cache's uid list and maps to the current table
+        position.  Returns -1 if the UID is not found.
+
+        NOTE: This performs a linear scan.  For tables with <2000 rows
+        (our MAX_ITEMS_IN_MEMORY cap) this is sub-millisecond.
+        """
+        try:
+            uids = self._row_cache.uids
+            if uid in uids:
+                idx = uids.index(uid)
+                # Validate against actual table row count
+                if idx < self.table.rowCount():
+                    return idx
+        except (ValueError, AttributeError):
+            pass
+        return -1
+
+    def _find_resource_by_uid(self, resources, uid):
+        """Find a resource dict in a list by its UID.
+
+        Uses _build_uid_from_resource to match against the target UID.
+        Returns None if not found.
+        """
+        for resource in resources:
+            if self._build_uid_from_resource(resource) == uid:
+                return resource
+        return None
 
     def _populate_resource_row(self, row, resource):
         # Default implementation for common fields - can be overridden by subclasses
@@ -878,9 +1653,21 @@ class BaseResourcePage(BaseTablePage):
         self.items_count.setText(f"{count} items")
 
     def _show_empty_message(self):
+        # The list is now empty, so drop any lingering selection — the rows it
+        # referenced are gone and "Delete Selected" must not act on vanished
+        # items.  Centralizing the clear here covers every empty-state caller
+        # (initial display and watch-driven emptying), each of which returns
+        # before its normal selection clear/prune step would run.
+        self.selected_items.clear()
         # Keep table headers visible - don't clear the table completely
         if self.table:
-            self.table.setRowCount(0)  # Just clear rows, keep headers
+            # setRowCount is QTableWidget-only.  Pages migrated to QTableView
+            # (model-view) must clear via their own model.set_resources([])
+            # which they do in their overridden clear_table().
+            if hasattr(self.table, "setRowCount"):
+                self.table.setRowCount(0)  # Just clear rows, keep headers
+            elif hasattr(self, "clear_table"):
+                self.clear_table()
             self.table.show()  # Ensure table is visible
         # Clear and setup the message container
         self._clear_message_container()
@@ -910,10 +1697,14 @@ class BaseResourcePage(BaseTablePage):
         # Add widgets to message container
         self._message_widget_container.layout().addWidget(empty_title)
         self._message_widget_container.layout().addWidget(empty_subtitle)
-        # Show the message overlay but keep table visible in background
-        self._table_stack.setCurrentWidget(self.table)
-        # Switch to message container view
-        self._table_stack.setCurrentWidget(self._message_widget_container)
+        if self._table_stack:
+            # Show the message overlay but keep table visible in background
+            if hasattr(self, 'table_container') and self.table_container:
+                self._table_stack.setCurrentWidget(self.table_container)
+            else:
+                self._table_stack.setCurrentWidget(self.table)
+            # Switch to message container view
+            self._table_stack.setCurrentWidget(self._message_widget_container)
 
     def _show_error_message(self, message):
         self._clear_message_container()
@@ -922,7 +1713,8 @@ class BaseResourcePage(BaseTablePage):
         error_label.setStyleSheet(self.style_manager.get_error_label_style())
         error_label.setWordWrap(True)
         self._message_widget_container.layout().addWidget(error_label)
-        self._table_stack.setCurrentWidget(self._message_widget_container)
+        if self._table_stack:
+            self._table_stack.setCurrentWidget(self._message_widget_container)
 
     def _clear_message_container(self):
         layout = self._message_widget_container.layout()
@@ -931,28 +1723,79 @@ class BaseResourcePage(BaseTablePage):
             if child.widget():
                 child.widget().deleteLater()
 
+    def _get_stale_cached_items(self) -> list:
+        """Return the most recently cached result for this resource type + namespace,
+        or an empty list if nothing is cached.  Used by SWR to render stale data
+        instantly while a background refresh is in flight."""
+        try:
+            from Utils.unified_cache_system import get_unified_cache
+            if not self.resource_type:
+                return []
+            kube_client = self.kube_client
+            cluster_name = getattr(kube_client, 'current_cluster', None) if kube_client else None
+            if not cluster_name:
+                return []
+            namespace = (
+                None if self.namespace_filter == "All Namespaces"
+                else self.namespace_filter
+            )
+            namespace_key = f"ns_{namespace}" if namespace else "all_namespaces"
+            cache_key = f"{cluster_name}_{self.resource_type}_{namespace_key}"
+            items = get_unified_cache().get_cached_resources(self.resource_type, cache_key)
+            if not items:
+                logging.debug(
+                    f"SWR cache miss for {self.resource_type} "
+                    f"(key={cache_key}, namespace={namespace_key})"
+                )
+            return items if items else []
+        except Exception:
+            return []
+
     def force_load_data(self):
-        # Guard: If a load is already in progress, don't clear resources or start a new load
-        # This prevents the race condition where resources are cleared but duplicate detection
-        # returns an existing operation ID without emitting a new signal
-        if self.is_loading_initial:
+        # Guard: If any load is already in progress, don't clear resources or start a new load.
+        # Checking both flags prevents the race condition where a force_load_data call during
+        # an active scroll-triggered page load (is_loading_more=True) would overwrite
+        # _backup_resources with an empty list and corrupt the loading state machine.
+        if self.is_loading_initial or self.is_loading_more:
             logging.debug(
-                f"{self.__class__.__name__}: Skipping force_load_data - load already in progress"
+                f"{self.__class__.__name__}: Skipping force_load_data - load already in progress "
+                f"(initial={self.is_loading_initial}, more={self.is_loading_more})"
             )
             return
-        # Show loading indicator
-        self.show_loading_indicator("Refreshing data...")
-        # Backup existing resources before clearing - will restore if load returns empty
-        # This preserves visible data during transient failures (cluster disconnect, theme change, etc.)
-        self._backup_resources = list(self.resources) if self.resources else []
-        self._clear_resources()  # Use new method to clear resources properly
+
+        # SWR: render stale cached data immediately so the user sees content right
+        # away while the background refresh is in flight — no loading spinner needed.
+        stale_items = self._get_stale_cached_items()
+        if stale_items:
+            self.resources = list(stale_items)
+            self._display_resources(self.resources)
+            self.items_count.setText(f"{len(self.resources)} items")
+            self._backup_resources = list(self.resources)
+            logging.debug(
+                f"{self.__class__.__name__}: SWR — rendered {len(stale_items)} "
+                f"stale {self.resource_type} items instantly"
+            )
+            # Keep self.resources aligned with the displayed stale rows so
+            # checkbox/action lookups still resolve raw_data while the refresh
+            # is in flight.  The background load replaces self.resources
+            # wholesale on completion, so nothing accumulates.
+            self._clear_resources(keep_data=True)
+        else:
+            # No previous data — show the loading spinner for a true cold start.
+            self.show_loading_indicator("Refreshing data...")
+            self._backup_resources = list(self.resources) if self.resources else []
+            self._clear_resources()  # clears self.resources list; table display is untouched
         self.current_continue_token = None
         self.all_data_loaded = False
         self.is_loading_initial = True
         self._start_loading_thread()
 
-    def _clear_resources(self):
-        self.resources.clear()
+    def _clear_resources(self, keep_data=False):
+        # keep_data=True retains self.resources so SWR-displayed stale rows
+        # keep their raw_data for checkbox/action lookups while the refresh is
+        # in flight; the large-dataset bookkeeping is still reset below.
+        if not keep_data:
+            self.resources.clear()
         # Also clear any remaining resources for large datasets
         if hasattr(self, "_remaining_resources"):
             self._remaining_resources.clear()
@@ -968,12 +1811,19 @@ class BaseResourcePage(BaseTablePage):
             self.clear_table()
             # Clear all cached data
             self._clear_resources()
+            # Reset diff-engine row cache for new cluster
+            self._row_cache = RowCache()
             # Reset loading states
             self.is_loading_initial = False
             self.is_loading_more = False
             self.all_data_loaded = False
             self.current_continue_token = None
             self._initial_load_done = False
+            # Cluster switch force-stops all watches (stop_all_watches), so any
+            # reference this page held is gone with the old stream.  Clear the
+            # flag so the scheduled restart below re-acquires a fresh reference
+            # for the new cluster instead of short-circuiting on a stale held=True.
+            self._holds_watch_ref = False
             # Reset namespace loading flag so namespaces get refreshed for new cluster
             if hasattr(self, "_namespaces_loaded"):
                 self._namespaces_loaded = False
@@ -1006,6 +1856,19 @@ class BaseResourcePage(BaseTablePage):
                 logging.debug(
                     f"Triggered namespace reload for visible page {self.__class__.__name__}"
                 )
+            # Restart the watch stream for the new cluster.  Without this,
+            # showEvent never refires (the page was already visible during
+            # the cluster switch) so the watch stays dormant — pod
+            # ADDED/MODIFIED/DELETED events from the new cluster never
+            # reach the UI, and the user has to click Refresh to see new
+            # data.  Deferring slightly lets the new cluster's API service
+            # finish initialising and any old watches finish stopping.
+            if self.isVisible():
+                QTimer.singleShot(200, self._start_resource_watch)
+                logging.debug(
+                    f"Scheduled watch restart for {self.__class__.__name__} "
+                    f"after cluster change"
+                )
             logging.info(f"Cleared {self.__class__.__name__} for cluster change")
         except Exception as e:
             logging.error(
@@ -1035,15 +1898,27 @@ class BaseResourcePage(BaseTablePage):
                     checkbox.blockSignals(False)
         # Update selected_items based on state
         if state == Qt.CheckState.Checked.value:
-            # Add all items to selected set
-            for resource in self.resources:
-                resource_namespace = resource.get("namespace", "")
-                resource_key = (
-                    (resource["name"], resource_namespace)
-                    if resource_namespace
-                    else (resource["name"], "")
-                )
-                self.selected_items.add(resource_key)
+            # Add only the rows actually present in the current view.  In
+            # large-dataset mode the table renders a capped subset of
+            # self.resources, so keying off the full list would select
+            # invisible rows the user never checked (and that "Delete
+            # Selected" must not act on).  Resolve each visible checkbox by
+            # name, mirroring the per-row handler so keys stay consistent.
+            name_to_resource = {}
+            for r in self.resources:
+                nm = r.get("name")
+                if nm not in name_to_resource:
+                    name_to_resource[nm] = r
+            for row in range(self.table.rowCount()):
+                checkbox_container = self.table.cellWidget(row, 0)
+                if not checkbox_container:
+                    continue
+                checkbox = checkbox_container.findChild(QCheckBox)
+                if not checkbox:
+                    continue
+                resource = name_to_resource.get(checkbox.property("resource_name"))
+                if resource:
+                    self.selected_items.add(self._build_resource_key(resource))
         logging.debug(
             f"Select all: {state == Qt.CheckState.Checked.value}, Selected items: {len(self.selected_items)}"
         )
@@ -1113,16 +1988,11 @@ class BaseResourcePage(BaseTablePage):
         if hasattr(self, "_debounced_updater"):
             self._debounced_updater.cancel_update("search_" + self.__class__.__name__)
             self._debounced_updater.cancel_update("scroll_" + self.__class__.__name__)
-        # Stop threads
-        for thread in [
-            self.loading_thread,
-            self.delete_thread,
-            self.batch_delete_thread,
-        ]:
-            if thread and thread.isRunning():
-                if hasattr(thread, "cancel"):
-                    thread.cancel()
-                thread.wait(1000)
+        # Stop loading thread (delete threads are owned by deletion_manager)
+        if self.loading_thread and self.loading_thread.isRunning():
+            if hasattr(self.loading_thread, "cancel"):
+                self.loading_thread.cancel()
+            self.loading_thread.wait(1000)
 
     def clear_table(self):
         try:
@@ -1133,11 +2003,11 @@ class BaseResourcePage(BaseTablePage):
                 # For QTableWidget - clear spans and widgets first
                 if hasattr(self.table, "clearSpans"):
                     self.table.clearSpans()
-                # Clear any cell widgets that might interfere with new layout
+                # Orphan every cell widget synchronously (setParent(None) via
+                # _teardown_row_widgets) so none linger as zombie duplicates —
+                # bare removeCellWidget() only defers deletion via deleteLater().
                 for row in range(self.table.rowCount()):
-                    for col in range(self.table.columnCount()):
-                        if self.table.cellWidget(row, col):
-                            self.table.removeCellWidget(row, col)
+                    self._teardown_row_widgets(row)
                 self.table.setRowCount(0)
             elif hasattr(self.table, "clear"):
                 # For other table widgets
@@ -1145,6 +2015,8 @@ class BaseResourcePage(BaseTablePage):
             # DO NOT clear self.resources array - this was causing action button failures!
             # The resources array must persist so action buttons can reference resource data
             logging.debug("Table UI cleared successfully - resources data preserved")
+            # Reset diff-engine row cache so next update does a full rebuild
+            self._row_cache = RowCache()
         except Exception as e:
             logging.error(f"Error clearing table: {e}")
 
@@ -1159,6 +2031,15 @@ class BaseResourcePage(BaseTablePage):
         # Apply enhanced styling with platform overrides
         table.setStyleSheet(BaseTablePageStyles.get_table_style())
         table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        # Enable mouse tracking for full-row hover and attach delegate
+        table.setMouseTracking(True)
+        table.viewport().setMouseTracking(True)
+        try:
+            delegate = HighPerformanceDelegate(table)
+            table.setItemDelegate(delegate)
+        except Exception:
+            delegate = None
+
         table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         # Configure appearance with explicit settings
@@ -1168,32 +2049,229 @@ class BaseResourcePage(BaseTablePage):
         # Force consistent selection behavior
         table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        # Configure resizable columns
-        self._configure_table_resizing(table, headers)
-        # Connect cell click signal
+        # Resizing is now handled by _auto_resize_columns
         table.cellClicked.connect(self.handle_row_click)
+
+        # Wire itemEntered to update hovered row in delegate (QTableWidget emits itemEntered)
+        try:
+            def _on_item_entered(item):
+                try:
+                    if delegate and item is not None:
+                        delegate.hovered_row = item.row()
+                        table.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
+                        table.viewport().update()
+                except Exception:
+                    pass
+
+            table.itemEntered.connect(_on_item_entered)
+        except Exception:
+            pass
+
+        # Install viewport event filter to clear hover on leave
+        if delegate:
+            class _LeaveFilter(QObject):
+                def eventFilter(self, obj, event):
+                    if event.type() == QEvent.Type.Leave:
+                        delegate.hovered_row = -1
+                        table.viewport().setCursor(Qt.CursorShape.ArrowCursor)
+                        table.viewport().update()
+                    return super().eventFilter(obj, event)
+
+            lf = _LeaveFilter(table)
+            table.viewport().installEventFilter(lf)
+
         return table
 
-    def _configure_table_resizing(self, table, headers):
-        header = table.horizontalHeader()
-        header.setStretchLastSection(False)
-        header.setSectionsMovable(False)
-        header.setSectionsClickable(True)
-        header.setMinimumSectionSize(20)  # Reduced minimum
-        header.setDefaultSectionSize(120)
-        for i in range(len(headers)):
-            if i == 0:  # Checkbox column
-                header.setSectionResizeMode(i, QHeaderView.ResizeMode.Fixed)
-                table.setColumnWidth(i, 20)  # Minimal width for checkbox
-            elif i == len(headers) - 1:  # Last column (Actions)
-                header.setSectionResizeMode(i, QHeaderView.ResizeMode.Fixed)
-                table.setColumnWidth(i, 100)  # Fixed width for actions
+    def _auto_resize_columns(self, max_col_widths=None, min_col_widths=None):
+        """Resize columns to fit content and viewport without clipping."""
+        try:
+            if not self.table or not is_valid(self.table):
+                return
+            
+            header = self.table.horizontalHeader()
+            col_count = self.table.columnCount()
+            if col_count == 0:
+                return
+
+            # Phase 0: Enforce interactive mode for data columns
+            self._enforce_header_resize_modes(header, col_count)
+
+            # Phase 1: Content-fit with constraints
+            col_min_widths = self._compute_column_min_widths(header, col_count, min_col_widths)
+            self._apply_content_fit(header, col_count, col_min_widths, max_col_widths)
+
+            # Phase 2: Viewport-fit (remove overflow or fill space)
+            viewport_width = self.table.viewport().width()
+            if viewport_width <= 0:
+                QTimer.singleShot(80, lambda: self._auto_resize_columns(max_col_widths, min_col_widths))
+                return
+
+            self._adjust_to_viewport(viewport_width, col_min_widths, max_col_widths)
+        except Exception as e:
+            logging.debug(f"Auto-resize error: {e}")
+
+    def _enforce_header_resize_modes(self, header: QHeaderView, col_count: int):
+        """Ensure columns have appropriate resize modes."""
+        for col in range(col_count):
+            if header.isSectionHidden(col):
+                continue
+                
+            # Identify columns by their header title (supports both QTableWidget and QTableView)
+            title = ""
+            if hasattr(self.table, "horizontalHeaderItem"):
+                item = self.table.horizontalHeaderItem(col)
+                if item:
+                    title = item.text().lower().strip()
             else:
-                header.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
-        # Set the second - to - last column to stretch if we have enough columns
-        if len(headers) > 2:
-            stretch_col = len(headers) - 2
-            header.setSectionResizeMode(stretch_col, QHeaderView.ResizeMode.Stretch)
+                model = self.table.model()
+                if model:
+                    title = str(model.headerData(col, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole) or "").lower().strip()
+                
+            if col == 0:
+                continue
+            elif col == col_count - 1:
+                header.setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            elif title in ["status", "age"]:
+                # Ensure Status and Age columns are strictly fit to content
+                header.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
+            else:
+                header.setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
+
+    def _compute_column_min_widths(self, header: QHeaderView, col_count: int, explicit_mins=None):
+        """Calculate minimum widths for each column based on header text."""
+        from PyQt6.QtGui import QFontMetrics
+        fm = QFontMetrics(header.font())
+        padding = 20
+        min_widths = {}
+        
+        for col in range(col_count):
+            if header.isSectionHidden(col):
+                min_widths[col] = 0
+                continue
+            if explicit_mins and col in explicit_mins:
+                min_widths[col] = explicit_mins[col]
+                continue
+            
+            # Supports both QTableWidget and QTableView
+            text = ""
+            if hasattr(self.table, "horizontalHeaderItem"):
+                item = self.table.horizontalHeaderItem(col)
+                if item:
+                    text = item.text()
+            else:
+                model = self.table.model()
+                if model:
+                    text = str(model.headerData(col, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole) or "")
+                    
+            width = fm.horizontalAdvance(text) if text else 0
+            min_widths[col] = max(40, width + padding)
+        return min_widths
+
+    def _apply_content_fit(self, header: QHeaderView, col_count: int, min_widths, max_widths=None):
+        """Resize columns to fit their content, within min/max constraints."""
+        for col in range(col_count):
+            if header.isSectionHidden(col):
+                continue
+            if col == col_count - 1:
+                self.table.setColumnWidth(col, 40)
+                continue
+                
+            if header.sectionResizeMode(col) == QHeaderView.ResizeMode.Interactive:
+                self.table.resizeColumnToContents(col)
+                current = self.table.columnWidth(col)
+                
+                # Apply min
+                if current < min_widths[col]:
+                    self.table.setColumnWidth(col, min_widths[col])
+                # Apply max
+                if max_widths and col in max_widths and current > max_widths[col]:
+                    self.table.setColumnWidth(col, max_widths[col])
+
+    def _adjust_to_viewport(self, viewport_width: int, min_widths, max_widths=None):
+        """Adjust column widths to perfectly fill the viewport."""
+        header = self.table.horizontalHeader()
+        visible_cols = [c for c in range(self.table.columnCount()) if not header.isSectionHidden(c)]
+        total_width = sum(self.table.columnWidth(c) for c in visible_cols)
+        
+        target_width = viewport_width - 2
+        overflow = total_width - target_width
+
+        if overflow > 0:
+            self._shrink_columns(visible_cols, overflow, min_widths)
+        elif overflow < 0:
+            self._expand_columns(visible_cols, -overflow, max_widths)
+
+    def _shrink_columns(self, visible_cols: List[int], overflow: int, min_widths):
+        """Reduce column widths to fit viewport."""
+        header = self.table.horizontalHeader()
+        shrinkable = sorted(
+            [c for c in visible_cols if header.sectionResizeMode(c) == QHeaderView.ResizeMode.Interactive 
+             and self.table.columnWidth(c) > min_widths[c]],
+            key=lambda c: self.table.columnWidth(c),
+            reverse=True
+        )
+        
+        remaining = overflow
+        for col in shrinkable:
+            if remaining <= 0: break
+            current = self.table.columnWidth(col)
+            can_give = current - min_widths[col]
+            reduce_by = min(remaining, can_give)
+            if reduce_by > 0:
+                self.table.setColumnWidth(col, int(current - reduce_by))
+                remaining -= reduce_by
+
+    def _expand_columns(self, visible_cols: List[int], extra: int, max_widths=None):
+        """Increase column widths to fill empty space."""
+        header = self.table.horizontalHeader()
+        expandable = sorted(
+            [c for c in visible_cols if header.sectionResizeMode(c) == QHeaderView.ResizeMode.Interactive],
+            key=lambda c: self.table.columnWidth(c),
+            reverse=True
+        )
+        
+        remaining = extra
+        for col in expandable:
+            if remaining <= 0: break
+            current = self.table.columnWidth(col)
+            limit = max_widths.get(col, float('inf')) if max_widths else float('inf')
+            
+            can_grow = limit - current
+            if can_grow > 0:
+                grow_by = min(remaining, can_grow)
+                self.table.setColumnWidth(col, int(current + grow_by))
+                remaining -= grow_by
+
+    def _update_table_height(self):
+        """Scale table bounds natively by summing physically rendered rows."""
+        if not self.table or not hasattr(self, "table") or hasattr(self.table, 'set_data'):
+            return
+            
+        try:
+            num_rows = self.table.rowCount()
+            rows_height = sum(self.table.rowHeight(r) for r in range(num_rows))
+            header_height = self.table.horizontalHeader().height() if hasattr(self.table, 'horizontalHeader') else 42
+            if header_height <= 0: header_height = 42
+            
+            exact_height = rows_height + header_height + 12
+            
+            if hasattr(self.table, 'horizontalScrollBar') and self.table.horizontalScrollBar().isVisible():
+                exact_height += self.table.horizontalScrollBar().height()
+                
+            clamped_height = min(exact_height, 2000)
+            if hasattr(self, 'table_container') and self.table_container:
+                self.table_container.setMaximumHeight(clamped_height)
+            self.table.setMaximumHeight(clamped_height)
+        except Exception as e:
+            logging.error(f"Error computing _update_table_height physically: {e}")
+
+    def _ensure_full_width_utilization(self):
+        """Legacy shim for backward compatibility with subclasses."""
+        self._auto_resize_columns()
+
+    def _configure_table_resizing(self, table, headers):
+        """Legacy shim for backward compatibility with subclasses."""
+        pass
 
     def _create_select_all_checkbox(self):
         select_all_checkbox = QCheckBox()
@@ -1254,50 +2332,6 @@ class BaseResourcePage(BaseTablePage):
             logging.debug(f"Updated table row {row}")
         except Exception as e:
             logging.error(f"Error updating table row {row}: {e}")
-
-    def _ensure_full_width_utilization(self):
-        if not self.table or not hasattr(self, "table"):
-            return
-        try:
-            # Skip for VirtualScrollTable as it handles its own layout
-            if hasattr(self.table, "set_data"):
-                return
-            if not hasattr(self.table, "horizontalHeader"):
-                return
-            header = self.table.horizontalHeader()
-            total_width = self.table.viewport().width()
-            if total_width <= 0:
-                # Try again later if width is not available yet
-                QTimer.singleShot(100, self._ensure_full_width_utilization)
-                return
-            # Get number of visible columns
-            visible_columns = []
-            for i in range(header.count()):
-                if not header.isSectionHidden(i):
-                    visible_columns.append(i)
-            if not visible_columns:
-                return
-            # Find stretch columns and distribute remaining width
-            stretch_columns = []
-            fixed_width = 0
-            for col in visible_columns:
-                if header.sectionResizeMode(col) == QHeaderView.ResizeMode.Stretch:
-                    stretch_columns.append(col)
-                else:
-                    fixed_width += header.sectionSize(col)
-            # If we have stretch columns, let Qt handle it
-            if stretch_columns:
-                for col in stretch_columns:
-                    header.setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
-            else:
-                # No stretch columns, make the last column stretch
-                if visible_columns:
-                    last_col = visible_columns[-1]
-                    header.setSectionResizeMode(
-                        last_col, QHeaderView.ResizeMode.Stretch
-                    )
-        except Exception as e:
-            logging.debug(f"Error in _ensure_full_width_utilization: {e}")
 
     def _handle_edit_resource(self, resource_name, resource_namespace, resource):
         try:
@@ -1411,6 +2445,10 @@ class BaseResourcePage(BaseTablePage):
             logging.debug(f"Could not load BaseTablePageStyles for menu: {e}")
             # Use theme-aware fallback styling
             menu.setStyleSheet(BaseResourcePageStyles.get_menu_fallback_style())
+        # Immutable dispatch key captured at button-creation time.  For
+        # model/view pages this is the resource UID, so the action targets the
+        # correct resource even after watch updates reorder the source rows.
+        dispatch_key = self._action_dispatch_key(row)
         # Connect signals to change row appearance when menu opens / closes
         try:
             menu.aboutToShow.connect(lambda: self._on_menu_show(row))
@@ -1432,28 +2470,26 @@ class BaseResourcePage(BaseTablePage):
                 ]
             )
             # Check if pod has ports for port forwarding
-            if row < len(self.resources) and self.resources:
-                pod_resource = self.resources[row]
-                if self._has_pod_ports(pod_resource):
-                    actions.append(
-                        {
-                            "text": "Port Forward",
-                            "icon": "Icons/network.png",
-                            "dangerous": False,
-                        }
-                    )
+            resolved = self._get_action_resource(dispatch_key)
+            if resolved and self._has_pod_ports(resolved[0]):
+                actions.append(
+                    {
+                        "text": "Port Forward",
+                        "icon": "Icons/network.png",
+                        "dangerous": False,
+                    }
+                )
         elif hasattr(self, "resource_type") and self.resource_type == "services":
             # Check if service has ports for port forwarding
-            if row < len(self.resources) and self.resources:
-                service_resource = self.resources[row]
-                if self._has_service_ports(service_resource):
-                    actions.append(
-                        {
-                            "text": "Port Forward",
-                            "icon": "Icons/network.png",
-                            "dangerous": False,
-                        }
-                    )
+            resolved = self._get_action_resource(dispatch_key)
+            if resolved and self._has_service_ports(resolved[0]):
+                actions.append(
+                    {
+                        "text": "Port Forward",
+                        "icon": "Icons/network.png",
+                        "dangerous": False,
+                    }
+                )
         elif hasattr(self, "resource_type") and self.resource_type == "nodes":
             # Node - specific actions
             actions.append(
@@ -1463,6 +2499,33 @@ class BaseResourcePage(BaseTablePage):
                     "dangerous": False,
                 }
             )
+        elif hasattr(self, "resource_type") and self.resource_type == "deployments":
+            # Deployment - specific mutations.  No "icon" key: no scale.png /
+            # restart.png assets ship today (the loader would just log and
+            # fall through to text-only).  Add the key back when assets exist.
+            actions.extend(
+                [
+                    {"text": "Scale", "dangerous": False},
+                    {"text": "Restart Rollout", "dangerous": False},
+                ]
+            )
+        elif hasattr(self, "resource_type") and self.resource_type == "statefulsets":
+            # Fork B: StatefulSets get both Scale (via /scale subresource)
+            # and Restart Rollout (via spec.template.metadata.annotations).
+            # No icon key — same rationale as deployments branch above.
+            actions.extend(
+                [
+                    {"text": "Scale", "dangerous": False},
+                    {"text": "Restart Rollout", "dangerous": False},
+                ]
+            )
+        elif hasattr(self, "resource_type") and self.resource_type == "daemonsets":
+            # Fork B: DaemonSets get Restart Rollout ONLY — they have no
+            # replicas concept (one pod per node), so a Scale action would
+            # immediately be rejected by the API.
+            actions.append(
+                {"text": "Restart Rollout", "dangerous": False},
+            )
         # Standard actions for all resources
         actions.extend(
             [
@@ -1470,7 +2533,8 @@ class BaseResourcePage(BaseTablePage):
                 {"text": "Delete", "icon": "Icons/delete.png", "dangerous": True},
             ]
         )
-        # Add actions to menu with OLD WORKING PATTERN - only pass row index
+        # Bind each action to the immutable dispatch key (UID for model/view
+        # pages, row index for QTableWidget pages) captured above.
         for action_info in actions:
             try:
                 action = menu.addAction(action_info["text"])
@@ -1487,12 +2551,11 @@ class BaseResourcePage(BaseTablePage):
                         )
                 if action_info.get("dangerous", False):
                     action.setProperty("dangerous", True)
-                # OLD WORKING PATTERN: Only pass action and row - no resource data storage
                 action.triggered.connect(
-                    partial(self._handle_action, action_info["text"], row)
+                    partial(self._handle_action, action_info["text"], dispatch_key)
                 )
                 logging.debug(
-                    f"Action button: Connected '{action_info['text']}' for row {row}"
+                    f"Action button: Connected '{action_info['text']}' (key={dispatch_key})"
                 )
             except Exception as e:
                 logging.error(f"Error adding action {action_info['text']}: {e}")
@@ -1554,7 +2617,7 @@ class BaseResourcePage(BaseTablePage):
         return container
 
     def _on_menu_show(self, row):
-        logging.info(f"Action button menu opening for row {row}")
+        logging.debug(f"Action button menu opening for row {row}")
         self._highlight_active_row(row, True)
 
     def _highlight_active_row(self, row, highlight):
@@ -1575,57 +2638,72 @@ class BaseResourcePage(BaseTablePage):
         except Exception as e:
             logging.debug(f"Error highlighting row {row}: {e}")
 
-    # Removed old _handle_action_with_resource method - replaced with OLD WORKING PATTERN
-    def _handle_action(self, action, row):
-        logging.info(f"BaseResourcePage: Action '{action}' clicked on row {row}")
-        # Add debugging for resources array
-        logging.info(
-            f"BaseResourcePage: Resources array length: {len(self.resources) if hasattr(self, 'resources') else 'No resources attribute'}"
-        )
-        # FALLBACK: If resources array is empty but table has rows, read from table
-        # This handles the case where theme changes or other events temporarily clear resources
-        # while table rows still exist
+    def _action_dispatch_key(self, row):
+        """Value bound into an action button's click closure to identify its
+        target resource.
+
+        QTableWidget pages key by the row index (this default).  Subclasses
+        that reorder rows on watch updates may override this to bind the
+        resource's immutable UID, captured at button-creation time, so
+        dispatch survives watch-driven row reordering.
+        """
+        return row
+
+    def _get_action_resource(self, target):
+        """Resolve an action-dispatch key to (resource, name, namespace).
+
+        Base implementation treats ``target`` as a row index into
+        self.resources, with a table-read fallback for QTableWidget pages.
+        Returns None when no resource can be resolved.
+        """
+        row = target
         if (
             not hasattr(self, "resources")
             or not self.resources
+            or not isinstance(row, int)
             or row >= len(self.resources)
         ):
-            if hasattr(self, "table") and self.table and row < self.table.rowCount():
-                logging.info(
-                    f"BaseResourcePage: Resources empty, reading data from table row {row}"
-                )
+            if (
+                isinstance(row, int)
+                and hasattr(self, "table")
+                and self.table
+                and hasattr(self.table, "rowCount")
+                and hasattr(self.table, "item")
+                and row < self.table.rowCount()
+            ):
                 # Extract resource name from table (typically column 1)
                 resource_name = ""
                 resource_namespace = ""
                 if self.table.item(row, 1):  # Name column
                     resource_name = self.table.item(row, 1).text()
-                # Try to get namespace from table if it exists (varies by resource type)
-                # Find the namespace column by checking column headers for "namespace" match
+                # Find the namespace column by checking headers for "namespace"
                 for col in range(2, self.table.columnCount()):
                     header_item = self.table.horizontalHeaderItem(col)
                     if header_item:
                         header_text = header_item.text().lower().strip()
-                        # Check for namespace column (case - insensitive match for "namespace" or variants)
                         if "namespace" in header_text:
                             cell_item = self.table.item(row, col)
                             if cell_item and cell_item.text():
                                 resource_namespace = cell_item.text()
                                 break
-                # Fall back to namespace_filter if not found in table
                 if not resource_namespace and self.namespace_filter:
                     resource_namespace = self.namespace_filter
-                # Create minimal resource dict from table data
                 resource = {"name": resource_name, "namespace": resource_namespace}
-            else:
-                logging.warning(
-                    f"BaseResourcePage: No resources available for action '{action}' on row {row}"
-                )
-                return
-        else:
-            # Normal path: use resources array
-            resource = self.resources[row]
-            resource_name = resource.get("name", "")
-            resource_namespace = resource.get("namespace", "")
+                return resource, resource_name, resource_namespace
+            return None
+        resource = self.resources[row]
+        return resource, resource.get("name", ""), resource.get("namespace", "")
+
+    # Removed old _handle_action_with_resource method - replaced with OLD WORKING PATTERN
+    def _handle_action(self, action, target):
+        logging.info(f"BaseResourcePage: Action '{action}' clicked (target={target})")
+        resolved = self._get_action_resource(target)
+        if resolved is None:
+            logging.warning(
+                f"BaseResourcePage: No resource resolved for action '{action}' (target={target})"
+            )
+            return
+        resource, resource_name, resource_namespace = resolved
         logging.info(
             f"BaseResourcePage: Processing action '{action}' for {resource_name}"
             + (f" in {resource_namespace}" if resource_namespace else "")
@@ -1680,11 +2758,23 @@ class BaseResourcePage(BaseTablePage):
         elif action == "View Metrics":
             # Handle node - specific View Metrics action
             if hasattr(self, "select_node_for_graphs"):
-                self.select_node_for_graphs(row)
+                self.select_node_for_graphs(target)
             else:
                 logging.warning(
                     f"View Metrics action not supported for resource type: {self.resource_type}"
                 )
+        elif action in ("Scale", "Restart Rollout"):
+            # Page-owned actions. DeploymentsPage / StatefulSetsPage /
+            # DaemonSetsPage override _handle_action and apply workload-
+            # specific safeguards (HPA pre-scan, OnDelete warning, in-flight
+            # de-dup). Reaching the base dispatcher means a page exposed the
+            # menu item without the override — log loudly and do nothing,
+            # rather than scale/restart through an unguarded fallback.
+            logging.error(
+                f"BaseResourcePage: '{action}' reached the base dispatcher for "
+                f"resource_type={getattr(self, 'resource_type', '?')}; the page "
+                f"must override _handle_action to handle it safely."
+            )
         else:
             logging.warning(f"BaseResourcePage: Unknown action: {action}")
 
@@ -1786,14 +2876,19 @@ class BaseResourcePage(BaseTablePage):
 
     def _create_checkbox_container(self, row, resource_name):
         container = QWidget()
+        container.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        container.setStyleSheet("background: transparent; border: none;")
+        
         layout = QHBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
         checkbox = QCheckBox()
+        checkbox.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         checkbox.setProperty("row", row)
         checkbox.setProperty("resource_name", resource_name)
         checkbox.stateChanged.connect(self._on_row_checkbox_changed)
-        # Apply theme - aware checkbox styling
+        # Apply theme-aware checkbox styling
         checkbox.setStyleSheet(BaseTablePageStyles.get_checkbox_style())
         layout.addWidget(checkbox)
         return container
@@ -1809,13 +2904,8 @@ class BaseResourcePage(BaseTablePage):
                     resource = r
                     break
             if resource:
-                # Handle both namespaced and cluster - scoped resources
-                resource_namespace = resource.get("namespace", "")
-                resource_key = (
-                    (resource["name"], resource_namespace)
-                    if resource_namespace
-                    else (resource["name"], "")
-                )
+                # Identity key shared with select-all and selection restore.
+                resource_key = self._build_resource_key(resource)
                 if state == Qt.CheckState.Checked.value:
                     self.selected_items.add(resource_key)
                     logging.debug(f"Selected resource: {resource_key}")
@@ -1853,6 +2943,71 @@ class BaseResourcePage(BaseTablePage):
                     self.select_all_checkbox.blockSignals(False)
         except Exception as e:
             logging.debug(f"Error updating select - all state: {e}")
+
+    def _build_resource_key(self, resource):
+        """Build the (name, namespace) identity tuple used in selected_items.
+
+        Centralizes the keying shared by the per-row checkbox handler, the
+        select-all handler, and selection restoration after rebuilds.  A
+        missing or empty namespace normalizes to "" (cluster-scoped).
+        """
+        name = resource.get("name", "")
+        namespace = resource.get("namespace", "") or ""
+        return (name, namespace)
+
+    def _restore_row_selection_state(self):
+        """Re-apply preserved checkbox selections after a full table rebuild.
+
+        The legacy watch-rebuild path (_apply_watch_update_legacy) destroys
+        and recreates every row widget, so the per-row checkboxes are created
+        unchecked.  Without this step the user's selection would silently
+        vanish every time the cluster data mutates.
+
+        Two things happen here:
+          1. PRUNE  — selected_items is intersected with the keys of the
+                      resources currently displayed, dropping any selection
+                      whose resource was deleted in this update.  This keeps
+                      the select-all math and the bulk-delete target accurate.
+          2. RESTORE — every rebuilt row whose resource is still selected has
+                      its checkbox re-checked (signals blocked so the per-row
+                      handler does not re-fire).
+
+        Matching uses the checkbox's own 'resource_name' property, so it stays
+        correct regardless of the table's current sort order.
+        """
+        try:
+            if not self.table:
+                return
+            # Map displayed resource names → identity keys (first occurrence
+            # wins, mirroring _on_row_checkbox_changed's name-based lookup).
+            name_to_key = {}
+            for r in self.resources:
+                nm = r.get("name")
+                if nm not in name_to_key:
+                    name_to_key[nm] = self._build_resource_key(r)
+
+            # PRUNE — drop selections for resources that vanished this update.
+            self.selected_items &= set(name_to_key.values())
+
+            # RESTORE — re-check the checkbox on every still-selected row.
+            for row in range(self.table.rowCount()):
+                container = self.table.cellWidget(row, 0)
+                if not container:
+                    continue
+                checkbox = container.findChild(QCheckBox)
+                if not checkbox:
+                    continue
+                key = name_to_key.get(checkbox.property("resource_name"))
+                should_check = key is not None and key in self.selected_items
+                if checkbox.isChecked() != should_check:
+                    checkbox.blockSignals(True)
+                    checkbox.setChecked(should_check)
+                    checkbox.blockSignals(False)
+
+            # Sync the header select-all checkbox to the restored count.
+            self._update_select_all_state()
+        except Exception as e:
+            logging.debug(f"Selection restore after rebuild failed: {e}")
 
     def __del__(self):
         try:
@@ -1925,13 +3080,9 @@ class BaseResourcePage(BaseTablePage):
                 self._debounced_updater.cancel_update(
                     "scroll_" + self.__class__.__name__
                 )
-            if hasattr(self, "_render_timer"):
-                try:
-                    if self._render_timer is not None and self._render_timer.isActive():
-                        self._render_timer.stop()
-                except RuntimeError:
-                    # QTimer was already deleted by Qt - this is fine during shutdown
-                    pass
+            if hasattr(self, "_watch_render_timer"):
+                if is_valid(self._watch_render_timer) and self._watch_render_timer.isActive():
+                    self._watch_render_timer.stop()
             # Cleanup threads
             self.cleanup_timers_and_threads()
             # Cache system removed - no cache cleanup needed

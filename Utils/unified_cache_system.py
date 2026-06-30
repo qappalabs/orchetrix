@@ -1,104 +1,116 @@
 """
 Unified Cache System
-Provides a simple in-memory cache for the application.
+Provides a bounded, thread-safe in-memory cache backed by cachetools.TTLCache.
+Each resource type gets its own TTLCache with automatic TTL expiry and LRU eviction.
 """
 
 import logging
-import time
+import threading
 from typing import Dict, Any, Optional
-from collections import defaultdict
+
+from cachetools import TTLCache
 
 
 class UnifiedCache:
-    """Simple in-memory cache system"""
+    """Thread-safe, bounded in-memory cache system.
 
-    def __init__(self):
-        self._cache: Dict[str, Dict[str, Any]] = defaultdict(dict)
-        self._metadata: Dict[str, Dict[str, Dict[str, Any]]] = defaultdict(dict)
-        self._max_age = 300  # 5 minutes default
+    Storage is organized hierarchically: resource_type -> cache_key -> data.
+    Each resource_type bucket is a TTLCache with automatic expiry and LRU eviction.
+    All operations are protected by a reentrant lock.
+    """
+
+    def __init__(self, default_ttl: int = 300, default_maxsize: int = 256):
+        self._buckets: Dict[str, TTLCache] = {}
+        self._lock = threading.RLock()
+        self._default_ttl = default_ttl        # 5 minutes
+        self._default_maxsize = default_maxsize  # per resource type
+
+    def _get_bucket(self, resource_type: str) -> TTLCache:
+        """Get or create the TTLCache bucket for a resource type. Caller must hold _lock."""
+        if resource_type not in self._buckets:
+            self._buckets[resource_type] = TTLCache(
+                maxsize=self._default_maxsize, ttl=self._default_ttl
+            )
+        return self._buckets[resource_type]
 
     def cache_resources(self, resource_type: str, cache_key: str, data: Any) -> None:
-        """Cache data with metadata"""
-        self._cache[resource_type][cache_key] = data
-        self._metadata[resource_type][cache_key] = {
-            'timestamp': time.time(),
-            'size': len(str(data)) if data else 0
-        }
+        """Cache data. TTLCache handles expiry timestamps and LRU eviction automatically."""
+        with self._lock:
+            bucket = self._get_bucket(resource_type)
+            bucket[cache_key] = data
         logging.debug(f"Cached {resource_type}:{cache_key}")
 
     def get_cached_resources(self, resource_type: str, cache_key: str) -> Optional[Any]:
-        """Get cached data if not expired"""
-        if resource_type in self._cache and cache_key in self._cache[resource_type]:
-            # Check if expired
-            if resource_type in self._metadata and cache_key in self._metadata[resource_type]:
-                metadata = self._metadata[resource_type][cache_key]
-                if time.time() - metadata['timestamp'] < self._max_age:
-                    return self._cache[resource_type][cache_key]
-                else:
-                    # Remove expired entry
-                    del self._cache[resource_type][cache_key]
-                    del self._metadata[resource_type][cache_key]
+        """Get cached data if present and not expired."""
+        with self._lock:
+            bucket = self._buckets.get(resource_type)
+            if bucket is not None:
+                return bucket.get(cache_key)
         return None
 
     def clear_resource_cache(self, resource_type: str, cache_key: str) -> None:
-        """Clear specific cache entry"""
-        if resource_type in self._cache and cache_key in self._cache[resource_type]:
-            del self._cache[resource_type][cache_key]
-        if resource_type in self._metadata and cache_key in self._metadata[resource_type]:
-            del self._metadata[resource_type][cache_key]
+        """Clear a specific cache entry."""
+        with self._lock:
+            bucket = self._buckets.get(resource_type)
+            if bucket is not None:
+                bucket.pop(cache_key, None)
         logging.debug(f"Cleared cache {resource_type}:{cache_key}")
 
     def optimize_caches(self) -> None:
-        """Clean up expired entries"""
-        current_time = time.time()
-        expired_keys = []
+        """Proactively sweep expired entries from all buckets.
 
-        for resource_type, cache_data in self._cache.items():
-            for cache_key in list(cache_data.keys()):  # Use list() to allow modification during iteration
-                if (resource_type in self._metadata and
-                    cache_key in self._metadata[resource_type]):
-                    metadata = self._metadata[resource_type][cache_key]
-                    if current_time - metadata['timestamp'] >= self._max_age:
-                        expired_keys.append((resource_type, cache_key))
+        Called by external timers (cluster_connector every 5 min,
+        resource_loader every 1 min). Without this, TTLCache only
+        removes expired items lazily on mutation.
+        """
+        total_expired = 0
+        with self._lock:
+            for resource_type, bucket in self._buckets.items():
+                expired = bucket.expire()
+                total_expired += len(expired)
 
-        # Remove expired entries
-        for resource_type, cache_key in expired_keys:
-            del self._cache[resource_type][cache_key]
-            del self._metadata[resource_type][cache_key]
-
-        if expired_keys:
-            logging.debug(f"Cleaned up {len(expired_keys)} expired cache entries")
+        if total_expired:
+            logging.debug(f"Cleaned up {total_expired} expired cache entries")
 
     def clear_empty_entries(self) -> int:
-        """Clear all empty cache entries - call on startup or theme change to remove stale data"""
+        """Clear all empty cache entries (None, empty list, empty dict).
+
+        Called on startup or theme change to remove stale data.
+        """
         empty_keys = []
+        with self._lock:
+            for resource_type, bucket in self._buckets.items():
+                # TTLCache.keys() filters expired entries, so .get() here only sees live values.
+                for cache_key in list(bucket.keys()):
+                    data = bucket.get(cache_key)
+                    if data is None or (isinstance(data, (list, dict)) and not data):
+                        empty_keys.append((resource_type, cache_key))
 
-        for resource_type, cache_data in self._cache.items():
-            for cache_key, data in list(cache_data.items()):
-                # Check if data is empty (None, empty list, empty dict)
-                if data is None or (isinstance(data, (list, dict)) and not data):
-                    empty_keys.append((resource_type, cache_key))
-
-        # Remove empty entries
-        for resource_type, cache_key in empty_keys:
-            if resource_type in self._cache and cache_key in self._cache[resource_type]:
-                del self._cache[resource_type][cache_key]
-            if resource_type in self._metadata and cache_key in self._metadata[resource_type]:
-                del self._metadata[resource_type][cache_key]
+            for resource_type, cache_key in empty_keys:
+                bucket = self._buckets.get(resource_type)
+                if bucket is not None:
+                    bucket.pop(cache_key, None)
 
         if empty_keys:
-            logging.info(f"Cleared {len(empty_keys)} empty cache entries: {[f'{rt}:{ck}' for rt, ck in empty_keys[:5]]}{'...' if len(empty_keys) > 5 else ''}")
+            logging.info(
+                f"Cleared {len(empty_keys)} empty cache entries: "
+                f"{[f'{rt}:{ck}' for rt, ck in empty_keys[:5]]}"
+                f"{'...' if len(empty_keys) > 5 else ''}"
+            )
 
         return len(empty_keys)
 
 
 # Global cache instance
 _cache_instance = None
+_cache_instance_lock = threading.Lock()
 
 
 def get_unified_cache() -> UnifiedCache:
-    """Get the unified cache singleton"""
+    """Get the unified cache singleton (thread-safe)."""
     global _cache_instance
     if _cache_instance is None:
-        _cache_instance = UnifiedCache()
+        with _cache_instance_lock:
+            if _cache_instance is None:
+                _cache_instance = UnifiedCache()
     return _cache_instance

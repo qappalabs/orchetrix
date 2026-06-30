@@ -1,11 +1,12 @@
 import logging
-from PyQt6.QtWidgets import QHBoxLayout, QLineEdit, QComboBox, QLabel, QTableWidgetItem
+from PyQt6.QtWidgets import QHBoxLayout, QLineEdit, QLabel, QTableWidgetItem
 from PyQt6.QtCore import Qt
 
 # Import Managers via local import or assume injected usage to avoid circulars if possible,
 # but ResourceSearchHandler interacts heavily with page UI.
 from Base_Components.resource_page_style_manager import ResourcePageStyleManager
 from Utils.unified_resource_loader import get_unified_resource_loader
+from UI.CustomComboBox import CustomComboBox
 
 # Constants from BaseResourcePage (could be moved to a shared config)
 SEARCH_DEBOUNCE_MS = 500
@@ -52,19 +53,18 @@ class ResourceSearchHandler:
             self.namespace_label.setStyleSheet(ResourcePageStyleManager.get_namespace_label_style())
             self.namespace_label.setMinimumWidth(70)
 
-            self.namespace_combo = QComboBox()
+            self.namespace_combo = CustomComboBox()
             self.namespace_combo.addItem("Loading namespaces...")
             # We assume the page has _on_namespace_changed or hook it up via handler
             # For now, binding to page's method to maintain existing logic flow
             self.namespace_combo.currentTextChanged.connect(self.page._on_namespace_changed)
-            self.namespace_combo.setFixedWidth(150)
+            self.namespace_combo.setFixedWidth(180)
             self.namespace_combo.setFixedHeight(32)
         else:
             self.namespace_combo = None
 
         # Apply styling
-        if self.namespace_combo:
-            ResourcePageStyleManager.apply_namespace_combo_style(self.namespace_combo)
+        # CustomComboBox applies its own styles.
 
         # Add widgets to layout
         filters_layout.addWidget(self.search_label)
@@ -76,7 +76,16 @@ class ResourceSearchHandler:
             filters_layout.addWidget(self.namespace_combo)
 
         header_layout.addLayout(filters_layout)
-        
+
+        # Hide search if the page opts out of unified search and provides no
+        # local_search hook. Pages that opt out but implement local_search keep
+        # the bar visible and route queries through the hook (see perform_search).
+        uses_unified = getattr(self.page, 'uses_unified_search', True)
+        has_local = callable(getattr(self.page, 'local_search', None))
+        if not uses_unified and not has_local:
+            self.search_label.hide()
+            self.search_bar.hide()
+
         # Expose widgets to page if needed (BaseResourcePage expects them)
         self.page.search_bar = self.search_bar
         self.page.search_label = self.search_label
@@ -96,8 +105,17 @@ class ResourceSearchHandler:
         """Execute the search logic."""
         if not self.search_bar:
             return
-            
+
         search_text = self.search_bar.text().strip()
+
+        # Pages that opt out of unified search route queries to their own
+        # local_search hook (which handles both empty and non-empty queries).
+        # Without a hook, typing is a no-op — the bar should already be hidden.
+        if not getattr(self.page, 'uses_unified_search', True):
+            local_search = getattr(self.page, 'local_search', None)
+            if callable(local_search):
+                local_search(search_text)
+            return
 
         if not search_text:
             self.clear_search_and_reload()
@@ -109,11 +127,11 @@ class ResourceSearchHandler:
         """Clear search mode."""
         self._is_searching = False
         self._current_search_query = None
-        
+
         # Update page state
         self.page._is_searching = False
         self.page._current_search_query = None
-        
+
         # Reload normal data
         self.page.force_load_data()
 
@@ -122,7 +140,7 @@ class ResourceSearchHandler:
         try:
             self._is_searching = True
             self._current_search_query = search_text
-            
+
             # Sync to page state
             self.page._is_searching = True
             self.page._current_search_query = search_text
@@ -172,7 +190,7 @@ class ResourceSearchHandler:
                 search_query=search_text
             )
 
-            logging.info(
+            logging.debug(
                 f"Started global search for '{search_text}' in {self.page.resource_type}")
 
         except Exception as e:
@@ -203,9 +221,9 @@ class ResourceSearchHandler:
             self.page._update_items_count()
 
             if search_results:
-                logging.info(f"Search found {len(search_results)} {resource_type} items.")
+                logging.debug(f"Search found {len(search_results)} {resource_type} items.")
             else:
-                logging.info(f"Search found no {resource_type} items.")
+                logging.debug(f"Search found no {resource_type} items.")
 
         except Exception as e:
             logging.error(f"Error processing search results: {e}")

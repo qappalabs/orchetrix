@@ -47,9 +47,9 @@ class RolesPage(BaseResourcePage):
         # Column specifications with optimized default widths
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
-            (1, 140, "interactive"),  # Name
+            (1, 140, "stretch"),  # Name
             (2, 90, "interactive"),  # Namespace
-            (3, 80, "stretch"),  # Age
+            (3, 80, "interactive"),  # Age
             (4, 40, "fixed")        # Actions
         ]
 
@@ -72,12 +72,30 @@ class RolesPage(BaseResourcePage):
         # Ensure full width utilization after configuration
         QTimer.singleShot(100, self._ensure_full_width_utilization)
 
+    def _auto_resize_columns(self, max_col_widths=None, min_col_widths=None):
+        """Override to provide explicit widths for columns to let Name stretch and avoid clipping."""
+        explicit_mins = {
+            1: 150,  # Name
+            2: 100,  # Namespace
+            3: 80,   # Age
+            4: 40,   # Actions
+        }
+        if min_col_widths:
+            explicit_mins.update(min_col_widths)
+        explicit_maxes = {
+            2: 150,  # Namespace max width
+            3: 120,  # Age max width
+        }
+        if max_col_widths:
+            explicit_maxes.update(max_col_widths)
+        super()._auto_resize_columns(max_col_widths=explicit_maxes, min_col_widths=explicit_mins)
+
     def populate_resource_row(self, row, resource):
         """
         Populate a single row with role data from live Kubernetes resources
         """
         # Set row height once
-        self.table.setRowHeight(row, 40)
+        self.table.setRowHeight(row, 42)
 
         # Create checkbox for row selection
         resource_name = resource["name"]

@@ -1,12 +1,14 @@
 """
-Debounced Update Manager with Throttling - Prevents excessive UI updates and API calls
+Debounced Update Manager with Throttling – Prevents excessive UI updates and API calls.
 """
-
-from PyQt6.QtCore import QTimer, QObject
-from typing import Callable
-from collections import deque
 import logging
 import time
+from collections import deque
+from typing import Callable
+
+from PyQt6.QtCore import QObject, QTimer
+
+__all__ = ["DebouncedUpdater", "get_debounced_updater", "cleanup_debounced_updater"]
 
 class DebouncedUpdater(QObject):
     """Manages debounced updates and throttling to prevent UI flooding and API overload"""
@@ -28,7 +30,12 @@ class DebouncedUpdater(QObject):
 
     def schedule_update(self, update_key: str, callback: Callable,
                        delay_ms: int = None, *args, **kwargs):
-        """Schedule an update with debouncing"""
+        """Schedule a debounced update.
+
+        If an update for *update_key* is already pending, its timer is reset
+        to *delay_ms* from now (debounce). The timer object is reused so that
+        the signal connection does not accumulate duplicates.
+        """
         if delay_ms is None:
             delay_ms = self._default_delay
 
@@ -157,8 +164,13 @@ def get_debounced_updater() -> DebouncedUpdater:
         _debounced_updater = DebouncedUpdater()
     return _debounced_updater
 
-def cleanup_debounced_updater():
-    """Clean up the global debounced updater"""
+def cleanup_debounced_updater() -> None:
+    """Clean up the global debounced updater and reset to None.
+
+    Note: Callers that hold a local reference to the previous instance will
+    still have access to the cleaned-up object. Obtain a fresh instance via
+    get_debounced_updater() after calling this.
+    """
     global _debounced_updater
     if _debounced_updater is not None:
         _debounced_updater.cleanup()

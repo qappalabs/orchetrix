@@ -6,28 +6,71 @@ Uses QTableView with VirtualizedResourceModel for optimal performance
 import logging
 from PyQt6.QtWidgets import (
     QTableView, QHeaderView, QAbstractItemView,
-    QStyledItemDelegate, QApplication
+    QStyledItemDelegate, QApplication, QStyle
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QModelIndex, QTimer
+from PyQt6.QtCore import Qt, pyqtSignal, QModelIndex, QTimer, QSize
 from PyQt6.QtGui import QColor, QPainter
+from UI.ThemeManager import get_theme_manager
 from typing import List, Dict, Any, Optional, Callable
 
 from .virtualized_table_model import VirtualizedResourceModel
 
 
 class HighPerformanceDelegate(QStyledItemDelegate):
-    """Custom delegate for optimized cell rendering"""
+    """Custom delegate for optimized cell rendering and hover support"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.hovered_row = -1
 
     def paint(self, painter: QPainter, option, index: QModelIndex):
-        """Optimized paint method"""
-        if option.state & QApplication.State.State_Selected:
-            # Custom selection color
-            painter.fillRect(option.rect, QColor(227, 242, 253))
+        """Paint selection and hovered row as full-row hover by forcing MouseOver state"""
+        # Selected state handling (keep existing visual). Use theme SELECTED_BG when available.
+        try:
+            theme = get_theme_manager().get_current_theme()
+            sel_bg = getattr(theme.colors, 'SELECTED_BG', None)
+        except Exception:
+            sel_bg = None
 
-        # Use default painting for text
+        def _qcolor_from_rgba_string(s: str) -> QColor:
+            try:
+                s = s.strip()
+                if s.startswith('rgba'):
+                    nums = s[s.find('(')+1:s.find(')')].split(',')
+                    r = int(nums[0].strip())
+                    g = int(nums[1].strip())
+                    b = int(nums[2].strip())
+                    a = float(nums[3].strip())
+                    return QColor(r, g, b, int(a * 255))
+                if s.startswith('#'):
+                    return QColor(s)
+            except Exception:
+                pass
+            # fallback
+            return QColor(245, 150, 78, int(0.10 * 255))
+
+        if option.state & QStyle.StateFlag.State_Selected:
+            fill_color = _qcolor_from_rgba_string(sel_bg) if sel_bg else QColor(245, 150, 78, int(0.10 * 255))
+            painter.fillRect(option.rect, fill_color)
+        else:
+            # If this cell belongs to the hovered row, paint a full-cell hover background
+            if index.row() == self.hovered_row:
+                # Use a subtle hover color similar to stylesheet default; alpha for translucency
+                # Prefer theme HOVER_HIGHLIGHT if present
+                try:
+                    hover_val = getattr(theme.colors, 'HOVER_HIGHLIGHT', None)
+                except Exception:
+                    hover_val = None
+                if hover_val:
+                    hover_color = _qcolor_from_rgba_string(hover_val)
+                else:
+                    hover_color = QColor(245, 150, 78, int(0.07 * 255))
+                painter.fillRect(option.rect, hover_color)
+
+        # Also inject MouseOver state so any stylesheet-based visuals still receive the state
+        if index.row() == self.hovered_row:
+            option.state |= QStyle.StateFlag.State_MouseOver
+
         super().paint(painter, option, index)
 
 
@@ -64,6 +107,15 @@ class VirtualScrollTable(QTableView):
         # Set custom delegate for optimized rendering
         self.delegate = HighPerformanceDelegate(self)
         self.setItemDelegate(self.delegate)
+
+        self.setMouseTracking(True)
+        self.viewport().setMouseTracking(True)
+        try:
+            # entered(index) fires when mouse moves into a new cell
+            self.entered.connect(self._on_entered)
+        except Exception:
+            # Some versions/environments may not expose entered; ignore safely
+            pass
 
         # Configure header for responsive layout
         self.horizontalHeader().setStretchLastSection(True)
@@ -142,6 +194,28 @@ class VirtualScrollTable(QTableView):
         except Exception as e:
             logging.warning(f"Error adjusting columns to screen: {e}")
 
+    def sizeHint(self):
+        """Return optimal size based on rows to prevent layout expanding unnecessarily."""
+        if not self._model:
+            return QSize(super().sizeHint().width(), self.horizontalHeader().height() + 2)
+            
+        row_count = self._model.rowCount()
+        row_height = self.verticalHeader().defaultSectionSize()
+        header_height = self.horizontalHeader().height()
+        
+        # Calculate precise height needed for all items
+        total_height = header_height + (row_count * row_height) + 2
+        
+        if self.horizontalScrollBar().isVisible():
+            total_height += self.horizontalScrollBar().height()
+            
+        return QSize(super().sizeHint().width(), total_height)
+
+    def minimumSizeHint(self):
+        """Allow shrinking down to just the header when layout squashes it."""
+        header_height = self.horizontalHeader().height() if self.horizontalHeader() else 30
+        return QSize(super().minimumSizeHint().width(), header_height)
+
     def resizeEvent(self, event):
         """Handle resize events to trigger responsive column adjustment"""
         super().resizeEvent(event)
@@ -169,6 +243,7 @@ class VirtualScrollTable(QTableView):
 
             # Apply responsive column sizing
             QTimer.singleShot(100, self._adjust_columns_to_screen)  # Delay to ensure proper widget size
+            self.updateGeometry()
 
             logging.info(f"Set resource data: {len(data)} items, {len(self.headers)} columns")
 
@@ -179,18 +254,21 @@ class VirtualScrollTable(QTableView):
         """Append new data efficiently"""
         if self._model:
             self._model.append_data(additional_data)
+            self.updateGeometry()
             self.data_changed.emit()
 
     def update_data(self, new_data: List[Dict], incremental: bool = False):
         """Update data efficiently"""
         if self._model:
             self._model.update_data(new_data, incremental)
+            self.updateGeometry()
             self.data_changed.emit()
 
     def refresh_data(self, new_data: List[Dict]):
         """Refresh all data"""
         if self._model:
             self._model.refresh_data(new_data)
+            self.updateGeometry()
             self.data_changed.emit()
 
     def set_formatters(self, formatters: Dict[str, Callable]):
@@ -327,6 +405,26 @@ class VirtualScrollTable(QTableView):
         if self._model:
             self._model.layoutChanged.emit()
         self.viewport().update()
+
+    def _on_entered(self, index: QModelIndex):
+        """Update delegate hovered row when mouse enters a cell"""
+        try:
+            if index is None or not index.isValid():
+                self.delegate.hovered_row = -1
+            else:
+                self.delegate.hovered_row = index.row()
+            self.viewport().update()
+        except Exception:
+            pass
+
+    def leaveEvent(self, event):
+        """Clear hovered row when mouse leaves the widget"""
+        try:
+            self.delegate.hovered_row = -1
+            self.viewport().update()
+        except Exception:
+            pass
+        super().leaveEvent(event)
 
     def get_performance_stats(self) -> Dict[str, Any]:
         """Get performance statistics"""

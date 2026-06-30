@@ -5,8 +5,58 @@ import logging
 import time
 import json
 import gc
+import faulthandler
 from datetime import datetime
 from PyQt6.QtCore import QPoint
+
+# Enable faulthandler IMMEDIATELY to capture C++ segfaults / aborts.
+# Writes the crash traceback to a dedicated file so it survives even if
+# the console window closes on crash.
+#
+# Pre-flight rotation: evaluate log size BEFORE opening the file descriptor.
+# Rotation must happen here — never at runtime — because the fault handler
+# caches the raw integer fd at the C level. Closing or renaming the file
+# after enablement causes fd-reuse corruption (the handler would write into
+# whatever fd the OS reassigns, e.g. a database handle or network socket).
+# Threshold: 1 MB ≈ ~20 distinct crash traces; keeps two generations on disk.
+_FAULT_LOG_PATH   = os.path.join(os.path.dirname(os.path.abspath(__file__)), "crash_trace.log")
+_FAULT_LOG_BACKUP = _FAULT_LOG_PATH + ".1"
+_FAULT_LOG_MAX_BYTES = 1 * 1024 * 1024  # 1 MB
+
+try:
+    if os.path.exists(_FAULT_LOG_PATH) and os.path.getsize(_FAULT_LOG_PATH) >= _FAULT_LOG_MAX_BYTES:
+        # Remove stale backup, then rotate current → backup.
+        # Errors are silently swallowed: a failed rotation is non-fatal;
+        # the app will simply append to the oversized file rather than crash.
+        try:
+            if os.path.exists(_FAULT_LOG_BACKUP):
+                os.remove(_FAULT_LOG_BACKUP)
+            os.rename(_FAULT_LOG_PATH, _FAULT_LOG_BACKUP)
+        except OSError:
+            pass  # Windows sharing violation or permission error — append anyway
+except OSError:
+    pass  # os.path.getsize failed (e.g. permission denied) — proceed safely
+
+# Open in append mode so previous crash traces are never truncated on restart.
+# Wrapped defensively: failure to open the crash-log must never abort startup.
+# The shutdown teardown (further below) already guards on `if _fault_file:`.
+_fault_file = None
+try:
+    _fault_file = open(_FAULT_LOG_PATH, "a")
+    faulthandler.enable(file=_fault_file, all_threads=True)
+except Exception:
+    # File-based crash logging is unavailable — fall back to stderr so
+    # faulthandler still captures segfaults / aborts to the console.
+    _fault_file = None
+    try:
+        faulthandler.enable()  # writes to stderr
+    except Exception:
+        pass  # faulthandler entirely unavailable — proceed without it
+    print(
+        f"[orchetrix] WARNING: could not open crash-trace log "
+        f"({_FAULT_LOG_PATH!r}); faulthandler will write to stderr.",
+        file=sys.stderr,
+    )
 
 # Set up logging first
 try:
@@ -49,6 +99,7 @@ try:
 
     from Utils.cluster_state_manager import get_cluster_state_manager, ClusterState
     from Utils.thread_manager import shutdown_thread_manager
+    from Utils.qt_utils import is_valid
     from Utils.error_handler import get_error_handler, ResourceCleaner, error_handler
     from Utils.kubeconfig_watcher import get_kubeconfig_watcher, cleanup_kubeconfig_watcher
 
@@ -156,6 +207,26 @@ class MainWindow(QMainWindow):
         # Initialize UI components
         self.init_ui()
 
+        # Toast notification system — must be created after init_ui so the
+        # window geometry is known for correct positioning.
+        # Wrapped defensively: toast notifications are non-critical, so import
+        # or initialization failures must never prevent the app from starting.
+        try:
+            from UI.toast_notification import initialize_toast_manager
+            self._toast_manager = initialize_toast_manager(self)
+        except Exception as e:
+            logging.warning(f"Toast notification system unavailable: {e}")
+            self._toast_manager = None
+
+        # Register a lazy callback so toast connections are made the moment the
+        # PortForwardManager is first created (by whichever page needs it).
+        # This avoids forcing eager creation of the manager at startup.
+        try:
+            from Utils.port_forward_manager import register_on_manager_created
+            register_on_manager_created(self._connect_port_forward_toasts)
+        except Exception as e:
+            logging.warning(f"Port-forward toast registration unavailable: {e}")
+
         # Central loading overlay
         self.loading_overlay = LoadingOverlay(self)
         self.loading_overlay.hide()
@@ -172,23 +243,36 @@ class MainWindow(QMainWindow):
     def _periodic_cleanup(self):
         """Enhanced periodic cleanup to prevent memory leaks and performance degradation"""
         try:
-            cleanup_start = time.time()
+            cleanup_start = time.perf_counter()
+            # Phase-1 instrumentation: per-sub-step timing (ms), logged as a
+            # breakdown when the cycle is slow — maps WHERE the multi-second
+            # stall actually goes (gc.collect vs O(n) get_objects vs the O(W)
+            # allWidgets scan vs cache cleanups) before optimizing anything.
+            t = {}
 
             # Force garbage collection with statistics
+            _t0 = time.perf_counter()
             collected = gc.collect()
+            t['gc.collect'] = (time.perf_counter() - _t0) * 1000
             if collected > 0:
                 logging.debug(f"Periodic cleanup: {collected} objects collected")
 
-            # Get memory usage statistics
+            # Get memory usage statistics.  gc.get_objects() materializes the
+            # entire heap (O(n)) — a heavily-suspected cost; timed separately.
+            _t0 = time.perf_counter()
             total_objects = len(gc.get_objects())
+            t['gc.get_objects'] = (time.perf_counter() - _t0) * 1000
 
             # Cleanup chart page caches if needed
+            _t0 = time.perf_counter()
             if hasattr(self, 'cluster_view') and hasattr(self.cluster_view, 'pages'):
                 charts_page = self.cluster_view.pages.get('Charts')
                 if charts_page and hasattr(charts_page, 'cleanup_cache'):
                     charts_page.cleanup_cache()
+            t['charts_cache'] = (time.perf_counter() - _t0) * 1000
 
             # Cleanup age caches from base resource pages
+            _t0 = time.perf_counter()
             try:
                 from Base_Components.base_resource_page import BaseResourcePage
                 if hasattr(BaseResourcePage, '_age_cache') and len(BaseResourcePage._age_cache) > 1000:
@@ -196,20 +280,31 @@ class MainWindow(QMainWindow):
                     logging.debug("Cleaned base resource page age cache")
             except Exception as cache_error:
                 logging.debug(f"Could not cleanup age cache: {cache_error}")
+            t['age_cache'] = (time.perf_counter() - _t0) * 1000
 
             # Cleanup background workers that may be finished
+            _t0 = time.perf_counter()
             self._cleanup_finished_workers()
+            t['finished_workers'] = (time.perf_counter() - _t0) * 1000
 
-            # Cleanup virtual scroll tables
-            self._cleanup_virtual_scroll_tables()
+            # NOTE: _cleanup_virtual_scroll_tables() was removed here.  It scanned
+            # the entire QApplication.allWidgets() tree (O(W)) every 30s searching
+            # for the never-instantiated VirtualScroll class.  Instrumentation
+            # proved this dead-code scan cost up to ~885ms per cleanup — frequently
+            # the single largest component of the stall — for zero benefit.
 
-            # Monitor memory usage and log warnings if high (increased threshold)
-            if total_objects > 150000:  # Increased threshold for warning
+            # Monitor memory usage and log a warning if high.  The heap-composition
+            # histogram was REMOVED here: it answered its question (steady state is
+            # app-side dict/list/closures + Qt widgets; K8s models appear only
+            # transiently) and instrumentation showed its O(n) Counter pass cost
+            # ~800ms on the >600k spikes — making the worst cleanups even worse.
+            if total_objects > 150000:
                 logging.warning(f"High object count detected: {total_objects} objects in memory")
 
-            cleanup_time = (time.time() - cleanup_start) * 1000
-            if cleanup_time > 100:  # Log if cleanup takes too long
-                logging.warning(f"Periodic cleanup took {cleanup_time:.1f}ms")
+            cleanup_time = (time.perf_counter() - cleanup_start) * 1000
+            if cleanup_time > 100:  # Log if slow — WITH per-sub-step breakdown
+                breakdown = ", ".join(f"{k}={v:.0f}ms" for k, v in t.items() if v >= 1.0)
+                logging.warning(f"Periodic cleanup took {cleanup_time:.1f}ms  [{breakdown}]")
             else:
                 logging.debug(f"Periodic cleanup completed in {cleanup_time:.1f}ms, {total_objects} objects")
 
@@ -237,24 +332,6 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logging.debug(f"Error cleaning up finished workers: {e}")
 
-    def _cleanup_virtual_scroll_tables(self):
-        """Clean up virtual scroll table caches"""
-        try:
-            from PyQt6.QtWidgets import QApplication
-
-            # Find all virtual scroll tables and clean them up
-            for widget in QApplication.allWidgets():
-                if hasattr(widget, 'cleanup') and 'VirtualScroll' in widget.__class__.__name__:
-                    try:
-                        # Only cleanup if widget is not currently visible
-                        if not widget.isVisible():
-                            widget.cleanup()
-                    except Exception as widget_error:
-                        logging.debug(f"Error cleaning up virtual scroll widget: {widget_error}")
-
-        except Exception as e:
-            logging.debug(f"Error cleaning up virtual scroll tables: {e}")
-
     def _setup_cluster_state_manager(self):
         """Setup cluster state manager"""
         try:
@@ -270,7 +347,6 @@ class MainWindow(QMainWindow):
         try:
             self._kubeconfig_watcher = get_kubeconfig_watcher()
             self._kubeconfig_watcher.kubeconfig_changed.connect(self._on_kubeconfig_changed)
-            logging.info(f"Kubeconfig watcher initialized, watching: {self._kubeconfig_watcher.get_kubeconfig_path()}")
         except Exception as e:
             logging.error(f"Failed to setup kubeconfig watcher: {e}")
             self._kubeconfig_watcher = None
@@ -296,6 +372,8 @@ class MainWindow(QMainWindow):
         self.update_panel_positions()
         if hasattr(self, 'loading_overlay') and self.loading_overlay.isVisible():
             self.loading_overlay.resize(self.size())
+        if hasattr(self, '_toast_manager') and self._toast_manager:
+            self._toast_manager.reposition()
 
     def init_ui(self):
         """Initialize all UI components"""
@@ -343,6 +421,52 @@ class MainWindow(QMainWindow):
         # Setup connections
         self.setup_connections()
 
+    def _connect_port_forward_toasts(self, manager):
+        """Connect PortForwardManager signals to the toast notification system.
+
+        Called lazily via register_on_manager_created — only runs when the
+        manager is first created (i.e. when the user visits a port-forward
+        capable page), not at application startup.
+        """
+        try:
+            manager.port_forward_active.connect(self._on_port_forward_active)
+            manager.port_forward_error.connect(self._on_port_forward_error)
+        except Exception as e:
+            logging.warning(f"Could not connect port-forward toast signals: {e}")
+
+    def _on_port_forward_active(self, config):
+        """Show a non-blocking success toast when a port-forward becomes active."""
+        if not config:
+            return
+        try:
+            local_port = config.local_port
+            resource_name = config.resource_name
+            target_port = config.target_port
+        except AttributeError:
+            try:
+                config_repr = repr(config)
+            except Exception as repr_error:
+                config_repr = f"<unrepresentable: {repr_error}>"
+            logging.warning(
+                "Port-forward active signal received with malformed config; skipping toast. config=%s",
+                config_repr,
+            )
+            return
+        if hasattr(self, '_toast_manager') and self._toast_manager:
+            self._toast_manager.show_success(
+                "Port Forward Active",
+                f"localhost:{local_port} → {resource_name}:{target_port}"
+            )
+
+    def _on_port_forward_error(self, key: str, error_message: str):
+        """Show a persistent error notification when a port-forward fails.
+        Uses show_persistent_error so the toast stays visible until manually
+        dismissed — critical failures must not auto-dismiss before the user
+        has a chance to see them.
+        """
+        if hasattr(self, '_toast_manager') and self._toast_manager:
+            self._toast_manager.show_persistent_error("Port Forward Failed", error_message)
+
     def setup_connections(self):
         """Set up signal connections between components"""
         self.home_page.open_cluster_signal.connect(self.switch_to_cluster_view)
@@ -371,22 +495,23 @@ class MainWindow(QMainWindow):
         # UI-LEVEL DEDUPLICATION (Singleton Dialog Pattern)
         # This prevents stacked dialogs if duplicate signals slip through
         if not hasattr(self, '_recently_handled_deletions'):
-            self._recently_handled_deletions = set()
+            self._recently_handled_deletions = {}
         
-        if cluster_name in self._recently_handled_deletions:
+        current_time = time.time()
+        expiry_time = self._recently_handled_deletions.get(cluster_name, 0)
+        
+        if current_time < expiry_time:
             logging.debug(f"Suppressing duplicate deletion handling for: {cluster_name}")
             return
         
-        # Mark as handled and auto-clear after 5 seconds
-        self._recently_handled_deletions.add(cluster_name)
-        QTimer.singleShot(5000, lambda: self._recently_handled_deletions.discard(cluster_name))
+        # Mark as handled for 5 seconds
+        self._recently_handled_deletions[cluster_name] = current_time + 5.0
         
         logging.info(f"Main handling external deletion of cluster: {cluster_name}")
         
         # CRITICAL: Clear stale state for the deleted cluster regardless of current view
         # This prevents "already connected" issues when cluster is recreated
         try:
-            from Utils.cluster_state_manager import get_cluster_state_manager
             state_manager = get_cluster_state_manager()
             state_manager.reset_cluster_state(cluster_name)
             logging.debug(f"Reset cluster state for deleted cluster: {cluster_name}")
@@ -653,8 +778,7 @@ class MainWindow(QMainWindow):
                 logging.debug(f"Connecting to cluster: {cluster_name}")
 
             elif state == ClusterState.CONNECTED:
-                # Don't show loading message, connect silently
-                logging.info(f"Successfully connected to cluster: {cluster_name}")
+                logging.debug(f"Main: received CONNECTED state for cluster: {cluster_name}")
 
             elif state == ClusterState.ERROR:
                 # Hide any existing loading overlay on error
@@ -685,7 +809,8 @@ class MainWindow(QMainWindow):
                     logging.info(f"Updated title bar cluster name to: {cluster_name}")
 
                 # FIXED: Post-switch operations with error handling
-                QTimer.singleShot(50, lambda: self._post_switch_operations(cluster_name))
+                self._pending_switch_cluster = cluster_name
+                QTimer.singleShot(50, self._execute_post_switch_operations)
 
             else:
                 # FIXED: Better error handling - don't switch to cluster view on failure
@@ -707,6 +832,11 @@ class MainWindow(QMainWindow):
             logging.error(f"Error handling cluster switch completion: {e}")
             self.loading_overlay.hide_loading()
 
+    def _execute_post_switch_operations(self):
+        """Execute post switch safely."""
+        if is_valid(self) and hasattr(self, '_pending_switch_cluster'):
+            self._post_switch_operations(self._pending_switch_cluster)
+
     def _post_switch_operations(self, cluster_name):
         """Post-switch operations with better error handling"""
         try:
@@ -718,11 +848,30 @@ class MainWindow(QMainWindow):
                     hasattr(self.cluster_view.terminal_panel, 'reposition')):
                 self.cluster_view.terminal_panel.reposition()
 
-            # Handle page change for current cluster view page
-            if hasattr(self.cluster_view, 'handle_page_change'):
+            # Reload the currently visible page so it fetches fresh data for the
+            # new cluster.  Pages manage their own data loading, watch streams, and
+            # namespace lists via force_load_data / load_data / _auto_load_data.
+            # We just need to re-trigger it after _clear_all_page_data wiped the
+            # old cluster's data and reset _initial_load_done = False.
+            try:
                 current_page = self.cluster_view.stacked_widget.currentWidget()
                 if current_page:
-                    self.cluster_view.handle_page_change(current_page)
+                    if hasattr(current_page, 'force_load_data'):
+                        current_page.force_load_data()
+                    elif hasattr(current_page, 'load_data'):
+                        current_page.load_data()
+                    elif hasattr(current_page, 'refresh_data'):
+                        current_page.refresh_data()
+                    else:
+                        # Intentionally stateless pages (e.g. AppsPage, ComparePage)
+                        # have no cluster-scoped data to reload — this is by design.
+                        logging.debug(
+                            "Page <%s> skipped during post-switch reload for cluster "
+                            "'%s': no force_load_data/load_data/refresh_data interface",
+                            current_page.__class__.__name__, cluster_name
+                        )
+            except Exception as reload_error:
+                logging.warning(f"Failed to reload current page for {cluster_name}: {reload_error}")
 
             logging.info(f"Post-switch operations completed for {cluster_name}")
 
@@ -800,15 +949,6 @@ class MainWindow(QMainWindow):
                     self.cluster_view.close_any_open_detail_panels()
 
         self.hide_terminal_if_visible()
-
-        if current_widget == self.cluster_view and hasattr(self.cluster_view, 'stacked_widget'):
-            active_cluster_subpage = self.cluster_view.stacked_widget.currentWidget()
-
-            if active_cluster_subpage:
-                if hasattr(active_cluster_subpage, 'force_load_data'):
-                    active_cluster_subpage.force_load_data()
-                elif hasattr(active_cluster_subpage, 'load_data'):
-                    active_cluster_subpage.load_data()
 
         if hasattr(self, 'title_bar') and hasattr(self.title_bar, 'update_context'):
             page_name = "Unknown"
@@ -920,7 +1060,7 @@ class MainWindow(QMainWindow):
                     self.cluster_view.terminal_panel.cleanup()
 
             # Clean up main pages
-            pages_to_cleanup = [self.home_page, self.cluster_view, self.preferences_page]
+            pages_to_cleanup = [self.cluster_view, self.preferences_page]
             for page in pages_to_cleanup:
                 if not page:
                     continue
@@ -1003,7 +1143,7 @@ def main():
     app.setFont(QFont("Segoe UI", 9))
 
     # Apply theme from ThemeManager with saved preference
-    from PyQt6.QtCore import QSettings
+    from PyQt6.QtCore import QSettings, QEvent, QCoreApplication
     from UI.ThemeManager import get_theme_manager
 
     settings = QSettings("Orchetrix", "OX")
@@ -1018,6 +1158,16 @@ def main():
     # Connect theme_changed signal to update app stylesheet
     def on_theme_changed(theme_name):
         theme = theme_manager.get_current_theme()
+        # GUARDRAIL: flush all pending DeferredDelete events BEFORE re-styling.
+        # Under heavy load (e.g. a 1000-pod storm) the eager row teardown floods
+        # the event queue with deleteLater() events that the starved event loop
+        # hasn't processed yet.  setStyleSheet() then recursively traverses the
+        # widget tree and dereferences those half-destroyed C++ objects → access
+        # violation (0xC0000005), a silent crash with no Python traceback.
+        # Forcing the deletions to complete now sanitizes the tree so the style
+        # engine only ever walks live widgets.  This is signal-order independent,
+        # so it protects every theme handler, not just this one. See crash_trace.log.
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         app.setStyleSheet(theme.get_main_style())
         logging.info(f"Theme changed to {theme_name}")
 
@@ -1143,4 +1293,18 @@ if __name__ == "__main__":
 
     finally:
         logging.info(f"Exiting application with status code: {exit_status}")
+
+        # Teardown the process-global faulthandler file descriptor.
+        # The handler caches a raw C-level fd integer; closing the Python
+        # file object without first detaching the handler risks fd-reuse
+        # corruption if a late signal arrives after the OS recycles the fd.
+        try:
+            if _fault_file:
+                if faulthandler.is_enabled():
+                    faulthandler.disable()
+                _fault_file.flush()
+                _fault_file.close()
+        except Exception:
+            pass  # Best-effort; process is terminating imminently
+
         sys.exit(exit_status)

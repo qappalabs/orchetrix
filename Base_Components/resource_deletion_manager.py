@@ -12,6 +12,7 @@ class ResourceDeletionManager:
         self.page = page  # The BaseResourcePage instance
         self.delete_thread = None
         self.batch_delete_thread = None
+        self.deletion_in_flight = False
 
     def handle_delete_selected(self, selected_items):
         """Handle the delete selected button click."""
@@ -59,8 +60,8 @@ class ResourceDeletionManager:
         if hasattr(self.page, '_perform_deletion_without_confirmation'):
             self.page._perform_deletion_without_confirmation()
         elif hasattr(self.page, 'delete_selected_resources'):
-            # If the page has its own delete logic, let it handle it 
-            # (though normally we'd want to consolidate here. 
+            # If the page has its own delete logic, let it handle it
+            # (though normally we'd want to consolidate here.
             #  For now, assume BaseResourcePage uses this manager for the default logic)
             self.delete_selected_resources(selected_items)
         else:
@@ -72,8 +73,14 @@ class ResourceDeletionManager:
 
     def delete_selected_resources(self, selected_items_list):
         """Perform batch deletion."""
-        if self.batch_delete_thread and self.batch_delete_thread.isRunning():
-            self.batch_delete_thread.wait(300)
+        # Shared gate: blocks any new deletion while either a single or batch
+        # delete is already in flight, preventing duplicate DELETEs and racing
+        # completion callbacks.
+        if self.deletion_in_flight:
+            QMessageBox.information(
+                self.page, "Deletion In Progress",
+                "A deletion is already in progress. Please wait for it to complete.")
+            return
 
         if not selected_items_list:
             logging.warning("No items to delete")
@@ -122,8 +129,13 @@ class ResourceDeletionManager:
                 lambda current, total: progress.setValue(current))
             self.batch_delete_thread.batch_delete_completed.connect(
                 lambda success, errors: self.on_batch_delete_completed(success, errors, progress))
+            # finished is a safety net: clears the flag even if the completion
+            # signal is never emitted (e.g. thread crash or force-quit).
+            self.batch_delete_thread.finished.connect(self._clear_deletion_flag)
+            self.deletion_in_flight = True
             self.batch_delete_thread.start()
         except Exception as e:
+            self.deletion_in_flight = False
             progress.close()
             QMessageBox.critical(self.page, "Delete Error",
                                  f"Failed to start deletion process: {str(e)}")
@@ -131,6 +143,7 @@ class ResourceDeletionManager:
 
     def on_batch_delete_completed(self, success_list, error_list, progress_dialog):
         """Callback for batch deletion completion."""
+        self.deletion_in_flight = False
         try:
             progress_dialog.close()
             success_count = len(success_list)
@@ -151,26 +164,20 @@ class ResourceDeletionManager:
 
             QMessageBox.information(self.page, "Deletion Results", result_message)
 
-            # Refresh page data
-            if hasattr(self.page, 'force_load_data') and callable(self.page.force_load_data):
-                self.page.force_load_data()
-            else:
-                logging.warning("Page does not have force_load_data method, skipping refresh")
+            self._refresh_after_delete()
 
         except Exception as e:
             logging.error(f"Error in batch delete completion handler: {e}")
             QMessageBox.critical(
                 self.page, "Error", f"Error processing deletion results: {str(e)}")
             try:
-                if hasattr(self.page, 'force_load_data') and callable(self.page.force_load_data):
-                    self.page.force_load_data()
+                self._refresh_after_delete()
             except Exception as inner_exc:
                 logging.error(f"Failed to refresh data after deletion error: {inner_exc}")
 
     def delete_resource_single(self, resource_name, resource_namespace):
         """Delete a single resource."""
-        # Block concurrent deletions instead of using arbitrary wait
-        if self.delete_thread and self.delete_thread.isRunning():
+        if self.deletion_in_flight:
             QMessageBox.information(
                 self.page, "Deletion In Progress",
                 "A deletion is already in progress. Please wait for it to complete.")
@@ -189,20 +196,47 @@ class ResourceDeletionManager:
         self.delete_thread = ResourceDeleterThread(
             self.page.resource_type, resource_name, resource_namespace)
         self.delete_thread.delete_completed.connect(self.on_delete_completed)
+        self.delete_thread.finished.connect(self._clear_deletion_flag)
+        self.deletion_in_flight = True
         self.delete_thread.start()
 
     def on_delete_completed(self, success, message, resource_name, resource_namespace):
         """Callback for single resource deletion."""
+        self.deletion_in_flight = False
         if success:
             QMessageBox.information(self.page, "Deletion Successful", message)
             if hasattr(self.page, 'selected_items'):
                 self.page.selected_items.discard((resource_name, resource_namespace))
-            if hasattr(self.page, 'force_load_data'):
-                self.page.force_load_data()
-            else:
-                logging.warning("Page does not have force_load_data method, skipping refresh")
+            self._refresh_after_delete()
         else:
             QMessageBox.critical(self.page, "Deletion Failed", message)
+
+    def _clear_deletion_flag(self):
+        """Safety net: reset the in-flight flag when a thread finishes for any reason."""
+        self.deletion_in_flight = False
+
+    def _refresh_after_delete(self):
+        # When a watch is active for this page's (resource_type, namespace),
+        # the kubelet's MODIFIED (Terminating) and DELETED events will reach
+        # the table via the normal watch path within the throttle window.
+        # Calling force_load_data() here issues a redundant LIST that
+        # interrupts the watch stream and causes the visible UI lag.
+        if not hasattr(self.page, 'force_load_data') or not callable(self.page.force_load_data):
+            logging.warning("Page does not have force_load_data method, skipping refresh")
+            return
+        try:
+            from Utils.unified_resource_loader import get_unified_resource_loader
+            resource_type = getattr(self.page, 'resource_type', None)
+            # Read via the public watch_namespace property so this module never
+            # depends on the page's internal storage name.  Defaults to None for
+            # pages without watches (e.g. ChartsPage), which makes has_active_watch
+            # return False and falls through to force_load_data().
+            watch_ns = getattr(self.page, 'watch_namespace', None)
+            if resource_type is not None and get_unified_resource_loader().has_active_watch(resource_type, watch_ns):
+                return
+        except Exception as e:
+            logging.debug(f"Watch-active check failed; falling back to force_load_data: {e}")
+        self.page.force_load_data()
 
     def cleanup(self):
         """Stop any running threads."""
@@ -212,3 +246,4 @@ class ResourceDeletionManager:
         if self.batch_delete_thread and self.batch_delete_thread.isRunning():
             self.batch_delete_thread.quit()
             self.batch_delete_thread.wait()
+        self.deletion_in_flight = False

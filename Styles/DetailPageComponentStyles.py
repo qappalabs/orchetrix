@@ -141,6 +141,18 @@ def get_content_area_style():
     return f"background-color: {theme.colors.BG_SIDEBAR}; border: none;"
 
 
+
+def get_header_icon_style():
+    """Header icon style - theme-aware"""
+    theme = _get_theme()
+    return f"""
+        background-color: transparent;
+        border: none;
+        margin-right: 5px;
+        padding: 0px;
+    """
+
+
 def get_tab_widget_style():
     """Tab widget and tab bar style - theme-aware"""
     theme = _get_theme()
@@ -154,7 +166,7 @@ def get_tab_widget_style():
             background-color: {theme.colors.BG_SIDEBAR};
             margin: 0px;
             padding: 0px;
-            top: 0px;
+            top: -1px;
         }}
         QTabBar {{
             qproperty-drawBase: 0;
@@ -167,35 +179,24 @@ def get_tab_widget_style():
         QTabBar::tab {{
             background-color: {theme.colors.BG_SIDEBAR};
             color: {theme.colors.TEXT_SECONDARY};
-            padding: 12px 20px;
+            padding: 12px 16px;
             border: none;
-            border-top: none;
-            border-left: none;
-            border-right: none;
             border-bottom: 2px solid transparent;
             margin: 0px;
-            margin-right: 2px;
-            font-size: 13px;
+            margin-right: 20px;
+            font-size: 14px;
             font-weight: 500;
-            min-width: 70px;
-            max-width: 120px;
         }}
         QTabBar::tab:selected {{
-            color: {theme.colors.TEXT_LIGHT};
-            border-bottom: 2px solid {theme.colors.ACCENT_BLUE};
+            color: {theme.colors.ACCENT_ORANGE};
+            border-bottom: 2px solid {theme.colors.ACCENT_ORANGE};
             background-color: {theme.colors.BG_SIDEBAR};
             font-weight: 600;
-            border-top: none;
-            border-left: none;
-            border-right: none;
         }}
         QTabBar::tab:hover:!selected {{
             color: {theme.colors.TEXT_LIGHT};
-            background-color: {theme.colors.HOVER_BG_DARKER};
-            border-bottom: 2px solid transparent;
-            border-top: none;
-            border-left: none;
-            border-right: none;
+            background-color: transparent;
+            border-bottom: 2px solid {theme.colors.BORDER_LIGHT};
         }}
         QTabBar::scroller {{
             width: 0px;

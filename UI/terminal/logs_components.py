@@ -7,6 +7,9 @@ classes which provide comprehensive log viewing functionality for Kubernetes pod
 
 import logging
 from datetime import datetime
+
+from Utils.time_utils import TimezoneManager
+from Utils.kubernetes_client import get_kubernetes_client
 from kubernetes import watch
 from kubernetes.client.rest import ApiException
 from PyQt6.QtWidgets import (
@@ -45,7 +48,6 @@ class LogsHeaderWidget(QWidget):
         self.namespace = namespace
         self.containers = []
         self.setup_ui()
-        self.load_containers()
 
     def setup_ui(self):
         """Setup the simplified header UI components with fixed layout."""
@@ -115,21 +117,26 @@ class LogsHeaderWidget(QWidget):
     def load_containers(self):
         """Load available containers for the pod."""
         try:
-            from Utils.kubernetes_client import get_kubernetes_client
             kube_client = get_kubernetes_client()
 
             if kube_client and kube_client.v1:
                 pod = kube_client.v1.read_namespaced_pod(name=self.pod_name, namespace=self.namespace)
                 if pod.spec and pod.spec.containers:
                     self.containers = [c.name for c in pod.spec.containers]
+                    
+                    self.container_combo.blockSignals(True)
                     self.container_combo.clear()
                     self.container_combo.addItems(self.containers)
+                    self.container_combo.blockSignals(False)
 
-                    if len(self.containers) == 1:
-                        self.container_combo.setCurrentText(self.containers[0])
+                    if self.containers:
+                        # Always select the first container by default and notify viewer
+                        first_container = self.containers[0]
+                        self.container_combo.setCurrentText(first_container)
+                        self.container_changed.emit(first_container)
 
         except Exception as e:
-            logging.error(f"Error loading containers: {e}")
+            logging.error(f"Error loading containers for {self.pod_name}: {e}")
             self.containers = []
 
     def _on_lines_changed(self, text):
@@ -184,12 +191,28 @@ class LogsStreamWorker(QThread):
     def run(self):
         """Run the log streaming."""
         try:
-            from Utils.kubernetes_client import get_kubernetes_client
             self._kube_client = get_kubernetes_client()
 
             if not self._kube_client or not self._kube_client.v1:
                 self.error_occurred.emit("Kubernetes client not available")
                 return
+
+            # Check if container name is required but missing (Multi-container pods)
+            if not self.container:
+                # If we don't have a container name, try to fetch it but only if there is exactly one
+                try:
+                    pod = self._kube_client.v1.read_namespaced_pod(name=self.pod_name, namespace=self.namespace)
+                    if pod.spec and pod.spec.containers:
+                        if len(pod.spec.containers) == 1:
+                            self.container = pod.spec.containers[0].name
+                        else:
+                            self.error_occurred.emit(f"Multiple containers found for pod {self.pod_name}. Please select one.")
+                            return
+                except Exception as e:
+                    # Non-fatal: fall through and let the log API default to the
+                    # only container (works for single-container pods). Log so the
+                    # failure is visible instead of silently swallowed.
+                    logging.debug(f"Could not pre-fetch container for pod {self.pod_name} in {self.namespace}: {e}")
 
             self.connection_status.emit("Connecting to log stream...")
 
@@ -231,14 +254,14 @@ class LogsStreamWorker(QThread):
 
                 # Parse the log line
                 log_line = event
-                timestamp = datetime.now().strftime("%H:%M:%S")
+                timestamp = TimezoneManager.get_instance().get_now().strftime("%H:%M:%S")
 
                 # Extract timestamp if present
                 if log_line and ' ' in log_line and log_line.startswith('20'):
                     parts = log_line.split(' ', 1)
                     if len(parts) == 2:
                         try:
-                            timestamp = parts[0].split('T')[1][:8]  # Extract time part
+                            timestamp = TimezoneManager.get_instance().format_time(parts[0])
                             log_line = parts[1]
                         except (IndexError, ValueError) as e:
                             logging.debug(f"Error parsing log timestamp: {e}")
@@ -247,7 +270,12 @@ class LogsStreamWorker(QThread):
 
         except ApiException as e:
             if not self._stop_requested:
-                self.error_occurred.emit(f"API error during streaming: {e.reason}")
+                # Handle specific Kubernetes API errors for logs
+                error_body = str(e.body) if hasattr(e, 'body') else str(e)
+                if "waiting to start" in error_body.lower() or "containercreating" in error_body.lower():
+                    self.error_occurred.emit("Container is still creating. Logs will be available soon.")
+                else:
+                    self.error_occurred.emit(f"API error: {e.reason or 'Unknown error'}")
         except Exception as e:
             if not self._stop_requested:
                 self.error_occurred.emit(f"Streaming error: {str(e)}")
@@ -275,7 +303,7 @@ class LogsStreamWorker(QThread):
                         break
 
                     if line.strip():
-                        timestamp = datetime.now().strftime("%H:%M:%S")
+                        timestamp = TimezoneManager.get_instance().get_now().strftime("%H:%M:%S")
                         log_line = line
 
                         # Extract timestamp if present
@@ -283,7 +311,7 @@ class LogsStreamWorker(QThread):
                             parts = line.split(' ', 1)
                             if len(parts) == 2:
                                 try:
-                                    timestamp = parts[0].split('T')[1][:8]
+                                    timestamp = TimezoneManager.get_instance().format_time(parts[0])
                                     log_line = parts[1]
                                 except (IndexError, ValueError) as e:
                                     logging.debug(f"Error parsing log timestamp: {e}")
@@ -326,7 +354,9 @@ class EnhancedLogsViewer(QWidget):
 
         self.setup_ui()
         self.connect_signals()
-        self.start_log_stream()
+        
+        # Load containers - this will trigger initial log stream via signal
+        QTimer.singleShot(100, self.header.load_containers)
 
     def setup_ui(self):
         """Setup the UI components."""
@@ -598,9 +628,26 @@ class EnhancedLogsViewer(QWidget):
             scrollbar.setValue(scrollbar.maximum())
 
     def handle_stream_error(self, error_message):
-        """Handle streaming errors."""
-        self.header.update_status(f"❌ Error: {error_message}")
+        """Handle streaming errors with improved feedback."""
+        self.header.update_status(f"❌ {error_message}")
         self.show_status_indicator("❌ Error", "#ff6b68")
+        
+        # Display the error message directly in the logs area for better visibility
+        cursor = self.logs_display.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        
+        char_format = QTextCharFormat()
+        char_format.setForeground(QColor("#ff6b68"))
+        char_format.setFontWeight(QFont.Weight.Bold)
+        cursor.setCharFormat(char_format)
+        
+        # Add a clear system message to the log area
+        cursor.insertText(f"\n[SYSTEM ERROR] {error_message}\n")
+        
+        # Ensure scroll to bottom to see the error
+        scrollbar = self.logs_display.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+        
         logging.error(f"Log stream error: {error_message}")
 
     def update_status(self, message):

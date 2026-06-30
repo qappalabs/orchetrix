@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
     QHeaderView,
     QPushButton,
     QMessageBox,
+    QTableWidgetItem,
 )
 
 from PyQt6.QtCore import Qt, QTimer
@@ -18,7 +19,10 @@ from Base_Components.base_components import SortableTableWidgetItem, StatusLabel
 
 from Base_Components.base_resource_page import BaseResourcePage
 
+from PyQt6 import sip
 from UI.Styles import (
+    AppColors,
+    AppConstants,
     get_status_active_color,  # Running
     get_status_warning_color,  # Pending
     get_status_error_color,  # Failed/Error/CrashLoopBackOff
@@ -32,7 +36,7 @@ from UI.ThemeManager import get_theme_manager
 
 from Utils.port_forward_manager import get_port_forward_manager, PortForwardConfig
 
-from Utils.port_forward_dialog import PortForwardDialog, ActivePortForwardsDialog
+from UI.PortForwardDialog import PortForwardDialog, ActivePortForwardsDialog
 
 from Utils.cluster_connector import get_cluster_connector
 
@@ -76,8 +80,6 @@ class PodsPage(BaseResourcePage):
         # Add port forwarding management button
         self._add_port_forward_management_button()
 
-    # Delete button functionality now inherited from BaseResourcePage
-    # No longer need to duplicate the _add_delete_selected_button method
     def _add_port_forward_management_button(self):
         """Add port forward management button"""
         pf_btn = QPushButton("Port Forwards")
@@ -112,7 +114,7 @@ class PodsPage(BaseResourcePage):
             (6, 110, "interactive"),  # Node
             (7, 60, "interactive"),  # QoS
             (8, 60, "stretch"),  # Age
-            (9, 80, "fixed"),  # Status - stretch to fill remaining space
+            (9, 120, "fixed"),  # Status - give it enough room for 'ImagePullBackOff'
             (10, 40, "fixed"),  # Actions
         ]
         # Apply column configuration
@@ -134,13 +136,69 @@ class PodsPage(BaseResourcePage):
         # Ensure full width utilization after configuration
         QTimer.singleShot(100, self._ensure_full_width_utilization)
 
+    def _auto_resize_columns(self, max_col_widths=None, min_col_widths=None):
+        """Override to provide explicit minimum widths for columns like Status that contain wide pill widgets."""
+        explicit_mins = {
+            # 0 is Checkbox
+            1: 120,  # Name - lower floor allows it to shrink more to save other headers
+            2: 120,  # Namespace
+            3: 110,  # Containers
+            4: 80,   # Restarts
+            5: 140,  # Controlled By
+            6: 110,  # Node
+            7: 60,   # QoS
+            8: 60,   # Age
+            9: 140,  # Status - must be wide enough for 'ImagePullBackOff' badge
+            10: 40,  # Actions
+        }
+        
+        # Merge with any caller overrides
+        if min_col_widths:
+            explicit_mins.update(min_col_widths)
+            
+        explicit_maxes = {
+            2: 160, # Namespace - rarely longer than a few words, cap it so space goes to Name
+        }
+        
+        if max_col_widths:
+            explicit_maxes.update(max_col_widths)
+            
+        super()._auto_resize_columns(max_col_widths=explicit_maxes, min_col_widths=explicit_mins)
+
+    @staticmethod
+    def _init_container_status(status_obj):
+        """Return an 'Init:<reason>' status if an init container is failing,
+        else None.
+
+        Init containers run to completion before app containers start, so an
+        init failure would otherwise be hidden behind the pod's 'Pending' phase.
+        """
+        for cs in status_obj.get("initContainerStatuses", []):
+            state = cs.get("state", {})
+            if "waiting" in state:
+                reason = state["waiting"].get("reason", "")
+                if reason in (
+                    "CrashLoopBackOff",
+                    "ImagePullBackOff",
+                    "ErrImagePull",
+                    "CreateContainerConfigError",
+                    "CreateContainerError",
+                    "InvalidImageName",
+                    "ErrImageNeverPull",
+                ):
+                    return f"Init:{reason}"
+            elif "terminated" in state:
+                if state["terminated"].get("exitCode", 0) != 0:
+                    return "Init:Error"
+        return None
+
     def _get_status_color(self, pod_status: str) -> str:
         """Get the appropriate color for a pod status"""
         if pod_status == "Running":
             return get_status_active_color()
         elif pod_status == "Pending":
             return get_status_warning_color()
-        elif pod_status in (
+        elif pod_status.startswith("Init:") or pod_status in (
             "Failed",
             "Error",
             "CrashLoopBackOff",
@@ -159,13 +217,107 @@ class PodsPage(BaseResourcePage):
                 else get_status_info_color()
             )
 
+    def _project_row_data(self, resource):
+        """Project pod resource into a flat dict for diff comparison.
+
+        Extracts the same fields as populate_resource_row but into a
+        dictionary keyed by column semantics.  NEVER stores colors or
+        styles — only text values that determine whether a cell changed.
+        """
+        uid = self._build_uid_from_resource(resource)
+        name = resource.get("name", "")
+        namespace = resource.get("namespace", "")
+        age_str = resource.get("age", "Unknown")
+
+        raw = resource.get("raw_data", {}) or {}
+
+        # Container count
+        containers_count = "0"
+        if raw and raw.get("spec", {}).get("containers"):
+            containers = raw["spec"]["containers"]
+            init_containers = raw["spec"].get("initContainers", [])
+            containers_count = str(len(containers) + len(init_containers))
+
+        # Restart count — include init containers so an init crash loop isn't
+        # hidden as 0 restarts (mirrors the combined-statuses Init:* surfacing).
+        restart_count = "0"
+        status_for_restarts = raw.get("status", {}) if raw else {}
+        restart_statuses = (
+            status_for_restarts.get("containerStatuses", [])
+            + status_for_restarts.get("initContainerStatuses", [])
+        )
+        if restart_statuses:
+            total_restarts = sum(
+                cs.get("restartCount", 0) for cs in restart_statuses
+            )
+            restart_count = str(total_restarts)
+
+        # Controller
+        controller_by = ""
+        if raw and raw.get("metadata", {}).get("ownerReferences"):
+            owner_refs = raw["metadata"]["ownerReferences"]
+            if owner_refs:
+                controller_by = owner_refs[0].get("kind", "")
+
+        # QoS class
+        qos_class = ""
+        if raw and raw.get("status", {}).get("qosClass"):
+            qos_class = raw["status"]["qosClass"]
+
+        # Node name
+        node_name = ""
+        if raw and raw.get("spec", {}).get("nodeName"):
+            node_name = raw["spec"]["nodeName"]
+
+        # Pod status (same logic as populate_resource_row)
+        pod_status = "Unknown"
+        if raw and raw.get("status"):
+            status_obj = raw["status"]
+            pod_status = status_obj.get("phase", "Unknown")
+            # Surface init-container failures (prefixed "Init:") before falling
+            # back to app container / phase status.
+            init_failure = self._init_container_status(status_obj)
+            if init_failure:
+                pod_status = init_failure
+            else:
+                for cs in status_obj.get("containerStatuses", []):
+                    state = cs.get("state", {})
+                    if "waiting" in state:
+                        reason = state["waiting"].get("reason", "")
+                        if reason in ("CrashLoopBackOff", "ImagePullBackOff", "ErrImagePull"):
+                            pod_status = reason
+                            break
+                    elif "terminated" in state:
+                        if state["terminated"].get("exitCode", 0) != 0:
+                            pod_status = "Error"
+                            break
+
+        return {
+            "uid": uid,
+            "name": name,
+            "namespace": namespace,
+            "containers": containers_count,
+            "restarts": restart_count,
+            "controller": controller_by,
+            "node": node_name,
+            "qos": qos_class,
+            "age": age_str,
+            "status": pod_status,
+            "_raw": resource,  # internal — excluded from diff comparison
+        }
+
     def populate_resource_row(self, row, resource):
         """
         Populate a single row with Pod data from kubernetes client response,
         using a StatusLabel for the Status column so per-status colors aren't overridden.
         """
-        self.table.setRowHeight(row, 40)
+        self.table.setRowHeight(row, 42)
         name = resource["name"]
+        # Set a dummy item for the checkbox column for highlighting
+        dummy_check_item = SortableTableWidgetItem("")
+        dummy_check_item.setFlags(dummy_check_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        self.table.setItem(row, 0, dummy_check_item)
+        
         # 1) Checkbox
         cb = self._create_checkbox_container(row, name)
         # No setStyleSheet needed - BaseResourcePage returns ThemeAwareCheckBox
@@ -178,12 +330,17 @@ class PodsPage(BaseResourcePage):
             containers = raw["spec"]["containers"]
             init_containers = raw["spec"].get("initContainers", [])
             containers_count = str(len(containers) + len(init_containers))
-        # Get restart count from kubernetes API response
+        # Get restart count from kubernetes API response — include init
+        # containers so an init crash loop isn't hidden as 0 restarts.
         restart_count = "0"
-        if raw and raw.get("status", {}).get("containerStatuses"):
-            container_statuses = raw["status"]["containerStatuses"]
+        status_for_restarts = raw.get("status", {}) if raw else {}
+        restart_statuses = (
+            status_for_restarts.get("containerStatuses", [])
+            + status_for_restarts.get("initContainerStatuses", [])
+        )
+        if restart_statuses:
             total_restarts = sum(
-                container.get("restartCount", 0) for container in container_statuses
+                container.get("restartCount", 0) for container in restart_statuses
             )
             restart_count = str(total_restarts)
         # Get controller reference from kubernetes API response
@@ -208,22 +365,28 @@ class PodsPage(BaseResourcePage):
             status = raw["status"]
             pod_phase = status.get("phase", "Unknown")
             pod_status = pod_phase
-            # Check for more specific states from container statuses
-            for cs in status.get("containerStatuses", []):
-                state = cs.get("state", {})
-                if "waiting" in state:
-                    reason = state["waiting"].get("reason", "")
-                    if reason in (
-                        "CrashLoopBackOff",
-                        "ImagePullBackOff",
-                        "ErrImagePull",
-                    ):
-                        pod_status = reason
-                        break
-                elif "terminated" in state:
-                    if state["terminated"].get("exitCode", 0) != 0:
-                        pod_status = "Error"
-                        break
+            # Surface init-container failures (prefixed "Init:") before falling
+            # back to app container / phase status.
+            init_failure = self._init_container_status(status)
+            if init_failure:
+                pod_status = init_failure
+            else:
+                # Check for more specific states from container statuses
+                for cs in status.get("containerStatuses", []):
+                    state = cs.get("state", {})
+                    if "waiting" in state:
+                        reason = state["waiting"].get("reason", "")
+                        if reason in (
+                            "CrashLoopBackOff",
+                            "ImagePullBackOff",
+                            "ErrImagePull",
+                        ):
+                            pod_status = reason
+                            break
+                    elif "terminated" in state:
+                        if state["terminated"].get("exitCode", 0) != 0:
+                            pod_status = "Error"
+                            break
         # 2) All columns *except* Status and Actions
         cols = [
             name,
@@ -254,15 +417,18 @@ class PodsPage(BaseResourcePage):
                 item.setTextAlignment(
                     Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
                 )
-            # Make non-editable
-            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            # Set default text color (using cached values)
-            item.setForeground(text_color)
-            self.table.setItem(row, col, item)
+            # Set text color and apply consistent styling (including bold orange for name)
+            self.table.setItem(row, col, self.style_table_item(item, is_name=(idx == 0)))
         # 3) Status column as StatusLabel widget (col index 9)
         status_col = 1 + len(cols)  # equals 9
         # Get the appropriate color for the pod status
         color = self._get_status_color(pod_status)
+        # Backing item carries the status text so the column sorts by status
+        # (the StatusLabel widget below provides the colored display).
+        status_sort_item = SortableTableWidgetItem(pod_status)
+        status_sort_item.setFlags(status_sort_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        self.table.setItem(row, status_col, status_sort_item)
+        
         # Create status widget with proper color
         status_widget = StatusLabel(pod_status, color)
         # Connect click event to select the row
@@ -272,33 +438,30 @@ class PodsPage(BaseResourcePage):
         action_btn = self._create_action_button(
             row, name, resource.get("namespace", "")
         )
+        # Set a dummy item for the action column for highlighting
+        dummy_action_item = SortableTableWidgetItem("")
+        dummy_action_item.setFlags(dummy_action_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        self.table.setItem(row, status_col + 1, dummy_action_item)
+        
         action_container = self._create_action_container(row, action_btn)
         self.table.setCellWidget(row, status_col + 1, action_container)
 
-    # Removed duplicate _create_action_button - now uses base class implementation
     def _get_pod_exposed_ports(self, pod_resource):
-        """Extract exposed ports from pod resource"""
+        """Extract exposed ports from pod container specs."""
         if not pod_resource or not pod_resource.get("raw_data"):
             return []
         exposed_ports = []
         raw_data = pod_resource["raw_data"]
-        # Get ports from container specs
-        containers = raw_data.get("spec", {}).get("containers", [])
-        for container in containers:
-            ports = container.get("ports", [])
-            for port in ports:
+        for container in raw_data.get("spec", {}).get("containers", []):
+            for port in container.get("ports", []):
                 if port.get("containerPort"):
-                    exposed_ports.append(
-                        {
-                            "port": port["containerPort"],
-                            "protocol": port.get("protocol", "TCP"),
-                            "name": port.get("name", f"port-{port['containerPort']}"),
-                        }
-                    )
+                    exposed_ports.append({
+                        "port": port["containerPort"],
+                        "protocol": port.get("protocol", "TCP"),
+                        "name": port.get("name", f"port-{port['containerPort']}"),
+                    })
         return exposed_ports
 
-    # Removed duplicate _handle_action_with_data - now uses base class _handle_action
-    # Removed duplicate _handle_action method - now using base class implementation with enhanced pod support
     def _handle_port_forward(self, pod_name, namespace, resource):
         """Handle port forwarding for a pod"""
         try:
@@ -329,26 +492,18 @@ class PodsPage(BaseResourcePage):
             )
 
     def _create_port_forward(self, config):
-        """Create a port forward from configuration"""
         try:
-            port_config = self.port_manager.start_port_forward(
+            self.port_manager.start_port_forward(
                 resource_name=config["resource_name"],
                 resource_type=config["resource_type"],
                 namespace=config["namespace"],
                 target_port=config["target_port"],
                 local_port=config.get("local_port"),
                 protocol=config.get("protocol", "TCP"),
+                bind_address=config.get("bind_address", "localhost"),
             )
-            QMessageBox.information(
-                self,
-                "Port Forward Created",
-                f"Port forward created successfully!\n\n"
-                f"Resource: {config['resource_type']}/{config['resource_name']}\n"
-                f"Local: localhost:{port_config.local_port}\n"
-                f"Target: {port_config.target_port}\n"
-                f"Protocol: {port_config.protocol}\n\n"
-                f"Access at: http://localhost:{port_config.local_port}",
-            )
+            # Success / error feedback is dispatched centrally by MainWindow via
+            # port_forward_active / port_forward_error signals → toasts.
         except Exception as e:
             QMessageBox.critical(
                 self, "Port Forward Failed", f"Failed to create port forward: {str(e)}"
@@ -578,30 +733,29 @@ class PodsPage(BaseResourcePage):
         self._refresh_table_text_colors()
 
     def _refresh_pod_status_colors(self):
-        """Refresh pod status label colors when theme changes"""
+        """Refresh pod status label colors when theme changes with defensive checks."""
+        from Styles.BaseDetailSectionStyles import get_custom_badge_style
         if not hasattr(self, "table") or not self.table:
             return
         status_col = 9  # Status column index
         for row in range(self.table.rowCount()):
-            status_widget = self.table.cellWidget(row, status_col)
-            if isinstance(status_widget, StatusLabel):
-                pod_status = (
-                    status_widget.label.text()
-                    if hasattr(status_widget, "label") and status_widget.label
-                    else ""
-                )
-                # Get the appropriate color for the pod status
-                color = self._get_status_color(pod_status)
-                # Try to use StatusLabel's public API first, fall back to direct stylesheet update
-                if hasattr(status_widget, "set_color"):
-                    status_widget.set_color(color)
-                elif hasattr(status_widget, "update_style"):
-                    status_widget.update_style()
-                else:
-                    # Fallback: direct stylesheet update
-                    status_widget.label.setStyleSheet(
-                        f"color: {QColor(color).name()}; background-color: transparent;"
-                    )
+            try:
+                status_widget = self.table.cellWidget(row, status_col)
+                if isinstance(status_widget, StatusLabel):
+                    # SAFETY CHECK: Ensure the C++ label object still exists
+                    if hasattr(status_widget, "label") and status_widget.label and not sip.isdeleted(status_widget.label):
+                        pod_status = status_widget.label.text()
+                        
+                        # Get the appropriate color for the pod status
+                        color = self._get_status_color(pod_status)
+                        
+                        # Re-apply the full badge style
+                        status_widget.label.setStyleSheet(
+                            get_custom_badge_style(color, is_small=True)
+                        )
+            except (RuntimeError, AttributeError):
+                # Widget or its C++ object was deleted during iteration, skip safely
+                continue
 
     def _refresh_table_text_colors(self):
         """Refresh table item text colors when theme changes"""
@@ -620,4 +774,5 @@ class PodsPage(BaseResourcePage):
             ):  # Columns 1-8 (Name through Age, excluding Status and Actions)
                 item = self.table.item(row, col)
                 if item:
-                    item.setForeground(text_color)
+                    # Apply styling including theme-aware colors
+                    self.style_table_item(item, is_name=(col == 1))

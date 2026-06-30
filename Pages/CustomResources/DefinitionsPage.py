@@ -4,7 +4,7 @@ Dynamic implementation of the Definitions page with live Kubernetes data.
 
 import logging
 
-from PyQt6.QtWidgets import (QHeaderView)
+from PyQt6.QtWidgets import QHeaderView, QCheckBox
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor
 
@@ -31,9 +31,6 @@ class DefinitionsPage(BaseResourcePage):
 
         # Set up the base UI components
         super().setup_ui("Definitions", headers, sortable_columns)
-
-        # Apply table style
-        # Table styling is already handled by BaseResourcePage
 
         # Configure column widths
         self.configure_columns()
@@ -73,12 +70,13 @@ class DefinitionsPage(BaseResourcePage):
 
         # Ensure full width utilization after configuration
         QTimer.singleShot(100, self._ensure_full_width_utilization)
+
     def populate_resource_row(self, row, resource):
         """
         Populate a single row with CustomResourceDefinition data from live Kubernetes resources
         """
         # Set row height once
-        self.table.setRowHeight(row, 40)
+        self.table.setRowHeight(row, 42)
 
         # Create checkbox for row selection
         resource_name = resource["name"]
@@ -158,8 +156,6 @@ class DefinitionsPage(BaseResourcePage):
                 # Find the checkbox widget inside the container
                 checkbox = checkbox_container.findChild(checkbox_container.__class__.__bases__[0])
                 if not checkbox:
-                    # Try to find QCheckBox specifically
-                    from PyQt6.QtWidgets import QCheckBox
                     checkbox = checkbox_container.findChild(QCheckBox)
                 
                 if checkbox:

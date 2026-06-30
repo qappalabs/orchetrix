@@ -1,9 +1,6 @@
 import sys
 import os
 import logging
-# Add the project root directory to sys.path
-project_root = os.path.abspath(os.path.dirname(__file__))
-sys.path.append(project_root)
 
 from PyQt6.QtCore import Qt, QPoint, QEvent, QSize, QPropertyAnimation, QEasingCurve, pyqtProperty, QRectF  # noqa: E402
 from PyQt6.QtGui import QFont, QLinearGradient, QPainter, QColor, QPixmap, QIcon, QPainterPath, QCursor, QAction  # noqa: E402
@@ -13,6 +10,7 @@ from Styles import TitleBarStyles  # noqa: E402
 from UI.Icons import Icons, resource_path  # noqa: E402
 from UI.ThemeAwarePage import ThemeAwareMixin  # noqa: E402
 from UI.ThemeManager import get_theme_manager  # noqa: E402
+from UI.CustomComboBox import CustomComboBox  # noqa: E402
 
 class ThemeToggle(QAbstractButton):
     def __init__(self, parent=None):
@@ -109,7 +107,6 @@ class ThemeToggle(QAbstractButton):
         return QColor(int(r), int(g), int(b))
 
 
-
 class TitleBar(ThemeAwareMixin, QWidget):
     def __init__(self, parent=None, update_pinned_items_signal=None):
         self._parent_window = parent
@@ -171,8 +168,25 @@ class TitleBar(ThemeAwareMixin, QWidget):
                 self.logo_label.setPixmap(pixmap.scaled(self.logo_icon_size, Qt.AspectRatioMode.KeepAspectRatio,
                                                         Qt.TransformationMode.SmoothTransformation))
             else:
-                # Create a fallback logo
-                self.create_fallback_logo()
+                # Try SVG via renderer
+                from PyQt6.QtSvg import QSvgRenderer
+                from PyQt6.QtCore import QByteArray
+                svg_path = resource_path("Icons/logoIcon.svg")
+                if os.path.exists(svg_path):
+                    with open(svg_path, "r", encoding="utf-8") as f:
+                        svg_content = f.read()
+                    renderer = QSvgRenderer(QByteArray(svg_content.encode("utf-8")))
+                    if renderer.isValid():
+                        svg_pixmap = QPixmap(self.logo_icon_size)
+                        svg_pixmap.fill(Qt.GlobalColor.transparent)
+                        painter = QPainter(svg_pixmap)
+                        renderer.render(painter)
+                        painter.end()
+                        self.logo_label.setPixmap(svg_pixmap)
+                    else:
+                        self.create_fallback_logo()
+                else:
+                    self.create_fallback_logo()
         except Exception as e:
             logging.debug(f"Failed to load logo: {e}")
             self.create_fallback_logo()
@@ -181,42 +195,16 @@ class TitleBar(ThemeAwareMixin, QWidget):
         self.home_btn = self.create_icon_button("home", "Home")
         self.home_btn.clicked.connect(self.navigate_to_home)
 
-        # Pinned Clusters button with dropdown (using QWidget for better control)
-        self.pinned_clusters_container = QWidget()
-        self.pinned_clusters_container.setFixedSize(300, 30)
-        pinned_layout = QHBoxLayout(self.pinned_clusters_container)
-        pinned_layout.setContentsMargins(8, 0, 0, 0)  # Add left margin for the container
-        pinned_layout.setSpacing(8)  # Increase spacing between icon and text
-
-        # Icon label for cluster icon
-        self.pinned_clusters_icon = QLabel()
-        self.pinned_clusters_icon.setFixedSize(16, 16)
-        self.pinned_clusters_icon.setStyleSheet(TitleBarStyles.get_pinned_cluster_icon_style())
-        self.pinned_clusters_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.pinned_clusters_icon.hide()  # Hidden by default
-
-        # Label for "Pinned Clusters" text or current cluster name
-        self.pinned_clusters_label = QLabel("Pinned Clusters")
-        self.pinned_clusters_label.setStyleSheet(TitleBarStyles.get_pinned_cluster_label_style())
-        self.pinned_clusters_label.setFixedHeight(30)
-
-        # Button for the arrow
-        self.pinned_clusters_arrow_btn = QToolButton()
-        self.pinned_clusters_arrow_btn.setFixedSize(30, 30)
-        self.pinned_clusters_arrow_btn.setIcon(self.create_down_arrow_icon())
-        self.pinned_clusters_arrow_btn.setIconSize(QSize(10, 10))
-        self.pinned_clusters_arrow_btn.setStyleSheet(TitleBarStyles.get_pinned_cluster_arrow_style())
-        self.pinned_clusters_arrow_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        self.pinned_clusters_arrow_btn.clicked.connect(self.toggle_pinned_clusters_dropdown)
-
-        # Container widget styling
-        self.pinned_clusters_container.setStyleSheet(TitleBarStyles.get_pinned_cluster_container_style())
-
-        # Add widgets to layout in correct order
-        pinned_layout.addWidget(self.pinned_clusters_icon)
-        pinned_layout.addWidget(self.pinned_clusters_label)
-        pinned_layout.addStretch()
-        pinned_layout.addWidget(self.pinned_clusters_arrow_btn)
+        # Pinned Clusters dropdown using searchable CustomComboBox
+        self.pinned_clusters_combo = CustomComboBox(self, is_searchable=True, show_unpin=True)
+        self.pinned_clusters_combo.setFixedSize(300, 34)
+        self.pinned_clusters_combo.setPlaceholderText("Pinned Clusters")
+        self.pinned_clusters_combo.currentTextChanged.connect(self.handle_item_selection)
+        self.pinned_clusters_combo.unpin_clicked.connect(self.handle_unpin_item)
+        self.pinned_clusters_combo.setObjectName("pinned_clusters_combo")
+        
+        # Override combo styling to fit TitleBar
+        self.pinned_clusters_combo.setStyleSheet(TitleBarStyles.get_pinned_cluster_container_style())
 
         # Theme Toggle
         self.theme_toggle = ThemeToggle(self)
@@ -232,7 +220,7 @@ class TitleBar(ThemeAwareMixin, QWidget):
         self.theme_toggle.blockSignals(False)
 
         # Settings icon on the right (removed troubleshoot, notifications, and profile)
-        self.settings_btn = self.create_icon_button("preferences", "Settings")
+        self.settings_btn = self.create_icon_button("settings", "Settings")
 
         # Window control buttons
         self.minimize_btn = self.create_window_control_button("minimize", "Minimize")
@@ -249,7 +237,7 @@ class TitleBar(ThemeAwareMixin, QWidget):
         layout.addWidget(self.logo_label)
         layout.addWidget(self.home_btn)
         layout.addSpacerItem(QSpacerItem(90, 0))
-        layout.addWidget(self.pinned_clusters_container)
+        layout.addWidget(self.pinned_clusters_combo)
         layout.addStretch(1)
         layout.addWidget(self.theme_toggle)
         layout.addSpacing(10)
@@ -293,10 +281,8 @@ class TitleBar(ThemeAwareMixin, QWidget):
     def _on_theme_changed(self, theme_name):
         """Re-apply all styles when theme changes"""
         self.setStyleSheet(TitleBarStyles.get_title_bar_style())
-        self.pinned_clusters_icon.setStyleSheet(TitleBarStyles.get_pinned_cluster_icon_style())
-        self.pinned_clusters_label.setStyleSheet(TitleBarStyles.get_pinned_cluster_label_style())
-        self.pinned_clusters_arrow_btn.setStyleSheet(TitleBarStyles.get_pinned_cluster_arrow_style())
-        self.pinned_clusters_container.setStyleSheet(TitleBarStyles.get_pinned_cluster_container_style())
+        if hasattr(self, 'pinned_clusters_combo'):
+            self.pinned_clusters_combo.setStyleSheet(TitleBarStyles.get_pinned_cluster_container_style())
         self.close_btn.setStyleSheet(TitleBarStyles.get_close_button_style())
         self.home_btn.setStyleSheet(TitleBarStyles.get_icon_button_style())
         self.settings_btn.setStyleSheet(TitleBarStyles.get_icon_button_style())
@@ -320,7 +306,7 @@ class TitleBar(ThemeAwareMixin, QWidget):
                 self.home_btn.setIconSize(self.normal_icon_size)
 
         if hasattr(self, 'settings_btn'):
-            prefs_icon = Icons.get_theme_icon("preferences.svg", theme_folder)
+            prefs_icon = Icons.get_theme_icon("settings.svg", theme_folder)
             if not prefs_icon.isNull():
                 self.settings_btn.setIcon(prefs_icon)
                 self.settings_btn.setIconSize(self.normal_icon_size)
@@ -367,24 +353,21 @@ class TitleBar(ThemeAwareMixin, QWidget):
         get_theme_manager().set_theme(new_theme)
 
     def update_current_cluster(self, cluster_name):
-        """Update the pinned clusters label with the selected cluster name and icon"""
+        """Update the current cluster name and icon in the dropdown"""
         self.current_cluster = cluster_name
-        if cluster_name:
-            # Truncate if necessary to prevent overflow
-            display_name = cluster_name[:25] + "..." if len(cluster_name) > 25 else cluster_name
-            self.pinned_clusters_label.setText(display_name)
-
-            # Get the cluster icon using existing HomePage system
-            cluster_icon = self.get_cluster_icon(cluster_name)
-            if cluster_icon and not cluster_icon.isNull():
-                self.pinned_clusters_icon.setPixmap(cluster_icon)
-                self.pinned_clusters_icon.show()
+        if hasattr(self, 'pinned_clusters_combo'):
+            self.pinned_clusters_combo.setCurrentText(cluster_name if cluster_name else "")
+            
+            # Fetch and apply cluster icon
+            if cluster_name:
+                cluster_icon = self.get_cluster_icon(cluster_name)
+                if cluster_icon and not cluster_icon.isNull():
+                    self.pinned_clusters_combo.setIcon(cluster_icon)
+                else:
+                    self.pinned_clusters_combo.setIcon(None)
             else:
-                self.pinned_clusters_icon.hide()
-        else:
-            self.pinned_clusters_label.setText("Pinned Clusters")
-            self.pinned_clusters_icon.hide()
-        logging.debug(f"Updated pinned clusters label to: {self.pinned_clusters_label.text()}")
+                self.pinned_clusters_combo.setIcon(None)
+        logging.debug(f"Updated current cluster to: {cluster_name}")
 
     def get_cluster_icon(self, cluster_name):
         """Get cluster icon using the HomePage's color system"""
@@ -412,119 +395,13 @@ class TitleBar(ThemeAwareMixin, QWidget):
             logging.debug(f"Error getting cluster icon for {cluster_name}: {e}")
             return None
 
-    def create_down_arrow_icon(self):
-        """Create a downward arrow icon for the dropdown"""
-        size = QSize(10, 10)  # Smaller size for the arrow
-        pixmap = QPixmap(size)
-        pixmap.fill(Qt.GlobalColor.transparent)
-
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor("#FFFFFF"))
-
-        path = QPainterPath()
-        path.moveTo(size.width() * 0.5, size.height() * 0.85)  # Bottom point
-        path.lineTo(size.width() * 0.15, size.height() * 0.35)  # Top-left point
-        path.lineTo(size.width() * 0.85, size.height() * 0.35)  # Top-right point
-        path.closeSubpath()
-
-        painter.drawPath(path)
-        painter.end()
-
-        return QIcon(pixmap)
-
-    def toggle_pinned_clusters_dropdown(self):
-        """Toggle the visibility of the pinned clusters dropdown"""
-        if self.dropdown_menu and self.dropdown_menu.isVisible():
-            self.dropdown_menu.hide()
-            # Keep the current cluster name displayed when closing dropdown
-        else:
-            self.create_or_update_dropdown()
-            # The label should maintain the current cluster name
-            if self.search_input:
-                self.search_input.setFocus()  # Set focus to the search input when opening
-
-    def create_or_update_dropdown(self):
-        """Create or update the dropdown menu with search input and pinned items"""
-        if not self.dropdown_menu:
-            self.dropdown_menu = QMenu(self)
-            self.dropdown_menu.setStyleSheet(TitleBarStyles.get_dropdown_menu_style())
-
-        # Initialize or reuse the search input and action
-        if not self.search_input:
-            self.search_input = QLineEdit(self)  # Set parent to self to prevent deletion
-            self.search_input.setPlaceholderText("Search...")
-            self.search_input.setFixedWidth(287)  # Match the width of pinned_clusters_container
-            self.search_input.setStyleSheet(TitleBarStyles.get_search_input_style())
-            self.search_input.textChanged.connect(self.filter_pinned_items)
-            self.search_action = QWidgetAction(self)  # Set parent to self to prevent deletion
-            self.search_action.setDefaultWidget(self.search_input)
-            self.dropdown_menu.addAction(self.search_action)
-
-        # Clear and update the pinned items
-        self.dropdown_menu.clear()
-        self.dropdown_menu.addAction(self.search_action)  # Re-add the search action
-
-        # Add pinned items as actions
-        if self.pinned_items:
-            for item in self.pinned_items:
-                action = QAction(item, self.dropdown_menu)
-                action.triggered.connect(lambda checked, i=item: self.handle_item_selection(i))
-                self.dropdown_menu.addAction(action)
-        else:
-            action = QAction("No pinned clusters", self.dropdown_menu)
-            action.setEnabled(False)
-            self.dropdown_menu.addAction(action)
-
-        # Show the dropdown below the container
-        button_pos = self.pinned_clusters_container.mapToGlobal(QPoint(0, self.pinned_clusters_container.height()))
-        self.dropdown_menu.move(button_pos)
-        self.dropdown_menu.show()
-
-    def filter_pinned_items(self, text):
-        """Filter the dropdown items based on the search input with Elasticsearch-like matching"""
-        if not self.pinned_items or not self.dropdown_menu:
-            return
-
-        search_text = text.lower()
-        self.dropdown_menu.clear()
-        self.dropdown_menu.addAction(self.search_action)  # Re-add the search action
-
-        # Filter items using substring matching (Elasticsearch-like)
-        filtered_items = [item for item in self.pinned_items if search_text in item.lower()]
-        if filtered_items:
-            for item in filtered_items:
-                action = QAction(item, self.dropdown_menu)
-                action.triggered.connect(lambda checked, i=item: self.handle_item_selection(i))
-                self.dropdown_menu.addAction(action)
-        else:
-            action = QAction("No matching pinned clusters", self.dropdown_menu)
-            action.setEnabled(False)
-            self.dropdown_menu.addAction(action)
-
-        # Update the dropdown position and restore focus
-        button_pos = self.pinned_clusters_container.mapToGlobal(QPoint(0, self.pinned_clusters_container.height()))
-        self.dropdown_menu.move(button_pos)
-        if self.search_input:
-            self.search_input.setFocus()  # Restore focus to ensure continuous typing
 
     def handle_item_selection(self, item):
-        """Handle the selection of a pinned item"""
+        """Handle the selection of a pinned item from the CustomComboBox"""
+        if not item or item == self.current_cluster:
+            return
+            
         self.current_cluster = item
-
-        # Update both text and icon
-        display_name = item[:25] + "..." if len(item) > 25 else item
-        self.pinned_clusters_label.setText(display_name)
-
-        # Set the cluster icon using existing system
-        cluster_icon = self.get_cluster_icon(item)
-        if cluster_icon and not cluster_icon.isNull():
-            self.pinned_clusters_icon.setPixmap(cluster_icon)
-            self.pinned_clusters_icon.show()
-        else:
-            self.pinned_clusters_icon.hide()
 
         # Emit signal to open cluster
         if self.open_cluster_signal and hasattr(self._parent_window.home_page, 'all_data'):
@@ -532,8 +409,12 @@ class TitleBar(ThemeAwareMixin, QWidget):
                 for data_item in self._parent_window.home_page.all_data[view_type]:
                     if data_item.get("name") == item and "Cluster" in data_item.get("kind", ""):
                         self.open_cluster_signal.emit(item)
-                        break
-        self.dropdown_menu.hide()
+                        return
+
+    def handle_unpin_item(self, item_name):
+        """Handle unpin action from the dropdown"""
+        if hasattr(self._parent_window, 'home_page') and hasattr(self._parent_window.home_page, 'toggle_pin_item'):
+            self._parent_window.home_page.toggle_pin_item(item_name)
 
     def create_icon_button(self, icon_id, tooltip, fallback_icon=None):
         """Create a tool button with the specified icon and tooltip.
@@ -613,53 +494,7 @@ class TitleBar(ThemeAwareMixin, QWidget):
 
         return btn
 
-    def create_back_icon(self):
-        """Create a back arrow icon"""
-        size = self.normal_icon_size
-        pixmap = QPixmap(size)
-        pixmap.fill(Qt.GlobalColor.transparent)
 
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor("#FFFFFF"))
-
-        path = QPainterPath()
-        path.moveTo(size.width() * 0.65, size.height() * 0.15)
-        path.lineTo(size.width() * 0.35, size.height() * 0.5)
-        path.lineTo(size.width() * 0.65, size.height() * 0.85)
-        path.lineTo(size.width() * 0.55, size.height() * 0.5)
-        path.closeSubpath()
-
-        painter.drawPath(path)
-        painter.end()
-
-        return QIcon(pixmap)
-
-    def create_forward_icon(self):
-        """Create a forward arrow icon"""
-        size = self.normal_icon_size
-        pixmap = QPixmap(size)
-        pixmap.fill(Qt.GlobalColor.transparent)
-
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor("#FFFFFF"))
-
-        path = QPainterPath()
-        path.moveTo(size.width() * 0.35, size.height() * 0.15)
-        path.lineTo(size.width() * 0.65, size.height() * 0.5)
-        path.lineTo(size.width() * 0.35, size.height() * 0.85)
-        path.lineTo(size.width() * 0.45, size.height() * 0.5)
-        path.closeSubpath()
-
-        painter.drawPath(path)
-        painter.end()
-
-        return QIcon(pixmap)
 
     def create_fallback_logo(self):
         """Create a simple colored logo as fallback"""
@@ -670,8 +505,8 @@ class TitleBar(ThemeAwareMixin, QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         gradient = QLinearGradient(0, 0, self.logo_icon_size.width(), self.logo_icon_size.height())
-        gradient.setColorAt(0, QColor("#4A9EFF"))
-        gradient.setColorAt(1, QColor("#0066CC"))
+        gradient.setColorAt(0, QColor("#FF9500"))
+        gradient.setColorAt(1, QColor("#FF5500"))
         painter.setBrush(gradient)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(0, 0, self.logo_icon_size.width(), self.logo_icon_size.height(), 6, 6)
@@ -691,8 +526,9 @@ class TitleBar(ThemeAwareMixin, QWidget):
         if hasattr(self._parent_window, 'switch_to_home'):
             self._parent_window.switch_to_home()
             self.current_cluster = None
-            self.pinned_clusters_label.setText("Pinned Clusters")
-            self.pinned_clusters_icon.hide()
+            if hasattr(self, 'pinned_clusters_combo'):
+                self.pinned_clusters_combo.setCurrentText("")
+                self.pinned_clusters_combo.setIcon(None)
 
     def eventFilter(self, obj, event):
         if event.type() == QEvent.Type.MouseButtonDblClick:
@@ -700,9 +536,13 @@ class TitleBar(ThemeAwareMixin, QWidget):
             return True
         return super().eventFilter(obj, event)
 
-    def toggle_maximize(self):
+    def _get_theme_folder(self):
+        """Return the lowercase theme folder name ('dark' or 'light') for icon lookups."""
         theme_name = get_theme_manager().get_current_theme_name()
-        theme_folder = theme_name.lower() if isinstance(theme_name, str) else "dark"
+        return theme_name.lower() if isinstance(theme_name, str) else "dark"
+
+    def toggle_maximize(self):
+        theme_folder = self._get_theme_folder()
 
         if self._parent_window.isMaximized():
             self._parent_window.showNormal()
@@ -763,8 +603,7 @@ class TitleBar(ThemeAwareMixin, QWidget):
             self.double_click_in_progress = False
 
     def update_maximize_button_icon(self, is_maximized):
-        theme_name = get_theme_manager().get_current_theme_name()
-        theme_folder = theme_name.lower() if isinstance(theme_name, str) else "dark"
+        theme_folder = self._get_theme_folder()
 
         icon_filename = "maximize_active.svg" if is_maximized else "maximize.svg"
         icon = Icons.get_theme_icon(icon_filename, theme_folder)
@@ -785,8 +624,10 @@ class TitleBar(ThemeAwareMixin, QWidget):
         if not isinstance(pinned_items, list):
             pinned_items = []
         self.pinned_items = pinned_items
-        if self.dropdown_menu and self.dropdown_menu.isVisible():
-            self.create_or_update_dropdown()
+        if hasattr(self, 'pinned_clusters_combo'):
+            self.pinned_clusters_combo.setItems(pinned_items)
+            if self.current_cluster:
+                self.pinned_clusters_combo.setCurrentText(self.current_cluster)
 
     def _connect_signal_safely(self, signal, slot):
         """Connect signal safely with proper tracking for cleanup"""

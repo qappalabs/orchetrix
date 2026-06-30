@@ -2,13 +2,13 @@
 Dynamic implementation of the Storage Classes page with live Kubernetes data.
 """
 
-from PyQt6.QtWidgets import (QHeaderView)
+from PyQt6.QtWidgets import (QHeaderView, QWidget, QLabel)
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor
 
 from Base_Components.base_components import SortableTableWidgetItem
 from Base_Components.base_resource_page import BaseResourcePage
-from UI.Styles import AppColors
+from UI.Styles import AppStyles, AppColors
 from Utils.data_formatters import parse_age_to_seconds
 
 
@@ -30,14 +30,12 @@ class StorageClassesPage(BaseResourcePage):
         sortable_columns = {1, 2, 3, 4, 5}
 
         # Set up the base UI components with styles
-        super().setup_ui("Storage Classes", headers, sortable_columns)
+        layout = super().setup_ui("Storage Classes", headers, sortable_columns)
 
         # Table styling is already handled by BaseResourcePage
 
         # Configure column widths
         self.configure_columns()
-
-        # Add delete selected button
 
     def configure_columns(self):
         """Configure column widths for full screen utilization"""
@@ -49,13 +47,12 @@ class StorageClassesPage(BaseResourcePage):
         # Column specifications with optimized default widths
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
-            (1, 140, "interactive"), # Name
+            (1, 140, "stretch"),     # Name - stretch to fill remaining space
             (2, 90, "interactive"),  # Provisioner
             (3, 80, "interactive"),  # Reclaim Policy
             (4, 70, "interactive"),  # Default
             (5, 60, "interactive"),  # Age
-            (6, 80, "stretch"),      # Status - stretch to fill remaining space
-            (7, 40, "fixed")        # Actions
+            (6, 40, "fixed")         # Actions
         ]
 
         # Apply column configuration
@@ -73,12 +70,40 @@ class StorageClassesPage(BaseResourcePage):
 
         # Ensure full width utilization after configuration
         QTimer.singleShot(100, self._ensure_full_width_utilization)
+
+    def _auto_resize_columns(self, max_col_widths=None, min_col_widths=None):
+        """Override to provide explicit minimum widths for columns that contain wider strings."""
+        explicit_mins = {
+            # 0 is Checkbox
+            1: 140,  # Name
+            2: 240,  # Provisioner - needs to be quite wide to fit things like 'k8s.io/minikube-hostpath'
+            3: 130,  # Reclaim Policy
+            4: 80,   # Default
+            5: 60,   # Age
+            6: 40,   # Actions
+        }
+        
+        # Merge with any caller overrides
+        if min_col_widths:
+            explicit_mins.update(min_col_widths)
+            
+        explicit_maxes = {
+            2: 300,  # Provisioner
+            3: 180,  # Reclaim Policy
+            4: 100,  # Default
+            5: 80,   # Age
+        }
+        if max_col_widths:
+            explicit_maxes.update(max_col_widths)
+            
+        super()._auto_resize_columns(max_col_widths=explicit_maxes, min_col_widths=explicit_mins)
+
     def populate_resource_row(self, row, resource):
         """
         Populate a single row with storage class data from live Kubernetes resources
         """
         # Set row height once
-        self.table.setRowHeight(row, 40)
+        self.table.setRowHeight(row, 42)
 
         # Create checkbox for row selection
         resource_name = resource["name"]

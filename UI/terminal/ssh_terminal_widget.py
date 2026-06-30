@@ -5,20 +5,15 @@ This module contains the SSHTerminalWidget class which provides
 specialized terminal functionality for SSH connections to pods.
 """
 
+import logging
 import re
 
-import logging
-
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QTextCharFormat, QKeySequence
 
-from PyQt6.QtCore import Qt
-
 from Utils.kubernetes_client import KubernetesPodSSH
-
 from UI.ThemeAwarePage import ThemeAwareMixin
-
 from .terminal_widget import UnifiedTerminalWidget
-
 from .terminal_constants import StyleConstants
 
 

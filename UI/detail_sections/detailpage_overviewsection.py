@@ -1,18 +1,49 @@
 """
 Overview section for DetailPage component
 """
-
+import os
 from PyQt6.QtWidgets import (
-    QScrollArea, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QFrame
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
+    QScrollArea, QFrame, QSizePolicy, QGridLayout,
+    QTableWidget, QTableWidgetItem, QHeaderView, QPushButton,
+    QMenu, QApplication, QLayout, QGraphicsDropShadowEffect,
+    QAbstractItemView
 )
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QColor, QFont
+from PyQt6.QtCore import Qt, QTimer, QByteArray, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QPixmap, QPainter
+from PyQt6.QtSvg import QSvgRenderer
 from typing import Dict, Any
 import logging
+import re
+from UI.ThemeManager import get_theme_manager
+from Utils.qt_utils import is_valid
+
+
+class ClickableSelectableLabel(QLabel):
+    """
+    A QLabel that allows text selection but also emits a clicked signal 
+    when clicked (and not selecting text).
+    """
+    clicked = pyqtSignal()
+
+    def __init__(self, text="", parent=None):
+        super().__init__(text, parent)
+        self.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse)
+        # Mouse tracking not strictly needed unless we want hover effects
+
+    def mouseReleaseEvent(self, event):
+        # Only emit clicked if text was NOT selected during this click action
+        # AND it was a left click
+        if not self.hasSelectedText() and event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mouseReleaseEvent(event)
 
 from .base_detail_section import BaseDetailSection
 import Styles.BaseDetailSectionStyles as BaseDetailSectionStyles
 import Styles.OverviewSectionStyles as OverviewSectionStyles
+from Utils.data_formatters import format_age
+from Utils.time_utils import TimezoneManager
 
 
 class DetailPageOverviewSection(BaseDetailSection):
@@ -24,6 +55,34 @@ class DetailPageOverviewSection(BaseDetailSection):
         self.setup_overview_ui()
         # Note: Theme signals connected via ThemeAwareMixin in BaseDetailSection
 
+    def _render_svg_from_file(self, icon_filename, color, size=18):
+        """Load an SVG from Icons folder, recolor it, and return a QPixmap."""
+        base_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        icon_path = os.path.join(base_path, "Icons", icon_filename)
+        try:
+            with open(icon_path, 'r', encoding='utf-8') as f:
+                svg_content = f.read()
+            
+            # Pattern to match stroke or fill attributes/styles with common sentinel colors
+            sentinel_pattern = r'(?:#[0-9a-fA-F]{3,6}|black|white|currentColor|gray)'
+            
+            # Replace attributes: stroke="color" or fill="color"
+            svg_content = re.sub(rf'(stroke|fill)\s*=\s*["\']{sentinel_pattern}["\']', rf'\1="{color}"', svg_content, flags=re.IGNORECASE)
+            
+            # Replace inline styles: stroke: color or fill: color
+            svg_content = re.sub(rf'(stroke|fill)\s*:\s*{sentinel_pattern}', rf'\1: {color}', svg_content, flags=re.IGNORECASE)
+                
+            renderer = QSvgRenderer(QByteArray(svg_content.encode('utf-8')))
+            pixmap = QPixmap(size, size)
+            pixmap.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(pixmap)
+            renderer.render(painter)
+            painter.end()
+            return pixmap
+        except Exception as e:
+            logging.error(f"Error rendering SVG {icon_filename}: {e}")
+            return QPixmap(size, size)
+
     def _on_theme_changed(self, theme_name):
 
         # Refresh overview content style
@@ -34,13 +93,10 @@ class DetailPageOverviewSection(BaseDetailSection):
         # Refresh resource header widgets (static)
         if hasattr(self, 'resource_name_label'):
             self.resource_name_label.setStyleSheet(
-                BaseDetailSectionStyles.get_primary_text_style())
-        if hasattr(self, 'resource_info_label'):
-            self.resource_info_label.setStyleSheet(
-                BaseDetailSectionStyles.get_secondary_text_style())
-        if hasattr(self, 'creation_time_label'):
-            self.creation_time_label.setStyleSheet(
-                BaseDetailSectionStyles.get_secondary_text_style())
+                OverviewSectionStyles.get_overview_header_style())
+        if hasattr(self, 'resource_type_label'):
+             self.resource_type_label.setStyleSheet(
+                 OverviewSectionStyles.get_resource_type_style())
 
         # Refresh section headers (static)
         if hasattr(self, 'status_header'):
@@ -55,23 +111,46 @@ class DetailPageOverviewSection(BaseDetailSection):
 
         # Refresh status widgets (static)
         if hasattr(self, 'status_text_label'):
-            self.status_text_label.setStyleSheet(
+            # This might be removed in redesign, check if exists
+             self.status_text_label.setStyleSheet(
                 BaseDetailSectionStyles.get_field_value_style())
+                
+        # Refresh Info Cards
+        if hasattr(self, 'created_card'):
+             self.created_card.setStyleSheet(BaseDetailSectionStyles.get_info_card_style())
+             self.created_card.title_label.setStyleSheet(BaseDetailSectionStyles.get_card_title_style())
+             self.created_card.value_label.setStyleSheet(BaseDetailSectionStyles.get_card_value_style())
+             # Refresh Icon
+             if hasattr(self.created_card, 'icon_info'):
+                 info = self.created_card.icon_info
+                 theme = get_theme_manager().get_current_theme()
+                 stroke_color = theme.colors.ACCENT_BLUE if "time" in info['name'] else theme.colors.ACCENT_ORANGE
+                 bg_color = f"rgba({QColor(stroke_color).red()}, {QColor(stroke_color).green()}, {QColor(stroke_color).blue()}, 0.1)"
+                 
+                 # Scope both styles to avoid inheritance/leakage
+                 self.created_card.icon_container.setStyleSheet(f"QFrame {{ background-color: {bg_color}; border-radius: 12px; border: none; }}")
+                 self.created_card.icon_label.setStyleSheet("background: transparent; border: none;")
+                 self.created_card.icon_label.setPixmap(self._render_svg_from_file(info['file'], stroke_color, size=24))
+                 
+        if hasattr(self, 'secondary_card'):
+             self.secondary_card.setStyleSheet(BaseDetailSectionStyles.get_info_card_style())
+             self.secondary_card.title_label.setStyleSheet(BaseDetailSectionStyles.get_card_title_style())
+             self.secondary_card.value_label.setStyleSheet(BaseDetailSectionStyles.get_card_value_style())
+             # Refresh Icon
+             if hasattr(self.secondary_card, 'icon_info'):
+                 info = self.secondary_card.icon_info
+                 theme = get_theme_manager().get_current_theme()
+                 stroke_color = theme.colors.ACCENT_BLUE if "time" in info['name'] else theme.colors.ACCENT_ORANGE
+                 bg_color = f"rgba({QColor(stroke_color).red()}, {QColor(stroke_color).green()}, {QColor(stroke_color).blue()}, 0.1)"
+                 
+                 self.secondary_card.icon_container.setStyleSheet(f"QFrame {{ background-color: {bg_color}; border-radius: 12px; border: none; }}")
+                 self.secondary_card.icon_label.setStyleSheet("background: transparent; border: none;")
+                 self.secondary_card.icon_label.setPixmap(self._render_svg_from_file(info['file'], stroke_color, size=24))
 
         # Refresh status badge with current status type (static)
         if hasattr(self, 'status_badge') and hasattr(self, '_current_status_type'):
-            if self._current_status_type == 'success':
-                self.status_badge.setStyleSheet(
-                    OverviewSectionStyles.get_status_badge_success_style())
-            elif self._current_status_type == 'warning':
-                self.status_badge.setStyleSheet(
-                    OverviewSectionStyles.get_status_badge_warning_style())
-            elif self._current_status_type == 'error':
-                self.status_badge.setStyleSheet(
-                    OverviewSectionStyles.get_status_badge_error_style())
-            else:
-                self.status_badge.setStyleSheet(
-                    OverviewSectionStyles.get_status_badge_default_style())
+            self.status_badge.setStyleSheet(
+                BaseDetailSectionStyles.get_status_badge_style(self._current_status_type))
 
         # Refresh labels content (static)
         if hasattr(self, 'labels_content'):
@@ -82,47 +161,115 @@ class DetailPageOverviewSection(BaseDetailSection):
                 border-radius: 4px;
             """)
 
-        # Refresh tables if they exist (static)
-        # Use try - except to handle deleted C++ objects (RuntimeError)
+        # Refresh table styles (if they exist)
         try:
             if hasattr(self, 'history_table') and self.history_table:
-                self.history_table.isVisible()  # Check if widget is still valid
+                # Use a safe way to check if the widget still exists
                 self.history_table.setStyleSheet(
                     OverviewSectionStyles.get_history_table_style())
-        except RuntimeError:
-            # Widget has been deleted, skip styling
+        except (RuntimeError, AttributeError):
+            # Widget might have been deleted or reference is None
             pass
+            
         try:
             if hasattr(self, 'pods_table') and self.pods_table:
-                self.pods_table.isVisible()  # Check if widget is still valid
-                self.pods_table.setStyleSheet(
-                    OverviewSectionStyles.get_pods_table_style())
-        except RuntimeError:
-            # Widget has been deleted, skip styling
+                if self.pods_table.isVisible():
+                    self.pods_table.setStyleSheet(
+                        OverviewSectionStyles.get_pods_table_style())
+        except (RuntimeError, AttributeError):
             pass
+
+        # Refresh Card Styles (Explicitly to ensure background update)
+        if hasattr(self, 'conditions_card'):
+             self.conditions_card.setStyleSheet(BaseDetailSectionStyles.get_info_card_style())
+             self.conditions_card.style().unpolish(self.conditions_card)
+             self.conditions_card.style().polish(self.conditions_card)
+
+        if hasattr(self, 'labels_card'):
+             self.labels_card.setStyleSheet(BaseDetailSectionStyles.get_info_card_style())
+             self.labels_card.style().unpolish(self.labels_card)
+             self.labels_card.style().polish(self.labels_card)
+
+        if hasattr(self, 'specific_card'):
+             self.specific_card.setStyleSheet(BaseDetailSectionStyles.get_info_card_style())
+             self.specific_card.style().unpolish(self.specific_card)
+             self.specific_card.style().polish(self.specific_card)
+        
+        try:
+            if hasattr(self, 'rollback_icon_label') and self.rollback_icon_label:
+                 theme = get_theme_manager().get_current_theme()
+                 self.rollback_icon_label.setPixmap(self._render_svg_from_file("history.svg", BaseDetailSectionStyles.get_section_header_color()))
+        except (RuntimeError, AttributeError):
+             pass
+
+        # Refresh specific header
+        if hasattr(self, 'specific_header'):
+            self.specific_header.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
 
         # Refresh dynamic widgets in layouts by iterating through them
         if hasattr(self, 'conditions_container_layout'):
-            self._refresh_dynamic_widgets_in_layout(
-                self.conditions_container_layout)
+            self._refresh_dynamic_widgets_in_layout(self.conditions_container_layout)
+        
+        if hasattr(self, 'labels_layout'):
+             self._refresh_dynamic_widgets_in_layout(self.labels_layout)
+
         if hasattr(self, 'specific_layout'):
             self._refresh_dynamic_widgets_in_layout(self.specific_layout)
+
+        # Refresh scroll area style
+        if hasattr(self, 'scroll_area'):
+            self.scroll_area.setStyleSheet(
+                OverviewSectionStyles.get_scroll_area_style())
 
         # DO NOT call update_ui_with_data() - eliminates race condition
 
     def _refresh_dynamic_widgets_in_layout(self, layout):
-
         if not layout:
             return
 
         for i in range(layout.count()):
             item = layout.itemAt(i)
-            if item and item.widget():
-                widget = item.widget()
-                # Refresh stylesheet by re - applying theme - aware function
-                # Most dynamic widgets use field_value_style
-                widget.setStyleSheet(
-                    BaseDetailSectionStyles.get_field_value_style())
+            if item:
+                if item.widget():
+                    widget = item.widget()
+                    class_name = widget.__class__.__name__
+
+                    if class_name == 'QLabel':
+                        text = widget.text()
+                        if text and text.isupper() and len(text.split()) <= 2:
+                            widget.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
+                        elif text.endswith(':'):
+                            widget.setStyleSheet(BaseDetailSectionStyles.get_field_label_style())
+                        else:
+                            # Check for specialized labels
+                            object_name = widget.objectName()
+                            if object_name == "card_title":
+                                widget.setStyleSheet(BaseDetailSectionStyles.get_card_title_style())
+                            elif object_name == "card_value":
+                                widget.setStyleSheet(BaseDetailSectionStyles.get_card_value_style())
+                            elif text in ["True", "False"]:
+                                if text == "True":
+                                    widget.setStyleSheet(BaseDetailSectionStyles.get_condition_badge_true_style())
+                                else:
+                                    widget.setStyleSheet(BaseDetailSectionStyles.get_condition_badge_false_style())
+                                widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                            else:
+                                widget.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
+
+                    elif class_name == 'QFrame':
+                        obj_name = widget.objectName()
+                        if obj_name == "info_card":
+                            widget.setStyleSheet(BaseDetailSectionStyles.get_info_card_style())
+                            # Force style re-application
+                            widget.style().unpolish(widget)
+                            widget.style().polish(widget)
+
+                    # Recurse
+                    if widget.layout():
+                        self._refresh_dynamic_widgets_in_layout(widget.layout())
+
+                elif item.layout():
+                    self._refresh_dynamic_widgets_in_layout(item.layout())
 
     def set_raw_data(self, raw_data):
 
@@ -134,12 +281,12 @@ class DetailPageOverviewSection(BaseDetailSection):
     def setup_overview_ui(self):
 
         # Create scroll area for overview content
-        scroll_area = QScrollArea()
-        scroll_area.setStyleSheet(
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setStyleSheet(
             OverviewSectionStyles.get_scroll_area_style())
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setFrameShape(QScrollArea.Shape.NoFrame)
-        scroll_area.setHorizontalScrollBarPolicy(
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QScrollArea.Shape.NoFrame)
+        self.scroll_area.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         # Overview content widget
@@ -157,96 +304,293 @@ class DetailPageOverviewSection(BaseDetailSection):
 
         self.create_overview_sections(overview_layout)
 
-        scroll_area.setWidget(self.overview_content)
-        self.content_layout.addWidget(scroll_area)
+        self.scroll_area.setWidget(self.overview_content)
+        self.content_layout.addWidget(self.scroll_area)
 
     def create_overview_sections(self, layout):
 
         # Resource Header Section
         self.create_resource_header(layout)
 
-        # Status Section
-        self.create_status_section(layout)
+        # Info Cards Section
+        self.create_info_cards_section(layout)
+
+        # Separator Line
+        theme = get_theme_manager().get_current_theme()
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setFrameShadow(QFrame.Shadow.Plain)
+        separator.setStyleSheet(f"background-color: {theme.colors.BORDER_LIGHT}; max-height: 1px; border: none;")
+        layout.addWidget(separator)
 
         # Conditions Section
         self.create_conditions_section(layout)
 
-        # Labels Section
-        self.create_labels_section(layout)
-
         # Resource - specific section
         self.create_specific_section(layout)
 
-        layout.addStretch()
+        # Labels Section
+        self.create_labels_section(layout)
+
+        layout.addStretch(1)
+
 
     def create_resource_header(self, layout):
+        """Create the redesigned header with Name, Badge, and Sub-header"""
+        
+        # Main Header Card (Transparent background for header area)
+        header_container = QWidget()
+        header_layout = QVBoxLayout(header_container)
+        header_layout.setContentsMargins(0, 0, 0, 10)
+        header_layout.setSpacing(5)
 
-        header_card = QFrame()
-        card_layout = QVBoxLayout(header_card)
-        header_layout = QHBoxLayout()
-        header_layout.setContentsMargins(0, 0, 0, 0)
-        header_layout.setSpacing(16)
-
-        # Left side - Resource info
-        left_layout = QVBoxLayout()
-        left_layout.setSpacing(4)
-
-        self.resource_name_label = QLabel("Resource Name")
+        # Top Row: Resource Name (Left) + Ready Badge (Right)
+        top_row = QHBoxLayout()
+        # top_row.setSpacing(10) # Removed spacing as icon is gone
+        
+        self.resource_name_label = QLabel("Minikube") # Placeholder
         self.resource_name_label.setStyleSheet(
-            BaseDetailSectionStyles.get_primary_text_style())
+            OverviewSectionStyles.get_overview_header_style())
+        self.resource_name_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        
+        # KEY FIX: Enable wrapping and size policy
+        self.resource_name_label.setWordWrap(True)
+        self.resource_name_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        self.resource_name_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        
+        # Status Badge (Pill shape -> Card shape)
+        self.status_badge = QLabel("✔ Ready") # Added Checkmark
+        self.status_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.status_badge.setStyleSheet(BaseDetailSectionStyles.get_status_badge_style('success'))
+        
+        # Add Shadow for Card look
+        shadow = QGraphicsDropShadowEffect(self.status_badge)
+        shadow.setBlurRadius(8)
+        shadow.setOffset(0, 1)
+        shadow.setColor(QColor(0, 0, 0, 40))
+        self.status_badge.setGraphicsEffect(shadow)
+        
+        # Let the widget size itself naturally based on QSS padding
+        self.status_badge.setMinimumHeight(24)
+        self.status_badge.setMinimumWidth(80)
+        self.status_badge.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
 
-        self.resource_info_label = QLabel("Type / Namespace")
-        self.resource_info_label.setStyleSheet(
-            BaseDetailSectionStyles.get_secondary_text_style())
+        # Layout: Label takes all space (pushing badge right). AlignTop makes the badge 
+        # stay at the top level and prevents it from height-stretching next to multi-line titles.
+        top_row.addWidget(self.resource_name_label, 1)
+        top_row.addWidget(self.status_badge, 0, Qt.AlignmentFlag.AlignTop)
 
-        self.creation_time_label = QLabel("Created: unknown")
-        self.creation_time_label.setStyleSheet(
-            BaseDetailSectionStyles.get_secondary_text_style())
+        # Bottom Row: Icon + Resource Type
+        bottom_row = QHBoxLayout()
+        bottom_row.setSpacing(6)
+        
+        # Package/box icon loaded from Icons folder
+        icon_color = OverviewSectionStyles.get_resource_type_color()
+        
+        self.type_icon = QLabel()
+        self.type_icon.setFixedSize(20, 20)
+        self.type_icon.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.type_icon.setPixmap(self._render_svg_from_file("package-box.svg", icon_color, size=20))
+        self.type_icon.setStyleSheet("border: none; background: transparent;")
+        
+        
+        self.resource_type_label = QLabel("Node")
+        self.resource_type_label.setStyleSheet(OverviewSectionStyles.get_resource_type_style())
+        
+        bottom_row.addWidget(self.type_icon)
+        bottom_row.addWidget(self.resource_type_label)
+        bottom_row.addStretch()
 
-        left_layout.addWidget(self.resource_name_label)
-        left_layout.addWidget(self.resource_info_label)
-        left_layout.addWidget(self.creation_time_label)
+        header_layout.addLayout(top_row)
+        header_layout.addLayout(bottom_row)
+        
+        layout.addWidget(header_container)
 
-        header_layout.addLayout(left_layout, 1)
-        card_layout.addLayout(header_layout)
-        layout.addWidget(header_card)
+    def create_info_cards_section(self, layout):
+        """Create the row of info cards (Created, Version/Age, etc.)"""
+        cards_layout = QHBoxLayout()
+        cards_layout.setSpacing(15)
+        
+        # Card 1: Created
+        self.created_card = self._create_info_card("time_icon", "CREATED", "Unknown")
+        
+        # Card 2: Secondary Info (Version, IP, etc. - dynamic)
+        self.secondary_card = self._create_info_card("activity_icon", "VERSION", "Unknown")
+        
+        # equal width for both cards
+        cards_layout.addWidget(self.created_card, 1)
+        cards_layout.addWidget(self.secondary_card, 1)
+        
+        layout.addLayout(cards_layout)
 
-    def create_status_section(self, layout):
+    def _create_info_card(self, icon_name, title, value):
+        """Helper to create a styled info card using Horizontal Layout for strict separation"""
+        card = QFrame()
+        card.setObjectName("info_card") 
+        card.setStyleSheet(BaseDetailSectionStyles.get_info_card_style())
+        
+        # KEY FIX: Use Preferred to allow natural grow/shrink
+        card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        
+        # Add Shadow Effect (matching GraphWidget style from NodesPage)
+        shadow = QGraphicsDropShadowEffect(card)
+        shadow.setBlurRadius(8)
+        shadow.setOffset(0, 1)
+        shadow.setColor(QColor(0, 0, 0, 40))
+        card.setGraphicsEffect(shadow)
+        
+        # MAIN LAYOUT: Horizontal
+        # [ Icon Label ] [ Text Layout ] [ Stretch ]
+        layout = QHBoxLayout(card)
+        
+        # REMOVED: layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize) - causing sticky height
+        
+        layout.setContentsMargins(15, 12, 15, 12)
+        layout.setSpacing(10) # 10px Gap
+        # Note: We rely on addStretch() at the end to pack items to the left.
+        
+        # 1. ICON (Left)
+        # 1. ICON CONTAINER (Left)
+        # Determine colors and icon based on type using current theme
+        theme = get_theme_manager().get_current_theme()
+        
+        if "time" in icon_name:
+            stroke_color = theme.colors.ACCENT_BLUE
+            icon_file = "events.svg"
+        else: # activity/version
+            stroke_color = theme.colors.ACCENT_ORANGE
+            icon_file = "activity.svg"
+            
+        bg_color = f"rgba({QColor(stroke_color).red()}, {QColor(stroke_color).green()}, {QColor(stroke_color).blue()}, 0.1)"
+            
+        icon_container = QFrame()
+        icon_container.setObjectName("card_icon_container")
+        icon_container.setFixedSize(48, 48)
+        icon_container.setStyleSheet(f"""
+            QFrame#card_icon_container {{
+                background-color: {bg_color}; 
+                border-radius: 12px;
+                border: none;
+            }}
+        """)
+        
+        icon_layout = QVBoxLayout(icon_container)
+        icon_layout.setContentsMargins(0, 0, 0, 0)
+        icon_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        icon_label = QLabel()
+        icon_label.setPixmap(self._render_svg_from_file(icon_file, stroke_color, size=24))
+        icon_label.setStyleSheet("background: transparent; border: none;")
 
-        self.status_header = QLabel("STATUS")
-        self.status_header.setStyleSheet(
-            BaseDetailSectionStyles.get_section_header_style())
-        layout.addWidget(self.status_header)
-
-        self.status_card = QFrame()
-        status_card_layout = QVBoxLayout(self.status_card)
-        status_layout = QHBoxLayout()
-        status_layout.setContentsMargins(0, 0, 0, 0)
-        status_layout.setSpacing(16)
-
-        self.status_badge = QLabel("Unknown")
-        self.status_text_label = QLabel("Status not available")
-        self.status_text_label.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-
-        status_layout.addWidget(self.status_badge)
-        status_layout.addWidget(self.status_text_label, 1)
-        status_card_layout.addLayout(status_layout)
-        layout.addWidget(self.status_card)
+        # KEY FIX: Rigid width and Fixed Policy for Icon
+        icon_label.setFixedSize(24, 24)
+        icon_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        icon_layout.addWidget(icon_label)
+        
+        # Store icon info for theme refresh
+        card.icon_info = {'name': icon_name, 'file': icon_file}
+        card.icon_container = icon_container
+        card.icon_label = icon_label
+        
+        # 2. TEXT LAYOUT (Direct VBox)
+        text_layout = QVBoxLayout()
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setSpacing(2)
+        
+        title_label = QLabel(title)
+        title_label.setObjectName("card_title")
+        title_label.setStyleSheet(BaseDetailSectionStyles.get_card_title_style())
+        title_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        title_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom)
+        
+        # Format value for wrapping: inject zero-width space after common separators to handle JSON and long annotations
+        display_value = str(value)
+        for char in ['-', '.', '/', ',', ':', '"', '{', '}', '[', ']', '(', ')', '_', '=', ' ']:
+            display_value = display_value.replace(char, char + '\u200b')
+            
+        value_label = QLabel(display_value)
+        value_label.setObjectName("card_value")
+        # Ensure we use the (already updated) smaller font style
+        value_label.setStyleSheet(BaseDetailSectionStyles.get_card_value_style())
+        value_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        
+        # KEY FIX: Enable Word Wrap and Dynamic Height
+        value_label.setWordWrap(True)
+        # Horizontal: Preferred (try to fit text), Vertical: Minimum (grow as needed)
+        value_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+        value_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        
+        text_layout.addWidget(title_label)
+        text_layout.addWidget(value_label)
+        text_layout.addStretch() # Push text to top if card is tall
+        
+        # Add to main layout
+        # Add container to main layout
+        layout.addWidget(icon_container)
+        layout.addLayout(text_layout)
+        # Use a scaling stretch to keep text left but allow taking up space
+        layout.setStretch(1, 1) 
+        
+        # Store references
+        card.title_label = title_label
+        card.value_label = value_label
+        card.icon_label = icon_label
+        
+        return card
 
     def create_conditions_section(self, layout):
-
+        """Create the conditions section with redesigned header and card"""
+        
+        # Main wrapper to control spacing between header and card tightly
+        conditions_wrapper = QWidget()
+        wrapper_layout = QVBoxLayout(conditions_wrapper)
+        wrapper_layout.setContentsMargins(0, 0, 0, 0)
+        wrapper_layout.setSpacing(4) # TIGHT padding between Header and Card
+        
+        # Header Container
+        header_container = QWidget()
+        header_layout = QHBoxLayout(header_container)
+        header_layout.setContentsMargins(0, 0, 0, 5) # Top margin 20, Bottom 0
+        header_layout.setSpacing(8)
+        header_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter) # Align items vertically
+        
+        # Activity icon from Icons folder
+        stroke_color = BaseDetailSectionStyles.get_section_header_color()
+        icon_label = QLabel()
+        icon_label.setFixedSize(16, 16)
+        icon_label.setPixmap(self._render_svg_from_file("activity.svg", stroke_color, size=16))
+        
+        # Header Text
         self.conditions_header = QLabel("CONDITIONS")
-        self.conditions_header.setStyleSheet(
-            BaseDetailSectionStyles.get_section_header_style())
-        layout.addWidget(self.conditions_header)
+        self.conditions_header.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
+        
+        header_layout.addWidget(icon_label)
+        header_layout.addWidget(self.conditions_header)
+        header_layout.addStretch()
+        
+        wrapper_layout.addWidget(header_container)
 
+        # Card Container
         self.conditions_card = QFrame()
-        conditions_card_layout = QVBoxLayout(
-            self.conditions_card)  # ✅ ADDED THIS LINE
+        self.conditions_card.setObjectName("info_card") 
+        # Revert to Info Card style as requested (provides base for shadow)
+        self.conditions_card.setStyleSheet(BaseDetailSectionStyles.get_info_card_style())
+        
+        # Enhanced Shadow Effect (Pop-out look)
+        shadow = QGraphicsDropShadowEffect(self.conditions_card)
+        shadow.setBlurRadius(8) # Larger blur for depth
+        shadow.setOffset(0, 1)   # Increased vertical offset for lift
+        shadow.setColor(QColor(0, 0, 0, 40)) # Darker shadow for contrast
+        self.conditions_card.setGraphicsEffect(shadow)
+        
+        conditions_card_layout = QVBoxLayout(self.conditions_card)
+        conditions_card_layout.setContentsMargins(16, 16, 16, 16)
+        conditions_card_layout.setSpacing(0) # Spacing handled by separators
+        
         self.conditions_container_layout = QVBoxLayout()
-        self.conditions_container_layout.setSpacing(
-            BaseDetailSectionStyles.FIELD_GAP)
+        self.conditions_container_layout.setSpacing(0) 
 
         self.no_conditions_label = QLabel("No conditions available")
         self.no_conditions_label.setStyleSheet(BaseDetailSectionStyles.get_secondary_text_style() + """
@@ -255,36 +599,133 @@ class DetailPageOverviewSection(BaseDetailSection):
         """)
         self.conditions_container_layout.addWidget(self.no_conditions_label)
 
-        conditions_card_layout.addLayout(
-            self.conditions_container_layout)  # ✅ FIXED THIS LINE
-        layout.addWidget(self.conditions_card)
+        conditions_card_layout.addLayout(self.conditions_container_layout)
+        
+        wrapper_layout.addWidget(self.conditions_card)
+        
+        layout.addWidget(conditions_wrapper)
 
     def create_labels_section(self, layout):
-
+        """Create labels section with header icon and individual label cards"""
+        
+        # Main wrapper to control spacing
+        labels_wrapper = QWidget()
+        wrapper_layout = QVBoxLayout(labels_wrapper)
+        wrapper_layout.setContentsMargins(0, 0, 0, 0)
+        wrapper_layout.setSpacing(4)
+        
+        # Header Container
+        header_container = QWidget()
+        header_layout = QHBoxLayout(header_container)
+        header_layout.setContentsMargins(0, 0, 0, 5)
+        header_layout.setSpacing(8)
+        header_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        
+        # Tag icon from Icons folder
+        stroke_color = BaseDetailSectionStyles.get_section_header_color()
+        icon_label = QLabel()
+        icon_label.setFixedSize(16, 16)
+        icon_label.setPixmap(self._render_svg_from_file("tag.svg", stroke_color, size=16))
+        
+        # Header Text
         self.labels_header = QLabel("LABELS")
-        self.labels_header.setStyleSheet(
-            BaseDetailSectionStyles.get_section_header_style())
-        layout.addWidget(self.labels_header)
-
+        self.labels_header.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
+        
+        header_layout.addWidget(icon_label)
+        header_layout.addWidget(self.labels_header)
+        header_layout.addStretch()
+        
+        wrapper_layout.addWidget(header_container)
+        
+        # Card Container for individual label cards
+        # Card Container for individual label cards
+        # Card Container for individual label cards
         self.labels_card = QFrame()
-        labels_card_layout = QVBoxLayout(self.labels_card)  # ✅ ADDED THIS LINE
-        self.labels_content = QLabel("No labels")
-        self.labels_content.setStyleSheet(BaseDetailSectionStyles.get_field_value_style() + """
-            font-family: 'Consolas', 'Courier New', monospace;
-            background-color: rgba(255, 255, 255, 0.05);
+        self.labels_card.setObjectName("info_card") 
+        # Revert to Info Card style as requested
+        self.labels_card.setStyleSheet(BaseDetailSectionStyles.get_info_card_style())
+        
+        # Enhanced Shadow Effect (Pop-out look) to the OUTER card
+        shadow = QGraphicsDropShadowEffect(self.labels_card)
+        shadow.setBlurRadius(8) 
+        shadow.setOffset(0, 1)
+        shadow.setColor(QColor(0, 0, 0, 40))
+        self.labels_card.setGraphicsEffect(shadow)
+        
+        self.labels_layout = QVBoxLayout(self.labels_card)
+        self.labels_layout.setContentsMargins(16, 16, 16, 16)
+        self.labels_layout.setSpacing(8)
+        
+        # Placeholder for no labels
+        self.no_labels_label = QLabel("No labels")
+        self.no_labels_label.setStyleSheet(BaseDetailSectionStyles.get_secondary_text_style() + """
+            font-style: italic;
             padding: 8px;
-            border-radius: 4px;
         """)
-        self.labels_content.setWordWrap(True)
-        labels_card_layout.addWidget(self.labels_content)  # ✅ FIXED THIS LINE
-        layout.addWidget(self.labels_card)
+        self.labels_layout.addWidget(self.no_labels_label)
+        
+        wrapper_layout.addWidget(self.labels_card)
+        
+        layout.addWidget(labels_wrapper)
 
     def create_specific_section(self, layout):
-
-        self.specific_section = QFrame()
-        self.specific_layout = QVBoxLayout(self.specific_section)
-        self.specific_layout.setContentsMargins(0, 0, 0, 0)
+        """Create resource-specific section with header icon and card"""
+        
+        # Main wrapper to control spacing
+        specific_wrapper = QWidget()
+        wrapper_layout = QVBoxLayout(specific_wrapper)
+        wrapper_layout.setContentsMargins(0, 0, 0, 0)
+        wrapper_layout.setSpacing(4)  # Tight padding between header and card
+        
+        # Header Container
+        header_container = QWidget()
+        header_layout = QHBoxLayout(header_container)
+        header_layout.setContentsMargins(0, 0, 0, 5)
+        header_layout.setSpacing(8)
+        header_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        
+        # Load SVG icon
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        svg_path = os.path.join(project_root, "Icons", "details-page-detail-icon.svg")
+        icon_label = QLabel()
+        icon_label.setFixedSize(16, 16)
+        
+        if os.path.exists(svg_path):
+            stroke_color = BaseDetailSectionStyles.get_section_header_color()
+            pixmap = self._render_svg_from_file("details-page-detail-icon.svg", stroke_color, size=16)
+            icon_label.setPixmap(pixmap)
+        
+        # Header Text (set dynamically by add_resource_specific_fields)
+        self.specific_header = QLabel("DETAILS")
+        self.specific_header.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
+        
+        header_layout.addWidget(icon_label)
+        header_layout.addWidget(self.specific_header)
+        header_layout.addStretch()
+        
+        wrapper_layout.addWidget(header_container)
+        
+        # Card Container
+        # Card Container
+        self.specific_card = QFrame()
+        self.specific_card.setObjectName("info_card")
+        # Revert to Info Card style as requested
+        self.specific_card.setStyleSheet(BaseDetailSectionStyles.get_info_card_style())
+        
+        # Enhanced Shadow Effect (Pop-out look)
+        shadow = QGraphicsDropShadowEffect(self.specific_card)
+        shadow.setBlurRadius(8)
+        shadow.setOffset(0, 1)
+        shadow.setColor(QColor(0, 0, 0, 40))
+        self.specific_card.setGraphicsEffect(shadow)
+        
+        self.specific_layout = QVBoxLayout(self.specific_card)
+        self.specific_layout.setContentsMargins(16, 16, 16, 16)
         self.specific_layout.setSpacing(BaseDetailSectionStyles.FIELD_GAP)
+        
+        wrapper_layout.addWidget(self.specific_card)
+        
+        self.specific_section = specific_wrapper
         self.specific_section.hide()
         layout.addWidget(self.specific_section)
 
@@ -371,25 +812,28 @@ class DetailPageOverviewSection(BaseDetailSection):
 
             # Update resource header
             self.resource_name_label.setText(metadata.get("name", "Unnamed"))
-
+            
+            # Update Resource Type Label
             resource_info = f"{self.resource_type.capitalize()}"
-            if "namespace" in metadata:
-                resource_info += f" / {metadata.get('namespace')}"
-            self.resource_info_label.setText(resource_info)
+            # Add Namespace if it exists
+            # if "namespace" in metadata:
+            #     resource_info += f"  •  {metadata.get('namespace')}" 
+            # (Keeping it simple per design, or add namespace if strictly requested)
+            self.resource_type_label.setText(resource_info)
 
-            # Update creation time
+            # Update creation time card
             creation_timestamp = metadata.get("creationTimestamp", "")
             if creation_timestamp:
                 try:
-                    # Simple datetime parsing
-                    formatted_time = creation_timestamp.replace(
-                        'T', ' ').replace('Z', '')
-                    self.creation_time_label.setText(
-                        f"Created: {formatted_time}")
+                    formatted_time = TimezoneManager.get_instance().format_time(creation_timestamp)
+                    self.created_card.value_label.setText(formatted_time)
                 except Exception:
-                    self.creation_time_label.setText("Created: unknown")
+                    self.created_card.value_label.setText("Unknown")
+            
+            # Update Secondary Card (Dynamic based on resource)
+            self._update_secondary_info_card(data)
 
-            # Update status
+            # Update status (Badge Only now)
             self.update_resource_status(data)
 
             # Update conditions
@@ -397,12 +841,51 @@ class DetailPageOverviewSection(BaseDetailSection):
 
             # Update labels
             self.update_labels(data)
-
+            
+            # Ensure UI recalculates flexible height
+            self.overview_content.adjustSize()
+            self.overview_content.updateGeometry()
+            
             # Update resource - specific fields
             self.add_resource_specific_fields(data)
 
         except Exception as e:
             self.handle_error(f"Error updating UI: {str(e)}")
+
+    def _update_secondary_info_card(self, data):
+        """Update the second info card based on resource type"""
+        resource_type = self.resource_type.lower()
+        status = data.get("status", {})
+        spec = data.get("spec", {})
+        
+        # Default fallback
+        title = "AGE"
+        value = "Unknown" # Calculate age if possible, for now placeholder
+        
+        # Calculate Age from timestamp if needed
+        creation_timestamp = data.get("metadata", {}).get("creationTimestamp", "")
+        if creation_timestamp:
+            value = format_age(creation_timestamp)
+
+        if resource_type in ["node", "nodes"]:
+            title = "VERSION"
+            value = status.get("nodeInfo", {}).get("kubeletVersion", "Unknown")
+        elif resource_type in ["pod", "pods"]:
+            title = "POD IP"
+            value = status.get("podIP", "Pending")
+        elif resource_type in ["service", "services", "svc"]:
+            title = "TYPE"
+            value = spec.get("type", "ClusterIP")
+        elif resource_type in ["deployment", "deployments", "replicaset", "replicasets", "statefulset", "statefulsets"]:
+            title = "REPLICAS"
+            ready = status.get("readyReplicas", 0)
+            total = status.get("replicas", 0)
+            value = f"{ready} / {total}"
+        
+        self.secondary_card.title_label.setText(title)
+        self.secondary_card.value_label.setText(str(value))
+
+
 
     def update_ui_with_basic_info(self, data: Dict[str, Any]):
 
@@ -835,30 +1318,24 @@ class DetailPageOverviewSection(BaseDetailSection):
 
         # Apply styling
         self.status_badge.setText(status_value)
-        if status_type == "success":
-            self.status_badge.setStyleSheet(
-                OverviewSectionStyles.get_status_badge_success_style())
-        elif status_type == "warning":
-            self.status_badge.setStyleSheet(
-                OverviewSectionStyles.get_status_badge_warning_style())
-        elif status_type == "error":
-            self.status_badge.setStyleSheet(
-                OverviewSectionStyles.get_status_badge_error_style())
-        else:
-            self.status_badge.setStyleSheet(
-                OverviewSectionStyles.get_status_badge_default_style())
+        self.status_badge.setStyleSheet(
+            BaseDetailSectionStyles.get_status_badge_style(status_type))
 
-        self.status_text_label.setText(status_text)
+        if hasattr(self, 'status_text_label'):
+             self.status_text_label.setText(status_text)
 
     def update_conditions(self, data):
-
-        # Safe widget clearing
+        
+        # Clear existing content safely
         while self.conditions_container_layout.count():
             item = self.conditions_container_layout.takeAt(0)
             if item.widget():
                 widget = item.widget()
                 widget.setParent(None)
                 widget.deleteLater()
+            elif item.layout():
+                # Recursively delete layouts if needed
+                self._clear_layout(item.layout())
 
         status = data.get("status", {})
         conditions = status.get("conditions", [])
@@ -869,32 +1346,162 @@ class DetailPageOverviewSection(BaseDetailSection):
                 font-style: italic;
                 padding: 8px;
             """)
-            self.conditions_container_layout.addWidget(
-                self.no_conditions_label)
+            self.conditions_container_layout.addWidget(self.no_conditions_label)
             return
 
-        for condition in conditions:
+        # Sort conditions? Usually default order is fine.
+        
+        for i, condition in enumerate(conditions):
             condition_type = condition.get("type", "Unknown")
             condition_status = condition.get("status", "Unknown")
             condition_message = condition.get("message", "")
-
-            condition_widget = QLabel(
-                f"{condition_type}: {condition_status} - {condition_message}")
-            condition_widget.setStyleSheet(
-                BaseDetailSectionStyles.get_field_value_style())
-            self.conditions_container_layout.addWidget(condition_widget)
+            
+            # Helper to check true/false
+            is_true = (str(condition_status).lower() == "true")
+            
+            # Row Container
+            row_widget = QWidget()
+            row_layout = QHBoxLayout(row_widget)
+            row_layout.setContentsMargins(0, 8, 0, 8)
+            row_layout.setSpacing(12)
+            
+            # 1. Status Dot
+            dot = QFrame()
+            dot.setFixedSize(8, 8)
+            dot.setStyleSheet(BaseDetailSectionStyles.get_badge_dot_style(is_true))
+            
+            # Center vertically relative to the entire row (Title + Message)
+            row_layout.addWidget(dot, 0, Qt.AlignmentFlag.AlignVCenter)
+            
+            # 2. Text Column
+            text_col = QWidget()
+            text_col_layout = QVBoxLayout(text_col)
+            text_col_layout.setContentsMargins(0, 0, 0, 0)
+            text_col_layout.setSpacing(4)
+            
+            # Header Row: Title + Badge
+            header_row = QHBoxLayout()
+            header_row.setContentsMargins(0, 0, 0, 0)
+            header_row.setSpacing(8)
+            
+            title_label = QLabel(condition_type)
+            # Use slightly larger/darker font for condition name
+            title_label.setStyleSheet(f"font-weight: 600; font-size: 14px; color: {BaseDetailSectionStyles._get_theme().colors.TEXT_LIGHT};")
+            
+            badge_label = QLabel(condition_status)
+            if is_true:
+                badge_label.setStyleSheet(BaseDetailSectionStyles.get_condition_badge_true_style())
+            else:
+                badge_label.setStyleSheet(BaseDetailSectionStyles.get_condition_badge_false_style())
+            
+            # badge fixed size tweak if needed, or let padding handle it
+            
+            header_row.addWidget(title_label)
+            header_row.addWidget(badge_label)
+            header_row.addStretch()
+            
+            text_col_layout.addLayout(header_row)
+            
+            # Message (Optional)
+            if condition_message:
+                msg_label = QLabel(condition_message)
+                msg_label.setWordWrap(True)
+                msg_label.setStyleSheet(BaseDetailSectionStyles.get_condition_message_style())
+                msg_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+                text_col_layout.addWidget(msg_label)
+            
+            row_layout.addWidget(text_col, 1) # Give text column all space
+            
+            self.conditions_container_layout.addWidget(row_widget)
+            
+            # Add Separator if not last item
+            if i < len(conditions) - 1:
+                sep = QFrame()
+                sep.setFrameShape(QFrame.Shape.HLine)
+                sep.setFrameShadow(QFrame.Shadow.Plain)
+                sep.setStyleSheet(f"background-color: {OverviewSectionStyles._get_theme().colors.BORDER_COLOR}; max-height: 1px; border: none;")
+                self.conditions_container_layout.addWidget(sep)
+            
+    def _clear_layout(self, layout):
+        if layout is not None:
+             while layout.count():
+                 item = layout.takeAt(0)
+                 widget = item.widget()
+                 if widget is not None:
+                     widget.deleteLater()
+                 else:
+                     self._clear_layout(item.layout())
 
     def update_labels(self, data):
-
+        """Update labels section with individual label cards"""
+        
+        # Clear existing labels
+        for i in reversed(range(self.labels_layout.count())):
+            item = self.labels_layout.itemAt(i)
+            if item.widget():
+                item.widget().deleteLater()
+        
         metadata = data.get("metadata", {})
         labels = metadata.get("labels", {})
-
+        
         if not labels:
-            self.labels_content.setText("No labels")
+            # Show "No labels" placeholder
+            no_labels = QLabel("No labels")
+            no_labels.setStyleSheet(BaseDetailSectionStyles.get_secondary_text_style() + """
+                font-style: italic;
+                padding: 8px;
+            """)
+            self.labels_layout.addWidget(no_labels)
             return
-
-        labels_text = "\n".join([f"{k}={v}" for k, v in labels.items()])
-        self.labels_content.setText(labels_text)
+        
+        # Create individual label cards
+        for key, value in labels.items():
+            label_card = self._create_label_card(key, value)
+            self.labels_layout.addWidget(label_card)
+    
+    def _create_label_card(self, key, value):
+        """Create a single label card - uses info_card styling"""
+        
+        # Use QFrame with info_card styling (same as Created/Version cards)
+        # BUT: For individual labels inside the main card, we might want a simpler style
+        # or just a border. The user said "add those card for every labels same as shown in image"
+        # The image shows simple rounded boxes.
+        # Since we are putting them INSIDE a 3D card now, we probably don't want double shadows.
+        card = QFrame()
+        card.setObjectName("label_item") 
+        # Simpler style for inner items: rounded with border, no shadow
+        card.setStyleSheet(f"""
+            QFrame#label_item {{
+                background-color: {OverviewSectionStyles._get_theme().colors.CARD_BG};
+                border: 1px solid {OverviewSectionStyles._get_theme().colors.BORDER_COLOR};
+                border-radius: 6px;
+            }}
+        """)
+        
+        card_layout = QHBoxLayout(card)
+        card_layout.setContentsMargins(12, 10, 12, 10)
+        card_layout.setSpacing(10)
+        
+        # Label text: key=value (no icon on individual cards)
+        # Format value for wrapping: inject zero-width space after common separators
+        display_text = f"{key}={value}"
+        for char in ['-', '.', '/', ',', ':', '"', '{', '}', '[', ']', '(', ')', '_', '=', ' ']:
+            display_text = display_text.replace(char, char + '\u200b')
+            
+        label_text = QLabel(display_text)
+        label_text.setStyleSheet(f"""
+            color: {OverviewSectionStyles._get_theme().colors.TEXT_LIGHT};
+            font-size: 13px;
+            font-weight: 500;
+            font-family: 'Consolas', 'Courier New', monospace;
+        """)
+        label_text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        label_text.setWordWrap(True)
+        
+        # Add to layout
+        card_layout.addWidget(label_text, 1)
+        
+        return card
 
     def add_resource_specific_fields(self, data):
 
@@ -905,6 +1512,33 @@ class DetailPageOverviewSection(BaseDetailSection):
                 item.widget().deleteLater()
 
         resource_type_lower = self.resource_type.lower()
+
+        # Set dynamic header text based on resource type
+        header_map = {
+            "pod": "POD DETAILS", "pods": "POD DETAILS",
+            "service": "SERVICE DETAILS", "services": "SERVICE DETAILS", "svc": "SERVICE DETAILS",
+            "deployment": "DEPLOYMENT DETAILS", "deployments": "DEPLOYMENT DETAILS", "deploy": "DEPLOYMENT DETAILS",
+            "configmap": "CONFIGMAP DETAILS", "configmaps": "CONFIGMAP DETAILS", "cm": "CONFIGMAP DETAILS",
+            "secret": "SECRET DETAILS", "secrets": "SECRET DETAILS",
+            "ingress": "INGRESS DETAILS", "ingresses": "INGRESS DETAILS", "ing": "INGRESS DETAILS",
+            "networkpolicy": "NETWORK POLICY DETAILS", "networkpolicies": "NETWORK POLICY DETAILS", "netpol": "NETWORK POLICY DETAILS",
+            "customresourcedefinition": "CRD DETAILS", "customresourcedefinitions": "CRD DETAILS", "crd": "CRD DETAILS",
+            "persistentvolume": "PV DETAILS", "persistentvolumes": "PV DETAILS", "pv": "PV DETAILS",
+            "persistentvolumeclaim": "PVC DETAILS", "persistentvolumeclaims": "PVC DETAILS", "pvc": "PVC DETAILS",
+            "replicaset": "REPLICASET DETAILS", "replicasets": "REPLICASET DETAILS", "rs": "REPLICASET DETAILS",
+            "daemonset": "DAEMONSET DETAILS", "daemonsets": "DAEMONSET DETAILS", "ds": "DAEMONSET DETAILS",
+            "statefulset": "STATEFULSET DETAILS", "statefulsets": "STATEFULSET DETAILS", "sts": "STATEFULSET DETAILS",
+            "job": "JOB DETAILS", "jobs": "JOB DETAILS",
+            "cronjob": "CRONJOB DETAILS", "cronjobs": "CRONJOB DETAILS", "cj": "CRONJOB DETAILS",
+            "node": "NODE DETAILS", "nodes": "NODE DETAILS",
+            "namespace": "NAMESPACE DETAILS", "namespaces": "NAMESPACE DETAILS", "ns": "NAMESPACE DETAILS",
+            "helmrelease": "HELM RELEASE DETAILS", "helmreleases": "HELM RELEASE DETAILS", "hr": "HELM RELEASE DETAILS",
+            "chart": "CHART DETAILS", "charts": "CHART DETAILS",
+            "priorityclass": "PRIORITY CLASS DETAILS", "priorityclasses": "PRIORITY CLASS DETAILS", "pc": "PRIORITY CLASS DETAILS",
+            "lease": "LEASE DETAILS", "leases": "LEASE DETAILS",
+            "ingressclass": "INGRESS CLASS DETAILS", "ingressclasses": "INGRESS CLASS DETAILS", "ic": "INGRESS CLASS DETAILS",
+        }
+        self.specific_header.setText(header_map.get(resource_type_lower, f"{self.resource_type.upper()} DETAILS"))
 
         # Add fields based on resource type
         if resource_type_lower in ["pod", "pods"]:
@@ -973,11 +1607,6 @@ class DetailPageOverviewSection(BaseDetailSection):
 
         spec = data.get("spec", {})
 
-        section_header = QLabel("NETWORK POLICY DETAILS")
-        section_header.setStyleSheet(
-            BaseDetailSectionStyles.get_section_header_style())
-        self.specific_layout.addWidget(section_header)
-
         # Pod selector
         pod_selector = spec.get("podSelector", {})
         if pod_selector:
@@ -985,91 +1614,45 @@ class DetailPageOverviewSection(BaseDetailSection):
             if match_labels:
                 labels_text = ", ".join(
                     [f"{k}={v}" for k, v in match_labels.items()])
-                selector_info = QLabel(f"Pod Selector: {labels_text}")
+                self._add_detail_field("Pod Selector", labels_text)
             else:
-                selector_info = QLabel("Pod Selector: All pods")
+                self._add_detail_field("Pod Selector", "All pods")
         else:
-            selector_info = QLabel("Pod Selector: All pods")
-
-        selector_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        selector_info.setWordWrap(True)
-        self.specific_layout.addWidget(selector_info)
+            self._add_detail_field("Pod Selector", "All pods")
 
         # Policy types
         policy_types = spec.get("policyTypes", [])
         if policy_types:
-            types_info = QLabel(f"Policy Types: {', '.join(policy_types)}")
-            types_info.setStyleSheet(
-                BaseDetailSectionStyles.get_field_value_style())
-            self.specific_layout.addWidget(types_info)
+            self._add_detail_field("Policy Types", ", ".join(policy_types))
 
         # Ingress rules
-        ingress_rules = spec.get("ingress", [])
-        ingress_info = QLabel(f"Ingress Rules: {len(ingress_rules)}")
-        ingress_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(ingress_info)
+        self._add_detail_field("Ingress Rules", len(spec.get("ingress", [])))
 
         # Egress rules
-        egress_rules = spec.get("egress", [])
-        egress_info = QLabel(f"Egress Rules: {len(egress_rules)}")
-        egress_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(egress_info)
+        self._add_detail_field("Egress Rules", len(spec.get("egress", [])))
 
     def _add_customresourcedefinition_specific_fields(self, data):
 
         spec = data.get("spec", {})
         status = data.get("status", {})
 
-        section_header = QLabel("CUSTOM RESOURCE DEFINITION DETAILS")
-        section_header.setStyleSheet(
-            BaseDetailSectionStyles.get_section_header_style())
-        self.specific_layout.addWidget(section_header)
-
         # Group and versions
-        group = spec.get("group", "Unknown")
-        group_info = QLabel(f"Group: {group}")
-        group_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(group_info)
+        self._add_detail_field("Group", spec.get("group", "Unknown"))
 
         versions = spec.get("versions", [])
         if versions:
             version_names = [v.get("name", "unknown") for v in versions]
-            versions_info = QLabel(f"Versions: {', '.join(version_names)}")
-            versions_info.setStyleSheet(
-                BaseDetailSectionStyles.get_field_value_style())
-            self.specific_layout.addWidget(versions_info)
+            self._add_detail_field("Versions", ", ".join(version_names))
 
         # Names
         names = spec.get("names", {})
         if names:
-            kind = names.get("kind", "Unknown")
-            kind_info = QLabel(f"Kind: {kind}")
-            kind_info.setStyleSheet(
-                BaseDetailSectionStyles.get_field_value_style())
-            self.specific_layout.addWidget(kind_info)
-
-            plural = names.get("plural", "Unknown")
-            plural_info = QLabel(f"Plural: {plural}")
-            plural_info.setStyleSheet(
-                BaseDetailSectionStyles.get_field_value_style())
-            self.specific_layout.addWidget(plural_info)
-
-            singular = names.get("singular", "Unknown")
-            singular_info = QLabel(f"Singular: {singular}")
-            singular_info.setStyleSheet(
-                BaseDetailSectionStyles.get_field_value_style())
-            self.specific_layout.addWidget(singular_info)
+            self._add_detail_field("Kind", names.get("kind", "Unknown"))
+            self._add_detail_field("Plural", names.get("plural", "Unknown"))
+            self._add_detail_field("Singular", names.get("singular", "Unknown"))
 
         # Scope
-        scope = spec.get("scope", "Unknown")
-        scope_info = QLabel(f"Scope: {scope}")
-        scope_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(scope_info)
+        self._add_detail_field("Scope", spec.get("scope", "Unknown"))
 
         # Status
         conditions = status.get("conditions", [])
@@ -1077,86 +1660,41 @@ class DetailPageOverviewSection(BaseDetailSection):
             established_condition = next(
                 (c for c in conditions if c.get("type") == "Established"), None)
             if established_condition:
-                established_status = established_condition.get(
-                    "status", "Unknown")
-                established_info = QLabel(f"Established: {established_status}")
-                established_info.setStyleSheet(
-                    BaseDetailSectionStyles.get_field_value_style())
-                self.specific_layout.addWidget(established_info)
+                self._add_detail_field("Established", established_condition.get("status", "Unknown"))
 
     def _add_pod_specific_fields(self, data):
 
         spec = data.get("spec", {})
         status = data.get("status", {})
 
-        section_header = QLabel("POD DETAILS")
-        section_header.setStyleSheet(
-            BaseDetailSectionStyles.get_section_header_style())
-        self.specific_layout.addWidget(section_header)
-
         containers = spec.get("containers", [])
-        container_info = QLabel(f"Containers: {len(containers)}")
-        container_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(container_info)
+        self._add_detail_field("Containers", len(containers))
 
         node_name = spec.get("nodeName", "")
         if node_name:
-            node_info = QLabel(f"Node: {node_name}")
-            node_info.setStyleSheet(
-                BaseDetailSectionStyles.get_field_value_style())
-            self.specific_layout.addWidget(node_info)
+            self._add_detail_field("Node", node_name)
 
         pod_ip = status.get("podIP", "")
         if pod_ip:
-            ip_info = QLabel(f"Pod IP: {pod_ip}")
-            ip_info.setStyleSheet(
-                BaseDetailSectionStyles.get_field_value_style())
-            self.specific_layout.addWidget(ip_info)
+            self._add_detail_field("Pod IP", pod_ip)
 
     def _add_service_specific_fields(self, data):
 
         spec = data.get("spec", {})
 
-        section_header = QLabel("SERVICE DETAILS")
-        section_header.setStyleSheet(
-            BaseDetailSectionStyles.get_section_header_style())
-        self.specific_layout.addWidget(section_header)
-
-        service_type = spec.get("type", "ClusterIP")
-        type_info = QLabel(f"Type: {service_type}")
-        type_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(type_info)
+        self._add_detail_field("Type", spec.get("type", "ClusterIP"))
 
         cluster_ip = spec.get("clusterIP", "")
         if cluster_ip:
-            ip_info = QLabel(f"Cluster IP: {cluster_ip}")
-            ip_info.setStyleSheet(
-                BaseDetailSectionStyles.get_field_value_style())
-            self.specific_layout.addWidget(ip_info)
+            self._add_detail_field("Cluster IP", cluster_ip)
 
     def _add_deployment_specific_fields(self, data):
 
         spec = data.get("spec", {})
         status = data.get("status", {})
 
-        section_header = QLabel("DEPLOYMENT DETAILS")
-        section_header.setStyleSheet(
-            BaseDetailSectionStyles.get_section_header_style())
-        self.specific_layout.addWidget(section_header)
-
-        replicas = spec.get("replicas", 0)
-        replicas_info = QLabel(f"Desired Replicas: {replicas}")
-        replicas_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(replicas_info)
-
-        ready_replicas = status.get("readyReplicas", 0)
-        ready_info = QLabel(f"Ready Replicas: {ready_replicas}")
-        ready_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(ready_info)
+        self._add_detail_field("Desired Replicas", spec.get("replicas", 0))
+        self._add_detail_field("Ready Replicas", status.get("readyReplicas", 0))
 
         # Add rollback section
         self._add_deployment_rollback_section(data)
@@ -1170,11 +1708,28 @@ class DetailPageOverviewSection(BaseDetailSection):
         if not deployment_name:
             return
 
-        # Create rollback section header
+        # Create header with icon
+        header_container = QWidget()
+        header_layout = QHBoxLayout(header_container)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(10)
+        header_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+
+        # Add History Icon
+        self.rollback_icon_label = QLabel()
+        theme = BaseDetailSectionStyles._get_theme()
+        self.rollback_icon_label.setPixmap(self._render_svg_from_file("history.svg", BaseDetailSectionStyles.get_section_header_color()))
+        header_layout.addWidget(self.rollback_icon_label)
+
         rollback_header = QLabel("ROLLBACK HISTORY")
         rollback_header.setStyleSheet(
             BaseDetailSectionStyles.get_section_header_style())
-        self.specific_layout.addWidget(rollback_header)
+        rollback_header.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        header_layout.addWidget(rollback_header)
+
+        # Add spacing before header for better separation
+        self.specific_layout.addSpacing(15)
+        self.specific_layout.addWidget(header_container)
 
         # Create loading label for history
         self.history_loading_label = QLabel("Loading rollback history...")
@@ -1204,7 +1759,7 @@ class DetailPageOverviewSection(BaseDetailSection):
         self.history_table.verticalHeader().setVisible(False)
 
         # Set consistent row height to accommodate widgets
-        self.history_table.verticalHeader().setDefaultSectionSize(40)
+        self.history_table.verticalHeader().setDefaultSectionSize(45)
 
         # Ensure the table shows widgets properly
         self.history_table.setShowGrid(True)
@@ -1280,6 +1835,15 @@ class DetailPageOverviewSection(BaseDetailSection):
             except (TypeError, RuntimeError):
                 pass  # Signal already disconnected or object deleted
 
+            # Guard against a late signal after the panel was cleared:
+            # clear_content() sets these child widgets to None, so dereferencing
+            # them would raise AttributeError (not caught by the RuntimeError
+            # guard below). Validate each child before touching it.
+            if not (is_valid(self.history_loading_label)
+                    and is_valid(self.history_container)
+                    and is_valid(self.history_table)):
+                return
+
             # Hide loading label and show container
             try:
                 self.history_loading_label.hide()
@@ -1314,45 +1878,69 @@ class DetailPageOverviewSection(BaseDetailSection):
                 logging.debug(
                     f"Row {row}: Revision {revision}, Current: {current}, Status: {status}")
 
-                # Add revision cell
+                # Add revision cell - using setCellWidget for text selection
                 revision_text = str(revision)
+                revision_label = QLabel(revision_text)
+                revision_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                revision_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+                
+                # Combine base style with specific overrides
+                base_style = BaseDetailSectionStyles.get_field_value_style()
+                revision_style = f"{base_style} QLabel {{ padding: 5px;"
+                if current:
+                    revision_style += f" font-weight: bold; color: {OverviewSectionStyles.get_status_active_color()};"
+                revision_style += " }"
+                revision_label.setStyleSheet(revision_style)
+                self.history_table.setCellWidget(row, 0, revision_label)
+
                 revision_item = QTableWidgetItem(revision_text)
                 revision_item.setFlags(
                     revision_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                if current:
-                    revision_item.setForeground(
-                        QColor(OverviewSectionStyles.get_status_active_color()))
-                    revision_item.setFont(QFont("", -1, QFont.Weight.Bold))
                 self.history_table.setItem(row, 0, revision_item)
 
                 # Add age cell
+                age_label = QLabel(age)
+                age_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                age_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+                age_label.setStyleSheet(BaseDetailSectionStyles.get_field_value_style() + "QLabel { padding: 5px; }")
+                self.history_table.setCellWidget(row, 1, age_label)
+
                 age_item = QTableWidgetItem(age)
                 age_item.setFlags(age_item.flags() & ~
                                   Qt.ItemFlag.ItemIsEditable)
                 self.history_table.setItem(row, 1, age_item)
 
                 # Add status cell
+                status_label = QLabel(status)
+                status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                status_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+                
+                base_style = BaseDetailSectionStyles.get_field_value_style()
+                status_style = f"{base_style} QLabel {{ padding: 5px;"
+                if current:
+                     status_style += f" font-weight: bold; color: {OverviewSectionStyles.get_status_active_color()};"
+                elif status == "Available":
+                     status_style += " color: #4CAF50;"
+                elif status == "Inactive":
+                     status_style += f" color: {OverviewSectionStyles.get_text_secondary_color()};"
+                status_style += " }"
+                
+                status_label.setStyleSheet(status_style)
+                self.history_table.setCellWidget(row, 2, status_label)
+
                 status_item = QTableWidgetItem(status)
                 status_item.setFlags(status_item.flags() &
                                      ~Qt.ItemFlag.ItemIsEditable)
-                if current:
-                    status_item.setForeground(
-                        QColor(OverviewSectionStyles.get_status_active_color()))
-                    status_item.setFont(QFont("", -1, QFont.Weight.Bold))
-                elif status == "Available":
-                    status_item.setForeground(QColor("#4CAF50"))
-                elif status == "Inactive":
-                    status_item.setForeground(
-                        QColor(OverviewSectionStyles.get_text_secondary_color()))
                 self.history_table.setItem(row, 2, status_item)
 
                 # Add change cause cell with enhanced tooltip
                 truncated_cause = change_cause[:50] + \
                     "..." if len(change_cause) > 50 else change_cause
-                cause_item = QTableWidgetItem(truncated_cause)
-                cause_item.setFlags(cause_item.flags() & ~
-                                    Qt.ItemFlag.ItemIsEditable)
-
+                
+                cause_label = QLabel(truncated_cause)
+                cause_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+                cause_label.setStyleSheet(BaseDetailSectionStyles.get_field_value_style() + "QLabel { padding: 5px; }")
+                
                 # Create detailed tooltip
                 tooltip_text = f"Change Cause: {change_cause}"
                 if images:
@@ -1360,6 +1948,13 @@ class DetailPageOverviewSection(BaseDetailSection):
                     tooltip_text += f"\nImages: {', '.join(images[:3])}"
                     if len(images) > 3:
                         tooltip_text += f"\n... and {len(images) - 3} more"
+                
+                cause_label.setToolTip(tooltip_text)
+                self.history_table.setCellWidget(row, 3, cause_label)
+
+                cause_item = QTableWidgetItem(truncated_cause)
+                cause_item.setFlags(cause_item.flags() & ~
+                                    Qt.ItemFlag.ItemIsEditable)
                 cause_item.setToolTip(tooltip_text)
                 self.history_table.setItem(row, 3, cause_item)
 
@@ -1398,6 +1993,9 @@ class DetailPageOverviewSection(BaseDetailSection):
 
             # Ensure Age column adjusts to content (already set to ResizeToContents)
             # Other columns maintain their fixed / stretch settings from table setup
+
+            # Ensure rows fit content properly
+            # self.history_table.resizeRowsToContents()
 
             # Adjust table height based on content
             self._adjust_table_height(len(history_data))
@@ -1514,17 +2112,19 @@ class DetailPageOverviewSection(BaseDetailSection):
             except (TypeError, RuntimeError):
                 pass  # Signal already disconnected or object deleted
 
-            # Re-enable buttons (wrap in try-except for deleted widget safety)
-            try:
-                for i in range(self.history_table.rowCount()):
-                    widget = self.history_table.cellWidget(
-                        i, 4)  # Action column widget
-                    if isinstance(widget, QPushButton):
-                        widget.setText("Rollback")
-                        widget.setEnabled(True)
-            except RuntimeError:
-                # Widget deleted, panel was closed - skip UI update
-                pass
+            # Re-enable buttons - validate the table first since clear_content()
+            # may have set it to None (AttributeError isn't caught below).
+            if is_valid(self.history_table):
+                try:
+                    for i in range(self.history_table.rowCount()):
+                        widget = self.history_table.cellWidget(
+                            i, 4)  # Action column widget
+                        if isinstance(widget, QPushButton):
+                            widget.setText("Rollback")
+                            widget.setEnabled(True)
+                except RuntimeError:
+                    # Widget deleted, panel was closed - skip UI update
+                    pass
 
             # Show result message
             from PyQt6.QtWidgets import QMessageBox
@@ -1570,318 +2170,143 @@ class DetailPageOverviewSection(BaseDetailSection):
 
     def _add_configmap_specific_fields(self, data):
 
-        section_header = QLabel("CONFIGMAP DETAILS")
-        section_header.setStyleSheet(
-            BaseDetailSectionStyles.get_section_header_style())
-        self.specific_layout.addWidget(section_header)
-
         data_section = data.get("data", {})
-        data_count = len(data_section)
-        data_info = QLabel(f"Data entries: {data_count}")
-        data_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(data_info)
+        self._add_detail_field("Data entries", len(data_section))
 
         if data_section:
-            data_keys = list(data_section.keys())[:5]  # Show first 5 keys
+            data_keys = list(data_section.keys())[:5]
             keys_text = ", ".join(data_keys)
             if len(data_section) > 5:
                 keys_text += f"... and {len(data_section) - 5} more"
-
-            keys_info = QLabel(f"Keys: {keys_text}")
-            keys_info.setStyleSheet(
-                BaseDetailSectionStyles.get_field_value_style())
-            keys_info.setWordWrap(True)
-            self.specific_layout.addWidget(keys_info)
+            self._add_detail_field("Keys", keys_text)
 
     def _add_secret_specific_fields(self, data):
 
-        section_header = QLabel("SECRET DETAILS")
-        section_header.setStyleSheet(
-            BaseDetailSectionStyles.get_section_header_style())
-        self.specific_layout.addWidget(section_header)
-
-        secret_type = data.get("type", "Opaque")
-        type_info = QLabel(f"Type: {secret_type}")
-        type_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(type_info)
+        self._add_detail_field("Type", data.get("type", "Opaque"))
 
         data_section = data.get("data", {})
-        data_count = len(data_section)
-        data_info = QLabel(f"Data entries: {data_count}")
-        data_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(data_info)
+        self._add_detail_field("Data entries", len(data_section))
 
     def _add_ingress_specific_fields(self, data):
 
         spec = data.get("spec", {})
 
-        section_header = QLabel("INGRESS DETAILS")
-        section_header.setStyleSheet(
-            BaseDetailSectionStyles.get_section_header_style())
-        self.specific_layout.addWidget(section_header)
-
-        ingress_class = spec.get("ingressClassName", "default")
-        class_info = QLabel(f"Ingress Class: {ingress_class}")
-        class_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(class_info)
+        self._add_detail_field("Ingress Class", spec.get("ingressClassName", "default"))
 
         rules = spec.get("rules", [])
-        rules_info = QLabel(f"Rules: {len(rules)}")
-        rules_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(rules_info)
+        self._add_detail_field("Rules", len(rules))
 
         if rules:
             hosts = [rule.get("host", "no-host") for rule in rules[:3]]
             hosts_text = ", ".join(hosts)
             if len(rules) > 3:
                 hosts_text += f"... and {len(rules) - 3} more"
-
-            hosts_info = QLabel(f"Hosts: {hosts_text}")
-            hosts_info.setStyleSheet(
-                BaseDetailSectionStyles.get_field_value_style())
-            hosts_info.setWordWrap(True)
-            self.specific_layout.addWidget(hosts_info)
+            self._add_detail_field("Hosts", hosts_text)
 
     def _add_persistentvolume_specific_fields(self, data):
 
         spec = data.get("spec", {})
         status = data.get("status", {})
 
-        section_header = QLabel("PERSISTENT VOLUME DETAILS")
-        section_header.setStyleSheet(
-            BaseDetailSectionStyles.get_section_header_style())
-        self.specific_layout.addWidget(section_header)
-
-        capacity = spec.get("capacity", {}).get("storage", "Unknown")
-        capacity_info = QLabel(f"Capacity: {capacity}")
-        capacity_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(capacity_info)
-
-        access_modes = spec.get("accessModes", [])
-        access_info = QLabel(f"Access Modes: {', '.join(access_modes)}")
-        access_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(access_info)
-
-        reclaim_policy = spec.get("persistentVolumeReclaimPolicy", "Unknown")
-        reclaim_info = QLabel(f"Reclaim Policy: {reclaim_policy}")
-        reclaim_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(reclaim_info)
-
-        phase = status.get("phase", "Unknown")
-        phase_info = QLabel(f"Phase: {phase}")
-        phase_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(phase_info)
+        self._add_detail_field("Capacity", spec.get("capacity", {}).get("storage", "Unknown"))
+        self._add_detail_field("Access Modes", ", ".join(spec.get("accessModes", [])))
+        self._add_detail_field("Reclaim Policy", spec.get("persistentVolumeReclaimPolicy", "Unknown"))
+        self._add_detail_field("Phase", status.get("phase", "Unknown"))
 
     def _add_persistentvolumeclaim_specific_fields(self, data):
 
         spec = data.get("spec", {})
         status = data.get("status", {})
 
-        section_header = QLabel("PERSISTENT VOLUME CLAIM DETAILS")
-        section_header.setStyleSheet(
-            BaseDetailSectionStyles.get_section_header_style())
-        self.specific_layout.addWidget(section_header)
-
-        access_modes = spec.get("accessModes", [])
-        access_info = QLabel(f"Access Modes: {', '.join(access_modes)}")
-        access_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(access_info)
-
-        requests = spec.get("resources", {}).get(
-            "requests", {}).get("storage", "Unknown")
-        requests_info = QLabel(f"Requested Storage: {requests}")
-        requests_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(requests_info)
-
-        storage_class = spec.get("storageClassName", "default")
-        storage_info = QLabel(f"Storage Class: {storage_class}")
-        storage_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(storage_info)
-
-        phase = status.get("phase", "Unknown")
-        phase_info = QLabel(f"Phase: {phase}")
-        phase_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(phase_info)
+        self._add_detail_field("Access Modes", ", ".join(spec.get("accessModes", [])))
+        self._add_detail_field("Requested Storage", spec.get("resources", {}).get("requests", {}).get("storage", "Unknown"))
+        self._add_detail_field("Storage Class", spec.get("storageClassName", "default"))
+        self._add_detail_field("Phase", status.get("phase", "Unknown"))
 
     def _add_replicaset_specific_fields(self, data):
 
         spec = data.get("spec", {})
         status = data.get("status", {})
 
-        section_header = QLabel("REPLICASET DETAILS")
-        section_header.setStyleSheet(
-            BaseDetailSectionStyles.get_section_header_style())
-        self.specific_layout.addWidget(section_header)
-
-        replicas = spec.get("replicas", 0)
-        replicas_info = QLabel(f"Desired Replicas: {replicas}")
-        replicas_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(replicas_info)
-
-        ready_replicas = status.get("readyReplicas", 0)
-        ready_info = QLabel(f"Ready Replicas: {ready_replicas}")
-        ready_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(ready_info)
-
-        available_replicas = status.get("availableReplicas", 0)
-        available_info = QLabel(f"Available Replicas: {available_replicas}")
-        available_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(available_info)
+        self._add_detail_field("Desired Replicas", spec.get("replicas", 0))
+        self._add_detail_field("Ready Replicas", status.get("readyReplicas", 0))
+        self._add_detail_field("Available Replicas", status.get("availableReplicas", 0))
 
     def _add_daemonset_specific_fields(self, data):
 
         status = data.get("status", {})
 
-        section_header = QLabel("DAEMONSET DETAILS")
-        section_header.setStyleSheet(
-            BaseDetailSectionStyles.get_section_header_style())
-        self.specific_layout.addWidget(section_header)
-
-        desired = status.get("desiredNumberScheduled", 0)
-        desired_info = QLabel(f"Desired: {desired}")
-        desired_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(desired_info)
-
-        current = status.get("currentNumberScheduled", 0)
-        current_info = QLabel(f"Current: {current}")
-        current_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(current_info)
-
-        ready = status.get("numberReady", 0)
-        ready_info = QLabel(f"Ready: {ready}")
-        ready_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(ready_info)
+        self._add_detail_field("Desired", status.get("desiredNumberScheduled", 0))
+        self._add_detail_field("Current", status.get("currentNumberScheduled", 0))
+        self._add_detail_field("Ready", status.get("numberReady", 0))
 
     def _add_statefulset_specific_fields(self, data):
 
         spec = data.get("spec", {})
         status = data.get("status", {})
 
-        section_header = QLabel("STATEFULSET DETAILS")
-        section_header.setStyleSheet(
-            BaseDetailSectionStyles.get_section_header_style())
-        self.specific_layout.addWidget(section_header)
-
-        replicas = spec.get("replicas", 0)
-        replicas_info = QLabel(f"Desired Replicas: {replicas}")
-        replicas_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(replicas_info)
-
-        ready_replicas = status.get("readyReplicas", 0)
-        ready_info = QLabel(f"Ready Replicas: {ready_replicas}")
-        ready_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(ready_info)
-
-        service_name = spec.get("serviceName", "Unknown")
-        service_info = QLabel(f"Service Name: {service_name}")
-        service_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(service_info)
+        self._add_detail_field("Desired Replicas", spec.get("replicas", 0))
+        self._add_detail_field("Ready Replicas", status.get("readyReplicas", 0))
+        self._add_detail_field("Service Name", spec.get("serviceName", "Unknown"))
 
     def _add_job_specific_fields(self, data):
 
         spec = data.get("spec", {})
         status = data.get("status", {})
 
-        section_header = QLabel("JOB DETAILS")
-        section_header.setStyleSheet(
-            BaseDetailSectionStyles.get_section_header_style())
-        self.specific_layout.addWidget(section_header)
-
-        parallelism = spec.get("parallelism", 1)
-        parallelism_info = QLabel(f"Parallelism: {parallelism}")
-        parallelism_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(parallelism_info)
-
-        completions = spec.get("completions", 1)
-        completions_info = QLabel(f"Completions: {completions}")
-        completions_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(completions_info)
-
-        succeeded = status.get("succeeded", 0)
-        succeeded_info = QLabel(f"Succeeded: {succeeded}")
-        succeeded_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(succeeded_info)
+        self._add_detail_field("Parallelism", spec.get("parallelism", 1))
+        self._add_detail_field("Completions", spec.get("completions", 1))
+        self._add_detail_field("Succeeded", status.get("succeeded", 0))
 
     def _add_cronjob_specific_fields(self, data):
 
         spec = data.get("spec", {})
         status = data.get("status", {})
 
-        section_header = QLabel("CRONJOB DETAILS")
-        section_header.setStyleSheet(
-            BaseDetailSectionStyles.get_section_header_style())
-        self.specific_layout.addWidget(section_header)
-
-        schedule = spec.get("schedule", "Unknown")
-        schedule_info = QLabel(f"Schedule: {schedule}")
-        schedule_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(schedule_info)
-
-        suspend = spec.get("suspend", False)
-        suspend_info = QLabel(f"Suspended: {'Yes' if suspend else 'No'}")
-        suspend_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(suspend_info)
-
+        self._add_detail_field("Schedule", spec.get("schedule", "Unknown"))
+        self._add_detail_field("Suspended", "Yes" if spec.get("suspend", False) else "No")
+        
         last_schedule = status.get("lastScheduleTime", "Never")
-        last_info = QLabel(f"Last Schedule: {last_schedule}")
-        last_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(last_info)
+        if last_schedule != "Never":
+            try:
+                last_schedule = TimezoneManager.get_instance().format_time(last_schedule)
+            except Exception:
+                pass
+                
+        self._add_detail_field("Last Schedule", last_schedule)
+
+    def _add_detail_field(self, label, value):
+        """Helper to add a horizontal label-value row matching SYSTEM INFO style"""
+        field_container = QWidget()
+        field_layout = QHBoxLayout(field_container)
+        field_layout.setContentsMargins(0, 0, 0, 0)
+        field_layout.setSpacing(12)
+        
+        label_widget = QLabel(label)
+        label_widget.setStyleSheet(BaseDetailSectionStyles.get_field_label_style())
+        label_widget.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        label_widget.setMinimumWidth(140)
+        label_widget.setMaximumWidth(140)
+        
+        value_widget = QLabel(str(value))
+        value_widget.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
+        value_widget.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        value_widget.setWordWrap(True)
+        
+        field_layout.addWidget(label_widget)
+        field_layout.addWidget(value_widget, 1)
+        
+        self.specific_layout.addWidget(field_container)
 
     def _add_node_specific_fields(self, data):
 
         status = data.get("status", {})
 
-        section_header = QLabel("NODE DETAILS")
-        section_header.setStyleSheet(
-            BaseDetailSectionStyles.get_section_header_style())
-        self.specific_layout.addWidget(section_header)
-
         # Node info
         node_info = status.get("nodeInfo", {})
-        os_image = node_info.get("osImage", "Unknown")
-        os_info = QLabel(f"OS Image: {os_image}")
-        os_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(os_info)
-
-        kernel_version = node_info.get("kernelVersion", "Unknown")
-        kernel_info = QLabel(f"Kernel Version: {kernel_version}")
-        kernel_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(kernel_info)
-
-        container_runtime = node_info.get("containerRuntimeVersion", "Unknown")
-        runtime_info = QLabel(f"Container Runtime: {container_runtime}")
-        runtime_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(runtime_info)
+        self._add_detail_field("OS Image", node_info.get("osImage", "Unknown"))
+        self._add_detail_field("Kernel Version", node_info.get("kernelVersion", "Unknown"))
+        self._add_detail_field("Container Runtime", node_info.get("containerRuntimeVersion", "Unknown"))
 
         # Add pods section for this node
         self._add_node_pods_section(data)
@@ -1889,71 +2314,28 @@ class DetailPageOverviewSection(BaseDetailSection):
     def _add_namespace_specific_fields(self, data):
 
         status = data.get("status", {})
-
-        section_header = QLabel("NAMESPACE DETAILS")
-        section_header.setStyleSheet(
-            BaseDetailSectionStyles.get_section_header_style())
-        self.specific_layout.addWidget(section_header)
-
-        phase = status.get("phase", "Unknown")
-        phase_info = QLabel(f"Phase: {phase}")
-        phase_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(phase_info)
+        self._add_detail_field("Phase", status.get("phase", "Unknown"))
 
     def _add_helmrelease_specific_fields(self, data):
 
         spec = data.get("spec", {})
         status = data.get("status", {})
 
-        section_header = QLabel("HELM RELEASE DETAILS")
-        section_header.setStyleSheet(
-            BaseDetailSectionStyles.get_section_header_style())
-        self.specific_layout.addWidget(section_header)
-
         chart = spec.get("chart", {})
-        chart_name = chart.get("spec", {}).get("chart", "Unknown")
-        chart_info = QLabel(f"Chart: {chart_name}")
-        chart_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(chart_info)
-
-        version = chart.get("spec", {}).get("version", "Unknown")
-        version_info = QLabel(f"Version: {version}")
-        version_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(version_info)
+        self._add_detail_field("Chart", chart.get("spec", {}).get("chart", "Unknown"))
+        self._add_detail_field("Version", chart.get("spec", {}).get("version", "Unknown"))
 
         release_status = status.get("conditions", [])
         if release_status:
             last_condition = release_status[-1]
-            condition_type = last_condition.get("type", "Unknown")
-            condition_status = last_condition.get("status", "Unknown")
-            status_info = QLabel(
-                f"Status: {condition_type} = {condition_status}")
-            status_info.setStyleSheet(
-                BaseDetailSectionStyles.get_field_value_style())
-            self.specific_layout.addWidget(status_info)
+            self._add_detail_field("Status", f"{last_condition.get('type', 'Unknown')} = {last_condition.get('status', 'Unknown')}")
 
     def _add_generic_custom_resource_fields(self, data):
 
         spec = data.get("spec", {})
 
-        section_header = QLabel("CUSTOM RESOURCE DETAILS")
-        section_header.setStyleSheet(
-            BaseDetailSectionStyles.get_section_header_style())
-        self.specific_layout.addWidget(section_header)
-
-        api_version = data.get("apiVersion", "Unknown")
-        api_info = QLabel(f"API Version: {api_version}")
-        api_info.setStyleSheet(BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(api_info)
-
-        kind = data.get("kind", "Unknown")
-        kind_info = QLabel(f"Kind: {kind}")
-        kind_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(kind_info)
+        self._add_detail_field("API Version", data.get("apiVersion", "Unknown"))
+        self._add_detail_field("Kind", data.get("kind", "Unknown"))
 
         # Show some basic spec fields if available
         if spec:
@@ -1961,95 +2343,82 @@ class DetailPageOverviewSection(BaseDetailSection):
             spec_text = ", ".join(spec_keys)
             if len(spec) > 3:
                 spec_text += f"... and {len(spec) - 3} more"
-
-            spec_info = QLabel(f"Spec fields: {spec_text}")
-            spec_info.setStyleSheet(
-                BaseDetailSectionStyles.get_field_value_style())
-            self.specific_layout.addWidget(spec_info)
+            self._add_detail_field("Spec fields", spec_text)
 
     def _add_priorityclass_specific_fields(self, data):
 
-        section_header = QLabel("PRIORITY CLASS DETAILS")
-        section_header.setStyleSheet(
-            BaseDetailSectionStyles.get_section_header_style())
-        self.specific_layout.addWidget(section_header)
-
-        value = data.get("value", 0)
-        value_info = QLabel(f"Priority Value: {value}")
-        value_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(value_info)
-
-        global_default = data.get("globalDefault", False)
-        default_info = QLabel(
-            f"Global Default: {'Yes' if global_default else 'No'}")
-        default_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(default_info)
+        self._add_detail_field("Priority Value", data.get("value", 0))
+        self._add_detail_field("Global Default", "Yes" if data.get("globalDefault", False) else "No")
 
         description = data.get("description", "")
         if description:
-            desc_info = QLabel(f"Description: {description}")
-            desc_info.setStyleSheet(
-                BaseDetailSectionStyles.get_field_value_style())
-            desc_info.setWordWrap(True)
-            self.specific_layout.addWidget(desc_info)
+            self._add_detail_field("Description", description)
 
     def _add_lease_specific_fields(self, data):
 
         spec = data.get("spec", {})
 
-        section_header = QLabel("LEASE DETAILS")
-        section_header.setStyleSheet(
-            BaseDetailSectionStyles.get_section_header_style())
-        self.specific_layout.addWidget(section_header)
-
-        holder_identity = spec.get("holderIdentity", "Unknown")
-        holder_info = QLabel(f"Holder Identity: {holder_identity}")
-        holder_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(holder_info)
-
-        lease_duration = spec.get("leaseDurationSeconds", "Unknown")
-        duration_info = QLabel(f"Lease Duration: {lease_duration}s")
-        duration_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(duration_info)
+        self._add_detail_field("Holder Identity", spec.get("holderIdentity", "Unknown"))
+        self._add_detail_field("Lease Duration", f"{spec.get('leaseDurationSeconds', 'Unknown')}s")
 
         acquire_time = spec.get("acquireTime", "")
         if acquire_time:
-            acquire_info = QLabel(f"Acquire Time: {acquire_time}")
-            acquire_info.setStyleSheet(
-                BaseDetailSectionStyles.get_field_value_style())
-            self.specific_layout.addWidget(acquire_info)
+            self._add_detail_field("Acquire Time", acquire_time)
 
     def clear_content(self):
 
         # Defensive: Clear cached data
+        # Defensive: Clear cached data
         self.current_data = None
+        
+        # KEY FIX: Disconnect any pending pod signals to prevent ghost windows
+        self._disconnect_pods_signals()
+        
+        # Clear widget references
+        self._pod_widgets = []
 
-        self.resource_name_label.setText("Resource Name")
-        self.resource_info_label.setText("Type / Namespace")
-        self.creation_time_label.setText("Created: unknown")
-        self.status_badge.setText("Unknown")
-        self.status_text_label.setText("Status not available")
-        self.labels_content.setText("No labels")
+        if hasattr(self, 'resource_name_label'):
+             self.resource_name_label.setText("Resource Name")
+        if hasattr(self, 'resource_type_label'):
+             self.resource_type_label.setText("Type")
+        
+        # Reset cards if they exist
+        if hasattr(self, 'created_card'):
+             self.created_card.value_label.setText("Unknown")
+        if hasattr(self, 'secondary_card'):
+             self.secondary_card.title_label.setText("INFO")
+             self.secondary_card.value_label.setText("Unknown")
+             
+        if hasattr(self, 'status_badge'):
+             self.status_badge.setText("Unknown")
+             self.status_badge.setStyleSheet(BaseDetailSectionStyles.get_status_badge_style('default'))
+        
+        if hasattr(self, 'status_text_label'):
+             self.status_text_label.setText("Status not available")
+        
+        # Clear labels layout
+        # Clear labels layout using helper
+        self._clear_layout(self.labels_layout)
+        
+        # Add "No labels" placeholder
+        no_labels = QLabel("No labels")
+        no_labels.setStyleSheet(BaseDetailSectionStyles.get_secondary_text_style() + """
+            font-style: italic;
+            padding: 8px;
+        """)
+        self.labels_layout.addWidget(no_labels)
 
         # Safe conditions clearing
-        while self.conditions_container_layout.count():
-            item = self.conditions_container_layout.takeAt(0)
-            if item.widget():
-                widget = item.widget()
-                widget.setParent(None)
-                widget.deleteLater()
+        self._clear_layout(self.conditions_container_layout)
 
         # Safe specific section clearing
-        while self.specific_layout.count():
-            item = self.specific_layout.takeAt(0)
-            if item.widget():
-                widget = item.widget()
-                widget.setParent(None)
-                widget.deleteLater()
+        self._clear_layout(self.specific_layout)
+        
+        # Reset dynamic widget references to prevent RuntimeError during theme changes
+        self.rollback_icon_label = None
+        self.history_loading_label = None
+        self.history_table = None
+        self.history_container = None
 
         self.specific_section.hide()
 
@@ -2061,16 +2430,8 @@ class DetailPageOverviewSection(BaseDetailSection):
     def clear_conditions_content(self):
 
         try:
-            while self.conditions_container_layout.count():
-                item = self.conditions_container_layout.takeAt(0)
-                if item and item.widget():
-                    widget = item.widget()
-                    try:
-                        widget.setParent(None)
-                        widget.deleteLater()
-                    except RuntimeError:
-                        # Widget already deleted, skip
-                        pass
+            # Use helper for safe clearing
+            self._clear_layout(self.conditions_container_layout)
         except Exception as e:
             logging.error(f"Error clearing conditions content: {e}")
 
@@ -2080,92 +2441,40 @@ class DetailPageOverviewSection(BaseDetailSection):
 
     def clear_specific_content(self):
 
-        while self.specific_layout.count():
-            item = self.specific_layout.takeAt(0)
-            if item.widget():
-                widget = item.widget()
-                widget.setParent(None)
-                widget.deleteLater()
+        self._clear_layout(self.specific_layout)
         self.specific_section.hide()
 
     def _add_validating_webhook_specific_fields(self, data):
 
-        section_header = QLabel("VALIDATING WEBHOOK DETAILS")
-        section_header.setStyleSheet(
-            BaseDetailSectionStyles.get_section_header_style())
-        self.specific_layout.addWidget(section_header)
-
         webhooks = data.get("webhooks", [])
-        webhooks_info = QLabel(f"Webhooks: {len(webhooks)}")
-        webhooks_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(webhooks_info)
+        self._add_detail_field("Webhooks", len(webhooks))
 
         if webhooks:
             first_webhook = webhooks[0]
-            name = first_webhook.get("name", "Unknown")
-            name_info = QLabel(f"First Webhook Name: {name}")
-            name_info.setStyleSheet(
-                BaseDetailSectionStyles.get_field_value_style())
-            self.specific_layout.addWidget(name_info)
+            self._add_detail_field("First Webhook Name", first_webhook.get("name", "Unknown"))
 
     def _add_mutating_webhook_specific_fields(self, data):
 
-        section_header = QLabel("MUTATING WEBHOOK DETAILS")
-        section_header.setStyleSheet(
-            BaseDetailSectionStyles.get_section_header_style())
-        self.specific_layout.addWidget(section_header)
-
         webhooks = data.get("webhooks", [])
-        webhooks_info = QLabel(f"Webhooks: {len(webhooks)}")
-        webhooks_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(webhooks_info)
+        self._add_detail_field("Webhooks", len(webhooks))
 
     def _add_replicationcontroller_specific_fields(self, data):
 
         spec = data.get("spec", {})
         status = data.get("status", {})
 
-        section_header = QLabel("REPLICATION CONTROLLER DETAILS")
-        section_header.setStyleSheet(
-            BaseDetailSectionStyles.get_section_header_style())
-        self.specific_layout.addWidget(section_header)
-
-        replicas = spec.get("replicas", 0)
-        replicas_info = QLabel(f"Desired Replicas: {replicas}")
-        replicas_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(replicas_info)
-
-        ready_replicas = status.get("readyReplicas", 0)
-        ready_info = QLabel(f"Ready Replicas: {ready_replicas}")
-        ready_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(ready_info)
+        self._add_detail_field("Desired Replicas", spec.get("replicas", 0))
+        self._add_detail_field("Ready Replicas", status.get("readyReplicas", 0))
 
     def _add_ingressclass_specific_fields(self, data):
 
         spec = data.get("spec", {})
 
-        section_header = QLabel("INGRESS CLASS DETAILS")
-        section_header.setStyleSheet(
-            BaseDetailSectionStyles.get_section_header_style())
-        self.specific_layout.addWidget(section_header)
-
-        controller = spec.get("controller", "Unknown")
-        controller_info = QLabel(f"Controller: {controller}")
-        controller_info.setStyleSheet(
-            BaseDetailSectionStyles.get_field_value_style())
-        self.specific_layout.addWidget(controller_info)
+        self._add_detail_field("Controller", spec.get("controller", "Unknown"))
 
         parameters = spec.get("parameters", {})
         if parameters:
-            params_info = QLabel(f"Parameters: {parameters}")
-            params_info.setStyleSheet(
-                BaseDetailSectionStyles.get_field_value_style())
-            params_info.setWordWrap(True)
-            self.specific_layout.addWidget(params_info)
+            self._add_detail_field("Parameters", parameters)
 
     def _add_node_pods_section(self, data):
 
@@ -2173,11 +2482,56 @@ class DetailPageOverviewSection(BaseDetailSection):
         if not node_name:
             return
 
-        # Create pods section header
+        # Create pods section header container
+        header_container = QWidget()
+        header_layout = QHBoxLayout(header_container)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(8)
+        
+        # Add spacing above the header
+        self.specific_layout.addSpacing(20)
+        
+        # Icon
+        try:
+            # Calculate path to icon: ../../Icons/pods-icon.svg
+            base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            icon_path = os.path.join(base_path, "Icons", "pods-icon.svg")
+            
+            if os.path.exists(icon_path):
+                icon_label = QLabel()
+                icon_label.setFixedSize(20, 20)
+                
+                # Use theme color matching text (TEXT_SECONDARY)
+                theme = OverviewSectionStyles._get_theme()
+                color = QColor(theme.colors.TEXT_SECONDARY)
+                
+                # Load and paint SVG
+                renderer = QSvgRenderer(icon_path)
+                pixmap = QPixmap(20, 20)
+                pixmap.fill(Qt.GlobalColor.transparent)
+                painter = QPainter(pixmap)
+                renderer.render(painter)
+                
+                # Paint the icon with the text color (SourceIn composition)
+                painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+                painter.fillRect(pixmap.rect(), color)
+                painter.end()
+                
+                icon_label.setPixmap(pixmap)
+                header_layout.addWidget(icon_label)
+        except Exception as e:
+            logging.warning(f"Failed to load pods icon: {e}")
+
+        # Header Text
         pods_header = QLabel("PODS RUNNING ON THIS NODE")
         pods_header.setStyleSheet(
-            BaseDetailSectionStyles.get_section_header_style())
-        self.specific_layout.addWidget(pods_header)
+            BaseDetailSectionStyles.get_section_header_style().replace("font-size: 16px;", "font-size: 14px;"))
+        pods_header.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        
+        header_layout.addWidget(pods_header)
+        header_layout.addStretch() # Push everything to left
+        
+        self.specific_layout.addWidget(header_container)
 
         # Create loading label
         self.pods_loading_label = QLabel("Loading pods...")
@@ -2198,13 +2552,21 @@ class DetailPageOverviewSection(BaseDetailSection):
             ["Pod Name", "Namespace", "Status", "CPU", "Memory"])
 
         # Style the table
+        self.pods_table.horizontalHeader().setStretchLastSection(True)
+        self.pods_table.verticalHeader().setVisible(False)
+        
+        # Style the table - Restore stylesheet for borders
         self.pods_table.setStyleSheet(
             OverviewSectionStyles.get_pods_table_style())
 
-        # Configure table properties
-        self.pods_table.setSelectionBehavior(
-            QTableWidget.SelectionBehavior.SelectRows)
+        # Disable row selection highlight
+        self.pods_table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.pods_table.setEditTriggers(
+            QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.pods_table.setSortingEnabled(False) # Disable sorting for now to avoid complexity with widgets only # Disable row selection
+        self.pods_table.setFocusPolicy(Qt.FocusPolicy.NoFocus) # Remove focus outline
         self.pods_table.verticalHeader().setVisible(False)
+        self.pods_table.verticalHeader().setDefaultSectionSize(45)
 
         # Connect single - click event to navigate to pod
         self.pods_table.itemClicked.connect(self._on_pod_clicked)
@@ -2255,24 +2617,36 @@ class DetailPageOverviewSection(BaseDetailSection):
         except Exception as e:
             self._handle_node_pods_error(f"Failed to fetch pods: {str(e)}")
 
+    def _disconnect_pods_signals(self):
+        """Helper to disconnect pod-related signals"""
+        try:
+            self.kubernetes_client.pods_data_loaded.disconnect(self._handle_node_pods_loaded)
+        except (TypeError, RuntimeError):
+            pass
+            
+        try:
+            self.kubernetes_client.api_error.disconnect(self._handle_node_pods_error)
+        except (TypeError, RuntimeError):
+            pass
+
     def _handle_node_pods_loaded(self, pods_data):
 
         try:
-            # Safely disconnect signals
-            try:
-                self.kubernetes_client.pods_data_loaded.disconnect(
-                    self._handle_node_pods_loaded)
-            except (TypeError, RuntimeError):
-                pass
-
-            try:
-                self.kubernetes_client.api_error.disconnect(
-                    self._handle_node_pods_error)
-            except (TypeError, RuntimeError):
-                pass
+            # Safely disconnect signals using helper
+            self._disconnect_pods_signals()
 
             # Hide loading label and show table container
+            # Hide loading label and show table container
             try:
+                # CRITICAL FIX: Ghost window issue
+                # Check if the overall section is visible. If not, do NOT show children.
+                if not self.isVisible() or not self.parent():
+                    return
+                
+                # Check if widgets still have a parent and are valid
+                if not self.pods_loading_label.parent() or not self.pods_container.parent():
+                    return
+
                 self.pods_loading_label.hide()
                 self.pods_container.show()
             except RuntimeError:
@@ -2292,8 +2666,12 @@ class DetailPageOverviewSection(BaseDetailSection):
                 self.pods_table.setSpan(0, 0, 1, 5)
                 return
 
-            # Populate the table
+            # Clear existing content and prepare for new data
+            self.pods_table.clearContents()
             self.pods_table.setRowCount(len(pods_data))
+            
+            # Keep strong references to widgets to prevent GC issues
+            self._pod_widgets = []
 
             for row, pod in enumerate(pods_data):
                 pod_name = pod.get("name", "Unknown")
@@ -2318,57 +2696,143 @@ class DetailPageOverviewSection(BaseDetailSection):
                 else:
                     memory_display = str(memory_usage)
 
-                # Add pod name cell
+                # Pod Name Cell - Orange, Clickable, Selectable
+                name_label = ClickableSelectableLabel(pod_name)
+                # Use explicit style
+                theme = OverviewSectionStyles._get_theme()
+                name_label.setStyleSheet(f"""
+                    QLabel {{
+                        font-size: 13px;
+                        font-weight: normal;
+                        color: {theme.colors.ACCENT_ORANGE};
+                        padding: 4px;
+                    }}
+                """)
+                name_label.setCursor(Qt.CursorShape.PointingHandCursor)
+                # Connect click signal for navigation
+                name_label.clicked.connect(lambda n=pod_name, ns=namespace: self._navigate_to_pods_page(n, ns))
+                
+                # Still set item for sorting and base data
                 name_item = QTableWidgetItem(pod_name)
-                name_item.setFlags(name_item.flags() & ~
-                                   Qt.ItemFlag.ItemIsEditable)
+                name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 self.pods_table.setItem(row, 0, name_item)
+                
+                # Set the interactive widget
+                self.pods_table.setCellWidget(row, 0, name_label)
+                self._pod_widgets.append(name_label) # Keep reference
 
-                # Add namespace cell
+                # Namespace Cell - Selectable
+                ns_label = QLabel(namespace)
+                ns_label.setStyleSheet(f"""
+                    QLabel {{
+                        font-size: 13px;
+                        font-weight: normal;
+                        color: {theme.colors.TEXT_LIGHT};
+                        padding: 4px;
+                    }}
+                """)
+                ns_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+                
                 namespace_item = QTableWidgetItem(namespace)
-                namespace_item.setFlags(
-                    namespace_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                namespace_item.setFlags(namespace_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 self.pods_table.setItem(row, 1, namespace_item)
+                
+                self.pods_table.setCellWidget(row, 1, ns_label)
+                self._pod_widgets.append(ns_label) # Keep reference
 
-                # Add status cell with color coding
-                status_item = QTableWidgetItem(status)
-                status_item.setFlags(status_item.flags() &
-                                     ~Qt.ItemFlag.ItemIsEditable)
-
-                # Color code status
+                # Add status cell with pill style (custom widget)
+                status_bg = "rgba(100, 100, 100, 0.1)" # Default gray
+                status_text = theme.colors.TEXT_SECONDARY
+                
                 if status.lower() == "running":
-                    status_item.setForeground(
-                        QColor(OverviewSectionStyles.get_status_active_color()))
+                    status_bg = "rgba(40, 167, 69, 0.15)" # Light green bg
+                    status_text = theme.colors.STATUS_ACTIVE # Green text
                 elif status.lower() in ["pending", "containercreating"]:
-                    status_item.setForeground(
-                        QColor(OverviewSectionStyles.get_status_warning_color()))
+                    status_bg = "rgba(255, 193, 7, 0.15)" # Light orange bg
+                    status_text = theme.colors.STATUS_WARNING # Orange text
                 elif status.lower() in ["failed", "crashloopbackoff", "error"]:
-                    status_item.setForeground(
-                        QColor(OverviewSectionStyles.get_text_danger_color()))
-                else:
-                    status_item.setForeground(
-                        QColor(OverviewSectionStyles.get_text_secondary_color()))
+                    status_bg = "rgba(220, 53, 69, 0.15)" # Light red bg
+                    status_text = theme.colors.TEXT_DANGER # Red text
 
+                # Prepare status item first
+                status_item = QTableWidgetItem(status)
                 self.pods_table.setItem(row, 2, status_item)
 
-                # Add CPU cell
-                cpu_item = QTableWidgetItem(cpu_display)
-                cpu_item.setFlags(cpu_item.flags() & ~
-                                  Qt.ItemFlag.ItemIsEditable)
-                cpu_item.setTextAlignment(
-                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                self.pods_table.setItem(row, 3, cpu_item)
+                # Create pill widget for status
+                status_widget = QWidget()
+                status_layout = QHBoxLayout(status_widget)
+                status_layout.setContentsMargins(4, 4, 4, 4)
+                status_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                
+                status_label = QLabel(status)
+                status_label.setStyleSheet(f"""
+                    QLabel {{ 
+                        background-color: {status_bg}; 
+                        color: {status_text}; 
+                        border-radius: 4px; 
+                        padding: 4px 8px;
+                        font-weight: bold; 
+                        font-size: 13px; 
+                    }}
+                """)
+                status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                # Make status selectable? Usually not necessary for pill, but if requested:
+                # status_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse) 
+                # (might look weird with background)
+                status_layout.addWidget(status_label)
+                
+                self.pods_table.setCellWidget(row, 2, status_widget)
+                self._pod_widgets.append(status_widget) # Keep reference
 
-                # Add Memory cell
-                memory_item = QTableWidgetItem(memory_display)
-                memory_item.setFlags(memory_item.flags() &
-                                     ~Qt.ItemFlag.ItemIsEditable)
-                memory_item.setTextAlignment(
-                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                self.pods_table.setItem(row, 4, memory_item)
+                # CPU Cell - Selectable
+                cpu_label = QLabel(cpu_display)
+                cpu_label.setStyleSheet(f"""
+                    QLabel {{
+                        font-size: 13px;
+                        font-weight: normal;
+                        color: {theme.colors.TEXT_LIGHT};
+                        padding: 4px;
+                    }}
+                """)
+                cpu_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                cpu_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+                
+                cpu_item = QTableWidgetItem(cpu_display)
+                cpu_item.setFlags(cpu_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                cpu_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                self.pods_table.setItem(row, 3, cpu_item)
+                
+                self.pods_table.setCellWidget(row, 3, cpu_label)
+                self._pod_widgets.append(cpu_label) # Keep reference
+
+                # Memory Cell - Selectable
+                mem_label = QLabel(memory_display)
+                mem_label.setStyleSheet(f"""
+                    QLabel {{
+                        font-size: 13px;
+                        font-weight: normal;
+                        color: {theme.colors.TEXT_LIGHT};
+                        padding: 4px;
+                    }}
+                """)
+                mem_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                mem_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+                
+                mem_item = QTableWidgetItem(memory_display)
+                mem_item.setFlags(mem_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                mem_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                self.pods_table.setItem(row, 4, mem_item)
+                
+                self.pods_table.setCellWidget(row, 4, mem_label)
+                self._pod_widgets.append(mem_label) # Keep reference
+
+
 
             logging.info(
                 f"Populated pods table with {len(pods_data)} pods for node")
+            
+            # Ensure rows fit content properly
+            # self.pods_table.resizeRowsToContents()
 
         except Exception as e:
             logging.error(f"Error handling node pods data: {str(e)}")
@@ -2630,6 +3094,10 @@ class DetailPageOverviewSection(BaseDetailSection):
             created_time = metadata.get("creationTimestamp", metadata.get(
                 "annotations", {}).get("updated", ""))
             if created_time:
+                try:
+                    created_time = TimezoneManager.get_instance().format_time(created_time)
+                except Exception:
+                    pass
                 self.creation_time_label.setText(
                     f"Last Updated: {created_time}")
             else:
@@ -2661,6 +3129,10 @@ class DetailPageOverviewSection(BaseDetailSection):
             deployed_time = status.get(
                 "lastDeployed", metadata.get("creationTimestamp", ""))
             if deployed_time:
+                try:
+                    deployed_time = TimezoneManager.get_instance().format_time(deployed_time)
+                except Exception:
+                    pass
                 self.creation_time_label.setText(
                     f"Last Deployed: {deployed_time}")
             else:
@@ -2687,7 +3159,7 @@ class DetailPageOverviewSection(BaseDetailSection):
             if hasattr(self, "status_badge"):
                 self.status_badge.setText("Available")
                 self.status_badge.setStyleSheet(
-                    OverviewSectionStyles.get_status_badge_success_style())
+                    BaseDetailSectionStyles.get_status_badge_style('success'))
 
             if hasattr(self, "status_text_label"):
                 self.status_text_label.setText(
@@ -2712,13 +3184,13 @@ class DetailPageOverviewSection(BaseDetailSection):
                 # Set badge color based on status using theme-aware colors
                 if release_status.lower() in ["deployed", "success"]:
                     self.status_badge.setStyleSheet(
-                        OverviewSectionStyles.get_status_badge_success_style())
+                        BaseDetailSectionStyles.get_status_badge_style('success'))
                 elif release_status.lower() in ["failed", "error"]:
                     self.status_badge.setStyleSheet(
-                        OverviewSectionStyles.get_status_badge_error_style())
+                        BaseDetailSectionStyles.get_status_badge_style('error'))
                 else:
                     self.status_badge.setStyleSheet(
-                        OverviewSectionStyles.get_status_badge_default_style())
+                        BaseDetailSectionStyles.get_status_badge_style('default'))
 
                 self.status_badge.setText(release_status)
 

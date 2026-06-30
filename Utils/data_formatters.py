@@ -1,14 +1,19 @@
-"""
-High-Performance Data Formatters and Utilities
-Consolidates scattered formatting functions into optimized utilities.
-Designed for maximum performance and consistent formatting across the app.
-"""
-
-import re
 import logging
-from datetime import datetime, timezone, timedelta
-from typing import Union, Optional
+import re
+from datetime import datetime, timedelta, timezone
+from typing import Optional, Union
 from dataclasses import dataclass
+
+__all__ = [
+    "ResourceUsage",
+    "HighPerformanceFormatters",
+    "format_age",
+    "parse_memory_value",
+    "format_percentage",
+    "truncate_string",
+    "parse_age_to_seconds",
+    "int_sort_key",
+]
 
 
 @dataclass
@@ -215,35 +220,29 @@ class HighPerformanceFormatters:
         return text[:max_length - len(suffix)] + suffix
 
 
-# Global formatter instance for maximum performance
-_formatter_instance = HighPerformanceFormatters()
-
-
-# Convenience functions that use the optimized formatter
+# Convenience functions — call static methods directly (no instance needed)
 def format_age(timestamp: Optional[Union[str, datetime]]) -> str:
-    """Format age for display"""
+    """Format age for display. Accepts ISO timestamp strings or datetime objects."""
     if timestamp is None:
         return 'Unknown'
-
     if isinstance(timestamp, datetime):
-        return _formatter_instance.format_age_from_datetime(timestamp)
-    else:
-        return _formatter_instance.format_age(str(timestamp))
+        return HighPerformanceFormatters.format_age_from_datetime(timestamp)
+    return HighPerformanceFormatters.format_age(str(timestamp))
 
 
 def parse_memory_value(memory_str: str) -> ResourceUsage:
-    """Parse memory value"""
-    return _formatter_instance.parse_memory_value(memory_str)
+    """Parse a Kubernetes memory string (e.g. '256Mi') into a ResourceUsage object."""
+    return HighPerformanceFormatters.parse_memory_value(memory_str)
 
 
 def format_percentage(value: Optional[float], precision: int = 1) -> str:
-    """Format percentage with consistent precision"""
-    return _formatter_instance.format_percentage(value, precision)
+    """Format a float as a percentage string with consistent precision."""
+    return HighPerformanceFormatters.format_percentage(value, precision)
 
 
 def truncate_string(text: str, max_length: int = 50, suffix: str = '...') -> str:
-    """Truncate string efficiently"""
-    return _formatter_instance.truncate_string(text, max_length, suffix)
+    """Truncate a string to max_length, appending suffix if truncated."""
+    return HighPerformanceFormatters.truncate_string(text, max_length, suffix)
 
 
 # Pre-compiled pattern for age parsing - matches number+suffix pairs
@@ -277,3 +276,15 @@ def parse_age_to_seconds(age_str: str) -> int:
             continue
 
     return total
+
+
+def int_sort_key(value, default: int = 0) -> int:
+    """Convert a table cell value to an int for numeric column sorting.
+
+    Returns `default` (0) when the value cannot be parsed as an int. This
+    mirrors the inline try/except previously duplicated across resource pages.
+    """
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return default

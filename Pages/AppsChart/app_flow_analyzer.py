@@ -19,6 +19,7 @@ from Utils.kubernetes_client import get_kubernetes_client
 from Services.kubernetes.api_config import APIClientConfig
 from kubernetes.client.rest import ApiException
 import logging
+import re
 from Utils.thread_manager import is_shutdown_requested
 
 
@@ -400,37 +401,6 @@ class AppFlowAnalyzer(QThread):
             logging.warning(f"Could not fetch services: {e}")
         return services
 
-    def _find_related_ingresses(self, services):
-        """Find ingresses that target the services"""
-        ingresses = []
-        try:
-            if self.is_interrupted():
-                return ingresses
-            
-            ing_list = self.kube_client.networking_v1.list_namespaced_ingress(namespace=self.namespace, _request_timeout=APIClientConfig.SERVICE_DISCOVERY_TIMEOUT)
-            service_names = [svc["name"] for svc in services]
-
-            for ingress in ing_list.items:
-                if self.is_interrupted():
-                    break
-                if ingress.spec.rules:
-                    for rule in ingress.spec.rules:
-                        if rule.http and rule.http.paths:
-                            for path in rule.http.paths:
-                                if path.backend.service and path.backend.service.name in service_names:
-                                    ingresses.append({
-                                        "name": ingress.metadata.name,
-                                        "namespace": ingress.metadata.namespace,
-                                        "host": rule.host or "N/A",
-                                        "path": path.path,
-                                        "service": path.backend.service.name,
-                                        "port": path.backend.service.port.number if path.backend.service.port else "N/A"
-                                    })
-                                    break
-        except Exception as e:
-            logging.warning(f"Could not fetch ingresses: {e}")
-        return ingresses
-
     def _find_all_related_ingresses(self, services):
         """Find ALL ingresses in the namespace, not just those targeting discovered services"""
         ingresses = []
@@ -556,85 +526,6 @@ class AppFlowAnalyzer(QThread):
 
         return configs
 
-    def _find_all_related_configs(self, workload, pods):
-        """Find ALL config resources that could be used by workload and pods - Enhanced Discovery"""
-        configs = {"configmaps": [], "secrets": [], "pvcs": []}
-
-        try:
-            # Get ALL configmaps in the namespace
-            self.progress_updated.emit("Scanning all configmaps...")
-            try:
-                if self.is_interrupted():
-                    return configs
-                
-                cm_list = self.kube_client.v1.list_namespaced_config_map(namespace=self.namespace, _request_timeout=APIClientConfig.SERVICE_DISCOVERY_TIMEOUT)
-                for cm in cm_list.items:
-                    if self.is_interrupted():
-                        break
-                    configs["configmaps"].append({
-                        "name": cm.metadata.name,
-                        "namespace": cm.metadata.namespace,
-                        "type": "configmap",
-                        "data_keys": list(cm.data.keys()) if cm.data else []
-                    })
-            except Exception as e:
-                logging.warning(f"Could not fetch configmaps: {e}")
-
-            # Get ALL secrets in the namespace (excluding system secrets)
-            self.progress_updated.emit("Scanning all secrets...")
-            try:
-                if self.is_interrupted():
-                    return configs
-                
-                secret_list = self.kube_client.v1.list_namespaced_secret(namespace=self.namespace, _request_timeout=APIClientConfig.SERVICE_DISCOVERY_TIMEOUT)
-                for secret in secret_list.items:
-                    if self.is_interrupted():
-                        break
-                    # Filter out system secrets
-                    if not secret.metadata.name.startswith(('default-token-', 'kube-root-ca')):
-                        configs["secrets"].append({
-                            "name": secret.metadata.name,
-                            "namespace": secret.metadata.namespace,
-                            "type": "secret",
-                            "secret_type": secret.type
-                        })
-            except Exception as e:
-                logging.warning(f"Could not fetch secrets: {e}")
-
-            # Get ALL PVCs in the namespace
-            self.progress_updated.emit("Scanning all PVCs...")
-            try:
-                if self.is_interrupted():
-                    return configs
-                
-                pvc_list = self.kube_client.v1.list_namespaced_persistent_volume_claim(namespace=self.namespace, _request_timeout=APIClientConfig.SERVICE_DISCOVERY_TIMEOUT)
-                for pvc in pvc_list.items:
-                    if self.is_interrupted():
-                        break
-                    configs["pvcs"].append({
-                        "name": pvc.metadata.name,
-                        "namespace": pvc.metadata.namespace,
-                        "type": "pvc",
-                        "status": pvc.status.phase if pvc.status else "Unknown"
-                    })
-            except Exception as e:
-                logging.warning(f"Could not fetch PVCs: {e}")
-
-            # Also include the original workload-specific configs for accurate connections
-            original_configs = self._find_related_configs(workload)
-
-            # Merge without duplicates
-            for config_type in ["configmaps", "secrets", "pvcs"]:
-                existing_names = {c["name"] for c in configs[config_type]}
-                for config in original_configs.get(config_type, []):
-                    if config["name"] not in existing_names:
-                        configs[config_type].append(config)
-
-        except Exception as e:
-            logging.warning(f"Could not analyze all configs: {e}")
-
-        return configs
-
     def _find_services_for_pod(self, pod):
         """Find services that might target this pod"""
         services = []
@@ -700,100 +591,78 @@ class AppFlowAnalyzer(QThread):
         return True
 
     def _names_suggest_relationship(self, name1, name2):
-        """Check if two resource names suggest they're related"""
-        # Remove common prefixes/suffixes and compare
-        import re
-
-        # Extract base names by removing common patterns
+        """Check if two resource names suggest they're related by comparing base names."""
         base1 = re.sub(r'(-service|-svc|-controller|-deployment|-deploy)$', '', name1)
         base2 = re.sub(r'(-service|-svc|-controller|-deployment|-deploy)$', '', name2)
 
-        # Check if base names match or one contains the other
-        if base1 == base2:
-            return True
-        if base1 in base2 or base2 in base1:
+        if base1 == base2 or base1 in base2 or base2 in base1:
             return True
 
-        # Check if they share a significant common prefix (more than 3 chars)
         common_prefix = ""
         for i in range(min(len(base1), len(base2))):
             if base1[i] == base2[i]:
                 common_prefix += base1[i]
             else:
                 break
-
         return len(common_prefix) >= 4
 
     def _selectors_match_workload(self, service_selector, workload_labels):
-        """Check if service selector matches workload labels"""
+        """Check if service selector matches workload labels."""
         if not service_selector:
             return False
-
-        # Check if all service selector criteria are met by workload labels
         for key, value in service_selector.items():
             if workload_labels.get(key) != value:
                 return False
         return True
 
     def _create_connections(self, app_flow):
-        """Create optimized connection information for readable graph - Smart Connection Management"""
+        """Create optimized connection information for the app flow graph."""
         connections = []
 
-        # Debug logging
-        logging.info(f"Creating connections for app flow with: {len(app_flow.get('ingresses', []))} ingresses, {len(app_flow.get('services', []))} services, {len(app_flow.get('deployments', []))} deployments, {len(app_flow.get('pods', []))} pods")
+        logging.info(
+            f"Creating connections: {len(app_flow.get('ingresses', []))} ingresses, "
+            f"{len(app_flow.get('services', []))} services, "
+            f"{len(app_flow.get('deployments', []))} deployments, "
+            f"{len(app_flow.get('pods', []))} pods"
+        )
 
-        # Ingress -> Service connections (all ingresses to their services)
         for ingress in app_flow["ingresses"]:
             service_name = ingress.get('service')
             if service_name:
-                connection = {
+                connections.append({
                     "from": f"ingress:{ingress['name']}",
                     "to": f"service:{service_name}",
                     "type": "ingress_to_service"
-                }
-                connections.append(connection)
-                logging.info(f"Added ingress->service connection: {connection}")
+                })
 
-        # Service -> Deployment connections (improved matching to show all logical connections)
         for service in app_flow["services"]:
             for deployment in app_flow["deployments"]:
                 service_selector = service.get('selector', {})
                 deployment_labels = deployment.get('labels', {})
 
-                # More flexible matching - check for any overlap or if they're related to the same workload
-                should_connect = False
-
-                # Check if selectors match
-                if self._selectors_match(service_selector, deployment_labels):
-                    should_connect = True
-
-                # Also connect if names are similar (same workload pattern)
-                elif self._names_suggest_relationship(service['name'], deployment['name']):
-                    should_connect = True
-
-                # Connect ALL services to deployment if there's only one deployment (common in single-app flows)
-                elif len(app_flow["deployments"]) == 1:
-                    should_connect = True
+                should_connect = (
+                    self._selectors_match(service_selector, deployment_labels)
+                    or self._names_suggest_relationship(service['name'], deployment['name'])
+                    or len(app_flow["deployments"]) == 1
+                )
 
                 if should_connect:
-                    connection = {
+                    connections.append({
                         "from": f"service:{service['name']}",
                         "to": f"deployment:{deployment['name']}",
                         "type": "service_to_deployment"
-                    }
-                    connections.append(connection)
-                    logging.info(f"Added service->deployment connection: {connection}")
+                    })
 
-        # Deployment -> Pod connections (smart grouping to reduce clutter)
-        deployment_to_pod_connections = self._create_smart_deployment_pod_connections(app_flow["deployments"], app_flow["pods"])
+        deployment_to_pod_connections = self._create_smart_deployment_pod_connections(
+            app_flow["deployments"], app_flow["pods"])
         connections.extend(deployment_to_pod_connections)
 
-        # Pod -> Config connections (optimized to show representative connections)
-        pod_config_connections = self._create_smart_pod_config_connections(app_flow["pods"], app_flow["configmaps"], app_flow["secrets"], app_flow["pvcs"])
+        pod_config_connections = self._create_smart_pod_config_connections(
+            app_flow["pods"], app_flow["configmaps"], app_flow["secrets"], app_flow["pvcs"])
         connections.extend(pod_config_connections)
 
         app_flow["connections"] = connections
-        logging.info(f"Created {len(connections)} optimized connections for better readability")
+        logging.info(f"Created {len(connections)} connections")
 
     def _create_smart_deployment_pod_connections(self, deployments, pods):
         """Create smart deployment-to-pod connections to reduce visual clutter"""
@@ -833,40 +702,30 @@ class AppFlowAnalyzer(QThread):
         return connections
 
     def _create_smart_pod_config_connections(self, pods, configmaps, secrets, pvcs):
-        """Create smart pod-to-config connections showing logical relationships"""
+        """Create smart pod-to-config connections showing logical relationships."""
         connections = []
 
-        # Strategy: Show actual logical connections but limit to prevent overcrowding
-        # Prioritize showing different types of relationships
-
-        # Show connections from first pod to demonstrate relationships
         if pods:
-            pod = pods[0]  # Use first pod for connections
+            pod = pods[0]
 
-            # Debug logging to see counts
-            logging.info(f"Pod-to-config connections: {len(configmaps)} ConfigMaps, {len(secrets)} Secrets, {len(pvcs)} PVCs")
-
-            # Connect to ALL ConfigMaps for comprehensive view (up to 20)
             if configmaps:
-                for configmap in configmaps[:20]:  # Show up to 20 configmaps for comprehensive view
+                for configmap in configmaps[:20]:
                     connections.append({
                         "from": f"pod:{pod['name']}",
                         "to": f"configmap:{configmap['name']}",
                         "type": "pod_to_config"
                     })
 
-            # Connect to ALL Secrets for comprehensive view (up to 20)
             if secrets:
-                for secret in secrets[:20]:  # Show up to 20 secrets for comprehensive view
+                for secret in secrets[:20]:
                     connections.append({
                         "from": f"pod:{pod['name']}",
                         "to": f"secret:{secret['name']}",
                         "type": "pod_to_secret"
                     })
 
-            # Connect to ALL PVCs for comprehensive view (up to 10)
             if pvcs:
-                for pvc in pvcs[:10]:  # Show up to 10 PVCs for comprehensive view
+                for pvc in pvcs[:10]:
                     connections.append({
                         "from": f"pod:{pod['name']}",
                         "to": f"pvc:{pvc['name']}",
@@ -875,22 +734,3 @@ class AppFlowAnalyzer(QThread):
 
         return connections
 
-    def _pod_uses_config(self, pod, config_resource, config_type):
-        """Check if a pod actually uses a specific config resource - Enhanced Logic"""
-        config_name = config_resource.get("name", "")
-
-        # For comprehensive view: show potential relationships based on namespace coexistence
-        # This gives users visibility into all available resources they could connect
-
-        # Actual usage checking could be implemented by:
-        # 1. Checking pod.spec.volumes for configMap/secret references
-        # 2. Checking pod.spec.containers[].env for configMapKeyRef/secretKeyRef
-        # 3. Checking pod.spec.containers[].envFrom for configMapRef/secretRef
-
-        # For now, show all configs to give comprehensive application view
-        # but exclude obvious system configs
-        if config_type == "secret" and config_name.startswith(('default-token-', 'kube-root-ca')):
-            return False
-
-        # Show all other resources for comprehensive view
-        return True

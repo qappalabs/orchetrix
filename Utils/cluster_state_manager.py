@@ -1,6 +1,9 @@
 from PyQt6.QtCore import QObject, pyqtSignal
 from enum import Enum
 from Utils.enhanced_worker import EnhancedBaseWorker
+from Utils.kubernetes_client import get_kubernetes_client
+from Utils.cluster_connector import get_cluster_connector
+from Utils.thread_manager import get_thread_manager
 import threading
 import logging
 import time
@@ -22,16 +25,11 @@ class ClusterConnectionWorker(EnhancedBaseWorker):
 
     def execute(self):
         try:
-            from Utils.kubernetes_client import get_kubernetes_client
-
             start_time = time.time()
 
             kube_client = get_kubernetes_client()
             if not kube_client:
                 raise Exception("Kubernetes client not available")
-
-            # FIXED: Add progress updates and better error handling
-            # Progress messages removed - silent operation
 
             # Check if we're already connected to this cluster and verify connectivity
             if (hasattr(kube_client, 'current_cluster') and
@@ -58,8 +56,7 @@ class ClusterConnectionWorker(EnhancedBaseWorker):
             if self.is_cancelled():
                 return None
 
-            # FIXED: Better connectivity test with timeout
-            # Progress messages removed - silent operation
+            # Better connectivity test with timeout
             remaining_time = self._timeout - (time.time() - start_time)
             if remaining_time <= 0:
                 raise Exception("Connection timeout during context switch")
@@ -69,8 +66,7 @@ class ClusterConnectionWorker(EnhancedBaseWorker):
             if self.is_cancelled():
                 return None
 
-            # FIXED: Load initial data with timeout
-            # Progress messages removed - silent operation
+            # Load initial data with timeout
             remaining_time = self._timeout - (time.time() - start_time)
             if remaining_time <= 5:  # Need at least 5 seconds for data loading
                 logging.warning(f"Insufficient time remaining for data loading: {remaining_time}s")
@@ -102,7 +98,7 @@ class ClusterConnectionWorker(EnhancedBaseWorker):
             raise Exception("Connection timeout")
 
         try:
-            # FIXED: Use version API which is typically most reliable
+            # Use version API which is typically most reliable
             version_info = kube_client.version_api.get_code()
 
             if self.is_cancelled():
@@ -132,7 +128,7 @@ class ClusterConnectionWorker(EnhancedBaseWorker):
         try:
             initial_data = {}
 
-            # FIXED: Load data with individual error handling and cancellation checks
+            # Load data with individual error handling and cancellation checks
             if not self.is_cancelled():
                 try:
                     nodes = kube_client._get_nodes()
@@ -194,7 +190,7 @@ class ClusterStateManager(QObject):
                     logging.warning(f"Already switching to {cluster_name}")
                     return False
 
-                # FIXED: Better state checking
+                # Better state checking
                 cluster_state = self.cluster_states.get(cluster_name, ClusterState.DISCONNECTED)
 
                 # If we think we're connected but the state shows disconnected, reset current_cluster
@@ -202,15 +198,39 @@ class ClusterStateManager(QObject):
                     logging.info(f"Resetting current_cluster for {cluster_name} due to state mismatch")
                     self.current_cluster = None
 
-                # Always attempt fresh connection to handle external cluster changes
-                # (removed early return for "already connected" to fix external disconnection detection)
-
-                # FIXED: If switching to a different cluster, ensure previous cluster is properly disconnected
+                # If switching to a different cluster, ensure previous cluster is properly disconnected
                 if self.current_cluster and self.current_cluster != cluster_name:
-                    logging.info(f"Switching from {self.current_cluster} to {cluster_name}")
-                    # Mark previous cluster as disconnected
-                    self.cluster_states[self.current_cluster] = ClusterState.DISCONNECTED
-                    self.state_changed.emit(self.current_cluster, ClusterState.DISCONNECTED)
+                    old_cluster = self.current_cluster
+                    logging.info(f"Switching from {old_cluster} to {cluster_name}")
+
+                    # Capture previous state for rollback on disconnect failure
+                    previous_state = self.cluster_states.get(old_cluster, ClusterState.CONNECTED)
+
+                    # Optimistic update: mark previous cluster as disconnected
+                    self.cluster_states[old_cluster] = ClusterState.DISCONNECTED
+                    self.state_changed.emit(old_cluster, ClusterState.DISCONNECTED)
+
+                    # CRITICAL: Properly disconnect older cluster through the connector.
+                    # This stops watches, clears cluster-specific caches, and prevents
+                    # stale data from the old cluster leaking into the new cluster's view.
+                    # Treat disconnect failure as fatal for the switch: if teardown fails,
+                    # stale watches would remain active causing data bleed and thread leaks.
+                    try:
+                        connector = get_cluster_connector()
+                        connector.disconnect_cluster(old_cluster)
+                        # Old cluster is now torn down: clear the stale current pointer so the
+                        # manager doesn't keep claiming a disconnected cluster is current while
+                        # the new connection is attempted. Only cleared on successful disconnect;
+                        # the except path below leaves it intact so rollback restores previous_state.
+                        self.current_cluster = None
+                        logging.info(f"Properly disconnected old cluster {old_cluster} before switching")
+                    except Exception as disconnect_error:
+                        # Rollback: revert state to prevent desynchronization between
+                        # the state dict (DISCONNECTED) and the network layer (still active)
+                        logging.error(f"Failed to disconnect old cluster {old_cluster}, aborting switch: {disconnect_error}")
+                        self.cluster_states[old_cluster] = previous_state
+                        self.state_changed.emit(old_cluster, previous_state)
+                        return False
 
                 self.pending_switch = cluster_name
                 self._initiate_cluster_switch(cluster_name)
@@ -229,7 +249,6 @@ class ClusterStateManager(QObject):
 
                 # Try to cancel the worker if possible
                 try:
-                    from Utils.thread_manager import get_thread_manager
                     thread_manager = get_thread_manager()
                     worker_id = f"cluster_connect_{old_cluster}"
                     thread_manager.cancel_worker(worker_id)
@@ -274,8 +293,6 @@ class ClusterStateManager(QObject):
     def _connect_to_cluster(self, cluster_name: str):
         """Connect to cluster with improved error handling"""
         try:
-            from Utils.thread_manager import get_thread_manager
-
             worker = ClusterConnectionWorker(cluster_name)
             worker.signals.finished.connect(lambda result: self._handle_connection_result(cluster_name, result))
             worker.signals.error.connect(lambda error: self._handle_connection_error(cluster_name, error))
@@ -303,7 +320,7 @@ class ClusterStateManager(QObject):
                     self._handle_connection_error(cluster_name, "Connection returned no result")
                     return
 
-                # FIXED: Don't clear cache for successful connections - let data persist for better performance
+                # Don't clear cache for successful connections - let data persist for better performance
                 # Only clear cache on connection failures or when explicitly disconnecting
                 logging.info(f"Keeping existing cache for successful connection: {cluster_name}")
 
@@ -313,9 +330,7 @@ class ClusterStateManager(QObject):
                 self.pending_switch = None
 
                 # CRITICAL: Synchronize with cluster_connector so pages using it see connected state
-                # This fixes the issue where NodesPage checks cluster_connector but state is managed here
                 try:
-                    from Utils.cluster_connector import get_cluster_connector
                     connector = get_cluster_connector()
                     connector.set_current_cluster(cluster_name)
                     logging.debug(f"Synchronized cluster_connector with connected state for {cluster_name}")
@@ -399,7 +414,6 @@ class ClusterStateManager(QObject):
 
                 # Reset kubernetes client
                 try:
-                    from Utils.kubernetes_client import get_kubernetes_client
                     kube_client = get_kubernetes_client()
                     if kube_client and hasattr(kube_client, 'current_cluster') and kube_client.current_cluster == cluster_name:
                         kube_client.current_cluster = None
@@ -409,7 +423,6 @@ class ClusterStateManager(QObject):
 
                 # Synchronize with cluster_connector
                 try:
-                    from Utils.cluster_connector import get_cluster_connector
                     connector = get_cluster_connector()
                     connector.disconnect_cluster(cluster_name)
                     logging.debug(f"Synchronized cluster_connector disconnect for {cluster_name}")
@@ -440,7 +453,6 @@ class ClusterStateManager(QObject):
 
             # Synchronize with cluster_connector (same as disconnect_cluster)
             try:
-                from Utils.cluster_connector import get_cluster_connector
                 connector = get_cluster_connector()
                 connector.disconnect_cluster(cluster_name)
                 logging.debug(f"Synchronized cluster_connector reset for {cluster_name}")
@@ -450,9 +462,18 @@ class ClusterStateManager(QObject):
             self.state_changed.emit(cluster_name, ClusterState.DISCONNECTED)
 
 _cluster_state_manager_instance = None
+_cluster_state_manager_lock = threading.Lock()
 
 def get_cluster_state_manager():
     global _cluster_state_manager_instance
     if _cluster_state_manager_instance is None:
-        _cluster_state_manager_instance = ClusterStateManager()
+        with _cluster_state_manager_lock:
+            if _cluster_state_manager_instance is None:
+                _cluster_state_manager_instance = ClusterStateManager()
     return _cluster_state_manager_instance
+
+__all__ = [
+    "ClusterState",
+    "ClusterStateManager",
+    "get_cluster_state_manager"
+]

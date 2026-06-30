@@ -1,28 +1,34 @@
 """
-AppsPage - specific styles with theme - aware support
+AppsPage-specific styles with theme-aware support.
 Contains styles that are unique to AppsPage and defined inline in the page.
 """
 
 import logging
 import os
+
+from UI.Icons import resource_path
+from UI.Styles import AppStyles
 from UI.ThemeManager import get_theme_manager
-from UI.Styles import AppColors, AppStyles
 
 
 def _get_theme():
     return get_theme_manager().get_current_theme()
 
 
+def _get_theme_name():
+    return get_theme_manager().get_current_theme_name()
+
+
+def _text_color_for_colored_button():
+    """Return correct text color for colored (green/red) buttons based on current theme."""
+    theme = _get_theme()
+    return theme.colors.TEXT_LIGHT if _get_theme_name() == "Dark" else theme.colors.TEXT_DARK
+
+
 # Live monitoring button - Start state (green)
 def get_live_monitor_btn_start_style():
     theme = _get_theme()
-    theme_manager = get_theme_manager()
-    theme_name = theme_manager.get_current_theme_name()
-    # For colored buttons (green / red), use white text in dark theme, dark text in light theme
-    if theme_name == "Dark":
-        text_color = theme.colors.TEXT_LIGHT  # White in dark theme
-    else:
-        text_color = theme.colors.TEXT_DARK  # Dark text in light theme
+    text_color = _text_color_for_colored_button()
     return f"""
         QPushButton {{
             background-color: {theme.colors.STATUS_ACTIVE};
@@ -40,7 +46,7 @@ def get_live_monitor_btn_start_style():
             background-color: {theme.colors.SUCCESS_PRESSED_BG};
         }}
         QPushButton:disabled {{
-            background-color: {theme.colors.TEXT_SUBTLE};
+            background-color: rgba(255, 255, 255, 0.05);
             border-color: {theme.colors.TEXT_SUBTLE};
             color: {theme.colors.TEXT_SECONDARY};
         }}
@@ -48,17 +54,9 @@ def get_live_monitor_btn_start_style():
 
 
 # Live monitoring button - Stop state (red)
-
-
 def get_live_monitor_btn_stop_style():
     theme = _get_theme()
-    theme_manager = get_theme_manager()
-    theme_name = theme_manager.get_current_theme_name()
-    # For colored buttons (green / red), use white text in dark theme, dark text in light theme
-    if theme_name == "Dark":
-        text_color = theme.colors.TEXT_LIGHT  # White in dark theme
-    else:
-        text_color = theme.colors.TEXT_DARK  # Dark text in light theme
+    text_color = _text_color_for_colored_button()
     return f"""
         QPushButton {{
             background-color: {theme.colors.ACCENT_RED};
@@ -75,16 +73,14 @@ def get_live_monitor_btn_stop_style():
             background-color: {theme.colors.DANGER_PRESSED_BG};
         }}
         QPushButton:disabled {{
-            background-color: {theme.colors.TEXT_SUBTLE};
-            border-color: {theme.colors.TEXT_SUBTLE};
-            color: {theme.colors.TEXT_SECONDARY};
+            background-color: rgba(232, 17, 35, 0.15);
+            border: 1px solid rgba(232, 17, 35, 0.25);
+            color: rgba(142, 155, 169, 0.6);
         }}
     """
 
 
 # Refresh button style
-
-
 def get_refresh_btn_style():
     theme = _get_theme()
     return f"""
@@ -106,8 +102,6 @@ def get_refresh_btn_style():
 
 
 # Title label style
-
-
 def get_title_label_style():
     theme = _get_theme()
     return f"font-size: 20px; font-weight: bold; color: {theme.colors.TEXT_LIGHT};"
@@ -123,13 +117,9 @@ def get_main_background_style():
 
 
 # Filter label styles (namespace, workload, resource)
-
-
 def get_filter_label_style():
     theme = _get_theme()
-    colors = theme.colors
-    text_color = colors.TEXT_LIGHT
-    return f"color: {text_color}; font-size: 13px; margin-right: 5px;"
+    return f"color: {theme.colors.TEXT_LIGHT}; font-size: 13px; margin-right: 5px;"
 
 
 def get_diagram_frame_style():
@@ -159,8 +149,6 @@ def get_diagram_title_style():
 
 
 # Export button style
-
-
 def get_export_btn_style():
     theme = _get_theme()
     return f"""
@@ -168,17 +156,17 @@ def get_export_btn_style():
             background-color: {theme.colors.BG_DARK};
             color: {theme.colors.TEXT_LIGHT};
             border: 1px solid {theme.colors.BORDER_DARK};
-            border-radius: 3px;
-            padding: 2px 6px;
-            font-size: 12px;
-            min-width: 20px;
-            max-height: 16px;
+            border-radius: 4px;
+            padding: 3px 8px;
+            font-size: 11px;
+            font-weight: 500;
         }}
         QToolButton:hover {{
-            background-color: {theme.colors.HOVER_BG_DARKER};
+            background-color: {theme.colors.HOVER_BG};
+            border-color: {theme.colors.ACCENT_BLUE};
         }}
         QToolButton:pressed {{
-            background-color: {theme.colors.BORDER_DARK};
+            background-color: {theme.colors.SELECTED_BG};
         }}
         QToolButton::menu-indicator {{
             image: none;
@@ -191,18 +179,20 @@ def get_export_menu_style():
     return f"""
         QMenu {{
             background-color: {theme.colors.CARD_BG};
-            border: 1px solid {theme.colors.BORDER_COLOR};
+            border: 1px solid {theme.colors.BORDER_LIGHT};
             border-radius: 4px;
-            padding: 2px;
+            padding: 4px;
         }}
         QMenu::item {{
             background-color: transparent;
             color: {theme.colors.TEXT_LIGHT};
-            padding: 4px 12px;
+            padding: 6px 20px 6px 10px;
             border-radius: 2px;
+            margin: 1px 0px;
         }}
         QMenu::item:selected {{
-            background-color: {theme.colors.SELECTED_BG};
+            background-color: {theme.colors.HOVER_BG};
+            color: {theme.colors.ACCENT_BLUE};
         }}
     """
 
@@ -223,13 +213,13 @@ def get_diagram_splitter_style():
     theme = _get_theme()
     return f"""
         QSplitter {{
-            background-color: {theme.colors.CARD_BG};
+            background-color: transparent;
         }}
         QSplitter::handle {{
             background-color: {theme.colors.BORDER_LIGHT};
-            height: 3px;
-            border-radius: 1px;
-            margin: 2px 0px;
+            height: 4px;
+            border-radius: 2px;
+            margin: 4px 100px; /* Centered narrow handle for premium look */
         }}
         QSplitter::handle:hover {{
             background-color: {theme.colors.ACCENT_BLUE};
@@ -241,12 +231,10 @@ def get_diagram_splitter_style():
 
 
 def get_status_container_style():
-    bg_color = getattr(
-        getattr(_get_theme(), "colors", None), "CARD_BG", AppColors.BG_MEDIUM
-    )
+    theme = _get_theme()
     return f"""
         QFrame {{
-            background-color: {bg_color};
+            background-color: {theme.colors.CARD_BG};
             border: none;
             margin: 0px;
         }}
@@ -255,13 +243,7 @@ def get_status_container_style():
 
 def get_status_header_style():
     theme = _get_theme()
-    theme_manager = get_theme_manager()
-    theme_name = theme_manager.get_current_theme_name()
-    # Ensure correct text color: white in dark theme, dark in light theme
-    if theme_name == "Dark":
-        text_color = theme.colors.TEXT_LIGHT  # White in dark theme
-    else:
-        text_color = theme.colors.TEXT_DARK  # Dark text in light theme
+    text_color = _text_color_for_colored_button()
     return f"""
         QLabel {{
             color: {text_color};
@@ -291,30 +273,19 @@ def get_status_text_style():
 
 def get_diagram_area_main_style():
     theme = _get_theme()
-    if hasattr(theme, "colors"):
-        colors = theme.colors
-        main_bg = getattr(colors, "BG_DARK", AppColors.BG_DARK)
-        border_color = getattr(colors, "BORDER_COLOR", AppColors.BORDER_COLOR)
-        light_border = getattr(colors, "BORDER_LIGHT", AppColors.BORDER_LIGHT)
-    else:
-        main_bg = AppColors.BG_DARK
-        border_color = AppColors.BORDER_COLOR
-        light_border = AppColors.BORDER_LIGHT
+    colors = theme.colors
     return f"""
-        /* Main container with theme - aware background */
         QWidget {{
-            background-color: {main_bg};
+            background-color: {colors.BG_DARK};
         }}
-        /* Diagram frame */
         QFrame {{
-            background-color: {main_bg};
-            border: 1px solid {border_color};
+            background-color: {colors.BG_DARK};
+            border: 1px solid {colors.BORDER_COLOR};
             border-radius: 6px;
         }}
-        /* Graphics view */
         QGraphicsView {{
-            background-color: {main_bg};
-            border: 1px solid {light_border};
+            background-color: {colors.BG_DARK};
+            border: 1px solid {colors.BORDER_LIGHT};
             border-radius: 4px;
         }}
         {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
@@ -323,24 +294,15 @@ def get_diagram_area_main_style():
 
 def get_theme_aware_dropdown_style():
     theme = _get_theme()
-    if hasattr(theme, "colors"):
-        colors = theme.colors
-        bg_color = getattr(colors, "BG_MEDIUM", "#2d2d2d")
-        text_color = getattr(colors, "TEXT_LIGHT", "#ffffff")
-        border_color = getattr(colors, "BORDER_LIGHT", "#3d3d3d")
-        hover_border = getattr(colors, "ACCENT_BLUE", "#555555")
-        selection_bg = getattr(colors, "SELECTED_BG", "#0078d7")
-    else:
-        # Fallback to dark theme colors
-        bg_color = "#2d2d2d"
-        text_color = "#ffffff"
-        border_color = "#3d3d3d"
-        hover_border = "#555555"
-        selection_bg = "#0078d7"
-    try:
-        from UI.Icons import resource_path
+    colors = theme.colors
+    bg_color = getattr(colors, "BG_MEDIUM", "#2d2d2d")
+    text_color = getattr(colors, "TEXT_LIGHT", "#ffffff")
+    border_color = getattr(colors, "BORDER_LIGHT", "#3d3d3d")
+    hover_border = getattr(colors, "ACCENT_BLUE", "#555555")
+    selection_bg = getattr(colors, "SELECTED_BG", "#0078d7")
 
-        down_arrow_icon = resource_path("Icons/down_btn.svg")
+    try:
+        down_arrow_icon = resource_path("Icons/down_arrow.svg")
         return f"""
         QComboBox {{
             background-color: {bg_color};

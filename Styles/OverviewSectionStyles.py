@@ -3,8 +3,9 @@ Styles for DetailPageOverviewSection component.
 Contains only page-specific unique styles.
 Shared styles should be imported directly from UI.Styles.EnhancedStyles.
 """
-from UI.ThemeManager import get_theme_manager
+from Styles import BaseDetailSectionStyles
 from UI.Styles import AppStyles
+from UI.ThemeManager import get_theme_manager
 
 
 def _get_theme():
@@ -23,28 +24,40 @@ def get_overview_content_style():
     return f"background-color: {theme.colors.BG_SIDEBAR}; border: none;"
 
 
-def get_status_badge_success_style():
-    """Status badge style for success state - theme-aware"""
+def get_overview_header_style():
+    """Resource name header style - theme-aware"""
     theme = _get_theme()
-    return f"color: {theme.colors.STATUS_ACTIVE}; font-weight: bold;"
+    return f"""
+        font-size: 24px;
+        font-weight: bold;
+        color: {theme.colors.TEXT_LIGHT};
+        margin-bottom: 4px;
+    """
 
 
-def get_status_badge_warning_style():
-    """Status badge style for warning state - theme-aware"""
+def get_resource_type_style():
+    """Resource type label style - theme-aware"""
     theme = _get_theme()
-    return f"color: {theme.colors.STATUS_WARNING}; font-weight: bold;"
+    return f"""
+        font-size: 14px;
+        color: {theme.colors.TEXT_SECONDARY};
+        font-weight: 500;
+    """
 
 
-def get_status_badge_error_style():
-    """Status badge style for error state - theme-aware"""
-    theme = _get_theme()
-    return f"color: {theme.colors.TEXT_DANGER}; font-weight: bold;"
+def get_resource_type_color():
+    """Get the color used for resource type text"""
+    return _get_theme().colors.TEXT_SECONDARY
 
 
-def get_status_badge_default_style():
-    """Status badge style for default state - theme-aware"""
-    theme = _get_theme()
-    return f"color: {theme.colors.TEXT_SECONDARY}; font-weight: bold;"
+def get_condition_message_style():
+    """Style for condition detail message"""
+    return BaseDetailSectionStyles.get_condition_message_style()
+
+
+def get_condition_dot_style(status_bool):
+    """Style for condition status dot"""
+    return BaseDetailSectionStyles.get_badge_dot_style(status_bool)
 
 
 def get_history_table_style():

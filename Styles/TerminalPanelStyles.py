@@ -87,10 +87,3 @@ def get_ssh_tab_button_style() -> str:
     )
 
 
-# Legacy tab styles (kept for backward compatibility, but prefer the functions above)
-ENHANCED_LOGS_TAB_LABEL_STYLE = create_tab_label_style("#4CAF50")
-ENHANCED_LOGS_TAB_BUTTON_STYLE = create_tab_button_style(
-    "#4CAF50", "#3d3d3d", "#1E1E1E"
-)
-SSH_TAB_LABEL_STYLE = create_tab_label_style("#FF9800")
-SSH_TAB_BUTTON_STYLE = create_tab_button_style("#FF9800", "#3d3d3d", "#1E1E1E")

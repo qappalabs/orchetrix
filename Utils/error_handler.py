@@ -3,27 +3,28 @@ Centralized Error Handling and Resource Management Utility
 Replaces scattered error handling with consistent patterns.
 """
 
-import logging
-import traceback
-import threading
 import gc
+import logging
+import threading
+import traceback
 from datetime import datetime
-from typing import Callable, Any, List
 from functools import wraps
-from PyQt6.QtWidgets import QMessageBox, QApplication
-from PyQt6.QtCore import QTimer, QThread
+from typing import Any, Callable, Dict, List, Optional
+
+from PyQt6.QtCore import QThread, QTimer
+from PyQt6.QtWidgets import QApplication, QMessageBox
 
 
 class ErrorHandler:
     """Centralized error handler with consistent patterns"""
 
     def __init__(self):
-        self._error_shown_recently = False
+        self._error_shown_recently: bool = False
         self._error_lock = threading.RLock()
-        self._last_error_time = 0
-        self._error_cooldown = 2.0  # seconds between error dialogs
-        self._recent_errors = {}  # Track recent error messages to prevent duplicates
-        self._error_message_cooldown = 10.0  # seconds before showing same error again
+        self._last_error_time: float = 0.0
+        self._error_cooldown: float = 2.0  # seconds between error dialogs
+        self._recent_errors: Dict[int, float] = {}  # Track recent error messages to prevent duplicates
+        self._error_message_cooldown: float = 10.0  # seconds before showing same error again
 
     def handle_error(self, error: Exception, context: str = "", show_dialog: bool = True) -> None:
         """Handle errors with consistent logging and optional user notification"""

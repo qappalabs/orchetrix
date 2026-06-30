@@ -1,6 +1,11 @@
-from UI.ThemeManager import get_theme_manager
+"""
+HomePage-specific styles with theme-aware support.
+Contains styles for the main home/browse page including sidebar buttons,
+tree widget, search, status badges, and action buttons.
+"""
 from PyQt6.QtGui import QFont
 from UI.Styles import AppConstants
+from UI.ThemeManager import get_theme_manager
 
 def _get_theme():
     """Get current theme"""
@@ -50,57 +55,62 @@ def get_top_bar_style():
 
 def get_tree_widget_style():
     theme = _get_theme()
+    # Use orange-tinted selection like resources pages
+    selection_bg = getattr(theme.colors, 'SELECTED_BG', 'rgba(255, 87, 51, 0.18)')
+    hover_highlight = getattr(theme.colors, 'HOVER_HIGHLIGHT', 'rgba(255, 87, 51, 0.08)')
+    selection_hover = getattr(theme.colors, 'SELECTION_HOVER', 'rgba(255, 87, 51, 0.25)')
     return f"""
         QTreeWidget {{
-            background-color: {theme.colors.BG_DARK};
-            border: none;
-            outline: none;
-            font-size: 13px;
-            gridline-color: {theme.colors.BORDER_DARK};
-            margin: 0;
-            padding: 0;
-            selection-background-color: rgba(53, 132, 228, 0.15);
-            alternate-background-color: transparent;
-        }}
-        QTreeWidget::item {{
-            padding: 6px 4px;
             background-color: transparent;
             border: none;
             outline: none;
+            font-size: 13px;
+            gridline-color: transparent;
+            margin: 0;
+            padding: 0;
+            selection-background-color: {selection_bg};
+            alternate-background-color: transparent;
+            color: {theme.colors.TEXT_TABLE};
+        }}
+        QTreeWidget::item {{
+            padding: 10px 4px;
+            background-color: transparent;
+            border: none;
+            outline: none;
+            color: {theme.colors.TEXT_TABLE};
         }}
         QTreeWidget::item:hover {{
-            background-color: rgba(53, 132, 228, 0.10);
+            background-color: {hover_highlight};
         }}
         QTreeWidget::item:selected {{
-            background-color: rgba(53, 132, 228, 0.15);
+            background-color: {selection_bg};
             color: {theme.colors.TEXT_LIGHT};
         }}
         QTreeWidget::item:selected:hover {{
-            background-color: rgba(53, 132, 228, 0.20);
+            background-color: {selection_hover};
+        }}
+        QHeaderView {{
+            background-color: {theme.colors.TABLE_HEADER};
+            border: none;
+            border-top-left-radius: 12px;
+            border-top-right-radius: 12px;
         }}
         QHeaderView::section {{
-            background-color: {theme.colors.TABLE_HEADER};
+            background-color: transparent;
             color: {theme.colors.TEXT_LIGHT};
-            padding: 8px 8px;
-            border-right: 1px solid {theme.colors.BORDER_DARK};
-            border-bottom: 1px solid {theme.colors.BORDER_DARK};
-            border-top: none;
-            border-left: 1px solid {theme.colors.BORDER_DARK};
+            padding: 10px 16px;
+            border: none;
+            font-size: 14px;
             text-align: left;
-            font-weight: bold;
-        }}
-        QHeaderView::section:first {{
-            border-left: 1px solid {theme.colors.BORDER_DARK};
+            font-weight: 600;
+            letter-spacing: 0.5px;
         }}
         QHeaderView::section:last {{
             padding: 0;
             text-align: center;
-            width: {AppConstants.SIZES["ACTION_WIDTH"]}px;
-            max-width: {AppConstants.SIZES["ACTION_WIDTH"]}px;
-            min-width: {AppConstants.SIZES["ACTION_WIDTH"]}px;
         }}
         QHeaderView::section:hover {{
-            background-color: {theme.colors.BG_MEDIUM};
+            background-color: rgba(255, 255, 255, 0.1);
         }}
         QHeaderView::down-arrow, QHeaderView::up-arrow {{
             image: none;
@@ -159,11 +169,27 @@ def get_search_style():
 def get_content_area_style():
     theme = _get_theme()
     return f"""
-        QFrame {{
-            background-color: {theme.colors.BG_DARK};
+        QFrame#table_container {{
+            background-color: {theme.colors.CARD_BG};
+            border: 1px solid {theme.colors.BORDER_COLOR};
+            border-radius: 12px;
+        }}
+    """
+
+def get_home_status_badge_style(color):
+    """Get pill-shaped status badge style matching the style used in Pods/Nodes pages."""
+    from PyQt6.QtGui import QColor
+    qc = QColor(color)
+    bg = f"rgba({qc.red()}, {qc.green()}, {qc.blue()}, 0.15)"
+    return f"""
+        QLabel {{
+            padding: 4px 12px;
+            border-radius: 10px;
+            font-weight: bold;
+            font-size: 12px;
             border: none;
-            padding: 0;
-            margin: 0;
+            background-color: {bg};
+            color: {color};
         }}
     """
 

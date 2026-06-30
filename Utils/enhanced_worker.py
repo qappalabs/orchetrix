@@ -1,7 +1,10 @@
-from PyQt6.QtCore import QRunnable, QObject, pyqtSignal
-import threading
 import logging
+import threading
 import time
+from typing import Any
+
+from PyQt6.QtCore import QObject, QRunnable, pyqtSignal
+
 from Utils.thread_manager import is_shutdown_requested
 
 class WorkerSignals(QObject):
@@ -77,5 +80,8 @@ class EnhancedBaseWorker(QRunnable):
         finally:
             self._completed.set()
 
-    def execute(self):
+    def execute(self) -> Any:
         raise NotImplementedError("Subclasses must implement execute method")
+
+
+__all__ = ["EnhancedBaseWorker", "WorkerSignals"]

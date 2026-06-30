@@ -41,10 +41,8 @@ class CronJobsPage(BaseResourcePage):
         headers = ["", "Name", "Namespace", "Schedule", "Suspend", "Active", "Last Schedule", "Age", ""]
         sortable_columns = [1, 2, 3, 4, 5, 6, 7]  # Name, Namespace, Schedule, Suspend, Active, Last Schedule, Age
 
-        # Set up the base UI components with styles
-        _ = super().setup_ui("CronJobs", headers, sortable_columns)
-
-        # Table styling is already handled by BaseResourcePage
+        # Set up the base UI components
+        super().setup_ui("CronJobs", headers, sortable_columns)
 
         # Configure column widths
         self.configure_columns()
@@ -59,13 +57,13 @@ class CronJobsPage(BaseResourcePage):
         # Column specifications with optimized default widths
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
-            (1, 140, "interactive"),  # Name
+            (1, 140, "stretch"),     # Name - stretch to fill remaining space
             (2, 90, "interactive"),  # Namespace
             (3, 80, "interactive"),  # Schedule
             (4, 70, "interactive"),  # Suspend
             (5, 70, "interactive"),  # Active
             (6, 70, "interactive"),  # Last Schedule
-            (7, 80, "stretch"),      # Age - stretch to fill remaining space
+            (7, 80, "interactive"),  # Age
             (8, 40, "fixed")        # Actions
         ]
 
@@ -88,12 +86,42 @@ class CronJobsPage(BaseResourcePage):
         # Ensure full width utilization after configuration
         QTimer.singleShot(100, self._ensure_full_width_utilization)
 
+    def _auto_resize_columns(self, max_col_widths=None, min_col_widths=None):
+        """Override to provide explicit widths for columns to let Name stretch and ensure Last Schedule has space."""
+        explicit_mins = {
+            1: 140,  # Name
+            2: 90,   # Namespace
+            3: 80,   # Schedule
+            4: 70,   # Suspend
+            5: 70,   # Active
+            6: 100,  # Last Schedule
+            7: 60,   # Age
+            8: 40,   # Actions
+        }
+        
+        if min_col_widths:
+            explicit_mins.update(min_col_widths)
+            
+        explicit_maxes = {
+            2: 150,  # Namespace
+            3: 120,  # Schedule
+            4: 80,   # Suspend
+            5: 80,   # Active
+            6: 130,  # Last Schedule
+            7: 80,   # Age
+        }
+        
+        if max_col_widths:
+            explicit_maxes.update(max_col_widths)
+            
+        super()._auto_resize_columns(max_col_widths=explicit_maxes, min_col_widths=explicit_mins)
+
     def populate_resource_row(self, row, resource):
         """
         Populate a single row with CronJob data
         """
         # Set row height
-        self.table.setRowHeight(row, 40)
+        self.table.setRowHeight(row, 42)
 
         # Create checkbox for row selection - styling handled by BaseResourcePage
         resource_name = resource["name"]
@@ -101,53 +129,11 @@ class CronJobsPage(BaseResourcePage):
             row, resource_name)
         self.table.setCellWidget(row, 0, checkbox_container)
 
-        # Extract additional data from the raw_data field if available
-        raw_data = resource.get("raw_data", {})
-
-        # Get CronJob details
-        schedule = ""
-        suspend = "False"
-        active = "0"
-        last_schedule = "Never"
-
-        if raw_data:
-            spec = raw_data.get("spec", {})
-            status = raw_data.get("status", {})
-
-            # Get schedule
-            schedule = spec.get("schedule", "")
-
-            # Get suspend status
-            suspend = str(spec.get("suspend", False))
-
-            # Get active jobs count
-            active_list = status.get("active", [])
-            active = str(len(active_list))
-
-            # Get last schedule time
-            last_schedule_time = status.get("lastScheduleTime", "")
-            if last_schedule_time:
-                # Format the time relative to now
-                try:
-                    # Parse ISO format timestamp
-                    last_time = parser.parse(last_schedule_time)
-                    now = datetime.datetime.now(datetime.timezone.utc)
-                    diff = now - last_time
-
-                    # Format as human - readable
-                    days = diff.days
-                    hours = diff.seconds // 3600
-                    minutes = (diff.seconds % 3600) // 60
-
-                    if days > 0:
-                        last_schedule = f"{days}d ago"
-                    elif hours > 0:
-                        last_schedule = f"{hours}h ago"
-                    else:
-                        last_schedule = f"{minutes}m ago"
-                except (ValueError, parser.ParserError) as e:
-                    last_schedule = "Error"
-                    logging.error(f"Error parsing last schedule time: {e}")
+        # Get CronJob details from pre-parsed resource fields
+        schedule = resource.get("schedule", "")
+        suspend = resource.get("suspend", "False")
+        active = resource.get("active", "0")
+        last_schedule = resource.get("last_schedule", "Never")
 
         # Prepare data columns
         columns = [
@@ -175,23 +161,7 @@ class CronJobsPage(BaseResourcePage):
                     num = 0
                 item = SortableTableWidgetItem(value, num)
             elif col == 5:  # Last Schedule column
-                # Sort by time ago (rough approximation)
-                try:
-                    if value == "Never":
-                        num = 99999  # Put at end of sort
-                    elif "d ago" in value:
-                        num = int(value.replace("d ago", "")) * \
-                            1440  # days to minutes
-                    elif "h ago" in value:
-                        num = int(value.replace("h ago", "")) * \
-                            60  # hours to minutes
-                    elif "m ago" in value:
-                        num = int(value.replace("m ago", ""))  # minutes
-                    else:
-                        num = 0
-                except ValueError:
-                    num = 0
-                item = SortableTableWidgetItem(value, num)
+                item = SortableTableWidgetItem(value, parse_age_to_seconds(value))
             elif col == 6:  # Age column
                 item = SortableTableWidgetItem(value, parse_age_to_seconds(value))
             else:

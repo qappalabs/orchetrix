@@ -4,15 +4,19 @@ import time
 from datetime import datetime
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox,
-    QFrame, QLineEdit, QCheckBox, QScrollArea, QMessageBox
+    QFrame, QLineEdit, QCheckBox, QScrollArea, QMessageBox, QRadioButton, QButtonGroup
 )
 from PyQt6.QtGui import QColor, QPainter
-from PyQt6.QtCore import Qt, QSize, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, QSize, pyqtSignal, QTimer, QSettings
 
+import logging
+import zoneinfo
 import Styles.PreferencesStyles as PreferencesStyles
 from UI.Icons import Icons
 from UI.ThemeManager import get_theme_manager
 from UI.ThemeAwarePage import ThemeAwareMixin
+from UI.CustomComboBox import CustomComboBox
+from Utils.time_utils import TimezoneManager
 
 class ToggleSwitch(QCheckBox):
     def __init__(self, parent=None):
@@ -23,7 +27,6 @@ class ToggleSwitch(QCheckBox):
         self._circle_position = 10
 
         # Connect to theme changes
-        from UI.ThemeManager import get_theme_manager
         get_theme_manager().theme_changed.connect(self._on_theme_changed)
 
     def _on_theme_changed(self, theme_name):
@@ -129,12 +132,15 @@ class PreferencesWidget(ThemeAwareMixin, QWidget):
         self.show_line_numbers = True  # Default to showing line numbers
         self.last_emitted_size = self.current_font_size  # Keep track of last emitted size to avoid duplicates
 
-        # Initialize timezone
-        self.current_timezone = self.get_system_timezone()
+        # Initialize timezone manager
+        self.tz_manager = TimezoneManager.get_instance()
+        self.current_timezone = self.tz_manager.get_current_timezone_name()
+        
+        self.timezone_timer = QTimer(self)
+        self.timezone_timer.timeout.connect(self.update_timezone_display)
 
         # Initialize theme manager and settings
         self.theme_manager = get_theme_manager()
-        from PyQt6.QtCore import QSettings
         self.settings = QSettings("Orchetrix", "OX")
         # Main layout
         main_layout = QHBoxLayout(self)
@@ -206,11 +212,7 @@ class PreferencesWidget(ThemeAwareMixin, QWidget):
 
     def get_system_timezone(self):
         """Get the system timezone"""
-        try:
-            # Simple implementation to get local timezone name
-            return str(datetime.now().astimezone().tzinfo)
-        except Exception:
-            return "UTC"
+        return self.tz_manager.get_current_timezone_name()
 
     def _on_theme_changed(self, theme_name):
         """Refresh UI when theme changes"""
@@ -226,35 +228,44 @@ class PreferencesWidget(ThemeAwareMixin, QWidget):
         self.content_scroll.setStyleSheet(PreferencesStyles.get_scroll_style())
 
         # Refresh sidebar buttons
-        if hasattr(self, 'app_btn'):
-            self.app_btn.setStyleSheet(PreferencesStyles.get_sidebar_button_style())
-        if hasattr(self, 'proxy_btn'):
-            self.proxy_btn.setStyleSheet(PreferencesStyles.get_sidebar_button_style())
-        if hasattr(self, 'kubernetes_btn'):
-            self.kubernetes_btn.setStyleSheet(PreferencesStyles.get_sidebar_button_style())
-        if hasattr(self, 'editor_btn'):
-            self.editor_btn.setStyleSheet(PreferencesStyles.get_sidebar_button_style())
-        if hasattr(self, 'terminal_btn'):
-            self.terminal_btn.setStyleSheet(PreferencesStyles.get_sidebar_button_style())
+        for btn_name in ('app_btn', 'proxy_btn', 'kubernetes_btn', 'editor_btn', 'terminal_btn'):
+            btn = getattr(self, btn_name, None)
+            if btn is not None:
+                try:
+                    btn.setStyleSheet(PreferencesStyles.get_sidebar_button_style())
+                except RuntimeError:
+                    pass
 
         # Update Back Button Icon
         if hasattr(self, 'back_btn'):
-            from UI.Icons import Icons
-            theme_name = self.theme_manager.get_current_theme_name() or "Dark"
-            icon = Icons.get_theme_icon("back_arrow.png", theme_name)
-            self.back_btn.setIcon(icon)
-            self.back_btn.setStyleSheet(PreferencesStyles.get_back_button_style())
+            try:
+                theme_name = self.theme_manager.get_current_theme_name() or "Dark"
+                icon = Icons.get_theme_icon("back_arrow.svg", theme_name)
+                self.back_btn.setIcon(icon)
+                self.back_btn.setStyleSheet(PreferencesStyles.get_back_button_style())
+            except RuntimeError:
+                pass
 
-        # Refresh current section to update its components
-        self.show_section(self.current_section)
+        # Null-out tracked widget references BEFORE rebuilding so no stale
+        # C++ objects remain accessible after the old content widget is deleted.
+        for attr in ('theme_combo', 'timezone_combo', 'timezone_info',
+                     'line_numbers_combo', 'tab_size_input',
+                     'editor_font_size_input', 'editor_font_family_combo',
+                     'font_size_input', 'font_family_combo', 'startup_status'):
+            if hasattr(self, attr):
+                obj = getattr(self, attr)
+                if obj is not None:
+                    try:
+                        obj.blockSignals(True)
+                    except RuntimeError:
+                        pass
+                setattr(self, attr, None)
 
-        # Update Theme Dropdown if it exists
-        if hasattr(self, 'theme_combo'):
-            theme_name = self.theme_manager.get_current_theme_name()
-            if self.theme_combo.currentText() != theme_name:
-                self.theme_combo.blockSignals(True)
-                self.theme_combo.setCurrentText(theme_name)
-                self.theme_combo.blockSignals(False)
+        # Rebuild the current section with updated styles
+        try:
+            self.show_section(self.current_section)
+        except Exception as e:
+            logging.warning(f"PreferencesWidget: error rebuilding section on theme change: {e}")
 
     def go_back(self):
         self.back_signal.emit()
@@ -264,7 +275,7 @@ class PreferencesWidget(ThemeAwareMixin, QWidget):
 
         # Use theme-aware icon
         theme_name = get_theme_manager().get_current_theme_name() or "Dark"
-        icon = Icons.get_theme_icon("back_arrow.png", theme_name)
+        icon = Icons.get_theme_icon("back_arrow.svg", theme_name)
 
         self.back_btn.setIcon(icon)
         self.back_btn.setIconSize(QSize(24, 24))
@@ -273,6 +284,33 @@ class PreferencesWidget(ThemeAwareMixin, QWidget):
         self.back_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.back_btn.clicked.connect(self.go_back)
         return self.back_btn
+
+    def _make_settings_card(self, title):
+        """Create a card QFrame with a grey title bar and content area.
+        Returns (card_frame, content_layout) so caller can add widgets."""
+        card = QFrame()
+        card.setObjectName("SettingsCard")
+        card.setStyleSheet(PreferencesStyles.get_card_outer_style())
+
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(0, 0, 0, 0)
+        card_layout.setSpacing(0)
+
+        # Title bar
+        title_label = QLabel(title)
+        title_label.setObjectName("sectionHeader")
+        title_label.setStyleSheet(PreferencesStyles.get_subsection_header_style())
+        card_layout.addWidget(title_label)
+
+        # Content container
+        content_widget = QWidget()
+        content_widget.setStyleSheet(PreferencesStyles.get_card_content_style())
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setContentsMargins(24, 20, 24, 24)
+        content_layout.setSpacing(10)
+        card_layout.addWidget(content_widget)
+
+        return card, content_layout
 
     def show_section(self, section):
         # Stop timezone timer when leaving app section
@@ -309,154 +347,122 @@ class PreferencesWidget(ThemeAwareMixin, QWidget):
     def show_app_section(self):
         content_widget = QWidget()
         content_layout = QVBoxLayout(content_widget)
-        content_layout.setContentsMargins(40, 40, 40, 40)
-        content_layout.setSpacing(5)
+        content_layout.setContentsMargins(32, 32, 32, 32)
+        content_layout.setSpacing(20)
 
-        # Header
+        # Page title
         app_header = QLabel("Application")
         app_header.setObjectName("header")
         app_header.setStyleSheet(PreferencesStyles.get_section_header_style())
         content_layout.addWidget(app_header)
 
-        # Theme section
-        theme_label = QLabel("THEME")
-        theme_label.setObjectName("sectionHeader")
-        theme_label.setStyleSheet(PreferencesStyles.get_subsection_header_style())
-        content_layout.addWidget(theme_label)
-
-        self.theme_combo = QComboBox()
+        # --- THEME card ---
+        theme_card, theme_content = self._make_settings_card("THEME")
+        self.theme_combo = CustomComboBox()
+        self.theme_combo.setFixedHeight(40)
         self.theme_combo.addItems(["Dark", "Light"])
-        self.theme_combo.setStyleSheet(PreferencesStyles.get_dropdown_style())
         self.theme_combo.setCursor(Qt.CursorShape.PointingHandCursor)
-
-        # Set current theme from settings
-        current_theme = self.settings.value("theme", "Light")
+        current_theme = self.theme_manager.get_current_theme_name()
         self.theme_combo.setCurrentText(current_theme)
-
-        # Connect signal
         self.theme_combo.currentTextChanged.connect(self.on_theme_changed)
-        content_layout.addWidget(self.theme_combo)
+        theme_content.addWidget(self.theme_combo)
+        content_layout.addWidget(theme_card)
 
-        divider1 = QFrame()
-        divider1.setObjectName("divider")
-        divider1.setFrameShape(QFrame.Shape.HLine)
-        divider1.setStyleSheet(PreferencesStyles.get_divider_style())
-        content_layout.addWidget(divider1)
+        # --- EXTENSION INSTALL REGISTRY card ---
+        reg_card, reg_content = self._make_settings_card("EXTENSION INSTALL REGISTRY")
 
-        # Extension registry section
-        registry_label = QLabel("EXTENSION INSTALL REGISTRY")
-        registry_label.setObjectName("sectionHeader")
-        registry_label.setStyleSheet(PreferencesStyles.get_subsection_header_style())
-        content_layout.addWidget(registry_label)
-
-        registry_combo = QComboBox()
-        registry_combo.addItems(["Default Url", "Custom Url"])
-        registry_combo.setStyleSheet(PreferencesStyles.get_dropdown_style())
-        registry_combo.setCursor(Qt.CursorShape.PointingHandCursor)
-        content_layout.addWidget(registry_combo)
+        radio_container = QWidget()
+        radio_container.setObjectName("RadioGroup")
+        radio_container.setStyleSheet(PreferencesStyles.get_radio_group_style())
+        radio_layout = QHBoxLayout(radio_container)
+        radio_layout.setContentsMargins(12, 8, 12, 8)
+        radio_layout.setSpacing(20)
+        radio_default = QRadioButton("Default Url")
+        radio_custom = QRadioButton("Custom Url")
+        radio_default.setChecked(True)
+        radio_layout.addWidget(radio_default)
+        radio_layout.addWidget(radio_custom)
+        radio_layout.addStretch()
+        reg_content.addWidget(radio_container)
 
         registry_help = QLabel(
-            "This setting is to change the registry URL for installing extensions by name. If you are unable to access the\n"
-            "default registry (https://registry.npmjs.org) you can change it in your .npmrc file or in the input below."
+            "This setting is to change the registry URL for installing extensions by name. "
+            "If you are unable to access the default registry (https://registry.npmjs.org) "
+            "you can change it in your .npmrc file or in the input below."
         )
         registry_help.setStyleSheet(PreferencesStyles.get_description_style())
         registry_help.setWordWrap(True)
-        content_layout.addWidget(registry_help)
+        reg_content.addWidget(registry_help)
 
         registry_input = QLineEdit()
         registry_input.setPlaceholderText("Custom Extension Registry URL...")
         registry_input.setStyleSheet(PreferencesStyles.get_input_style())
-        content_layout.addWidget(registry_input)
+        reg_content.addWidget(registry_input)
+        content_layout.addWidget(reg_card)
 
-        divider2 = QFrame()
-        divider2.setObjectName("divider")
-        divider2.setFrameShape(QFrame.Shape.HLine)
-        divider2.setStyleSheet(PreferencesStyles.get_divider_style())
-        content_layout.addWidget(divider2)
-
-        # Start-up section
-        startup_label = QLabel("START-UP")
-        startup_label.setObjectName("sectionHeader")
-        startup_label.setStyleSheet(PreferencesStyles.get_subsection_header_style())
-        content_layout.addWidget(startup_label)
-
-        startup_container = QWidget()
-        startup_layout = QHBoxLayout(startup_container)
-        startup_layout.setContentsMargins(0, 10, 0, 10)
-
+        # --- START-UP card ---
+        startup_card, startup_content = self._make_settings_card("START-UP")
+        startup_row = QWidget()
+        startup_row.setStyleSheet("background-color: transparent;")
+        startup_layout = QHBoxLayout(startup_row)
+        startup_layout.setContentsMargins(0, 4, 0, 4)
         startup_text = QLabel("Automatically start Orchetrix on login")
         startup_text.setStyleSheet(PreferencesStyles.get_text_style())
-
         self.startup_status = QLabel("Disabled")
         self.startup_status.setStyleSheet(PreferencesStyles.get_status_text_style(False))
-
         toggle_switch = ToggleSwitch()
         toggle_switch.setChecked(False)
         toggle_switch.toggled.connect(self.update_startup_status)
-
         startup_layout.addWidget(startup_text)
         startup_layout.addStretch()
         startup_layout.addWidget(self.startup_status)
         startup_layout.addWidget(toggle_switch)
+        startup_content.addWidget(startup_row)
+        content_layout.addWidget(startup_card)
 
-        content_layout.addWidget(startup_container)
-
-        divider3 = QFrame()
-        divider3.setObjectName("divider")
-        divider3.setFrameShape(QFrame.Shape.HLine)
-        divider3.setStyleSheet(PreferencesStyles.get_divider_style())
-        content_layout.addWidget(divider3)
-
-        # Local Timezone section
-        timezone_label = QLabel("LOCAL TIMEZONE")
-        timezone_label.setObjectName("sectionHeader")
-        timezone_label.setStyleSheet(PreferencesStyles.get_subsection_header_style())
-        content_layout.addWidget(timezone_label)
-
-        # Timezone combo box
-        self.timezone_combo = QComboBox()
+        # --- LOCAL TIMEZONE card ---
+        tz_card, tz_content = self._make_settings_card("LOCAL TIMEZONE")
+        self.timezone_combo = CustomComboBox()
+        self.timezone_combo.setFixedHeight(40)
         self.timezone_combo.addItems([
             "Asia/Calcutta", "America/New_York", "Europe/London",
             "Europe/Berlin", "Asia/Tokyo", "Asia/Singapore",
             "Australia/Sydney", "Pacific/Auckland"
         ])
-        self.timezone_combo.setStyleSheet(PreferencesStyles.get_dropdown_style())
         self.timezone_combo.setCursor(Qt.CursorShape.PointingHandCursor)
-
-        # Try to set the current timezone in the combo box
         try:
             index = self.timezone_combo.findText(self.current_timezone)
+            if index < 0 and self.current_timezone:
+                # Saved tz isn't a preset (e.g. default "UTC"); add it so it
+                # can be selected instead of falling back to the first preset.
+                self.timezone_combo.addItem(self.current_timezone)
+                index = self.timezone_combo.findText(self.current_timezone)
             if index >= 0:
                 self.timezone_combo.setCurrentIndex(index)
         except Exception as e:
             print(f"Error setting current timezone: {e}")
-
         self.timezone_combo.currentIndexChanged.connect(self.change_timezone)
-        content_layout.addWidget(self.timezone_combo)
+        tz_content.addWidget(self.timezone_combo)
 
-        # Add current time display
         self.timezone_info = QLabel()
         self.timezone_info.setStyleSheet(PreferencesStyles.get_description_style())
-        self.update_timezone_display()  # Initialize with current time
-        content_layout.addWidget(self.timezone_info)
+        self.update_timezone_display()
+        tz_content.addWidget(self.timezone_info)
 
-        # Add apply button
-        timezone_apply_container = QWidget()
-        timezone_apply_layout = QHBoxLayout(timezone_apply_container)
-        timezone_apply_layout.setContentsMargins(0, 10, 0, 10)
-
+        tz_btn_row = QWidget()
+        tz_btn_row.setStyleSheet("background-color: transparent;")
+        tz_btn_layout = QHBoxLayout(tz_btn_row)
+        tz_btn_layout.setContentsMargins(0, 8, 0, 0)
         timezone_apply_btn = QPushButton("Apply Timezone")
         timezone_apply_btn.setStyleSheet(PreferencesStyles.get_button_primary_style())
         timezone_apply_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         timezone_apply_btn.clicked.connect(self.apply_timezone)
-
-        timezone_apply_layout.addStretch()
-        timezone_apply_layout.addWidget(timezone_apply_btn)
-
-        content_layout.addWidget(timezone_apply_container)
+        tz_btn_layout.addStretch()
+        tz_btn_layout.addWidget(timezone_apply_btn)
+        tz_content.addWidget(tz_btn_row)
+        content_layout.addWidget(tz_card)
 
         content_layout.addStretch()
-
         self.content_scroll.setWidget(content_widget)
 
     def update_timezone_display(self):
@@ -486,46 +492,28 @@ class PreferencesWidget(ThemeAwareMixin, QWidget):
                     # ComboBox has been deleted, use stored timezone
                     pass
 
-            # Get current time in UTC
-            now_utc = datetime.utcnow()
-
-            # Format the time display
-            time_str = now_utc.strftime("%Y-%m-%d %H:%M:%S UTC")
-
-            # Try to get local time in the selected timezone
-            # Note: This is simplified and would need proper timezone handling in a real app
-            if timezone == "Asia/Calcutta":
-                local_time = now_utc.replace(hour=(now_utc.hour + 5) % 24)
+            # Simulate exactly what TimezoneManager would output for that selected timezone
+            # without inherently applying it fully yet
+            try:
+                selected_tz = zoneinfo.ZoneInfo(timezone)
+                now_utc = datetime.now(zoneinfo.ZoneInfo("UTC"))
+                local_time = now_utc.astimezone(selected_tz)
+                
+                time_str = now_utc.strftime("%Y-%m-%d %H:%M:%S UTC")
                 local_time_str = local_time.strftime("%Y-%m-%d %H:%M:%S")
-                time_str += f" | {local_time_str} IST (+5:30)"
-            elif timezone == "America/New_York":
-                local_time = now_utc.replace(hour=(now_utc.hour - 5) % 24)
-                local_time_str = local_time.strftime("%Y-%m-%d %H:%M:%S")
-                time_str += f" | {local_time_str} EST (-5:00)"
-            elif timezone == "Europe/London":
-                local_time = now_utc.replace(hour=(now_utc.hour + 0) % 24)
-                local_time_str = local_time.strftime("%Y-%m-%d %H:%M:%S")
-                time_str += f" | {local_time_str} GMT (+0:00)"
-            elif timezone == "Europe/Berlin":
-                local_time = now_utc.replace(hour=(now_utc.hour + 1) % 24)
-                local_time_str = local_time.strftime("%Y-%m-%d %H:%M:%S")
-                time_str += f" | {local_time_str} CET (+1:00)"
-            elif timezone == "Asia/Tokyo":
-                local_time = now_utc.replace(hour=(now_utc.hour + 9) % 24)
-                local_time_str = local_time.strftime("%Y-%m-%d %H:%M:%S")
-                time_str += f" | {local_time_str} JST (+9:00)"
-            elif timezone == "Asia/Singapore":
-                local_time = now_utc.replace(hour=(now_utc.hour + 8) % 24)
-                local_time_str = local_time.strftime("%Y-%m-%d %H:%M:%S")
-                time_str += f" | {local_time_str} SGT (+8:00)"
-            elif timezone == "Australia/Sydney":
-                local_time = now_utc.replace(hour=(now_utc.hour + 10) % 24)
-                local_time_str = local_time.strftime("%Y-%m-%d %H:%M:%S")
-                time_str += f" | {local_time_str} AEST (+10:00)"
-            elif timezone == "Pacific/Auckland":
-                local_time = now_utc.replace(hour=(now_utc.hour + 12) % 24)
-                local_time_str = local_time.strftime("%Y-%m-%d %H:%M:%S")
-                time_str += f" | {local_time_str} NZST (+12:00)"
+                # Format timezone string: get abbreviation format (e.g., EST)
+                tz_abbr = local_time.tzname()
+                
+                # Format time offset
+                offset = local_time.utcoffset()
+                hours, remainder = divmod(int(offset.total_seconds()), 3600)
+                minutes = remainder // 60
+                sign = '+' if hours >= 0 else '-'
+                offset_str = f"{sign}{abs(hours)}:{abs(minutes):02d}"
+                
+                time_str += f" | {local_time_str} {tz_abbr} (UTC{offset_str})"
+            except Exception as tz_err:
+                 time_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
 
             # Try to set the text, but handle if widget has been deleted
             try:
@@ -552,28 +540,26 @@ class PreferencesWidget(ThemeAwareMixin, QWidget):
         if hasattr(self, 'pending_timezone'):
             try:
                 timezone = self.pending_timezone
-                self.current_timezone = timezone
-                print(f"Applying timezone change to: {timezone}")
 
-                # Emit signal to notify application of timezone change
-                self.timezone_changed.emit(timezone)
+                success = self.tz_manager.set_timezone(timezone)
 
-                # Show confirmation message
-                QMessageBox.information(self, "Timezone Changed",
-                                        f"Timezone has been changed to {timezone}.\nApplication display times will use this timezone.")
-
-                # Update environment variable if needed
-                if platform.system() == "Linux" or platform.system() == "Darwin":
-                    os.environ["TZ"] = timezone
-                    time.tzset()  # Apply the timezone change
-
-                # In a real app, you might also want to:
-                # 1. Save this preference to settings
-                # 2. Update any time displays throughout the app
-                # 3. Handle Windows timezone changes differently
-
-                # Clear pending timezone
-                del self.pending_timezone
+                if success:
+                    # Update only after the manager confirms, so a failed apply
+                    # leaves the UI aligned with the active timezone.
+                    self.current_timezone = timezone
+                    print(f"Applying timezone change to: {timezone}")
+                    # Emit signal to notify application of timezone change
+                    self.timezone_changed.emit(timezone)
+                    
+                    # Show confirmation message
+                    QMessageBox.information(self, "Timezone Changed",
+                                            f"Timezone has been changed to {timezone}.\nApplication display times will use this timezone.")
+                    
+                    # Clear pending timezone
+                    del self.pending_timezone
+                else:
+                    QMessageBox.warning(self, "Timezone Error",
+                                        f"Failed to change timezone to {timezone}")
             except Exception as e:
                 print(f"Error applying timezone: {e}")
                 QMessageBox.warning(self, "Timezone Error",
@@ -585,413 +571,252 @@ class PreferencesWidget(ThemeAwareMixin, QWidget):
     def show_proxy_section(self):
         content_widget = QWidget()
         content_layout = QVBoxLayout(content_widget)
-        content_layout.setContentsMargins(40, 40, 40, 40)
-        content_layout.setSpacing(5)
-
-        header_container = QWidget()
-        header_layout = QHBoxLayout(header_container)
-        header_layout.setContentsMargins(0, 0, 0, 20)
+        content_layout.setContentsMargins(32, 32, 32, 32)
+        content_layout.setSpacing(20)
 
         proxy_header = QLabel("Proxy")
         proxy_header.setObjectName("header")
         proxy_header.setStyleSheet(PreferencesStyles.get_section_header_style())
-        header_layout.addWidget(proxy_header)
-        # header_layout.addWidget(self.create_back_button(), 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
+        content_layout.addWidget(proxy_header)
 
-        content_layout.addWidget(header_container)
-
-        # HTTP Proxy section
-        http_proxy_label = QLabel("HTTP PROXY")
-        http_proxy_label.setObjectName("sectionHeader")
-        http_proxy_label.setStyleSheet(PreferencesStyles.get_subsection_header_style())
-        content_layout.addWidget(http_proxy_label)
-
+        # --- HTTP PROXY card ---
+        proxy_card, proxy_content = self._make_settings_card("HTTP PROXY")
         proxy_input = QLineEdit()
         proxy_input.setPlaceholderText("Type HTTP proxy url (example: http://proxy.acme.org:8080)")
         proxy_input.setStyleSheet(PreferencesStyles.get_input_style())
-        content_layout.addWidget(proxy_input)
-
+        proxy_content.addWidget(proxy_input)
         proxy_desc = QLabel("Proxy is used only for non-cluster communication.")
         proxy_desc.setStyleSheet(PreferencesStyles.get_description_style())
-        content_layout.addWidget(proxy_desc)
+        proxy_content.addWidget(proxy_desc)
+        content_layout.addWidget(proxy_card)
 
-        divider = QFrame()
-        divider.setObjectName("divider")
-        divider.setFrameShape(QFrame.Shape.HLine)
-        divider.setStyleSheet(PreferencesStyles.get_divider_style())
-        content_layout.addWidget(divider)
-
-        # Certificate Trust section
-        cert_label = QLabel("CERTIFICATE TRUST")
-        cert_label.setObjectName("sectionHeader")
-        cert_label.setStyleSheet(PreferencesStyles.get_subsection_header_style())
-        content_layout.addWidget(cert_label)
-
-        cert_container = QWidget()
-        cert_layout = QHBoxLayout(cert_container)
-        cert_layout.setContentsMargins(0, 10, 0, 10)
-
+        # --- CERTIFICATE TRUST card ---
+        cert_card, cert_content = self._make_settings_card("CERTIFICATE TRUST")
+        cert_row = QWidget()
+        cert_row.setStyleSheet("background-color: transparent;")
+        cert_layout = QHBoxLayout(cert_row)
+        cert_layout.setContentsMargins(0, 4, 0, 4)
         cert_text = QLabel("Allow untrusted Certificate Authorities")
         cert_text.setStyleSheet(PreferencesStyles.get_text_style())
-
         cert_toggle = ToggleSwitch()
         cert_toggle.setChecked(False)
-
         cert_layout.addWidget(cert_text)
         cert_layout.addStretch()
         cert_layout.addWidget(cert_toggle)
-
-        content_layout.addWidget(cert_container)
-
+        cert_content.addWidget(cert_row)
         cert_desc = QLabel(
-            "This will make Lens to trust ANY certificate authority without any validations. Needed with some corporate proxies "
-            "that do certificate re-writing. Does not affect cluster communications!"
+            "This will make Orchetrix trust ANY certificate authority without any validations. "
+            "Needed with some corporate proxies that do certificate re-writing. "
+            "Does not affect cluster communications!"
         )
         cert_desc.setStyleSheet(PreferencesStyles.get_description_style())
         cert_desc.setWordWrap(True)
-        content_layout.addWidget(cert_desc)
+        cert_content.addWidget(cert_desc)
+        content_layout.addWidget(cert_card)
 
         content_layout.addStretch()
-
         self.content_scroll.setWidget(content_widget)
+
 
     def show_kubernetes_section(self):
         content_widget = QWidget()
         content_layout = QVBoxLayout(content_widget)
-        content_layout.setContentsMargins(40, 40, 40, 40)
-        content_layout.setSpacing(5)
-
-        header_container = QWidget()
-        header_layout = QHBoxLayout(header_container)
-        header_layout.setContentsMargins(0, 0, 0, 20)
+        content_layout.setContentsMargins(32, 32, 32, 32)
+        content_layout.setSpacing(20)
 
         k8s_header = QLabel("Kubernetes")
         k8s_header.setObjectName("header")
         k8s_header.setStyleSheet(PreferencesStyles.get_section_header_style())
-        header_layout.addWidget(k8s_header)
-        # header_layout.addWidget(self.create_back_button(), 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
+        content_layout.addWidget(k8s_header)
 
-        content_layout.addWidget(header_container)
-
-        # Kubectl Binary section
-        kubectl_label = QLabel("KUBECTL BINARY")
-        kubectl_label.setObjectName("sectionHeader")
-        kubectl_label.setStyleSheet(PreferencesStyles.get_subsection_header_style())
-        content_layout.addWidget(kubectl_label)
-
+        # --- KUBECTL BINARY card ---
+        kubectl_card, kubectl_content = self._make_settings_card("KUBECTL BINARY")
         kubectl_path_input = QLineEdit()
         kubectl_path_input.setPlaceholderText("Path to kubectl binary...")
         kubectl_path_input.setStyleSheet(PreferencesStyles.get_input_style())
-        content_layout.addWidget(kubectl_path_input)
+        kubectl_content.addWidget(kubectl_path_input)
+        content_layout.addWidget(kubectl_card)
 
-        divider1 = QFrame()
-        divider1.setObjectName("divider")
-        divider1.setFrameShape(QFrame.Shape.HLine)
-        divider1.setStyleSheet(PreferencesStyles.get_divider_style())
-        content_layout.addWidget(divider1)
-
-        # Kubeconfig section
-        kubeconfig_label = QLabel("KUBECONFIG")
-        kubeconfig_label.setObjectName("sectionHeader")
-        kubeconfig_label.setStyleSheet(PreferencesStyles.get_subsection_header_style())
-        content_layout.addWidget(kubeconfig_label)
-
+        # --- KUBECONFIG card ---
+        kubeconfig_card, kubeconfig_content = self._make_settings_card("KUBECONFIG")
         kubeconfig_path_input = QLineEdit()
         kubeconfig_path_input.setPlaceholderText("Path to kubeconfig file...")
         kubeconfig_path_input.setStyleSheet(PreferencesStyles.get_input_style())
-        content_layout.addWidget(kubeconfig_path_input)
+        kubeconfig_content.addWidget(kubeconfig_path_input)
+        content_layout.addWidget(kubeconfig_card)
 
-        divider2 = QFrame()
-        divider2.setObjectName("divider")
-        divider2.setFrameShape(QFrame.Shape.HLine)
-        divider2.setStyleSheet(PreferencesStyles.get_divider_style())
-        content_layout.addWidget(divider2)
-
-        # Helm Charts section
-        helm_charts_label = QLabel("HELM CHARTS")
-        helm_charts_label.setObjectName("sectionHeader")
-        helm_charts_label.setStyleSheet(PreferencesStyles.get_subsection_header_style())
-        content_layout.addWidget(helm_charts_label)
-
-        helm_repos_container = QWidget()
-        helm_repos_layout = QHBoxLayout(helm_repos_container)
-        helm_repos_layout.setContentsMargins(0, 10, 0, 10)
-
-        helm_repos_combo = QComboBox()
+        # --- HELM CHARTS card ---
+        helm_card, helm_content = self._make_settings_card("HELM CHARTS")
+        helm_row = QWidget()
+        helm_row.setStyleSheet("background-color: transparent;")
+        helm_row_layout = QHBoxLayout(helm_row)
+        helm_row_layout.setContentsMargins(0, 0, 0, 0)
+        helm_repos_combo = CustomComboBox()
+        helm_repos_combo.setFixedHeight(40)
         helm_repos_combo.addItem("Repositories")
-        helm_repos_combo.setStyleSheet(PreferencesStyles.get_dropdown_style())
-
         add_repo_btn = QPushButton("Add Custom Helm Repo")
         add_repo_btn.setStyleSheet(PreferencesStyles.get_button_primary_style())
+        helm_row_layout.addWidget(helm_repos_combo)
+        helm_row_layout.addSpacing(10)
+        helm_row_layout.addWidget(add_repo_btn)
+        helm_row_layout.addStretch()
+        helm_content.addWidget(helm_row)
 
-        helm_repos_layout.addWidget(helm_repos_combo)
-        helm_repos_layout.addSpacing(10)
-        helm_repos_layout.addWidget(add_repo_btn)
-        helm_repos_layout.addStretch()
-
-        content_layout.addWidget(helm_repos_container)
-
-        helm_repo_item_container = QWidget()
-        helm_repo_item_layout = QHBoxLayout(helm_repo_item_container)
-        helm_repo_item_layout.setContentsMargins(0, 10, 0, 10)
-
+        repo_item_row = QWidget()
+        repo_item_row.setStyleSheet("background-color: transparent;")
+        repo_item_layout = QHBoxLayout(repo_item_row)
+        repo_item_layout.setContentsMargins(0, 8, 0, 0)
+        repo_details = QVBoxLayout()
         helm_repo_item = QLabel("bitnami")
         helm_repo_url = QLabel("https://charts.bitnami.com/bitnami")
         helm_repo_item.setStyleSheet(PreferencesStyles.get_text_style())
         helm_repo_url.setStyleSheet(PreferencesStyles.get_description_style())
-
+        repo_details.addWidget(helm_repo_item)
+        repo_details.addWidget(helm_repo_url)
         delete_repo_btn = QPushButton("🗑")
         delete_repo_btn.setStyleSheet(PreferencesStyles.get_delete_button_style())
-
-        repo_details_layout = QVBoxLayout()
-        repo_details_layout.addWidget(helm_repo_item)
-        repo_details_layout.addWidget(helm_repo_url)
-
-        helm_repo_item_layout.addLayout(repo_details_layout)
-        helm_repo_item_layout.addStretch()
-        helm_repo_item_layout.addWidget(delete_repo_btn)
-
-        content_layout.addWidget(helm_repo_item_container)
+        repo_item_layout.addLayout(repo_details)
+        repo_item_layout.addStretch()
+        repo_item_layout.addWidget(delete_repo_btn)
+        helm_content.addWidget(repo_item_row)
+        content_layout.addWidget(helm_card)
 
         content_layout.addStretch()
-
         self.content_scroll.setWidget(content_widget)
+
 
     def show_editor_section(self):
         content_widget = QWidget()
         content_layout = QVBoxLayout(content_widget)
-        content_layout.setContentsMargins(40, 40, 40, 40)
-        content_layout.setSpacing(5)
-
-        header_container = QWidget()
-        header_layout = QHBoxLayout(header_container)
-        header_layout.setContentsMargins(0, 0, 0, 20)
+        content_layout.setContentsMargins(32, 32, 32, 32)
+        content_layout.setSpacing(20)
 
         editor_header = QLabel("Editor")
         editor_header.setObjectName("header")
         editor_header.setStyleSheet(PreferencesStyles.get_section_header_style())
-        header_layout.addWidget(editor_header)
-        # header_layout.addWidget(self.create_back_button(), 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
+        content_layout.addWidget(editor_header)
 
-        content_layout.addWidget(header_container)
-
-        # Line Numbers section
-        line_numbers_label = QLabel("LINE NUMBERS")
-        line_numbers_label.setObjectName("sectionHeader")
-        line_numbers_label.setStyleSheet(PreferencesStyles.get_subsection_header_style())
-        content_layout.addWidget(line_numbers_label)
-
-        self.line_numbers_combo = QComboBox()
+        # --- LINE NUMBERS card ---
+        ln_card, ln_content = self._make_settings_card("LINE NUMBERS")
+        self.line_numbers_combo = CustomComboBox()
+        self.line_numbers_combo.setFixedHeight(40)
         self.line_numbers_combo.addItems(["On", "Off"])
         self.line_numbers_combo.setCurrentText("On" if self.show_line_numbers else "Off")
-        self.line_numbers_combo.setStyleSheet(PreferencesStyles.get_dropdown_style())
         self.line_numbers_combo.setCursor(Qt.CursorShape.PointingHandCursor)
         self.line_numbers_combo.currentTextChanged.connect(self.on_line_numbers_changed)
-        content_layout.addWidget(self.line_numbers_combo)
+        ln_content.addWidget(self.line_numbers_combo)
+        ln_help = QLabel("Show or hide line numbers in editor")
+        ln_help.setStyleSheet(PreferencesStyles.get_description_style())
+        ln_content.addWidget(ln_help)
+        content_layout.addWidget(ln_card)
 
-        # Help text for line numbers
-        line_numbers_help = QLabel("Show or hide line numbers in editor")
-        line_numbers_help.setStyleSheet(PreferencesStyles.get_description_style())
-        line_numbers_help.setWordWrap(True)
-        content_layout.addWidget(line_numbers_help)
-
-        divider2 = QFrame()
-        divider2.setObjectName("divider")
-        divider2.setFrameShape(QFrame.Shape.HLine)
-        divider2.setStyleSheet(PreferencesStyles.get_divider_style())
-        content_layout.addWidget(divider2)
-
-        # Tab Size section
-        tab_size_label = QLabel("TAB SIZE")
-        tab_size_label.setObjectName("sectionHeader")
-        tab_size_label.setStyleSheet(PreferencesStyles.get_subsection_header_style())
-        content_layout.addWidget(tab_size_label)
-
-        # Modified to use self.tab_size_input and connect signal
+        # --- TAB SIZE card ---
+        tab_card, tab_content = self._make_settings_card("TAB SIZE")
         self.tab_size_input = QLineEdit()
         self.tab_size_input.setText(str(self.current_tab_size))
         self.tab_size_input.setStyleSheet(PreferencesStyles.get_input_style())
         self.tab_size_input.editingFinished.connect(self.on_tab_size_changed)
-        content_layout.addWidget(self.tab_size_input)
+        tab_content.addWidget(self.tab_size_input)
+        tab_help = QLabel("Number of spaces per tab in the editor")
+        tab_help.setStyleSheet(PreferencesStyles.get_description_style())
+        tab_content.addWidget(tab_help)
+        content_layout.addWidget(tab_card)
 
-        # Help text for Tab Size
-        tab_size_help = QLabel("Number of spaces per tab in the editor")
-        tab_size_help.setStyleSheet(PreferencesStyles.get_description_style())
-        tab_size_help.setWordWrap(True)
-        content_layout.addWidget(tab_size_help)
-
-        divider3 = QFrame()
-        divider3.setObjectName("divider")
-        divider3.setFrameShape(QFrame.Shape.HLine)
-        divider3.setStyleSheet(PreferencesStyles.get_divider_style())
-        content_layout.addWidget(divider3)
-
-        # Font Size section
-        font_size_label = QLabel("FONT SIZE")
-        font_size_label.setObjectName("sectionHeader")
-        font_size_label.setStyleSheet(PreferencesStyles.get_subsection_header_style())
-        content_layout.addWidget(font_size_label)
-
-        # This now affects the YAML editor too
+        # --- FONT SIZE card ---
+        fs_card, fs_content = self._make_settings_card("FONT SIZE")
         self.editor_font_size_input = QLineEdit()
         self.editor_font_size_input.setText(str(self.current_font_size))
         self.editor_font_size_input.setStyleSheet(PreferencesStyles.get_input_style())
         self.editor_font_size_input.editingFinished.connect(self.on_editor_font_size_changed)
-        content_layout.addWidget(self.editor_font_size_input)
+        fs_content.addWidget(self.editor_font_size_input)
+        fs_help = QLabel("This font size applies to all editors including the YAML editor")
+        fs_help.setStyleSheet(PreferencesStyles.get_description_style())
+        fs_content.addWidget(fs_help)
+        content_layout.addWidget(fs_card)
 
-        # Help text for Editor font size
-        editor_font_help = QLabel("This font size applies to all editors including the YAML editor")
-        editor_font_help.setStyleSheet(PreferencesStyles.get_description_style())
-        editor_font_help.setWordWrap(True)
-        content_layout.addWidget(editor_font_help)
-
-        divider4 = QFrame()
-        divider4.setObjectName("divider")
-        divider4.setFrameShape(QFrame.Shape.HLine)
-        divider4.setStyleSheet(PreferencesStyles.get_divider_style())
-        content_layout.addWidget(divider4)
-
-        # Font Family section
-        font_family_label = QLabel("FONT FAMILY")
-        font_family_label.setObjectName("sectionHeader")
-        font_family_label.setStyleSheet(PreferencesStyles.get_subsection_header_style())
-        content_layout.addWidget(font_family_label)
-
-        # This affects editors including YAML
-        self.editor_font_family_combo = QComboBox()
+        # --- FONT FAMILY card ---
+        ff_card, ff_content = self._make_settings_card("FONT FAMILY")
+        self.editor_font_family_combo = CustomComboBox()
+        self.editor_font_family_combo.setFixedHeight(40)
         self.editor_font_family_combo.addItems(["Consolas", "RobotoMono", "Courier New", "Monospace"])
         self.editor_font_family_combo.setCurrentText(self.current_font_family)
-        self.editor_font_family_combo.setStyleSheet(PreferencesStyles.get_dropdown_style())
         self.editor_font_family_combo.setCursor(Qt.CursorShape.PointingHandCursor)
         self.editor_font_family_combo.currentTextChanged.connect(self.on_editor_font_changed)
-        content_layout.addWidget(self.editor_font_family_combo)
-
-        # Help text for editor font family
-        editor_font_family_help = QLabel("This font family applies to all editors including the YAML editor")
-        editor_font_family_help.setStyleSheet(PreferencesStyles.get_description_style())
-        editor_font_family_help.setWordWrap(True)
-        content_layout.addWidget(editor_font_family_help)
+        ff_content.addWidget(self.editor_font_family_combo)
+        ff_help = QLabel("This font family applies to all editors including the YAML editor")
+        ff_help.setStyleSheet(PreferencesStyles.get_description_style())
+        ff_content.addWidget(ff_help)
+        content_layout.addWidget(ff_card)
 
         content_layout.addStretch()
-
         self.content_scroll.setWidget(content_widget)
 
     def show_terminal_section(self):
         content_widget = QWidget()
         content_layout = QVBoxLayout(content_widget)
-        content_layout.setContentsMargins(40, 40, 40, 40)
-        content_layout.setSpacing(5)
-
-        header_container = QWidget()
-        header_layout = QHBoxLayout(header_container)
-        header_layout.setContentsMargins(0, 0, 0, 20)
+        content_layout.setContentsMargins(32, 32, 32, 32)
+        content_layout.setSpacing(20)
 
         terminal_header = QLabel("Terminal")
         terminal_header.setObjectName("header")
         terminal_header.setStyleSheet(PreferencesStyles.get_section_header_style())
-        header_layout.addWidget(terminal_header)
-        # header_layout.addWidget(self.create_back_button(), 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
+        content_layout.addWidget(terminal_header)
 
-        content_layout.addWidget(header_container)
-
-        # Terminal Shell Path section
-        shell_path_label = QLabel("TERMINAL SHELL PATH")
-        shell_path_label.setObjectName("sectionHeader")
-        shell_path_label.setStyleSheet(PreferencesStyles.get_subsection_header_style())
-        content_layout.addWidget(shell_path_label)
-
+        # --- TERMINAL SHELL PATH card ---
+        shell_card, shell_content = self._make_settings_card("TERMINAL SHELL PATH")
         shell_path_input = QLineEdit()
         shell_path_input.setText("powershell.exe")
         shell_path_input.setStyleSheet(PreferencesStyles.get_input_style())
-        content_layout.addWidget(shell_path_input)
+        shell_content.addWidget(shell_path_input)
+        content_layout.addWidget(shell_card)
 
-        divider1 = QFrame()
-        divider1.setObjectName("divider")
-        divider1.setFrameShape(QFrame.Shape.HLine)
-        divider1.setStyleSheet(PreferencesStyles.get_divider_style())
-        content_layout.addWidget(divider1)
-
-        # Terminal Copy & Paste section
-        copy_paste_label = QLabel("TERMINAL COPY & PASTE")
-        copy_paste_label.setObjectName("sectionHeader")
-        copy_paste_label.setStyleSheet(PreferencesStyles.get_subsection_header_style())
-        content_layout.addWidget(copy_paste_label)
-
-        copy_paste_container = QWidget()
-        copy_paste_layout = QHBoxLayout(copy_paste_container)
-        copy_paste_layout.setContentsMargins(0, 10, 0, 10)
-
+        # --- TERMINAL COPY & PASTE card ---
+        cp_card, cp_content = self._make_settings_card("TERMINAL COPY & PASTE")
+        cp_row = QWidget()
+        cp_row.setStyleSheet("background-color: transparent;")
+        cp_layout = QHBoxLayout(cp_row)
+        cp_layout.setContentsMargins(0, 4, 0, 4)
         copy_paste_text = QLabel("Copy on select and paste on right-click")
         copy_paste_text.setStyleSheet(PreferencesStyles.get_text_style())
-
         copy_paste_toggle = ToggleSwitch()
         copy_paste_toggle.setChecked(self.copy_paste_enabled)
         copy_paste_toggle.toggled.connect(self.on_copy_paste_changed)
+        cp_layout.addWidget(copy_paste_text)
+        cp_layout.addStretch()
+        cp_layout.addWidget(copy_paste_toggle)
+        cp_content.addWidget(cp_row)
+        content_layout.addWidget(cp_card)
 
-        copy_paste_layout.addWidget(copy_paste_text)
-        copy_paste_layout.addStretch()
-        copy_paste_layout.addWidget(copy_paste_toggle)
-
-        content_layout.addWidget(copy_paste_container)
-
-        divider2 = QFrame()
-        divider2.setObjectName("divider")
-        divider2.setFrameShape(QFrame.Shape.HLine)
-        divider2.setStyleSheet(PreferencesStyles.get_divider_style())
-        content_layout.addWidget(divider2)
-
-        # Terminal Theme section
-        theme_label = QLabel("TERMINAL THEME")
-        theme_label.setObjectName("sectionHeader")
-        theme_label.setStyleSheet(PreferencesStyles.get_subsection_header_style())
-        content_layout.addWidget(theme_label)
-
-        theme_combo = QComboBox()
+        # --- TERMINAL THEME card ---
+        tt_card, tt_content = self._make_settings_card("TERMINAL THEME")
+        theme_combo = CustomComboBox()
+        theme_combo.setFixedHeight(40)
         theme_combo.addItems(["Dark"])
-        theme_combo.setStyleSheet(PreferencesStyles.get_dropdown_style())
         theme_combo.setCursor(Qt.CursorShape.PointingHandCursor)
-        content_layout.addWidget(theme_combo)
+        tt_content.addWidget(theme_combo)
+        content_layout.addWidget(tt_card)
 
-        divider3 = QFrame()
-        divider3.setObjectName("divider")
-        divider3.setFrameShape(QFrame.Shape.HLine)
-        divider3.setStyleSheet(PreferencesStyles.get_divider_style())
-        content_layout.addWidget(divider3)
-
-        # Font Size section
-        font_size_label = QLabel("FONT SIZE")
-        font_size_label.setObjectName("sectionHeader")
-        font_size_label.setStyleSheet(PreferencesStyles.get_subsection_header_style())
-        content_layout.addWidget(font_size_label)
-
+        # --- FONT SIZE card ---
+        tfs_card, tfs_content = self._make_settings_card("FONT SIZE")
         self.font_size_input = QLineEdit()
         self.font_size_input.setText(str(self.current_font_size))
         self.font_size_input.setStyleSheet(PreferencesStyles.get_input_style())
         self.font_size_input.editingFinished.connect(self.on_font_size_changed)
-        content_layout.addWidget(self.font_size_input)
+        tfs_content.addWidget(self.font_size_input)
+        content_layout.addWidget(tfs_card)
 
-        divider4 = QFrame()
-        divider4.setObjectName("divider")
-        divider4.setFrameShape(QFrame.Shape.HLine)
-        divider4.setStyleSheet(PreferencesStyles.get_divider_style())
-        content_layout.addWidget(divider4)
-
-        # Font Family section
-        font_family_label = QLabel("FONT FAMILY")
-        font_family_label.setObjectName("sectionHeader")
-        font_family_label.setStyleSheet(PreferencesStyles.get_subsection_header_style())
-        content_layout.addWidget(font_family_label)
-
-        self.font_family_combo = QComboBox()
+        # --- FONT FAMILY card ---
+        tff_card, tff_content = self._make_settings_card("FONT FAMILY")
+        self.font_family_combo = CustomComboBox()
+        self.font_family_combo.setFixedHeight(40)
         self.font_family_combo.addItems(["RobotoMono", "Consolas", "Courier New"])
         self.font_family_combo.setCurrentText(self.current_font_family)
-        self.font_family_combo.setStyleSheet(PreferencesStyles.get_dropdown_style())
         self.font_family_combo.setCursor(Qt.CursorShape.PointingHandCursor)
         self.font_family_combo.currentTextChanged.connect(self.on_font_changed)
-        content_layout.addWidget(self.font_family_combo)
+        tff_content.addWidget(self.font_family_combo)
+        content_layout.addWidget(tff_card)
 
         content_layout.addStretch()
-
         self.content_scroll.setWidget(content_widget)
 
     def show_placeholder_section(self, title):
@@ -1033,10 +858,8 @@ class PreferencesWidget(ThemeAwareMixin, QWidget):
         """Handle theme change from dropdown"""
         print(f"PreferencesWidget: Theme changed to {theme_name}")
 
-        # Save to settings
-        self.settings.setValue("theme", theme_name)
-
-        # Apply theme - theme_changed signal will update all widgets
+        # Apply theme - theme_manager.set_theme now handles persistence
+        # and emits theme_changed signal to update all widgets
         self.theme_manager.set_theme(theme_name)
 
     def on_font_changed(self, font_family):

@@ -7,7 +7,7 @@ from PyQt6.QtCore import Qt, QTimer
 
 from Base_Components.base_components import SortableTableWidgetItem
 from Base_Components.base_resource_page import BaseResourcePage
-from Utils.data_formatters import parse_age_to_seconds
+from Utils.data_formatters import parse_age_to_seconds, int_sort_key
 
 class PodDisruptionBudgetsPage(BaseResourcePage):
     """
@@ -27,7 +27,7 @@ class PodDisruptionBudgetsPage(BaseResourcePage):
 
     def setup_page_ui(self):
         """Set up the main UI elements for the PodDisruptionBudgets page"""
-        # Define headers and sortable columns - KEEP ORIGINAL
+        # Define headers and sortable columns
         headers = ["", "Name", "Namespace", "Min Available", "Max Unavailable", "Current Healthy", "Desired Healthy", "Age", ""]
         sortable_columns = {1, 2, 3, 4, 5, 6, 7}
 
@@ -36,8 +36,6 @@ class PodDisruptionBudgetsPage(BaseResourcePage):
 
         # Configure column widths
         self.configure_columns()
-
-        # Add delete selected button
 
     def configure_columns(self):
         """Configure column widths for full screen utilization"""
@@ -49,14 +47,14 @@ class PodDisruptionBudgetsPage(BaseResourcePage):
         # Column specifications with optimized default widths
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
-            (1, 140, "interactive"), # Name
+            (1, 140, "stretch"),     # Name - stretch to fill remaining space
             (2, 90, "interactive"),  # Namespace
             (3, 80, "interactive"),  # Min Available
             (4, 80, "interactive"),  # Max UnAvailable
             (5, 60, "interactive"),  # Current Healthy
             (6, 60, "interactive"),  # Desired Healthy
-            (7, 80, "stretch"),      # Age - stretch to fill remaining space
-            (8, 40, "fixed")        # Actions
+            (7, 80, "interactive"),  # Age
+            (8, 40, "fixed")         # Actions
         ]
 
         # Apply column configuration
@@ -75,12 +73,38 @@ class PodDisruptionBudgetsPage(BaseResourcePage):
         # Ensure full width utilization after configuration
         QTimer.singleShot(100, self._ensure_full_width_utilization)
 
+    def _auto_resize_columns(self, max_col_widths=None, min_col_widths=None):
+        """Override to provide explicit widths for columns to let Name stretch and avoid clipping."""
+        explicit_mins = {
+            1: 120,  # Name
+            2: 120,  # Namespace
+            3: 100,  # Min Available
+            4: 100,  # Max Unavailable
+            5: 100,  # Current Healthy
+            6: 100,  # Desired Healthy
+            7: 60,   # Age
+            8: 40,   # Actions
+        }
+        if min_col_widths:
+            explicit_mins.update(min_col_widths)
+        explicit_maxes = {
+            2: 150,  # Namespace
+            3: 120,  # Min Available
+            4: 120,  # Max Unavailable
+            5: 110,  # Current Healthy
+            6: 110,  # Desired Healthy
+            7: 80,   # Age
+        }
+        if max_col_widths:
+            explicit_maxes.update(max_col_widths)
+        super()._auto_resize_columns(max_col_widths=explicit_maxes, min_col_widths=explicit_mins)
+
     def populate_resource_row(self, row, resource):
         """
         Populate a single row with PodDisruptionBudget data extracted from raw_data
         """
         # Set row height
-        self.table.setRowHeight(row, 40)
+        self.table.setRowHeight(row, 42)
 
         # Create checkbox for row selection (styling already handled by BaseResourcePage)
         resource_name = resource["name"]
@@ -106,7 +130,7 @@ class PodDisruptionBudgetsPage(BaseResourcePage):
         current_healthy = str(status.get("currentHealthy", 0))
         desired_healthy = str(status.get("desiredHealthy", 0))
 
-        # Prepare data columns - MATCH ORIGINAL HEADERS
+        # Prepare data columns
         columns = [
             resource["name"],        # Name
             resource["namespace"],   # Namespace
@@ -123,11 +147,7 @@ class PodDisruptionBudgetsPage(BaseResourcePage):
 
             # Handle numeric columns for sorting
             if col in [4, 5]:  # Current/Desired Healthy columns
-                try:
-                    num = int(value)
-                except ValueError:
-                    num = 0
-                item = SortableTableWidgetItem(value, num)
+                item = SortableTableWidgetItem(value, int_sort_key(value))
             elif col == 6:  # Age column
                 item = SortableTableWidgetItem(value, parse_age_to_seconds(value))
             else:

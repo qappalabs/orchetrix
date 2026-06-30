@@ -45,6 +45,8 @@ SINGULAR_WORDS_ENDING_IN_S = frozenset({
     "iris",
     "gas",
     "bus",
+    # Kubernetes resource kinds where plural == singular (like "series").
+    "endpoints",
 })
 
 
@@ -125,6 +127,15 @@ def singularize_resource_type(resource_type: str) -> str:
     # Handle -shes -> -sh (e.g., "meshes" -> "mesh")
     if lower_type.endswith('shes'):
         return resource_type[:-2]
+
+    # A word ending in "ss" (class, address, ingress, status, process …) is
+    # already singular — its plural ends in "sses", handled by the rule above.
+    # This guard keeps singularization idempotent: without it the generic
+    # trailing-'s' strip below corrupts an already-singular "priorityclass"
+    # into "priorityclas", which breaks detail-view lookups when the value is
+    # singularized twice (page -> show_detail).
+    if lower_type.endswith('ss'):
+        return resource_type
 
     # Simple rule: remove trailing 's' if present
     if lower_type.endswith('s'):

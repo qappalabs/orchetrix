@@ -13,6 +13,7 @@ import Styles.OverviewPageStyles as OverviewPageStyles  # Theme - aware styles
 from UI.ThemeAwarePage import ThemeAwarePage  # Automatic theme handling
 from Services.kubernetes.api_config import APIClientConfig
 import logging
+import time
 from Utils.thread_manager import is_shutdown_requested
 
 
@@ -109,7 +110,6 @@ class OverviewDataWorker(QThread):
 
     def _load_workloads_summary(self):
 
-        import time
         try:
             workloads_data = {}
             start_time = time.time()

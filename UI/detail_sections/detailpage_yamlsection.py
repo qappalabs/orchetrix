@@ -165,7 +165,7 @@ class SearchWidget(QFrame):
     def setup_ui(self):
         """Setup search widget UI"""
         self.setFixedHeight(40)
-        self.setStyleSheet(YAMLSectionStyles.get_search_widget_style())
+        self.update_style()
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(6, 3, 6, 3)
@@ -187,8 +187,6 @@ class SearchWidget(QFrame):
 
         # Previous button with icon
         self.prev_button = QPushButton()
-        prev_icon = resource_path("Icons/Yaml_uparrow.svg")
-        self.prev_button.setIcon(QIcon(prev_icon))
         self.prev_button.setIconSize(QSize(14, 14))
         self.prev_button.setFixedSize(24, 24)
         self.prev_button.setToolTip("Previous (Shift+Enter)")
@@ -197,8 +195,6 @@ class SearchWidget(QFrame):
 
         # Next button with icon
         self.next_button = QPushButton()
-        next_icon = resource_path("Icons/Yaml_downarrow.svg")
-        self.next_button.setIcon(QIcon(next_icon))
         self.next_button.setIconSize(QSize(14, 14))
         self.next_button.setFixedSize(24, 24)
         self.next_button.setToolTip("Next (Enter)")
@@ -207,8 +203,6 @@ class SearchWidget(QFrame):
 
         # Case sensitive toggle with icon
         self.case_button = QPushButton()
-        case_icon = resource_path("Icons/Yaml_Casesensitive.svg")
-        self.case_button.setIcon(QIcon(case_icon))
         self.case_button.setIconSize(QSize(14, 14))
         self.case_button.setFixedSize(24, 24)
         self.case_button.setCheckable(True)
@@ -218,13 +212,33 @@ class SearchWidget(QFrame):
 
         # Close button with icon
         self.close_button = QPushButton()
-        close_icon = resource_path("Icons/close.svg")
-        self.close_button.setIcon(QIcon(close_icon))
         self.close_button.setIconSize(QSize(12, 12))
         self.close_button.setFixedSize(18, 18)
         self.close_button.setToolTip("Close (Escape)")
         self.close_button.clicked.connect(self.close_search)
         layout.addWidget(self.close_button)
+        
+        # Load theme icons initially
+        from UI.ThemeManager import get_theme_manager
+        current_theme = get_theme_manager().get_current_theme_name()
+        self.update_icons(current_theme)
+
+    def update_style(self):
+        """Update widget stylesheet"""
+        self.setStyleSheet(YAMLSectionStyles.get_search_widget_style())
+
+    def update_icons(self, theme_name):
+        """Update icons based on current theme"""
+        from UI.Icons import Icons
+        self.prev_button.setIcon(QIcon(Icons.get_theme_icon_path("Yaml_uparrow.svg", theme_name)))
+        self.next_button.setIcon(QIcon(Icons.get_theme_icon_path("Yaml_downarrow.svg", theme_name)))
+        self.case_button.setIcon(QIcon(Icons.get_theme_icon_path("Yaml_Casesensitive.svg", theme_name)))
+        self.close_button.setIcon(QIcon(Icons.get_theme_icon_path("close.svg", theme_name)))
+
+    def update_theme(self, theme_name):
+        """Called when theme changes to update everything"""
+        self.update_style()
+        self.update_icons(theme_name)
 
 
     def setup_shortcuts(self):
@@ -600,6 +614,8 @@ class DetailPageYAMLSection(BaseDetailSection):
         self.yaml_edited = False
         self.is_helm_resource = False
         self.reload_retry_count = 0
+        self._reload_success = False  # Track whether reload has succeeded
+        self._reload_in_progress = False  # Force API fetch during post-deploy reloads
         self.setup_yaml_ui()
 
     def _on_theme_changed(self, theme_name):
@@ -624,6 +640,10 @@ class DetailPageYAMLSection(BaseDetailSection):
                 self.yaml_editor.setStyleSheet(YAMLSectionStyles.get_yaml_editor_readonly_style())
             else:
                 self.yaml_editor.setStyleSheet(YAMLSectionStyles.get_yaml_editor_edit_style())
+                
+        # Update search widget styling and icons if it exists
+        if hasattr(self, 'yaml_editor') and hasattr(self.yaml_editor, 'search_widget') and self.yaml_editor.search_widget:
+            self.yaml_editor.search_widget.update_theme(theme_name)
 
     def setup_yaml_ui(self):
         """Setup YAML-specific UI"""
@@ -721,7 +741,8 @@ class DetailPageYAMLSection(BaseDetailSection):
         try:
             # CRITICAL FIX: Check if we already have raw_data from the page (e.g., NodesPage)
             # This prevents unnecessary API calls and empty YAML sections
-            if self.current_data is not None:
+            # However, after a deploy we MUST bypass the cache to fetch fresh server state
+            if self.current_data is not None and not self._reload_in_progress:
                 logging.info(f"YAML section: Using existing raw_data for {self.resource_type}/{self.resource_name}")
                 # Use the existing data directly instead of making API call
                 self.handle_data_loaded(self.current_data)
@@ -742,13 +763,16 @@ class DetailPageYAMLSection(BaseDetailSection):
         """Handle data loaded from Kubernetes API"""
         try:
             self.disconnect_api_signals()
+            self._reload_in_progress = False  # Reset: fresh data received
             self.handle_data_loaded(data)
         except Exception as e:
+            self._reload_in_progress = False
             self.handle_error(f"Error processing loaded data: {str(e)}")
 
     def handle_api_error(self, error_message):
         """Handle API error"""
         self.disconnect_api_signals()
+        self._reload_in_progress = False  # Reset to restore normal cache behavior
         self.handle_error(error_message)
 
     def update_ui_with_data(self, data: Dict[str, Any]):
@@ -774,6 +798,9 @@ class DetailPageYAMLSection(BaseDetailSection):
             self.original_yaml = yaml_text
 
             logging.debug(f"Successfully rendered YAML for {self.resource_type}/{self.resource_name}")
+            
+            # Set success flag after successful data load (thread-safe via QTimer)
+            QTimer.singleShot(0, lambda: setattr(self, '_reload_success', True))
 
         except Exception as e:
             error_message = f"Error rendering YAML: {str(e)}"
@@ -869,13 +896,22 @@ class DetailPageYAMLSection(BaseDetailSection):
                 # Keep only the fields that are allowed to be changed in Pods
                 editable_pod_spec = {}
 
-                # Always keep containers (for image updates)
+                # Only send name (strategic merge key) + image (only mutable container field)
+                # Sending full container objects (ports, env, resources, etc.) causes:
+                # 1. Strategic merge patch ambiguity on duplicate containerPort values → "Duplicate value" error
+                # 2. Kubernetes immutability rejection → "Forbidden: pod updates may not change fields other than..."
                 if 'containers' in spec:
-                    editable_pod_spec['containers'] = spec['containers']
+                    editable_pod_spec['containers'] = [
+                        {k: c[k] for k in ('name', 'image') if k in c}
+                        for c in spec['containers']
+                    ]
 
-                # Keep initContainers if present
+                # Keep initContainers if present (same restriction applies)
                 if 'initContainers' in spec:
-                    editable_pod_spec['initContainers'] = spec['initContainers']
+                    editable_pod_spec['initContainers'] = [
+                        {k: c[k] for k in ('name', 'image') if k in c}
+                        for c in spec['initContainers']
+                    ]
 
                 # Keep activeDeadlineSeconds if present
                 if 'activeDeadlineSeconds' in spec:
@@ -1082,8 +1118,10 @@ class DetailPageYAMLSection(BaseDetailSection):
 
     def schedule_data_reload(self):
         """Schedule a data reload with a configurable delay to allow changes to propagate"""
-        # Reset retry counter when starting a new reload sequence
+        # Reset retry counter and success flag when starting a new reload sequence
         self.reload_retry_count = 0
+        self._reload_success = False
+        self._reload_in_progress = True  # Force API fetch, bypass current_data cache
         self._perform_scheduled_reload()
 
     def _perform_scheduled_reload(self):
@@ -1103,7 +1141,12 @@ class DetailPageYAMLSection(BaseDetailSection):
 
     def _check_and_reload_again(self):
         """Helper to continue the reload sequence"""
+        # Short-circuit if reload has already succeeded
+        if self._reload_success:
+            return
+        
         if self.isVisible(): # Only reload if still visible
+            self._reload_in_progress = True  # Force API fetch, bypass current_data cache
             self.load_data()
 
     # Methods for preferences integration

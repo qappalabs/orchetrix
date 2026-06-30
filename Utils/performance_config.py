@@ -1,13 +1,13 @@
 """
-Performance Configuration - Centralized settings for optimal performance
+Performance Configuration – Centralized settings for optimal performance.
 
-NOTE: This file is currently UNUSED. It was created to provide centralized performance
-configuration with multiple profiles (high_performance, balanced, responsive) and adaptive
-optimization based on system resources. However, the application uses simpler direct constants
-in individual files instead (e.g., BATCH_SIZE in base_resource_page.py). This approach was
-abandoned in favor of simpler, directly-defined constants. Kept for potential future integration
-if centralized performance management becomes necessary.
+# NOTE: Currently unused – kept for potential future centralized performance management.
+# The application currently uses simpler direct constants in individual files.
 """
+import logging
+import os
+
+__all__ = ["get_performance_config", "apply_performance_optimizations", "PERFORMANCE_PROFILES"]
 
 # Table Rendering Performance
 TABLE_BATCH_SIZE = 25  # Smaller batches for responsive UI
@@ -108,16 +108,12 @@ def apply_performance_optimizations():
             - balanced: Typical systems (8GB+ RAM, 4+ CPUs)
             - resource_constrained: Limited systems or detection failures
     """
-    import logging
-    import os
-
     logger = logging.getLogger(__name__)
 
     try:
         import psutil
     except ImportError:
-        # Fallback to basic detection without psutil
-        cpu_count = os.cpu_count() or 4
+        # Fallback: psutil not available, use resource-constrained profile
         logger.debug("psutil not available, using resource_constrained profile")
         return get_performance_config("resource_constrained")
 

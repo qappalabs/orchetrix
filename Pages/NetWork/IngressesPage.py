@@ -1,3 +1,6 @@
+"""
+Dynamic implementation of the Ingresses page with live Kubernetes data and resource operations.
+"""
 from PyQt6.QtWidgets import (
     QHeaderView
 )
@@ -50,12 +53,12 @@ class IngressesPage(BaseResourcePage):
         # Column specifications with optimized default widths
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
-            (1, 140, "interactive"), # Name
+            (1, 140, "stretch"),     # Name - stretch to fill remaining space
             (2, 90, "interactive"),  # Namespace
             (3, 80, "interactive"),  # LoadBalancer
             (4, 60, "interactive"),  # Rule
-            (5, 80, "stretch"),      # Age - stretch to fill remaining space
-            (6, 40, "fixed")        # Actions
+            (5, 80, "interactive"),  # Age
+            (6, 40, "fixed")         # Actions
         ]
 
         # Apply column configuration
@@ -73,12 +76,34 @@ class IngressesPage(BaseResourcePage):
         # Ensure full width utilization after configuration
         QTimer.singleShot(100, self._ensure_full_width_utilization)
 
+    def _auto_resize_columns(self, max_col_widths=None, min_col_widths=None):
+        """Override to provide explicit widths for columns to let Name stretch and avoid clipping."""
+        explicit_mins = {
+            1: 120,  # Name
+            2: 120,  # Namespace
+            3: 120,  # LoadBalancer
+            4: 120,  # Rule
+            5: 60,   # Age
+            6: 40,   # Actions
+        }
+        if min_col_widths:
+            explicit_mins.update(min_col_widths)
+        explicit_maxes = {
+            2: 150,  # Namespace
+            3: 180,  # LoadBalancer
+            4: 250,  # Rule
+            5: 80,   # Age
+        }
+        if max_col_widths:
+            explicit_maxes.update(max_col_widths)
+        super()._auto_resize_columns(max_col_widths=explicit_maxes, min_col_widths=explicit_mins)
+
     def populate_resource_row(self, row, resource):
         """
         Populate a single row with Ingress data
         """
         # Set row height once
-        self.table.setRowHeight(row, 40)
+        self.table.setRowHeight(row, 42)
 
         # Create checkbox for row selection
         resource_name = resource["name"]

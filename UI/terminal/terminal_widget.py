@@ -46,7 +46,7 @@ class UnifiedTerminalWidget(QTextEdit, ThemeAwareMixin):
         self.setup_ui()
         self.update_prompt_with_working_directory()
         self.append_prompt()
-        print(f"UnifiedTerminalWidget initialized with copy_paste_enabled={self.copy_paste_enabled}")
+        logging.debug(f"UnifiedTerminalWidget initialized with copy_paste_enabled={self.copy_paste_enabled}")
 
     def setup_ui(self):
         """Initialize the UI components and styling."""
@@ -61,7 +61,7 @@ class UnifiedTerminalWidget(QTextEdit, ThemeAwareMixin):
     def set_copy_paste_enabled(self, enabled):
         """Enable or disable copy/paste functionality."""
         self.copy_paste_enabled = enabled
-        print(f"UnifiedTerminalWidget.set_copy_paste_enabled: copy_paste_enabled={enabled}")
+        logging.debug(f"UnifiedTerminalWidget.set_copy_paste_enabled: copy_paste_enabled={enabled}")
 
     def set_font(self, font_family, font_size=None):
         """
@@ -71,11 +71,11 @@ class UnifiedTerminalWidget(QTextEdit, ThemeAwareMixin):
             font_family (str): The font family name
             font_size (int, optional): The font size (6-72 range)
         """
-        print(f"UnifiedTerminalWidget.set_font: font_family={font_family}, font_size={font_size}")
+        logging.debug(f"UnifiedTerminalWidget.set_font: font_family={font_family}, font_size={font_size}")
         self.font_family = font_family
         if font_size is not None:
             self.font_size = max(6, min(int(font_size), 72))
-            print(f"Updated font size to: {self.font_size}")
+            logging.debug(f"Updated font size to: {self.font_size}")
 
         new_font = QFont(self.font_family, self.font_size)
         self.setFont(new_font)
@@ -99,7 +99,7 @@ class UnifiedTerminalWidget(QTextEdit, ThemeAwareMixin):
         self.document().setDefaultFont(new_font)
         self.repaint()
         self.update()
-        print(f"Font updated: {self.font().family()}, size {self.font().pointSize()}")
+        logging.debug(f"Font updated: {self.font().family()}, size {self.font().pointSize()}")
 
     def update_prompt_with_working_directory(self):
         """Update the terminal prompt to include the current working directory."""
@@ -216,7 +216,7 @@ class UnifiedTerminalWidget(QTextEdit, ThemeAwareMixin):
 
     def contextMenuEvent(self, event):
         """Create and show the context menu with terminal-specific actions."""
-        print(f"UnifiedTerminalWidget.contextMenuEvent: copy_paste_enabled={self.copy_paste_enabled}, edit_mode={self.edit_mode}")
+        logging.debug(f"UnifiedTerminalWidget.contextMenuEvent: copy_paste_enabled={self.copy_paste_enabled}, edit_mode={self.edit_mode}")
         menu = self.createStandardContextMenu()
 
         menu.addSeparator()
@@ -281,7 +281,7 @@ class UnifiedTerminalWidget(QTextEdit, ThemeAwareMixin):
 
         menu.exec(event.globalPos())
         event.accept()
-        print("UnifiedTerminalWidget: Enhanced context menu executed")
+        logging.debug("UnifiedTerminalWidget: Enhanced context menu executed")
 
     def _get_current_search_info(self):
         """Get current search information from logs viewer."""
@@ -441,7 +441,7 @@ class UnifiedTerminalWidget(QTextEdit, ThemeAwareMixin):
 
     def mousePressEvent(self, event):
         """Handle mouse press events."""
-        print(f"UnifiedTerminalWidget.mousePressEvent: copy_paste_enabled={self.copy_paste_enabled}, button={event.button()}, edit_mode={self.edit_mode}")
+        logging.debug(f"UnifiedTerminalWidget.mousePressEvent: copy_paste_enabled={self.copy_paste_enabled}, button={event.button()}, edit_mode={self.edit_mode}")
         self.setFocus()
         if event.button() == Qt.MouseButton.RightButton:
             # The context menu will handle pasting.
@@ -458,7 +458,7 @@ class UnifiedTerminalWidget(QTextEdit, ThemeAwareMixin):
             self.ensure_cursor_at_input()
 
         super().mousePressEvent(event)
-        print("UnifiedTerminalWidget: Mouse event passed to super")
+        logging.debug("UnifiedTerminalWidget: Mouse event passed to super")
 
     def mouseMoveEvent(self, event):
         """Handle mouse move events - allow default behavior for text selection."""
@@ -479,7 +479,7 @@ class UnifiedTerminalWidget(QTextEdit, ThemeAwareMixin):
     def paste(self):
         """Custom paste implementation to protect read-only parts of the terminal."""
         if not self.copy_paste_enabled or self.edit_mode:
-            print("UnifiedTerminalWidget: Paste blocked (copy_paste_enabled=False or edit_mode=True)")
+            logging.debug("UnifiedTerminalWidget: Paste blocked (copy_paste_enabled=False or edit_mode=True)")
             return
 
         cursor = self.textCursor()
@@ -491,9 +491,9 @@ class UnifiedTerminalWidget(QTextEdit, ThemeAwareMixin):
                 # Use the base class paste to handle the actual insertion
                 super().paste()
                 self.current_input = self.toPlainText()[self.input_position:]
-                print(f"UnifiedTerminalWidget: Pasted text: {text_to_paste[:50]}...")
+                logging.debug(f"UnifiedTerminalWidget: Pasted text: {text_to_paste[:50]}...")
         else:
-            print("UnifiedTerminalWidget: Paste blocked (cursor in read-only area)")
+            logging.debug("UnifiedTerminalWidget: Paste blocked (cursor in read-only area)")
 
     def keyPressEvent(self, event):
         """Handle keyboard input events."""

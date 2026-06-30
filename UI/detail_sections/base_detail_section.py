@@ -2,7 +2,7 @@
 Base class for all detail page sections with common functionality
 """
 
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QLayout
 from PyQt6.QtCore import pyqtSignal, QTimer
 from abc import ABCMeta, abstractmethod
 from typing import Optional, Dict, Any
@@ -40,6 +40,10 @@ class BaseDetailSection(ThemeAwareMixin, QWidget, metaclass=QWidgetMeta):
         self.current_data = None
         self.is_loading = False
         self._signals_connected = False
+        
+        # ViewModel state tracker for error severity.
+        # Decouples theme transitions from UI text parsing.
+        self._is_info_error_state = False
 
         self.setup_ui()
 
@@ -75,16 +79,31 @@ class BaseDetailSection(ThemeAwareMixin, QWidget, metaclass=QWidgetMeta):
             self.is_loading = False
             self.loading_finished.emit(self.section_name)
 
-    def show_error(self, error_message: str):
-        """Show error message only for real errors, not missing resources"""
-        self.hide_loading()
-
-        # Don't show error for resources that don't exist in cluster
-        if (
+    def _is_info_error(self, error_message: str) -> bool:
+        """
+        Evaluates raw backend error payload for non-critical missing resource conditions.
+        
+        Args:
+            error_message: Raw error message from backend API
+            
+        Returns:
+            True if error represents a missing/unavailable resource (info-level),
+            False if error represents a critical failure (error-level)
+        """
+        return (
             "not found" in error_message.lower()
             or "404" in error_message
             or "not available in this cluster" in error_message.lower()
-        ):
+        )
+
+    def show_error(self, error_message: str):
+        """Show error message and cache severity state"""
+        self.hide_loading()
+
+        # Determine state from raw payload and cache it in the ViewModel
+        self._is_info_error_state = self._is_info_error(error_message)
+
+        if self._is_info_error_state:
             # Just show that resource is not available
             self.error_widget.setText(
                 f"{self.section_name}: Resource not available in this cluster"
@@ -99,8 +118,10 @@ class BaseDetailSection(ThemeAwareMixin, QWidget, metaclass=QWidgetMeta):
         self.error_occurred.emit(self.section_name, error_message)
 
     def clear_error(self):
-        """Clear error message"""
+        """Clear error message and reset internal state"""
         self.error_widget.hide()
+        # Ensure state does not bleed into subsequent resource loads
+        self._is_info_error_state = False
 
     def set_resource(
         self, resource_type: str, resource_name: str, namespace: Optional[str] = None
@@ -160,11 +181,9 @@ class BaseDetailSection(ThemeAwareMixin, QWidget, metaclass=QWidgetMeta):
         logging.error(f"{self.section_name} error: {error_message}")
 
     def _on_theme_changed(self, theme_name):
-        """Handle theme changes - update error widget styling"""
+        """Handle theme changes by querying internal state, not presentation text"""
         if self.error_widget.isVisible():
-            # Re-apply the current error style with new theme
-            current_text = self.error_widget.text()
-            if "not available in this cluster" in current_text:
+            if self._is_info_error_state:
                 self.error_widget.setStyleSheet(get_error_widget_info_style())
             else:
                 self.error_widget.setStyleSheet(get_error_widget_error_style())
@@ -196,3 +215,22 @@ class BaseDetailSection(ThemeAwareMixin, QWidget, metaclass=QWidgetMeta):
         finally:
             # ← ALWAYS reset the flag
             self._signals_connected = False
+
+    def _clear_layout(self, layout: QLayout):
+        """
+        Helper method to safely clear all widgets from a layout.
+        CRITICAL: Hides widgets before unparenting to prevent ghost windows during destruction.
+        """
+        if not layout:
+            return
+            
+        while layout.count():
+            item = layout.takeAt(0)
+            if item.widget():
+                widget = item.widget()
+                widget.hide() # CRITICAL: Hide before unparenting to prevent top-level window flash
+                widget.setParent(None)
+                widget.deleteLater()
+            elif item.layout():
+                # Recursively clear sub-layouts if needed
+                self._clear_layout(item.layout())

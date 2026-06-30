@@ -10,6 +10,7 @@ from Base_Components.base_components import SortableTableWidgetItem
 from Base_Components.base_resource_page import BaseResourcePage
 from UI.Styles import AppColors
 from Utils.data_formatters import parse_age_to_seconds
+from Utils.resource_utils import singularize_resource_type
 
 class NetworkPoliciesPage(BaseResourcePage):
     """
@@ -36,12 +37,8 @@ class NetworkPoliciesPage(BaseResourcePage):
         # Set up the base UI components
         super().setup_ui("Network Policies", headers, sortable_columns)
 
-        # Table styling is already handled by BaseResourcePage
-
         # Configure column widths
         self.configure_columns()
-
-        # Add delete selected button
 
     def configure_columns(self):
         """Configure column widths for full screen utilization"""
@@ -53,11 +50,11 @@ class NetworkPoliciesPage(BaseResourcePage):
         # Column specifications with optimized default widths
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
-            (1, 140, "interactive"), # Name
+            (1, 140, "stretch"),     # Name - stretch to fill remaining space
             (2, 90, "interactive"),  # Namespace
             (3, 80, "interactive"),  # Policy Type
-            (4, 80, "stretch"),      # Age - stretch to fill remaining space
-            (5, 40, "fixed")        # Actions
+            (4, 80, "interactive"),  # Age
+            (5, 40, "fixed")         # Actions
         ]
 
         # Apply column configuration
@@ -76,12 +73,32 @@ class NetworkPoliciesPage(BaseResourcePage):
         # Ensure full width utilization after configuration
         QTimer.singleShot(100, self._ensure_full_width_utilization)
 
+    def _auto_resize_columns(self, max_col_widths=None, min_col_widths=None):
+        """Override to provide explicit widths for columns to let Name stretch and avoid clipping."""
+        explicit_mins = {
+            1: 120,  # Name
+            2: 120,  # Namespace
+            3: 100,  # Policy Type
+            4: 60,   # Age
+            5: 40,   # Actions
+        }
+        if min_col_widths:
+            explicit_mins.update(min_col_widths)
+        explicit_maxes = {
+            2: 150,  # Namespace
+            3: 150,  # Policy Type
+            4: 80,   # Age
+        }
+        if max_col_widths:
+            explicit_maxes.update(max_col_widths)
+        super()._auto_resize_columns(max_col_widths=explicit_maxes, min_col_widths=explicit_mins)
+
     def populate_resource_row(self, row, resource):
         """
         Populate a single row with NetworkPolicy data
         """
         # Set row height once
-        self.table.setRowHeight(row, 40)
+        self.table.setRowHeight(row, 42)
 
         # Create checkbox for row selection
         resource_name = resource["name"]
@@ -159,8 +176,6 @@ class NetworkPoliciesPage(BaseResourcePage):
 
                 if parent and hasattr(parent, 'detail_manager'):
                     # Get singular resource type
-                    resource_type = self.resource_type
-                    if resource_type.endswith('s'):
-                        resource_type = resource_type[:-1]
+                    resource_type = singularize_resource_type(self.resource_type)
 
                     parent.detail_manager.show_detail(resource_type, resource_name, namespace)

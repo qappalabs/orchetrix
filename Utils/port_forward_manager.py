@@ -12,14 +12,9 @@ import time
 from dataclasses import dataclass
 from typing import Dict, Optional, List
 
-# Windows subprocess configuration to prevent terminal popup
-if sys.platform == 'win32':
-    SUBPROCESS_FLAGS = subprocess.CREATE_NO_WINDOW
-else:
-    SUBPROCESS_FLAGS = 0
-
 from PyQt6.QtCore import QObject, pyqtSignal, QThread, QTimer
 
+from Utils import SUBPROCESS_FLAGS
 from Utils.kubernetes_client import get_kubernetes_client
 from Utils.thread_manager import is_shutdown_requested
 
@@ -31,8 +26,10 @@ class PortForwardConfig:
     namespace: str
     local_port: int
     target_port: int
+    kube_context: Optional[str] = None  # Explicit cluster context for kubectl
     protocol: str = 'TCP'
-    status: str = 'inactive'  # 'active', 'inactive', 'error'
+    bind_address: str = 'localhost'  # kubectl --address (e.g. 'localhost' or '0.0.0.0')
+    status: str = 'inactive'  # 'starting', 'active', 'inactive', 'error'
     error_message: Optional[str] = None
     created_at: float = None
 
@@ -54,7 +51,7 @@ class KubernetesPortForwarder:
 
         try:
             managed_client = get_kubernetes_client()
-            self.kube_client = managed_client if managed_client else None
+            self.kube_client = managed_client
         except Exception as e:
             logging.error(f"Failed to get kubernetes client: {e}")
             self.kube_client = None
@@ -76,35 +73,43 @@ class KubernetesPortForwarder:
                     "You can test with: kubectl cluster-info"
                 )
 
-            # Get target pod for service or use pod directly
-            target_pod, target_port = self._resolve_target()
+            # Resolve target resource reference (e.g. "pod/<name>" or "service/<name>")
+            target_ref, target_port = self._resolve_target()
 
             logging.info(
-                f"Starting kubectl port forward: localhost:{self.config.local_port} -> {target_pod}:{target_port}")
+                f"Starting kubectl port forward: localhost:{self.config.local_port} -> {target_ref}:{target_port}")
 
             # Use kubectl port-forward subprocess for reliability
             self.running = True
-            self._start_kubectl_forwarding(target_pod, target_port)
+            self._start_kubectl_forwarding(target_ref, target_port)
 
             logging.info(
-                f"Port forwarder started: localhost:{self.config.local_port} -> {target_pod}:{target_port}")
+                f"Port forwarder started: localhost:{self.config.local_port} -> {target_ref}:{target_port}")
 
         except Exception as e:
             logging.error(f"Error starting port forwarder: {e}")
             self.running = False
             raise e
 
-    def _start_kubectl_forwarding(self, target_pod, target_port):
+    def _start_kubectl_forwarding(self, target_ref, target_port):
         """Start kubectl port-forward subprocess."""
         try:
-            # Build kubectl command
+            # Build kubectl command — target_ref is already a full resource reference
+            # e.g. "pod/<name>" or "service/<name>", so no prefix needed here
             cmd = [
                 'kubectl',
                 'port-forward',
-                f'pod/{target_pod}',
+                target_ref,
                 f'{self.config.local_port}:{target_port}',
                 '--namespace', self.config.namespace
             ]
+
+            # Honor the bind address chosen in the dialog (defaults to localhost)
+            if getattr(self.config, 'bind_address', None):
+                cmd.extend(['--address', self.config.bind_address])
+
+            if self.config.kube_context:
+                cmd.extend(['--context', self.config.kube_context])
 
             logging.info(f"Executing: {' '.join(cmd)}")
 
@@ -118,32 +123,33 @@ class KubernetesPortForwarder:
                 creationflags=SUBPROCESS_FLAGS if sys.platform == 'win32' else 0
             )
 
-            # Start monitoring thread
-            self.monitor_thread = threading.Thread(
-                target=self._monitor_process,
-                daemon=True
-            )
-            self.monitor_thread.start()
-
-            # Give kubectl a moment to start
+            # Give kubectl a moment to start before checking status.
+            # NOTE: the monitor thread is intentionally NOT started yet — if kubectl
+            # exits during this window we read stderr directly here with no race.
             time.sleep(3)
 
             # Check if process started successfully
             if self.process.poll() is not None:
-                # Process already terminated
-                stderr_output = ""
+                # Process already terminated — read stderr directly (no monitor
+                # thread contention at this point)
                 try:
-                    stderr_output = self.process.stderr.read(
-                    ) if self.process.stderr else "No error output"
-                except BaseException:
-                    stderr_output = "Could not read error output"
+                    stderr_output = self.process.stderr.read() if self.process.stderr else ""
+                except Exception:
+                    stderr_output = ""
                 raise RuntimeError(
-                    f"kubectl port-forward failed to start: {stderr_output}")
+                    f"kubectl port-forward failed to start: {stderr_output.strip() or 'unknown error'}")
 
             # Verify port is actually listening
             if not self._wait_for_port_to_be_ready(self.config.local_port, timeout=10):
                 raise RuntimeError(
                     f"Port {self.config.local_port} is not ready after 10 seconds")
+
+            # Process is confirmed running — now start the monitor thread
+            self.monitor_thread = threading.Thread(
+                target=self._monitor_process,
+                daemon=True
+            )
+            self.monitor_thread.start()
 
         except Exception as e:
             logging.error(f"Error starting kubectl forwarding: {e}")
@@ -199,9 +205,13 @@ class KubernetesPortForwarder:
                     f"kubectl client check failed: {result.stderr}")
                 return False
 
-            # Then check if kubectl can access cluster
+            # Then check if kubectl can access the target cluster
+            cluster_info_cmd = ['kubectl', 'cluster-info']
+            if self.config.kube_context:
+                cluster_info_cmd.extend(['--context', self.config.kube_context])
+
             cluster_info = subprocess.run(
-                ['kubectl', 'cluster-info'],
+                cluster_info_cmd,
                 capture_output=True,
                 text=True,
                 timeout=5,
@@ -228,71 +238,35 @@ class KubernetesPortForwarder:
         start_time = time.time()
         while time.time() - start_time < timeout:
             try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(1)
-                result = sock.connect_ex(('localhost', port))
-                sock.close()
-                if result == 0:
-                    return True
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                    sock.settimeout(1)
+                    result = sock.connect_ex(('localhost', port))
+                    if result == 0:
+                        return True
             except Exception:
                 pass
             time.sleep(0.5)
         return False
 
     def _resolve_target(self):
-        """Resolve target pod and port."""
+        """Return a kubectl resource reference and port for the configured target.
+
+        Delegates resolution entirely to kubectl rather than re-implementing
+        service-to-pod selector logic in Python.  This handles:
+          - Standard selector-backed services
+          - Selectorless services (e.g. the built-in 'kubernetes' service)
+          - ExternalName services (kubectl will surface its own error)
+        """
         if self.config.resource_type == 'pod':
-            return self.config.resource_name, self.config.target_port
+            return f"pod/{self.config.resource_name}", self.config.target_port
 
         elif self.config.resource_type == 'service':
-            # Find pods for service
-            try:
-                # Get the actual v1 API client
-                v1_client = self.kube_client.v1 if hasattr(
-                    self.kube_client, 'v1') else self.kube_client
+            # Pass service/<name> directly to kubectl.  kubectl resolves the
+            # service port to a backing endpoint itself, so we never need to
+            # inspect spec.selector or list pods here.
+            return f"service/{self.config.resource_name}", self.config.target_port
 
-                service = v1_client.read_namespaced_service(
-                    name=self.config.resource_name,
-                    namespace=self.config.namespace
-                )
-
-                if not service.spec.selector:
-                    raise ValueError(
-                        f"Service {self.config.resource_name} has no selector")
-
-                # Find pods matching selector
-                selector = ','.join(
-                    [f"{k}={v}" for k, v in service.spec.selector.items()])
-                pods = v1_client.list_namespaced_pod(
-                    namespace=self.config.namespace,
-                    label_selector=selector
-                )
-
-                if not pods.items:
-                    raise ValueError(
-                        f"No pods found for service {self.config.resource_name}")
-
-                # Use first running pod
-                for pod in pods.items:
-                    if pod.status.phase == 'Running':
-                        target_port = self.config.target_port
-
-                        # Map service port to container port
-                        if service.spec.ports:
-                            for port in service.spec.ports:
-                                if port.port == self.config.target_port:
-                                    target_port = port.target_port or port.port
-                                    break
-
-                        logging.info(
-                            f"Service {self.config.resource_name} resolved to pod {pod.metadata.name}:{target_port}")
-                        return pod.metadata.name, target_port
-
-                raise ValueError(
-                    f"No running pods found for service {self.config.resource_name}")
-            except Exception as e:
-                logging.error(f"Error resolving service target: {e}")
-                raise
+        raise ValueError(f"Unsupported resource type: {self.config.resource_type}")
 
     def stop(self):
         """Stop port forwarding."""
@@ -349,6 +323,7 @@ class PortForwardWorker(QThread):
     """Worker thread for port forwarding."""
 
     # Signals
+    started = pyqtSignal()
     finished = pyqtSignal(dict)
     error = pyqtSignal(str)
 
@@ -366,6 +341,9 @@ class PortForwardWorker(QThread):
             self.forwarder = KubernetesPortForwarder(self.config)
             self.forwarder.start()
 
+            # Signal that port forward is confirmed running
+            self.started.emit()
+
             # Keep the worker running to maintain the port forward
             while not self._stop_requested and self.forwarder.is_running() and not is_shutdown_requested():
                 time.sleep(1)
@@ -378,11 +356,11 @@ class PortForwardWorker(QThread):
             self.finished.emit({'status': 'completed', 'config': self.config})
 
         except Exception as e:
-            error_msg = f"Port forward error for {self.config.key}: {e}"
-            logging.error(error_msg)
+            logging.error(f"Port forward error for {self.config.key}: {e}")
             if self.forwarder:
                 self.forwarder.stop()
-            self.error.emit(error_msg)
+            # Emit only the exception message — no internal key prefix in UI-facing text
+            self.error.emit(str(e))
 
     def stop(self):
         """Stop port forwarding."""
@@ -400,7 +378,8 @@ class PortForwardManager(QObject):
     """Manages multiple port forwards."""
 
     # Signals
-    port_forward_started = pyqtSignal(object)
+    port_forward_started = pyqtSignal(object)   # config — emitted when worker thread begins (status='starting')
+    port_forward_active = pyqtSignal(object)    # config — emitted when kubectl is confirmed running (status='active')
     port_forward_stopped = pyqtSignal(str)
     port_forward_error = pyqtSignal(str, str)
     port_forwards_updated = pyqtSignal(list)
@@ -446,10 +425,23 @@ class PortForwardManager(QObject):
                            namespace: str,
                            target_port: int,
                            local_port: Optional[int] = None,
-                           protocol: str = 'TCP') -> PortForwardConfig:
-        """Start a new port forward"""
+                           kube_context: Optional[str] = None,
+                           protocol: str = 'TCP',
+                           bind_address: str = 'localhost') -> PortForwardConfig:
+        """Start a new port forward with explicit context routing."""
 
         with self._lock:
+            # Auto-resolve context from the app's active cluster if not provided
+            resolved_context = kube_context
+            if not resolved_context:
+                try:
+                    from Utils.cluster_connector import get_cluster_connector
+                    connector = get_cluster_connector()
+                    if hasattr(connector, 'current_cluster') and connector.current_cluster:
+                        resolved_context = connector.current_cluster
+                except Exception as e:
+                    logging.debug(f"Could not auto-resolve kube_context for port forward: {e}")
+
             # Find available local port if not specified
             if local_port is None:
                 local_port = self.get_available_local_port()
@@ -457,14 +449,16 @@ class PortForwardManager(QObject):
                 if not self._is_port_available(local_port):
                     raise ValueError(f"Port {local_port} is already in use")
 
-            # Create configuration
+            # Create configuration with explicit context tracking
             config = PortForwardConfig(
                 resource_name=resource_name,
                 resource_type=resource_type,
                 namespace=namespace,
                 local_port=local_port,
                 target_port=target_port,
-                protocol=protocol
+                kube_context=resolved_context,
+                protocol=protocol,
+                bind_address=bind_address
             )
 
             # Check if forward already exists
@@ -485,6 +479,9 @@ class PortForwardManager(QObject):
             self._workers[config.key] = worker
 
             # Connect worker signals
+            worker.started.connect(
+                lambda: self._handle_worker_started(config.key)
+            )
             worker.finished.connect(
                 lambda result: self._handle_worker_finished(config.key, result)
             )
@@ -495,8 +492,8 @@ class PortForwardManager(QObject):
             # Start the worker thread
             worker.start()
 
-            # Update status
-            config.status = 'active'
+            # Update status - will transition to 'active' when worker confirms
+            config.status = 'starting'
             self.port_forward_started.emit(config)
             self._emit_updates()
 
@@ -540,6 +537,15 @@ class PortForwardManager(QObject):
         with self._lock:
             return self._forwards.get(key)
 
+    def _handle_worker_started(self, key: str):
+        """Handle worker successfully started port forwarding."""
+        with self._lock:
+            if key in self._forwards:
+                config = self._forwards[key]
+                config.status = 'active'
+                self.port_forward_active.emit(config)
+                self._emit_updates()
+
     def _handle_worker_finished(self, key: str, result):
         """Handle worker finished."""
         with self._lock:
@@ -556,6 +562,10 @@ class PortForwardManager(QObject):
                 config.status = 'error'
                 config.error_message = error_message
                 self.port_forward_error.emit(key, error_message)
+                # The worker thread has already exited (exception caused run() to return)
+                # so remove the failed entry immediately — no point keeping it in the list
+                del self._forwards[key]
+                self._workers.pop(key, None)
                 self._emit_updates()
 
     def _check_port_forward_status(self):
@@ -610,13 +620,58 @@ class PortForwardManager(QObject):
 # Singleton instance
 _port_forward_manager = None
 _port_forward_manager_lock = threading.Lock()
+_on_created_callbacks: list = []
+
+
+def register_on_manager_created(callback) -> None:
+    """Register a callback to be invoked when the PortForwardManager singleton
+    is first created.  If the manager already exists the callback is called
+    immediately.  This lets callers (e.g. MainWindow) wire up signal connections
+    without forcing eager creation of the manager.
+
+    Thread-safe: the check and the append are both performed while holding
+    _port_forward_manager_lock so that a concurrent get_port_forward_manager
+    call cannot create the manager and clear _on_created_callbacks in the
+    gap between the two operations, which would silently drop the callback.
+    The callback itself is invoked *outside* the lock to avoid a potential
+    deadlock if the callback re-enters get_port_forward_manager.
+    """
+    global _port_forward_manager
+    existing_manager = None
+    with _port_forward_manager_lock:
+        if _port_forward_manager is not None:
+            # Capture under lock so the reference is consistent with what
+            # get_port_forward_manager considers the authoritative instance.
+            existing_manager = _port_forward_manager
+        else:
+            _on_created_callbacks.append(callback)
+
+    # Invoke outside the lock to avoid holding it during arbitrary callback code.
+    if existing_manager is not None:
+        try:
+            callback(existing_manager)
+        except Exception as e:
+            logging.warning(f"register_on_manager_created callback failed: {e}")
 
 
 def get_port_forward_manager() -> PortForwardManager:
-
     global _port_forward_manager
+    pending_callbacks: list = []
     if _port_forward_manager is None:
         with _port_forward_manager_lock:
             if _port_forward_manager is None:
                 _port_forward_manager = PortForwardManager()
+                # Snapshot and clear under the lock so callbacks fire exactly
+                # once even if another thread registers concurrently.
+                pending_callbacks = list(_on_created_callbacks)
+                _on_created_callbacks.clear()
+
+    # Invoke outside the lock to avoid deadlock if a callback re-enters
+    # get_port_forward_manager (the lock is a plain Lock, not an RLock).
+    for cb in pending_callbacks:
+        try:
+            cb(_port_forward_manager)
+        except Exception as e:
+            logging.warning(f"Port forward manager creation callback failed: {e}")
+
     return _port_forward_manager

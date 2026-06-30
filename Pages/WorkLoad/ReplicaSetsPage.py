@@ -33,15 +33,11 @@ class ReplicaSetsPage(BaseResourcePage):
         headers = ["", "Name", "Namespace", "Desired", "Current", "Ready", "Age", ""]
         sortable_columns = {1, 2, 3, 4, 5, 6}
 
-        # Set up the base UI components with styles
+        # Set up the base UI components
         super().setup_ui("Replica Sets", headers, sortable_columns)
-
-        # Table styling is already handled by BaseResourcePage
 
         # Configure column widths
         self.configure_columns()
-
-        # Add delete selected button
 
     def configure_columns(self):
         """Configure column widths for full screen utilization"""
@@ -53,12 +49,12 @@ class ReplicaSetsPage(BaseResourcePage):
         # Column specifications with optimized default widths
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
-            (1, 180, "interactive"), # Name
+            (1, 180, "stretch"),     # Name - stretch to fill remaining space
             (2, 100, "interactive"),  # Namespace
             (3, 90, "interactive"),  # Desired
             (4, 80, "interactive"),  # Current
             (5, 80, "interactive"),  # Ready
-            (6, 70, "stretch"),      # Age - stretch to fill remaining space
+            (6, 70, "interactive"),  # Age
             (7, 40, "fixed")        # Actions
         ]
 
@@ -78,33 +74,50 @@ class ReplicaSetsPage(BaseResourcePage):
         # Ensure full width utilization after configuration
         QTimer.singleShot(100, self._ensure_full_width_utilization)
 
+    def _auto_resize_columns(self, max_col_widths=None, min_col_widths=None):
+        """Override to provide explicit widths for columns to let Name stretch."""
+        explicit_mins = {
+            1: 180,  # Name
+            2: 100,  # Namespace
+            3: 80,   # Desired
+            4: 80,   # Current
+            5: 80,   # Ready
+            6: 60,   # Age
+            7: 40,   # Actions
+        }
+        
+        if min_col_widths:
+            explicit_mins.update(min_col_widths)
+            
+        explicit_maxes = {
+            2: 150,  # Namespace
+            3: 110,  # Desired
+            4: 110,  # Current
+            5: 110,  # Ready
+            6: 80,   # Age
+        }
+        
+        if max_col_widths:
+            explicit_maxes.update(max_col_widths)
+            
+        super()._auto_resize_columns(max_col_widths=explicit_maxes, min_col_widths=explicit_mins)
+
     def populate_resource_row(self, row, resource):
         """
         Populate a single row with ReplicaSet data
         """
         # Set row height
-        self.table.setRowHeight(row, 40)
+        self.table.setRowHeight(row, 42)
 
         # Create checkbox for row selection - styling handled by BaseResourcePage
         resource_name = resource["name"]
         checkbox_container = self._create_checkbox_container(row, resource_name)
         self.table.setCellWidget(row, 0, checkbox_container)
 
-        # Extract additional data from the raw_data field if available
-        raw_data = resource.get("raw_data", {})
-
-        # Get status info
-        desired = "0"
-        current = "0"
-        ready = "0"
-
-        if raw_data:
-            spec = raw_data.get("spec", {})
-            status = raw_data.get("status", {})
-
-            desired = str(spec.get("replicas", 0))
-            current = str(status.get("replicas", 0))
-            ready = str(status.get("readyReplicas", 0))
+        # Get status info directly from pre-parsed resource fields
+        desired = str(resource.get("desired", "0"))
+        current = str(resource.get("current", "0"))
+        ready = str(resource.get("ready", "0"))
 
         # Prepare data columns
         columns = [

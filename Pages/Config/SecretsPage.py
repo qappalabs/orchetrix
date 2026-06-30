@@ -27,7 +27,7 @@ class SecretsPage(BaseResourcePage):
 
     def setup_page_ui(self):
         """Set up the main UI elements for the Secrets page"""
-        # Define headers and sortable columns - KEEP ORIGINAL
+        # Define headers and sortable columns
         headers = ["", "Name", "Namespace", "Labels", "Keys", "Type", "Age", ""]
         sortable_columns = {1, 2, 3, 4, 5, 6}
 
@@ -36,8 +36,6 @@ class SecretsPage(BaseResourcePage):
 
         # Configure column widths
         self.configure_columns()
-
-        # Add delete selected button
 
     def configure_columns(self):
         """Configure column widths for full screen utilization"""
@@ -49,13 +47,13 @@ class SecretsPage(BaseResourcePage):
         # Column specifications with optimized default widths
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
-            (1, 140, "interactive"), # Name
+            (1, 140, "stretch"),     # Name - stretch to fill remaining space
             (2, 90, "interactive"),  # Namespace
             (3, 80, "interactive"),  # Lables
             (4, 60, "interactive"),  # Keys
             (5, 60, "interactive"),  # Type
-            (6, 80, "stretch"),      # Age - stretch to fill remaining space
-            (7, 40, "fixed")        # Actions
+            (6, 80, "interactive"),  # Age
+            (7, 40, "fixed")         # Actions
         ]
 
         # Apply column configuration
@@ -73,12 +71,31 @@ class SecretsPage(BaseResourcePage):
         # Ensure full width utilization after configuration
         QTimer.singleShot(100, self._ensure_full_width_utilization)
 
+    def _auto_resize_columns(self, max_col_widths=None, min_col_widths=None):
+        """Override to provide explicit widths for columns where headers are clipping."""
+        explicit_mins = {
+            # 0 is Checkbox
+            1: 120,  # Name - lower floor
+            2: 120,  # Namespace
+            3: 100,  # Labels
+            4: 80,   # Keys
+            5: 80,   # Type
+            6: 60,   # Age
+            7: 40,   # Actions
+        }
+        
+        # Merge with any caller overrides
+        if min_col_widths:
+            explicit_mins.update(min_col_widths)
+            
+        super()._auto_resize_columns(max_col_widths=max_col_widths, min_col_widths=explicit_mins)
+
     def populate_resource_row(self, row, resource):
         """
         Populate a single row with Secret data extracted from raw_data
         """
         # Set row height
-        self.table.setRowHeight(row, 40)
+        self.table.setRowHeight(row, 42)
 
         # Create checkbox for row selection
         resource_name = resource["name"]
@@ -109,7 +126,7 @@ class SecretsPage(BaseResourcePage):
         # Get secret type
         secret_type = raw_data.get("type", "Opaque")
 
-        # Prepare data columns - MATCH ORIGINAL HEADERS
+        # Prepare data columns
         columns = [
             resource["name"],        # Name
             resource["namespace"],   # Namespace

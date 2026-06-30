@@ -1,11 +1,13 @@
 """
-Pin Storage Manager - Handles persistent storage of pinned items in JSON format.
+Pin Storage Manager – Handles persistent storage of pinned items in JSON format.
 """
 import json
-import os
 import logging
+import os
 from datetime import datetime, timezone
-from typing import Set
+from typing import Optional, Set
+
+__all__ = ["PinStorageManager", "get_pin_storage_manager"]
 
 class PinStorageManager:
     """Manages persistent storage of pinned items using JSON files."""
@@ -27,11 +29,11 @@ class PinStorageManager:
         # Ensure data directory exists
         self._ensure_data_directory()
 
-    def _ensure_data_directory(self):
+    def _ensure_data_directory(self) -> None:
         """Ensure the data directory exists."""
         try:
             os.makedirs(self.data_dir, exist_ok=True)
-            logging.info(f"Data directory ready: {self.data_dir}")
+            logging.debug(f"Data directory ready: {self.data_dir}")
         except Exception as e:
             logging.error(f"Failed to create data directory {self.data_dir}: {e}")
 
@@ -89,11 +91,12 @@ class PinStorageManager:
             logging.error(f"Failed to load pinned items: {e}")
             return set()
 
-# Global instance
-_pin_storage_manager = None
+# Module-level singleton – use get_pin_storage_manager() for access
+_pin_storage_manager: Optional[PinStorageManager] = None
+
 
 def get_pin_storage_manager() -> PinStorageManager:
-    """Get the global pin storage manager instance."""
+    """Return the application-wide PinStorageManager instance (lazy init)."""
     global _pin_storage_manager
     if _pin_storage_manager is None:
         _pin_storage_manager = PinStorageManager()

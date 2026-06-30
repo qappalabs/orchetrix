@@ -7,29 +7,30 @@ for viewing and interacting with Kubernetes application flow diagrams.
 
 import os
 import logging
+import math
 from datetime import datetime
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton, QFrame, QSizePolicy, QTextEdit, QGraphicsView,
     QGraphicsScene, QMessageBox, QFileDialog, QMenu, QToolButton,
-    QSplitter
+    QSplitter, QGraphicsPathItem
 )
-from PyQt6.QtCore import Qt, QTimer, QRectF
-from PyQt6.QtGui import QFont, QPen, QBrush, QColor, QPainter, QPixmap, QIcon, QAction
+from PyQt6.QtCore import Qt, QTimer, QRectF, QPointF
+from PyQt6.QtGui import QFont, QPen, QBrush, QColor, QPainter, QPixmap, QIcon, QAction, QPainterPath, QPolygonF
 
 from UI.Styles import AppColors
-from UI.Icons import resource_path
+from UI.Icons import resource_path, Icons
 from UI.ThemeManager import get_theme_manager
 from Business_Logic.app_flow_business import (
     AppFlowBusinessLogic, ResourceType, GraphLayout, ResourceInfo
 )
 
-# Import modular components from the same package
 from Utils.unified_resource_loader import get_unified_resource_loader
 from .app_flow_analyzer import AppFlowAnalyzer
 
-# Import theme - aware components
 import Styles.AppsPageStyles as AppsPageStyles
 from UI.ThemeAwarePage import ThemeAwarePage
+from UI.CustomComboBox import CustomComboBox
+from Utils.time_utils import TimezoneManager
 
 
 class AppsPage(ThemeAwarePage):
@@ -148,16 +149,11 @@ class AppsPage(ThemeAwarePage):
         namespace_label.setStyleSheet(AppsPageStyles.get_filter_label_style())
         filters_layout.addWidget(namespace_label)
 
-        self.namespace_combo = QComboBox()
+        self.namespace_combo = CustomComboBox()
         self.namespace_combo.setObjectName("namespaceCombo")
-        self.namespace_combo.setFixedHeight(30)
         self.namespace_combo.setMinimumWidth(150)
-        # Configure dropdown behavior to prevent upward opening
-        self._configure_dropdown_behavior(self.namespace_combo)
 
-        # Use theme - aware dropdown style specific to AppsPage
-        self.namespace_combo.setStyleSheet(
-            AppsPageStyles.get_theme_aware_dropdown_style())
+        # Removed setting explicit stylesheet as CustomComboBox is self-styling
         self.namespace_combo.addItem("Loading...")
         self.namespace_combo.setEnabled(False)
         filters_layout.addWidget(self.namespace_combo)
@@ -171,16 +167,11 @@ class AppsPage(ThemeAwarePage):
         workload_label.setStyleSheet(AppsPageStyles.get_filter_label_style())
         filters_layout.addWidget(workload_label)
 
-        self.workload_combo = QComboBox()
+        self.workload_combo = CustomComboBox()
         self.workload_combo.setObjectName("workloadCombo")
-        self.workload_combo.setFixedHeight(30)
         self.workload_combo.setMinimumWidth(150)
-        # Configure dropdown behavior to prevent upward opening
-        self._configure_dropdown_behavior(self.workload_combo)
 
-        # Use theme - aware dropdown style specific to AppsPage
-        self.workload_combo.setStyleSheet(
-            AppsPageStyles.get_theme_aware_dropdown_style())
+        # Removed setting explicit stylesheet as CustomComboBox is self-styling
 
         # Add workload items
         workload_items = [
@@ -206,17 +197,12 @@ class AppsPage(ThemeAwarePage):
         resource_label.setStyleSheet(AppsPageStyles.get_filter_label_style())
         filters_layout.addWidget(resource_label)
 
-        self.resource_combo = QComboBox()
+        self.resource_combo = CustomComboBox()
         self.resource_combo.setObjectName("resourceCombo")
-        self.resource_combo.setFixedHeight(30)
         # Further reduced width for better visibility
         self.resource_combo.setFixedWidth(150)
-        # Configure dropdown behavior to prevent upward opening
-        self._configure_dropdown_behavior(self.resource_combo)
 
-        # Use theme - aware dropdown style specific to AppsPage
-        self.resource_combo.setStyleSheet(
-            AppsPageStyles.get_theme_aware_dropdown_style())
+        # Removed setting explicit stylesheet as CustomComboBox is self-styling
         self.resource_combo.addItem("Select namespace and workload first")
         self.resource_combo.setEnabled(False)
         # Connect resource selection change
@@ -225,18 +211,6 @@ class AppsPage(ThemeAwarePage):
         filters_layout.addWidget(self.resource_combo)
 
         header_layout.addWidget(filters_widget)
-
-    def _configure_dropdown_behavior(self, combo_box):
-
-        try:
-            # Set view to list view for consistency
-            combo_box.view().setMinimumWidth(combo_box.minimumWidth())
-            # Set maximum visible items
-            combo_box.setMaxVisibleItems(10)
-        except Exception as e:
-            logging.debug(f"Error configuring dropdown behavior: {e}")
-
-    # Diagram functionality added above
 
     def load_namespaces(self):
 
@@ -428,13 +402,8 @@ class AppsPage(ThemeAwarePage):
             for resource in resources:
                 if isinstance(resource, dict) and 'name' in resource:
                     resource_names.append(resource['name'])
-                elif isinstance(resource, str):
-                    # Handle case where it might still be strings (backward compatibility)
-                    resource_names.append(resource)
                 else:
-                    # Fallback for unexpected format
-                    logging.warning(
-                        f"Unexpected resource format: {type(resource)}")
+                    logging.warning(f"Unexpected resource format: {type(resource)}")
                     resource_names.append(str(resource))
 
             # Store the full resource data for later use if needed
@@ -689,18 +658,10 @@ class AppsPage(ThemeAwarePage):
             return
 
         try:
-            # Store updated app flow data
             self.current_app_flow_data = app_flow
-
-            # Process app flow data through business logic
-            processed_data = self.business_logic.process_app_flow_data(
-                app_flow)
-
-            # Update existing graph elements instead of full redraw
+            processed_data = self.business_logic.process_app_flow_data(app_flow)
             self.update_existing_graph_elements(processed_data)
 
-            # Add timestamp to status
-            from datetime import datetime
             timestamp = datetime.now().strftime("%H:%M:%S")
             self.status_text.append(f"[{timestamp}] Live update completed")
 
@@ -711,7 +672,6 @@ class AppsPage(ThemeAwarePage):
     def on_live_app_flow_error(self, error_message):
 
         if self.live_monitoring_enabled:
-            from datetime import datetime
             timestamp = datetime.now().strftime("%H:%M:%S")
             self.status_text.append(
                 f"[{timestamp}] Live update error: {error_message}")
@@ -870,11 +830,11 @@ class AppsPage(ThemeAwarePage):
 
         # Export button with dropdown menu
         self.export_btn = QToolButton()
-        export_icon_path = resource_path("Icons/terminal_download.svg")
-        if os.path.exists(export_icon_path):
-            self.export_btn.setIcon(QIcon(export_icon_path))
-        else:
-            self.export_btn.setText("⬇")
+        
+        # Use theme-aware icon loading
+        theme_name = get_theme_manager().get_current_theme_name()
+        self.export_btn.setIcon(Icons.get_theme_icon("terminal_download.svg", theme_name))
+        
         self.export_btn.setToolTip("Export Graph")
         self.export_btn.setStyleSheet(AppsPageStyles.get_export_btn_style())
 
@@ -883,19 +843,15 @@ class AppsPage(ThemeAwarePage):
         export_menu.setStyleSheet(AppsPageStyles.get_export_menu_style())
 
         # Add export actions
-        export_image_action = QAction("Export as Image", self)
-        image_icon_path = resource_path("Icons/export_to_image.svg")
-        if os.path.exists(image_icon_path):
-            export_image_action.setIcon(QIcon(image_icon_path))
-        export_image_action.triggered.connect(self.export_as_image_dialog)
-        export_menu.addAction(export_image_action)
+        self.export_image_action = QAction("Export as Image", self)
+        self.export_image_action.setIcon(Icons.get_theme_icon("export_to_image.svg", theme_name))
+        self.export_image_action.triggered.connect(self.export_as_image_dialog)
+        export_menu.addAction(self.export_image_action)
 
-        export_pdf_action = QAction("Export as PDF", self)
-        pdf_icon_path = resource_path("Icons/export_to_pdf.svg")
-        if os.path.exists(pdf_icon_path):
-            export_pdf_action.setIcon(QIcon(pdf_icon_path))
-        export_pdf_action.triggered.connect(self.export_as_pdf_dialog)
-        export_menu.addAction(export_pdf_action)
+        self.export_pdf_action = QAction("Export as PDF", self)
+        self.export_pdf_action.setIcon(Icons.get_theme_icon("export_to_pdf.svg", theme_name))
+        self.export_pdf_action.triggered.connect(self.export_as_pdf_dialog)
+        export_menu.addAction(self.export_pdf_action)
 
         self.export_btn.setMenu(export_menu)
         self.export_btn.setPopupMode(
@@ -974,12 +930,6 @@ class AppsPage(ThemeAwarePage):
         diagram_layout.addWidget(self.diagram_splitter)
         main_layout.addWidget(self.diagram_frame)
 
-    def create_app_flow_diagram(self, app_flow):
-
-        # Redirect to horizontal layout method
-        processed_data = self.business_logic.process_app_flow_data(app_flow)
-        self.create_horizontal_app_flow_diagram(processed_data)
-
     def create_horizontal_app_flow_diagram(self, processed_data):
 
         self.diagram_scene.clear()
@@ -1026,7 +976,6 @@ class AppsPage(ThemeAwarePage):
             logging.warning("No connections found in processed_data!")
 
         for connection in connections:
-            # Handle both dict format and ConnectionInfo object format
             if hasattr(connection, 'from_resource'):
                 from_key = connection.from_resource
                 to_key = connection.to_resource
@@ -1036,16 +985,13 @@ class AppsPage(ThemeAwarePage):
                 to_key = connection.get("to")
                 connection_type = connection.get("type")
 
-            logging.info(f"Processing connection: {from_key} -> {to_key}")
+            logging.debug(f"Processing connection: {from_key} -> {to_key}")
             if from_key in positions and to_key in positions:
                 from_pos = positions[from_key]
                 to_pos = positions[to_key]
-                logging.info(f"Drawing connection from {from_pos} to {to_pos}")
-                self.draw_horizontal_connection(
-                    from_pos, to_pos, connection_type)
+                self.draw_horizontal_connection(from_pos, to_pos, connection_type)
             else:
-                logging.warning(
-                    f"Missing positions for connection: {from_key} -> {to_key}")
+                logging.debug(f"Missing positions for connection: {from_key} -> {to_key}")
 
         # Enable live monitoring button if we have a valid graph
         if resources:
@@ -1356,18 +1302,6 @@ class AppsPage(ThemeAwarePage):
         # Orange / Yellow for unknown or transitional states
         return self.get_theme_color('ACCENT_ORANGE', "#FF9800")
 
-    def create_interactive_resource_group(self, main_rect, icon_item, resource: ResourceInfo, x: float, y: float, width: float, height: float):
-
-
-        # Enable hover events on the main rectangle
-        main_rect.setAcceptHoverEvents(True)
-
-        # Create detailed tooltip content
-        tooltip_text = self.create_detailed_tooltip(resource)
-        main_rect.setToolTip(tooltip_text)
-
-        return main_rect
-
     def create_detailed_tooltip(self, resource: ResourceInfo) -> str:
 
         tooltip_lines = [
@@ -1587,20 +1521,14 @@ class AppsPage(ThemeAwarePage):
                 from_point_x, from_point_y, to_point_x, to_point_y, connection_type)
 
     def draw_curved_connection(self, from_x: float, from_y: float, to_x: float, to_y: float, color: str):
-
-        from PyQt6.QtGui import QPainterPath
-        from PyQt6.QtWidgets import QGraphicsPathItem
-
-        # Create curved path
+        """Draw a cubic bezier curve between two points."""
         path = QPainterPath()
         path.moveTo(from_x, from_y)
 
-        # Calculate control points for smooth curve
         mid_x = (from_x + to_x) / 2
         control1_x = from_x + (to_x - from_x) * 0.3
         control2_x = from_x + (to_x - from_x) * 0.7
 
-        # Add slight curve to avoid overlaps
         if from_y != to_y:
             curve_offset = (to_y - from_y) * 0.3
             path.cubicTo(
@@ -1609,10 +1537,8 @@ class AppsPage(ThemeAwarePage):
                 to_x, to_y
             )
         else:
-            # Gentle arc for same - level connections
             path.quadTo(mid_x, from_y - 20, to_x, to_y)
 
-        # Add curved path to scene
         path_item = QGraphicsPathItem(path)
         path_item.setPen(QPen(QColor(color), 2))
         self.diagram_scene.addItem(path_item)
@@ -1645,9 +1571,7 @@ class AppsPage(ThemeAwarePage):
         label_text.setPos(mid_x - text_width / 2, mid_y - text_height / 2)
 
     def draw_enhanced_arrow_head(self, to_x: float, to_y: float, from_x: float, from_y: float, color: str):
-
-        import math
-
+        """Draw a filled polygon arrowhead pointing toward (to_x, to_y)."""
         dx = to_x - from_x
         dy = to_y - from_y
 
@@ -1656,15 +1580,10 @@ class AppsPage(ThemeAwarePage):
             arrow_length = 15
             arrow_angle = math.pi / 5
 
-            # Calculate arrow head points
             arrow_x1 = to_x - arrow_length * math.cos(angle - arrow_angle)
             arrow_y1 = to_y - arrow_length * math.sin(angle - arrow_angle)
             arrow_x2 = to_x - arrow_length * math.cos(angle + arrow_angle)
             arrow_y2 = to_y - arrow_length * math.sin(angle + arrow_angle)
-
-            # Draw filled arrow head using polygon
-            from PyQt6.QtGui import QPolygonF
-            from PyQt6.QtCore import QPointF
 
             arrow_polygon = QPolygonF([
                 QPointF(to_x, to_y),
@@ -1688,7 +1607,7 @@ class AppsPage(ThemeAwarePage):
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Export Graph as Image",
-            f"app_flow_graph_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
+            f"app_flow_graph_{TimezoneManager.get_instance().get_now().strftime('%Y%m%d_%H%M%S')}.png",
             "PNG Image (*.png);;JPEG Image (*.jpg)"
         )
 
@@ -1712,7 +1631,7 @@ class AppsPage(ThemeAwarePage):
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Export Graph as PDF",
-            f"app_flow_graph_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+            f"app_flow_graph_{TimezoneManager.get_instance().get_now().strftime('%Y%m%d_%H%M%S')}.pdf",
             "PDF Document (*.pdf)"
         )
 
@@ -1845,7 +1764,7 @@ class AppsPage(ThemeAwarePage):
 
                     # Add timestamp at bottom
                     painter.setFont(QFont("Segoe UI", 10))
-                    timestamp = f"Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                    timestamp = f"Generated on {TimezoneManager.get_instance().get_now().strftime('%Y-%m-%d %H:%M:%S')}"
                     painter.drawText(
                         20, int(page_rect.height() - 20), timestamp)
 
@@ -2073,7 +1992,7 @@ class AppsPage(ThemeAwarePage):
 
         # Add timestamp
         painter.setFont(QFont("Segoe UI", 8))
-        timestamp = f"Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        timestamp = f"Generated on {TimezoneManager.get_instance().get_now().strftime('%Y-%m-%d %H:%M:%S')}"
         painter.drawText(20, height - 20, timestamp)
 
         # Add resource count
@@ -2252,6 +2171,25 @@ class AppsPage(ThemeAwarePage):
             if hasattr(self, 'diagram_view'):
                 self.diagram_view.setStyleSheet(
                     AppsPageStyles.get_diagram_view_style())
+
+            if hasattr(self, 'export_btn'):
+                self.export_btn.setStyleSheet(
+                    AppsPageStyles.get_export_btn_style())
+                self.export_btn.setIcon(Icons.get_theme_icon("terminal_download.svg", theme_name))
+                
+                if self.export_btn.menu():
+                    self.export_btn.menu().setStyleSheet(
+                        AppsPageStyles.get_export_menu_style())
+                
+                # Refresh action icons
+                if hasattr(self, 'export_image_action'):
+                    self.export_image_action.setIcon(Icons.get_theme_icon("export_to_image.svg", theme_name))
+                if hasattr(self, 'export_pdf_action'):
+                    self.export_pdf_action.setIcon(Icons.get_theme_icon("export_to_pdf.svg", theme_name))
+
+            if hasattr(self, 'diagram_splitter'):
+                self.diagram_splitter.setStyleSheet(
+                    AppsPageStyles.get_diagram_splitter_style())
 
             if hasattr(self, 'status_header'):
                 self.status_header.setStyleSheet(

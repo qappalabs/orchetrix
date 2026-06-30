@@ -9,12 +9,15 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import (
     Qt, QPropertyAnimation, QRect, QEasingCurve, QSize, QTimer, pyqtSignal,
-    QParallelAnimationGroup, QAbstractAnimation, QEvent
+    QParallelAnimationGroup, QAbstractAnimation, QEvent, QByteArray
 )
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QIcon, QPainter, QPixmap
+from PyQt6.QtSvg import QSvgRenderer
 from typing import Optional, Dict, Any
 import logging
-from UI.Icons import Icons
+import os
+import re
+from UI.Icons import resource_path, Icons
 from UI.ThemeManager import get_theme_manager
 
 # Import Kubernetes client
@@ -89,15 +92,116 @@ class DetailPageComponent(ThemeAwareMixin, QWidget):
         # Refresh tab widget
         if hasattr(self, 'tab_widget'):
             self.tab_widget.setStyleSheet(DetailPageComponentStyles.get_tab_widget_style())
+        
         # Update icon
-        self.update_theme_icon(theme_name)
+        self._update_close_button_icon(theme_name)
+        
+        # Refresh header icon using the centralized method
+        if hasattr(self, 'icon_label'):
+             self.icon_label.setStyleSheet(DetailPageComponentStyles.get_header_icon_style())
+             self._update_icon()
 
-    def update_theme_icon(self, theme_name):
+    def _update_close_button_icon(self, theme_name):
         """Update close button icon when theme changes"""
         if hasattr(self, 'back_button'):
             icon = Icons.get_theme_icon("Detailpage_Close.svg", theme_name)
             if icon and not icon.isNull():
                 self.back_button.setIcon(icon)
+
+    def _update_icon(self):
+        """Update the header resource icon based on type with theme-aware orange color"""
+        if not self.resource_type:
+            self.icon_label.clear()
+            return
+            
+        theme = get_theme_manager().get_current_theme()
+        color = theme.colors.ACCENT_ORANGE
+        
+        # Clean and normalize resource type for mapping
+        res_type = self.resource_type.lower()
+        # Don't strip 's' from resources that end in 's' naturally or plural forms we want to handle in map
+        if res_type.endswith('s') and res_type not in ["nodes", "pods", "services", "ingress", "storageclasses", "storageclass"]:
+             icon_id = res_type[:-1]
+        else:
+             icon_id = res_type
+
+        # Specific mapping for icons
+        icon_map = {
+             "node": "node.svg",
+             "nodes": "node.svg",
+             "pod": "pod.svg",
+             "pods": "pod.svg",
+             "configmap": "configmap.svg",
+             "secret": "secret.svg",
+             "service": "service.svg",
+             "services": "service.svg",
+             "deployment": "deployment.svg",
+             "deployments": "deployment.svg",
+             "ingress": "globe.svg",
+             "namespace": "tag.svg",
+             "namespaces": "tag.svg",
+             "endpoint": "endpoint.svg",
+             "endpoints": "endpoint.svg",
+             "replicaset": "replica.svg",
+             "replicasets": "replica.svg",
+             "persistentvolume": "nav_storage.svg",
+             "persistentvolumes": "nav_storage.svg",
+             "persistentvolumeclaim": "nav_storage.svg",
+             "persistentvolumeclaims": "nav_storage.svg",
+             "storageclass": "nav_storage.svg",
+             "storageclasse": "nav_storage.svg", # Handle common truncation
+             "storagecla": "nav_storage.svg",    # Handle common truncation seen in screenshot
+             "storageclasses": "nav_storage.svg",
+             "pv": "nav_storage.svg",
+             "pvc": "nav_storage.svg"
+        }
+
+        # Try to find SVG in the map, otherwise use default
+        svg_filename = icon_map.get(icon_id, "details-default.svg")
+        icon_path = resource_path(os.path.join("Icons", svg_filename))
+
+        if os.path.exists(icon_path):
+             pixmap = self._render_custom_svg(icon_path, color, size=32)
+             if pixmap and not pixmap.isNull():
+                  self.icon_label.setPixmap(pixmap)
+                  return
+
+        # Fallback to theme icon logic if SVG rendering fails
+        icon = Icons.get_theme_icon_by_id(res_type, get_theme_manager().get_current_theme_name() or "Dark")
+        if icon:
+             self.icon_label.setPixmap(icon.pixmap(32, 32))
+        else:
+             self.icon_label.clear()
+
+    def _render_custom_svg(self, icon_path, color, size=32):
+        """Load an SVG from file, recolor it, and return a QPixmap."""
+        if not icon_path or not os.path.exists(icon_path):
+            return None
+            
+        try:
+            with open(icon_path, 'r', encoding='utf-8') as f:
+                svg_data = f.read()
+                
+            # Pattern to match stroke or fill attributes/styles with common sentinel colors
+            # This catches #000000, #888888, #F5F5F5, black, etc.
+            sentinel_pattern = r'(?:#[0-9a-fA-F]{3,6}|black|white|currentColor|gray)'
+            
+            # Replace attributes: stroke="color" or fill="color"
+            svg_data = re.sub(rf'(stroke|fill)\s*=\s*["\']{sentinel_pattern}["\']', rf'\1="{color}"', svg_data, flags=re.IGNORECASE)
+            
+            # Replace inline styles: stroke: color or fill: color
+            svg_data = re.sub(rf'(stroke|fill)\s*:\s*{sentinel_pattern}', rf'\1: {color}', svg_data, flags=re.IGNORECASE)
+
+            renderer = QSvgRenderer(QByteArray(svg_data.encode('utf-8')))
+            pixmap = QPixmap(size, size)
+            pixmap.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(pixmap)
+            renderer.render(painter)
+            painter.end()
+            return pixmap
+        except Exception as e:
+            logging.error(f"Error rendering custom SVG {icon_path}: {str(e)}")
+            return None
 
     def setup_ui(self):
         """Setup main UI structure"""
@@ -137,7 +241,7 @@ class DetailPageComponent(ThemeAwareMixin, QWidget):
         header_layout = QHBoxLayout(self.header)
         header_layout.setContentsMargins(15, 10, 15, 10)
 
-        # Back/Close button - FIXED: Added icon and proper styling
+        # Back/Close button
         self.back_button = QPushButton()
 
         # Determine current theme and load correct icon
@@ -148,6 +252,12 @@ class DetailPageComponent(ThemeAwareMixin, QWidget):
         self.back_button.setCursor(Qt.CursorShape.PointingHandCursor)  # Hand cursor on hover
         self.back_button.setStyleSheet(DetailPageComponentStyles.get_back_button_style())
         self.back_button.clicked.connect(self.close_detail)
+
+        # Resource Icon
+        self.icon_label = QLabel()
+        self.icon_label.setFixedSize(32, 32)
+        self.icon_label.setStyleSheet(DetailPageComponentStyles.get_header_icon_style())
+        self.icon_label.setScaledContents(True)
 
         # Title
         self.title_label = QLabel("Resource Details")
@@ -162,6 +272,8 @@ class DetailPageComponent(ThemeAwareMixin, QWidget):
         self.action_button.hide()
 
         header_layout.addWidget(self.back_button)
+        header_layout.addSpacing(10) # Add spacing between back button and icon
+        header_layout.addWidget(self.icon_label)
         header_layout.addWidget(self.title_label)
         header_layout.addStretch()
         header_layout.addWidget(self.action_button)
@@ -271,12 +383,21 @@ class DetailPageComponent(ThemeAwareMixin, QWidget):
         self.resource_type = resource_type
         self.resource_name = resource_name
         self.resource_namespace = namespace
+        
+        # Format resource type for display (capitalize sections if needed)
+        # e.g. "nodes" -> "Node"
+        resource_type_display = resource_type.capitalize()
+        if resource_type_display.endswith('s'):
+             resource_type_display = resource_type_display[:-1]
 
         # Update title
-        title_text = f"{resource_type}: {resource_name}"
+        title_text = f"{resource_type_display}: {resource_name}"
         if namespace:
             title_text += f" (ns: {namespace})"
         self.title_label.setText(title_text)
+
+        # Update header icon
+        self._update_icon()
 
         # Handle action button for Helm resources
         self.setup_action_button(resource_type)
@@ -318,8 +439,9 @@ class DetailPageComponent(ThemeAwareMixin, QWidget):
 
         if raw_data:
             logging.info(f"DetailPageComponent: Processing raw data for {resource_type}, data keys: {list(raw_data.keys())}")
-            # Pass the raw data to all sections
-            sections = [self.overview_section, self.details_section, self.yaml_section, self.events_section]
+            # Pass the raw data to all sections EXCEPT events section
+            # Events section should ALWAYS fetch real kubernetes events regardless of generic raw data
+            sections = [self.overview_section, self.details_section, self.yaml_section]
             for section in sections:
                 if hasattr(section, 'set_raw_data'):
                     logging.info(f"DetailPageComponent: Setting raw data for {section.section_name}")
@@ -393,7 +515,7 @@ class DetailPageComponent(ThemeAwareMixin, QWidget):
             return
 
         # Import the install dialog
-        from Utils.helm_utils import ChartInstallDialog, install_helm_chart
+        from UI.ChartInstallDialog import ChartInstallDialog, install_helm_chart
 
         # Create and show install dialog
         dialog = ChartInstallDialog(chart_name, repository, self)
@@ -459,7 +581,7 @@ class DetailPageComponent(ThemeAwareMixin, QWidget):
             # For now, we'll use a default repository (in real scenarios, this should be stored with the release)
             repository = "bitnami"  # Default repository, could be enhanced to track original repo
 
-            from Utils.helm_utils import ChartInstallDialog, upgrade_helm_release
+            from UI.ChartInstallDialog import ChartInstallDialog, upgrade_helm_release
 
             # Create and show upgrade dialog (reusing install dialog)
             dialog = ChartInstallDialog(chart_name, repository, self)
@@ -584,8 +706,9 @@ class DetailPageComponent(ThemeAwareMixin, QWidget):
     pass
 
     def update_global_loading_state(self):
-        """Update global loading indicator based on section states"""
-        any(self.section_loading_states.values())
+        """Update global loading indicator based on section states."""
+        # Placeholder: extend this to drive a global spinner if one is added.
+        pass
 
     # Resize handle methods
     def resize_handle_mousePressEvent(self, event):
@@ -706,6 +829,9 @@ class DetailPageComponent(ThemeAwareMixin, QWidget):
         self.resource_type = None
         self.resource_name = None
         self.resource_namespace = None
+        
+        if hasattr(self, 'icon_label'):
+            self.icon_label.clear()
 
         # Clear raw data to prevent reuse for wrong resources
         self.chart_raw_data = None

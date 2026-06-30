@@ -7,7 +7,7 @@ from PyQt6.QtCore import Qt, QTimer
 
 from Base_Components.base_components import SortableTableWidgetItem
 from Base_Components.base_resource_page import BaseResourcePage
-from Utils.data_formatters import parse_age_to_seconds
+from Utils.data_formatters import parse_age_to_seconds, int_sort_key
 
 class PriorityClassesPage(BaseResourcePage):
     """
@@ -38,8 +38,6 @@ class PriorityClassesPage(BaseResourcePage):
         # Configure column widths
         self.configure_columns()
 
-        # Add delete selected button
-
     def configure_columns(self):
         """Configure column widths for full screen utilization"""
         if not self.table:
@@ -50,11 +48,11 @@ class PriorityClassesPage(BaseResourcePage):
         # Column specifications with optimized default widths
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
-            (1, 140, "interactive"), # Name
+            (1, 140, "stretch"),     # Name - stretch to fill remaining space
             (2, 90, "interactive"),  # Value
             (3, 60, "interactive"),  # Global Default
-            (4, 80, "stretch"),      # Status - stretch to fill remaining space
-            (5, 40, "fixed")        # Actions
+            (4, 80, "interactive"),  # Status
+            (5, 40, "fixed")         # Actions
         ]
 
         # Apply column configuration
@@ -73,12 +71,32 @@ class PriorityClassesPage(BaseResourcePage):
         # Ensure full width utilization after configuration
         QTimer.singleShot(100, self._ensure_full_width_utilization)
 
+    def _auto_resize_columns(self, max_col_widths=None, min_col_widths=None):
+        """Override to provide explicit widths for columns to let Name stretch and avoid clipping."""
+        explicit_mins = {
+            1: 120,  # Name
+            2: 100,  # Value
+            3: 100,  # Global Default
+            4: 80,   # Status
+            5: 40,   # Actions
+        }
+        if min_col_widths:
+            explicit_mins.update(min_col_widths)
+        explicit_maxes = {
+            2: 120,  # Value
+            3: 120,  # Global Default
+            4: 100,  # Status
+        }
+        if max_col_widths:
+            explicit_maxes.update(max_col_widths)
+        super()._auto_resize_columns(max_col_widths=explicit_maxes, min_col_widths=explicit_mins)
+
     def populate_resource_row(self, row, resource):
         """
         Populate a single row with PriorityClass data
         """
         # Set row height
-        self.table.setRowHeight(row, 40)
+        self.table.setRowHeight(row, 42)
 
         # Create checkbox for row selection (styling already handled by BaseResourcePage)
         resource_name = resource["name"]
@@ -99,11 +117,7 @@ class PriorityClassesPage(BaseResourcePage):
 
             # Handle numeric columns for sorting
             if col == 1:  # Value column
-                try:
-                    num = int(value)
-                except ValueError:
-                    num = 0
-                item = SortableTableWidgetItem(value, num)
+                item = SortableTableWidgetItem(value, int_sort_key(value))
             elif col == 3:  # Age column
                 item = SortableTableWidgetItem(value, parse_age_to_seconds(value))
             else:
@@ -150,10 +164,6 @@ class PriorityClassesPage(BaseResourcePage):
                 while parent and not hasattr(parent, 'detail_manager'):
                     parent = parent.parent()
 
-                if parent and hasattr(parent, 'detail_manager'):
-                    # Get singular resource type
-                    # resource_type = self.resource_type
-                    # if resource_type.endswith('s'):
-                    #     resource_type = resource_type[:-1]
 
+                if parent and hasattr(parent, 'detail_manager'):
                     parent.detail_manager.show_detail("priorityclasses", resource_name, namespace)

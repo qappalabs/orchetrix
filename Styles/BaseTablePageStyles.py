@@ -4,6 +4,7 @@ Contains shared styles for all resource pages (Pods, Deployments, Services, etc.
 """
 import os
 
+from UI.Styles import AppStyles
 from UI.ThemeManager import get_theme_manager
 
 
@@ -12,19 +13,32 @@ def _get_theme():
     return get_theme_manager().get_current_theme()
 
 
+def get_table_container_style():
+    """Style for the card container wrapping the table"""
+    theme = _get_theme()
+    return f"""
+        QFrame#table_container {{
+            background-color: {theme.colors.CARD_BG};
+            border: 1px solid {theme.colors.BORDER_COLOR};
+            border-radius: 12px;
+        }}
+    """
+
+
 # TABLE STYLING
 
 def get_table_style():
     """Theme-aware table style for resource pages"""
-    from UI.Styles import AppStyles
     theme = _get_theme()
     # Get selection/hover colors from theme with fallbacks
-    selection_bg = getattr(theme.colors, 'SELECTED_BG', 'rgba(53, 132, 228, 0.15)')
-    hover_highlight = getattr(theme.colors, 'HOVER_HIGHLIGHT', 'rgba(53, 132, 228, 0.10)')
-    selection_hover = getattr(theme.colors, 'SELECTION_HOVER', 'rgba(53, 132, 228, 0.20)')
+    selection_bg = getattr(theme.colors, 'SELECTED_BG', 'rgba(255, 87, 51, 0.18)')
+    hover_highlight = getattr(theme.colors, 'HOVER_HIGHLIGHT', 'rgba(255, 87, 51, 0.08)')
+    selection_hover = getattr(theme.colors, 'SELECTION_HOVER', 'rgba(255, 87, 51, 0.25)')
+    accent_orange = getattr(theme.colors, 'ACCENT_ORANGE', '#FF5733')
+    
     return f"""
         QTableWidget {{
-            background-color: {theme.colors.CARD_BG};
+            background-color: transparent;
             border: none;
             gridline-color: transparent;
             outline: none;
@@ -54,29 +68,47 @@ def get_table_style():
         QTableWidget::item:selected:hover {{
             background-color: {selection_hover};
         }}
+        {get_table_header_style()}
+        {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
+    """
+
+
+def get_table_header_style():
+    """Theme-aware style for the table header (QHeaderView)"""
+    theme = _get_theme()
+    return f"""
+        QHeaderView {{
+            background-color: {theme.colors.TABLE_HEADER};
+            border: none;
+            border-top-left-radius: 12px;
+            border-top-right-radius: 12px;
+            border-bottom-left-radius: 0px;
+            border-bottom-right-radius: 0px;
+        }}
 
         QHeaderView::section {{
-            background-color: {theme.colors.TABLE_HEADER};
+            background-color: transparent;
             color: {theme.colors.TEXT_LIGHT};
-            padding: 10px 8px;
+            padding: 10px 16px;
             border: none;
-            border-bottom: 1px solid {theme.colors.BORDER_COLOR};
-            font-size: 12px;
+            font-size: 14px;
             text-align: center;
-            font-weight: bold;
+            font-weight: 600;
+            letter-spacing: 0.5px;
         }}
 
         QHeaderView::section:hover {{
-            background-color: {theme.colors.BG_MEDIUM};
+            background-color: rgba(255, 255, 255, 0.1);
         }}
 
+        /* Completely hide default sort indicators */
         QHeaderView::down-arrow, QHeaderView::up-arrow {{
             image: none;
             width: 0px;
             height: 0px;
             border: none;
+            background: none;
         }}
-        {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
     """
 
 
@@ -97,14 +129,20 @@ def get_title_style():
 
 
 def get_count_style():
-    """Theme-aware count label style"""
+    """Theme-aware count label style with pill-shaped badge"""
     theme = _get_theme()
+    # Use background color that provides contrast for the pill
+    badge_bg = getattr(theme.colors, 'BG_DARK', '#f1f1f1') if get_theme_manager().get_current_theme_name() == "Light" else getattr(theme.colors, 'BG_MEDIUM', '#2d2d2d')
+    
     return f"""
         QLabel {{
-            font-size: 14px;
+            font-size: 13px;
+            font-weight: 500;
             color: {theme.colors.TEXT_SUBTLE};
-            padding: 0px 8px;
-            background-color: transparent;
+            padding: 4px 12px;
+            background-color: {badge_bg};
+            border-radius: 12px;
+            margin-left: 10px;
         }}
     """
 
@@ -117,42 +155,47 @@ def get_checkbox_style():
 
     # Get current theme and load theme-specific icon paths
     theme_name = get_theme_manager().get_current_theme_name() or "Dark"
-    unchecked_icon = Icons.get_theme_icon_path("check_box_unchecked.svg", theme_name)
-    checked_icon = Icons.get_theme_icon_path("check_box_checked.svg", theme_name)
+    white_checkmark = Icons.get_theme_icon_path("checkmark_white.svg", theme_name)
+
+    # Use Accent Orange for the border and checked background
+    theme = get_theme_manager().get_current_theme()
+    accent_orange = getattr(theme.colors, 'ACCENT_ORANGE', '#FF5733')
 
     return f"""
         QCheckBox {{
-            width: 14px;
-            height: 14px;
-            margin: 0px;
-            padding: 0px;
-            spacing: 0px;
-            background-color: transparent;
+            background: none;
             border: none;
             outline: none;
+            margin: 0px;
+            padding: 0px;
         }}
         QCheckBox::indicator {{
             width: 14px;
             height: 14px;
-            border: none;
-            background: transparent;
+            border-radius: 3px;
             margin: 0px;
             padding: 0px;
             spacing: 0px;
+            background: none;
             subcontrol-position: center;
             subcontrol-origin: content;
         }}
         QCheckBox::indicator:unchecked {{
-            image: url({unchecked_icon.replace(os.sep, '/')});
+            border: 2px solid {accent_orange};
+            background-color: transparent;
+            image: none;
         }}
         QCheckBox::indicator:checked {{
-            image: url({checked_icon.replace(os.sep, '/')});
+            border: 2px solid {accent_orange};
+            background-color: {accent_orange};
+            image: url({white_checkmark.replace(os.sep, '/')});
         }}
         QCheckBox::indicator:unchecked:hover {{
-            background-color: rgba(53, 132, 228, 0.15);
+            background-color: rgba(255, 107, 0, 0.1);
         }}
         QCheckBox::indicator:checked:hover {{
-            background-color: rgba(53, 132, 228, 0.15);
+            background-color: {accent_orange};
+            opacity: 0.9;
         }}
     """
 

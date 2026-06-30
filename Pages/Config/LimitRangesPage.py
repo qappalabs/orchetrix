@@ -38,8 +38,6 @@ class LimitRangesPage(BaseResourcePage):
         # Configure column widths
         self.configure_columns()
 
-        # Add delete selected button
-
     def configure_columns(self):
         """Configure column widths for full screen utilization"""
         if not self.table:
@@ -50,10 +48,10 @@ class LimitRangesPage(BaseResourcePage):
         # Column specifications with optimized default widths
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
-            (1, 140, "interactive"), # Name
+            (1, 140, "stretch"),     # Name - stretch to fill remaining space
             (2, 90, "interactive"),  # Namespace
-            (3, 80, "stretch"),      # Age - stretch to fill remaining space
-            (4, 40, "fixed")        # Actions
+            (3, 80, "interactive"),  # Age
+            (4, 40, "fixed")         # Actions
         ]
 
         # Apply column configuration
@@ -71,12 +69,30 @@ class LimitRangesPage(BaseResourcePage):
         # Ensure full width utilization after configuration
         QTimer.singleShot(100, self._ensure_full_width_utilization)
 
+    def _auto_resize_columns(self, max_col_widths=None, min_col_widths=None):
+        """Override to provide explicit widths for columns to let Name stretch and avoid clipping."""
+        explicit_mins = {
+            1: 120,  # Name
+            2: 120,  # Namespace
+            3: 60,   # Age
+            4: 40,   # Actions
+        }
+        if min_col_widths:
+            explicit_mins.update(min_col_widths)
+        explicit_maxes = {
+            2: 150,  # Namespace
+            3: 80,   # Age
+        }
+        if max_col_widths:
+            explicit_maxes.update(max_col_widths)
+        super()._auto_resize_columns(max_col_widths=explicit_maxes, min_col_widths=explicit_mins)
+
     def populate_resource_row(self, row, resource):
         """
         Populate a single row with LimitRange data
         """
         # Set row height
-        self.table.setRowHeight(row, 40)
+        self.table.setRowHeight(row, 42)
 
         # Create checkbox for row selection (styling already handled by BaseResourcePage)
         resource_name = resource["name"]
@@ -116,12 +132,6 @@ class LimitRangesPage(BaseResourcePage):
         action_button = self._create_action_button(row, resource["name"], resource["namespace"])
         action_container = self._create_action_container(row, action_button)
         self.table.setCellWidget(row, len(columns) + 1, action_container)
-
-    # def handle_row_click(self, row, column):
-    #     """Handle row selection when a table cell is clicked"""
-    #     if column != self.table.columnCount() - 1:  # Skip action column
-    #         # Select the row
-    #         self.table.selectRow(row)
 
     def handle_row_click(self, row, column):
         if column != self.table.columnCount() - 1:  # Skip action column

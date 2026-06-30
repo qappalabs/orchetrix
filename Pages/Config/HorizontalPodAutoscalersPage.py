@@ -2,7 +2,7 @@
 Dynamic implementation of the Horizontal Pod Autoscalers page with live Kubernetes data.
 """
 
-from PyQt6.QtWidgets import QHeaderView, QPushButton
+from PyQt6.QtWidgets import QHeaderView, QPushButton, QCheckBox
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor
 
@@ -35,8 +35,7 @@ class HorizontalPodAutoscalersPage(BaseResourcePage):
         headers = ["", "Name", "Namespace", "Metrics", "Min Pods", "Max Pods", "Replicas", "Age", "Status", ""]
         sortable_columns = {1, 2, 3, 4, 5, 6, 7, 8}
 
-        # Set up the base UI components - creates self.table
-        # Table styling is handled by BaseResourcePage
+        # Set up the base UI components
         super().setup_ui("Horizontal Pod Autoscalers", headers, sortable_columns)
 
         # Configure column widths
@@ -52,15 +51,15 @@ class HorizontalPodAutoscalersPage(BaseResourcePage):
         # Column specifications with optimized default widths
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
-            (1, 140, "interactive"),  # Name
+            (1, 140, "stretch"),     # Name - stretch to fill remaining space
             (2, 90, "interactive"),  # Namespace
             (3, 80, "interactive"),  # Metrics
             (4, 80, "interactive"),  # Min Pods
             (5, 60, "interactive"),  # Max Pods
             (6, 60, "interactive"),  # Replicas
             (7, 80, "interactive"),  # Age
-            (8, 80, "stretch"),      # Status - stretch to fill remaining space
-            (9, 40, "fixed")        # Actions
+            (8, 80, "interactive"),  # Status
+            (9, 40, "fixed")         # Actions
         ]
 
         # Apply column configuration
@@ -82,12 +81,40 @@ class HorizontalPodAutoscalersPage(BaseResourcePage):
         # Ensure full width utilization after configuration
         QTimer.singleShot(100, self._ensure_full_width_utilization)
 
+    def _auto_resize_columns(self, max_col_widths=None, min_col_widths=None):
+        """Override to provide explicit widths for columns to let Name stretch and avoid clipping."""
+        explicit_mins = {
+            1: 120,  # Name
+            2: 120,  # Namespace
+            3: 100,  # Metrics
+            4: 80,   # Min Pods
+            5: 80,   # Max Pods
+            6: 80,   # Replicas
+            7: 60,   # Age
+            8: 80,   # Status
+            9: 40,   # Actions
+        }
+        if min_col_widths:
+            explicit_mins.update(min_col_widths)
+        explicit_maxes = {
+            2: 150,  # Namespace
+            3: 150,  # Metrics
+            4: 90,   # Min Pods
+            5: 90,   # Max Pods
+            6: 90,   # Replicas
+            7: 80,   # Age
+            8: 100,  # Status
+        }
+        if max_col_widths:
+            explicit_maxes.update(max_col_widths)
+        super()._auto_resize_columns(max_col_widths=explicit_maxes, min_col_widths=explicit_mins)
+
     def populate_resource_row(self, row, resource):
         """
         Populate a single row with HPA data
         """
         # Set row height
-        self.table.setRowHeight(row, 40)
+        self.table.setRowHeight(row, 42)
 
         # Create checkbox for row selection
         resource_name = resource["name"]
@@ -163,7 +190,7 @@ class HorizontalPodAutoscalersPage(BaseResourcePage):
         elif status_text == "Scaling":
             color = AppColors.ACCENT_BLUE
         else:
-            color = AppColors.TEXT_TABLE
+            color = None
 
         # Create status widget with proper color
         status_widget = StatusLabel(status_text, color)
@@ -187,7 +214,6 @@ class HorizontalPodAutoscalersPage(BaseResourcePage):
         cell_widget = self.table.cellWidget(row, column)
         if cell_widget:
             # Check if the widget contains interactive elements like QCheckBox or QPushButton
-            from PyQt6.QtWidgets import QCheckBox
             if cell_widget.findChild(QCheckBox) or cell_widget.findChild(QPushButton):
                 return
 

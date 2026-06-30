@@ -160,8 +160,7 @@ def get_menu_style():
             }}
         """
 
-
-# Action container styles
+# Transparent action container style (no theme color needed)
 ACTION_CONTAINER_STYLE = """
     QWidget {
         background-color: transparent;
@@ -171,17 +170,19 @@ ACTION_CONTAINER_STYLE = """
     }
 """
 
-ACTION_CONTAINER_ACTIVE_STYLE = """
-    QWidget {
-        background-color: rgba(0, 149, 255, 0.08);
-        border-radius: 4px;
-    }
-"""
-
+# Inactive action container style (no theme color needed)
 ACTION_CONTAINER_INACTIVE_STYLE = """
     QWidget {
         background-color: transparent;
         border: none;
+    }
+"""
+
+# Active action container style (hardcoded fallback; prefer get_action_container_active_style() for full theme-awareness)
+ACTION_CONTAINER_ACTIVE_STYLE = """
+    QWidget {
+        background-color: rgba(0, 149, 255, 0.08);
+        border-radius: 4px;
     }
 """
 

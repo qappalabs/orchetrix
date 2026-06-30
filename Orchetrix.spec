@@ -2,6 +2,21 @@
 import os
 import sys
 from pathlib import Path
+try:
+    from PyInstaller.compat import is_win  # Dynamic OS detection for safe defaults
+except ImportError:
+    is_win = sys.platform.startswith('win')
+
+# Establish OS-aware default for symbol stripping.
+# GNU strip corrupts Windows PE files (DLLs/PYDs) and breaks PyQt6.
+# PyInstaller strongly recommends against stripping on Windows.
+default_strip_state = 'false' if is_win else 'true'
+
+# Read environment flag to allow configurable debug builds.
+# Enabling strip reduces binary size but removes debug symbols, rendering post-mortem debugging highly difficult.
+# Example usage for debug build: STRIP_SYMBOLS=false pyinstaller Orchetrix.spec
+env_strip = os.getenv('STRIP_SYMBOLS', default_strip_state).lower()
+STRIP_SYMBOLS = env_strip in ('true', '1', 'yes')
 
 # Get absolute path to icon
 icon_path = os.path.abspath(os.path.join('Icons', 'logoIcon.ico'))
@@ -85,7 +100,7 @@ exe = EXE(
     name='Orchetrix',
     debug=False,
     bootloader_ignore_signals=False,
-    strip=False,
+    strip=STRIP_SYMBOLS,  # Dynamically configured based on OS and environment
     upx=False,
     console=False,
     disable_windowed_traceback=False,
@@ -105,7 +120,7 @@ coll = COLLECT(
     exe,
     a.binaries,
     a.datas,
-    strip=False,
+    strip=STRIP_SYMBOLS,  # Synchronized with EXE configuration
     upx=False,
     upx_exclude=[],
     name='Orchetrix',

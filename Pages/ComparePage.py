@@ -11,7 +11,8 @@ from deepdiff import DeepDiff
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
-    QSizePolicy, QPushButton, QSplitter, QListView, QLineEdit, QMenu, QWidgetAction
+    QSizePolicy, QPushButton, QSplitter, QListView, QLineEdit, QMenu, QWidgetAction,
+    QApplication
 )
 from PyQt6.QtGui import QFont, QSyntaxHighlighter, QTextCharFormat, QColor, QKeySequence, QShortcut, QAction
 from PyQt6.QtCore import Qt, QPoint, QTimer
@@ -19,10 +20,15 @@ from PyQt6.QtCore import Qt, QPoint, QTimer
 from Utils.unified_resource_loader import get_unified_resource_loader
 from Utils.cluster_connector import get_cluster_connector
 
-from UI.detail_sections.detailpage_yamlsection import YamlEditorWithLineNumbers, DetailPageYAMLSection
+from UI.detail_sections.detailpage_yamlsection import YamlEditorWithLineNumbers, DetailPageYAMLSection, SearchWidget
+
+from Utils.kubernetes_client import get_kubernetes_client
+from kubernetes.client import ApiClient
 
 from UI.Styles import AppStyles
 from UI.ThemeManager import get_theme_manager
+from UI.CustomComboBox import CustomComboBox
+from Base_Components.resource_page_style_manager import ResourcePageStyleManager
 from UI.ThemeAwarePage import ThemeAwareMixin
 import Styles.ComparePageStyles as ComparePageStyles
 import Styles.BaseResourcePageStyles as BaseResourcePageStyles
@@ -384,7 +390,6 @@ class ComparePage(ThemeAwareMixin, QWidget):
         self._build_ui()
 
         # Connect to app shutdown signal for reliable cleanup
-        from PyQt6.QtWidgets import QApplication
         QApplication.instance().aboutToQuit.connect(self._clear_all_local_saves)
 
         self._populate_namespaces()
@@ -412,9 +417,6 @@ class ComparePage(ThemeAwareMixin, QWidget):
         if hasattr(self, 'right_resource_label'):
             self.right_resource_label.setStyleSheet(f"color: {theme.colors.TEXT_LIGHT}; font-size: 14px;")
 
-        # Refresh dropdowns with theme-aware styling
-        for combo in self.findChildren(QComboBox):
-            combo.setStyleSheet(BaseResourcePageStyles.get_namespace_combo_style())
 
         # Refresh Compare button
         if hasattr(self, 'compare_btn'):
@@ -445,20 +447,11 @@ class ComparePage(ThemeAwareMixin, QWidget):
         if hasattr(self, 'right_error_widget'):
             self.right_error_widget.setStyleSheet(ComparePageStyles.get_error_widget_style())
 
-        # Refresh search menus and inputs for searchable combos
-        if hasattr(self, 'resource1_combo'):
-            combo = self.resource1_combo
-            if hasattr(combo, '_search_menu') and combo._search_menu:
-                combo._search_menu.setStyleSheet(ComparePageStyles.get_search_menu_style())
-            if hasattr(combo, '_search_input') and combo._search_input:
-                combo._search_input.setStyleSheet(ComparePageStyles.get_search_input_style())
-
-        if hasattr(self, 'resource2_combo'):
-            combo = self.resource2_combo
-            if hasattr(combo, '_search_menu') and combo._search_menu:
-                combo._search_menu.setStyleSheet(ComparePageStyles.get_search_menu_style())
-            if hasattr(combo, '_search_input') and combo._search_input:
-                combo._search_input.setStyleSheet(ComparePageStyles.get_search_input_style())
+        # Refresh search widgets
+        if hasattr(self, 'left_search_widget') and hasattr(self.left_search_widget, 'update_theme'):
+            self.left_search_widget.update_theme(theme_name)
+        if hasattr(self, 'right_search_widget') and hasattr(self.right_search_widget, 'update_theme'):
+            self.right_search_widget.update_theme(theme_name)
 
     def _request_namespaces(self):
         """Request namespaces using unified loader."""
@@ -515,7 +508,7 @@ class ComparePage(ThemeAwareMixin, QWidget):
                 f"color: {theme.colors.TEXT_LIGHT}; font-size: 14px;"
             )
 
-            combo = QComboBox()
+            combo = CustomComboBox()
             combo.setObjectName(combo_name)
             combo.setEditable(False)
             combo.setSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Fixed)
@@ -527,8 +520,7 @@ class ComparePage(ThemeAwareMixin, QWidget):
             combo.setMinimumContentsLength(1)
             combo.addItem(placeholder)
 
-            # Use existing theme-aware dropdown style from BaseResourcePageStyles
-            combo.setStyleSheet(BaseResourcePageStyles.get_namespace_combo_style())
+            # CustomComboBox handles its own theme styling natively
 
             # Configure dropdown behavior to match other pages
             view = QListView()
@@ -573,11 +565,15 @@ class ComparePage(ThemeAwareMixin, QWidget):
         self.main_layout.addWidget(top_bar)
 
         # Create resource combos (will be placed in always-visible row)
-        self.resource1_combo = self._create_searchable_combo("Select resource 1", "resource1")
+        self.resource1_combo = CustomComboBox(self, is_searchable=True)
         self.resource1_combo.setObjectName("resource1_combo")
+        self.resource1_combo.setPlaceholderText("Select resource 1")
+        self.resource1_combo.setFixedHeight(32)
 
-        self.resource2_combo = self._create_searchable_combo("Select resource 2", "resource2")
+        self.resource2_combo = CustomComboBox(self, is_searchable=True)
         self.resource2_combo.setObjectName("resource2_combo")
+        self.resource2_combo.setPlaceholderText("Select resource 2")
+        self.resource2_combo.setFixedHeight(32)
 
         # Resource selector row - always visible (moved out of compare_area)
         resource_select_row = QWidget()
@@ -824,8 +820,6 @@ class ComparePage(ThemeAwareMixin, QWidget):
 
     def _setup_search_widgets(self, left_layout, right_layout):
         """Create search widgets for both editors positioned above each editor"""
-        from UI.detail_sections.detailpage_yamlsection import SearchWidget
-
         # Create and configure search widgets
         for side, editor, layout, close_handler in [
             ('left', self.left_box, left_layout, self._on_left_search_closed),
@@ -851,8 +845,6 @@ class ComparePage(ThemeAwareMixin, QWidget):
 
     def _setup_error_widgets(self, left_layout, right_layout):
         """Create error widgets for both editors positioned above each editor"""
-        from PyQt6.QtWidgets import QLabel
-
         # Create and configure error widgets
         for side, layout in [('left', left_layout), ('right', right_layout)]:
             error_widget = QLabel()
@@ -1148,6 +1140,15 @@ class ComparePage(ThemeAwareMixin, QWidget):
         self.resource2_combo.setEnabled(False)
 
     def _on_namespace_or_type_changed(self, _=None):
+        """Unified handler for Namespace or Resource Type changes"""
+        # Clear selected resources and disable during load
+        self.resource1_combo.clear()
+        self.resource1_combo.setPlaceholderText("Loading resources...")
+        self.resource1_combo.setEnabled(False)
+        self.resource2_combo.clear()
+        self.resource2_combo.setPlaceholderText("Loading resources...")
+        self.resource2_combo.setEnabled(False)
+        self.compare_btn.setEnabled(False)
         ns = self.namespace_combo.currentText().strip()
         rt = self.resource_type_combo.currentText().strip()
         if not ns or ns.startswith(("Loading", "No ", "Unable", "kubernetes package")):
@@ -1158,6 +1159,7 @@ class ComparePage(ThemeAwareMixin, QWidget):
         self._populate_resource_combos(names)
 
     def _populate_resource_combos(self, names):
+        """Populate resource selection combos with fresh data"""
         # Enhanced state persistence - store current selections to restore them
         current_resource1 = self.resource1_combo.currentText() if self.resource1_combo.count() > 0 else None
         current_resource2 = self.resource2_combo.currentText() if self.resource2_combo.count() > 0 else None
@@ -1168,27 +1170,14 @@ class ComparePage(ThemeAwareMixin, QWidget):
 
         self.resource1_combo.clear()
         self.resource2_combo.clear()
-        if not names:
-            self.resource1_combo.addItem("No resources found")
-            self.resource2_combo.addItem("No resources found")
-            self.resource1_combo.setEnabled(False)
-            self.resource2_combo.setEnabled(False)
-            # Clear original items for search
-            self.resource1_combo._original_items = []
-            self.resource2_combo._original_items = []
-        else:
-            # Keep specific labels for each dropdown
-            self.resource1_combo.setEnabled(True)
-            self.resource1_combo.addItem("Select resource 1")
+        
+        if names:
             self.resource1_combo.addItems(sorted(names))
-
-            self.resource2_combo.setEnabled(True)
-            self.resource2_combo.addItem("Select resource 2")
             self.resource2_combo.addItems(sorted(names))
-
-            # Store original items for search functionality
-            self.resource1_combo._original_items = ["Select resource 1"] + sorted(names)
-            self.resource2_combo._original_items = ["Select resource 2"] + sorted(names)
+            self.resource1_combo.setEnabled(True)
+            self.resource2_combo.setEnabled(True)
+            self.resource1_combo.setPlaceholderText("Select resource 1")
+            self.resource2_combo.setPlaceholderText("Select resource 2")
 
             # Enhanced state persistence - restore previous selections if they exist in the new list
             if current_resource1 and current_resource1 not in ["Select resource 1", "No resources found"]:
@@ -1198,8 +1187,8 @@ class ComparePage(ThemeAwareMixin, QWidget):
                 else:
                     self.resource1_combo.setCurrentIndex(0)  # Fallback to default
             else:
-                self.resource1_combo.setCurrentIndex(0)
-
+                self.resource1_combo.setCurrentText("")
+            
             if current_resource2 and current_resource2 not in ["Select resource 2", "No resources found"]:
                 restore_index2 = self.resource2_combo.findText(current_resource2)
                 if restore_index2 >= 0:
@@ -1207,7 +1196,12 @@ class ComparePage(ThemeAwareMixin, QWidget):
                 else:
                     self.resource2_combo.setCurrentIndex(0)  # Fallback to default
             else:
-                self.resource2_combo.setCurrentIndex(0)
+                self.resource2_combo.setCurrentText("")
+        else:
+            self.resource1_combo.setEnabled(False)
+            self.resource2_combo.setEnabled(False)
+            self.resource1_combo.setPlaceholderText("No resources found")
+            self.resource2_combo.setPlaceholderText("No resources found")
 
         # Re-enable signals
         self.resource1_combo.blockSignals(False)
@@ -1489,7 +1483,6 @@ class ComparePage(ThemeAwareMixin, QWidget):
         rt = (kind or "").strip().lower()
 
         try:
-            from Utils.kubernetes_client import get_kubernetes_client
             kube = get_kubernetes_client()
             resource_type = self._map_kind_to_resource_type(rt)
             obj = kube.get_resource_detail(resource_type, name, namespace)
@@ -1501,7 +1494,6 @@ class ComparePage(ThemeAwareMixin, QWidget):
             if hasattr(obj, "to_dict"):
                 data = obj.to_dict()
             else:
-                from kubernetes.client import ApiClient
                 data = ApiClient().sanitize_for_serialization(obj)
 
             # Convert to YAML using the same method as DetailPageYAMLSection
@@ -1600,7 +1592,6 @@ class ComparePage(ThemeAwareMixin, QWidget):
             return []
 
         try:
-            from Utils.kubernetes_client import get_kubernetes_client
             kube = get_kubernetes_client()
             v1 = kube.v1
             apps_v1 = kube.apps_v1
@@ -1872,7 +1863,6 @@ class ComparePage(ThemeAwareMixin, QWidget):
     def _update_resource(self, namespace: str, resource_type: str, name: str, yaml_data: dict, side: str):
         """Update Kubernetes resource"""
         try:
-            from Utils.kubernetes_client import get_kubernetes_client
             kube = get_kubernetes_client()
 
             # Connect to update result signal if not already connected
@@ -2065,120 +2055,7 @@ class ComparePage(ThemeAwareMixin, QWidget):
         self.resource1_combo.setEnabled(enable_dropdowns)
         self.resource2_combo.setEnabled(enable_dropdowns)
 
-    def _create_searchable_combo(self, placeholder_text: str, combo_id: str):
-        """Create a searchable combo box using QMenu approach"""
-        combo = QComboBox()
-        combo.setEditable(False)
-        combo.setSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Fixed)
-        combo.setFixedHeight(32)
-        combo.setMinimumWidth(120)
-        combo.addItem(placeholder_text)
-        combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        combo.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-        combo.setMinimumContentsLength(1)
-        combo.setStyleSheet(BaseResourcePageStyles.get_namespace_combo_style())
-
-        view = QListView()
-        combo.setView(view)
-        combo.setMaxVisibleItems(10)
-        view.setUniformItemSizes(True)
-        view.setVerticalScrollMode(QListView.ScrollMode.ScrollPerPixel)
-
-        # Store search state for this combo
-        setattr(combo, '_search_menu', None)
-        setattr(combo, '_search_input', None)
-        setattr(combo, '_search_action', None)
-        setattr(combo, '_original_items', [])
-        setattr(combo, '_combo_id', combo_id)
-
-        # Override showPopup to show QMenu instead
-        combo.showPopup = lambda: self._show_search_menu(combo)
-
-        return combo
-
-    def _show_search_menu(self, combo):
-        """Show QMenu with search functionality instead of popup"""
-        # Store original items on first use
-        if not combo._original_items:
-            combo._original_items = [combo.itemText(i) for i in range(combo.count())]
-
-        # Create or update the search menu
-        if not combo._search_menu:
-            combo._search_menu = QMenu(self)
-            combo._search_menu.setStyleSheet(ComparePageStyles.get_search_menu_style())
-
-        # Create search input if not exists
-        if not combo._search_input:
-            combo._search_input = QLineEdit(self)
-            combo._search_input.setPlaceholderText("Search resources...")
-            combo._search_input.setFixedWidth(combo.width() - 10)
-            combo._search_input.setStyleSheet(ComparePageStyles.get_search_input_style())
-            combo._search_input.textChanged.connect(lambda text: self._filter_menu_items(combo, text))
-            combo._search_action = QWidgetAction(self)
-            combo._search_action.setDefaultWidget(combo._search_input)
-
-        # Update menu with current items
-        self._update_search_menu(combo)
-
-        # Show menu below combo
-        button_pos = combo.mapToGlobal(QPoint(0, combo.height()))
-        combo._search_menu.move(button_pos)
-        combo._search_menu.show()
-
-        # Focus search input
-        combo._search_input.setFocus()
-        combo._search_input.clear()
-
-    def _update_search_menu(self, combo):
-        """Update the search menu with current items"""
-        combo._search_menu.clear()
-        combo._search_menu.addAction(combo._search_action)
-
-        # Add items as actions
-        if combo._original_items:
-            for item in combo._original_items:
-                if not item.startswith("Select resource"):
-                    action = QAction(item, combo._search_menu)
-                    action.triggered.connect(lambda checked, i=item: self._handle_menu_selection(combo, i))
-                    combo._search_menu.addAction(action)
-        else:
-            action = QAction("No resources found", combo._search_menu)
-            action.setEnabled(False)
-            combo._search_menu.addAction(action)
-
-    def _filter_menu_items(self, combo, search_text):
-        """Filter menu items based on search text"""
-        if not combo._original_items:
-            return
-
-        combo._search_menu.clear()
-        combo._search_menu.addAction(combo._search_action)
-
-        search_lower = search_text.lower()
-        filtered_items = [item for item in combo._original_items
-                          if not item.startswith("Select resource") and search_lower in item.lower()]
-
-        if filtered_items:
-            for item in filtered_items:
-                action = QAction(item, combo._search_menu)
-                action.triggered.connect(lambda checked, i=item: self._handle_menu_selection(combo, i))
-                combo._search_menu.addAction(action)
-        else:
-            action = QAction("No matching resources", combo._search_menu)
-            action.setEnabled(False)
-            combo._search_menu.addAction(action)
-
-        # Keep focus on search input
-        combo._search_input.setFocus()
-
-    def _handle_menu_selection(self, combo, item):
-        """Handle selection from search menu"""
-        # Find the item in the combo and select it
-        index = combo.findText(item)
-        if index >= 0:
-            combo.setCurrentIndex(index)
-        combo._search_menu.hide()
+    # Removed manual searchable combo logic as CustomComboBox now supports it natively
 
     # ---------- Local Save Functionality ----------
 

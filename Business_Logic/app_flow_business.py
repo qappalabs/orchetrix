@@ -39,14 +39,6 @@ class ConnectionInfo:
     connection_type: str
     metadata: Optional[Dict[str, Any]] = None
 
-@dataclass
-class GraphPosition:
-    """Position information for graph elements"""
-    x: float
-    y: float
-    width: float
-    height: float
-
 class AppFlowBusinessLogic:
     """Business logic for app flow analysis and graph generation"""
 
@@ -56,7 +48,7 @@ class AppFlowBusinessLogic:
     def set_graph_layout(self, layout: GraphLayout):
         """Set the graph layout orientation"""
         self.graph_layout = layout
-        logging.info(f"Graph layout set to: {layout.value}")
+        logging.debug(f"Graph layout set to: {layout.value}")
 
     def process_app_flow_data(self, raw_app_flow: Dict[str, Any]) -> Dict[str, Any]:
         """Process raw app flow data into standardized format"""
@@ -70,7 +62,7 @@ class AppFlowBusinessLogic:
                 "layout": self.graph_layout.value
             }
 
-            logging.info(f"Processed app flow data with {len(processed_data['resources'])} resources")
+            logging.debug(f"Processed app flow data with {len(processed_data['resources'])} resources")
             return processed_data
 
         except Exception as e:
@@ -298,5 +290,5 @@ class AppFlowBusinessLogic:
 
             layer_x += LAYER_SPACING_X
 
-        logging.info(f"Calculated layout positions for {len(positions)} resources across {len([layer for layer in layers.values() if layer])} layers")
+        logging.debug(f"Calculated layout positions for {len(positions)} resources across {sum(1 for layer in layers.values() if layer)} layers")
         return positions

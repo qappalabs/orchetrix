@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QComboBox,
 )
+from UI.CustomComboBox import CustomComboBox
 from PyQt6.QtGui import QIcon
 from PyQt6.QtCore import Qt, QSize
 
@@ -115,8 +116,8 @@ class UnifiedTerminalHeader(QWidget, ThemeAwareMixin):
         # Update search input styling
         self.search_input.setStyleSheet(StyleConstants.SEARCH_INPUT)
 
-        # Update shell dropdown styling
-        self.shell_dropdown.setStyleSheet(AppStyles.get_dropdown_style_with_icon())
+        # Shell dropdown is a force-dark CustomComboBox that styles itself
+        # and intentionally ignores theme changes, so nothing to refresh here.
 
         # Update all buttons styling
         for btn in (
@@ -224,14 +225,16 @@ class UnifiedTerminalHeader(QWidget, ThemeAwareMixin):
         self.controls_layout.setSpacing(4)
 
         # Shell dropdown (for regular terminals)
-        self.shell_dropdown = QComboBox()
+        self.shell_dropdown = CustomComboBox(parent=self, force_dark=True)
         self.shell_dropdown.setFixedSize(160, 24)
-        # Use the centralized dropdown style with proper icon resolution
-        self.shell_dropdown.setStyleSheet(AppStyles.get_dropdown_style_with_icon())
         self.shell_dropdown.setCursor(Qt.CursorShape.PointingHandCursor)
 
         for name, _ in self.available_shells:
             self.shell_dropdown.addItem(name)
+        
+        if self.available_shells:
+            self.shell_dropdown.setCurrentIndex(0)
+            
         self.shell_dropdown.currentIndexChanged.connect(self._update_selected_shell)
         self.controls_layout.addWidget(self.shell_dropdown)
 
@@ -290,7 +293,7 @@ class UnifiedTerminalHeader(QWidget, ThemeAwareMixin):
         """Update selected shell and create new terminal tab."""
         if index >= 0 and index < len(self.available_shells):
             self.selected_shell = self.available_shells[index][1]  # Store path only
-            print(f"Selected shell updated to: {self.selected_shell}")
+            logging.debug(f"Selected shell updated to: {self.selected_shell}")
             # Automatically create a new terminal tab with the selected shell
             self.add_new_tab()
 
@@ -468,7 +471,7 @@ class UnifiedTerminalHeader(QWidget, ThemeAwareMixin):
                         f.write("# " + "=" * 50 + "\n\n")
                         f.write(session_content)
 
-                    print(f"SSH session saved to: {filename}")
+                    logging.info(f"SSH session saved to: {filename}")
 
         except Exception as e:
             logging.error(f"Error downloading SSH session: {e}")
@@ -637,7 +640,7 @@ class UnifiedTerminalHeader(QWidget, ThemeAwareMixin):
                         f.write("# " + "=" * 50 + "\n\n")
                         f.write(logs_content)
 
-                    print(f"Logs saved to: {filename}")
+                    logging.info(f"Logs saved to: {filename}")
 
         except Exception as e:
             logging.error(f"Error downloading logs: {e}")

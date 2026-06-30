@@ -7,6 +7,13 @@ import logging
 from datetime import datetime
 from typing import Dict, Any, List
 from kubernetes.client.rest import ApiException
+from Utils.data_formatters import parse_age_to_seconds, format_age
+
+__all__ = [
+    'KubernetesEventsService',
+    'create_kubernetes_events_service'
+]
+
 
 # Event configuration constants
 EVENT_BATCH_SIZE = 100
@@ -65,13 +72,17 @@ class KubernetesEventsService:
 
                 issues.append(issue)
 
-            # Sort by most recent first
-            issues.sort(key=lambda x: x.get("age", ""), reverse=False)
+            # Sort by most recent first; push untimestamped ("Unknown") issues
+            # behind timestamped ones so they get dropped on truncation, not kept.
+            issues.sort(key=lambda x: (
+                x.get("age") in (None, "", "Unknown"),
+                parse_age_to_seconds(x.get("age", "")),
+            ))
 
             # Limit to most recent issues
             issues = issues[:MAX_ISSUES_RETURNED]
 
-            logging.info(f"Found {len(issues)} real cluster issues")
+            logging.debug(f"Found {len(issues)} cluster issues")
             return issues
 
         except Exception as e:
@@ -126,41 +137,11 @@ class KubernetesEventsService:
 
     def _format_age(self, timestamp) -> str:
         """Format age"""
-        if not timestamp:
-            return "Unknown"
-
-        try:
-            if isinstance(timestamp, str):
-                created = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-            else:
-                created = timestamp
-
-            now = datetime.now(created.tzinfo or datetime.now().astimezone().tzinfo)
-            diff = now - created
-
-            if diff.days > 0:
-                return f"{diff.days}d"
-            elif diff.seconds >= 3600:
-                return f"{diff.seconds // 3600}h"
-            else:
-                return f"{diff.seconds // 60}m"
-
-        except (ValueError, TypeError, AttributeError) as e:
-            logging.debug(f"Error calculating event age: {e}")
-            return "Unknown"
-        except Exception as e:
-            logging.error(f"Unexpected error calculating event age: {e}")
-            return "Unknown"
-
-    def clear_cache(self):
-        """Clear all cached formatting results"""
-        # No caching is implemented in this service
-        logging.debug("No cache to clear for events formatting")
+        return format_age(timestamp)
 
     def cleanup(self):
         """Cleanup events service resources"""
         logging.debug("Cleaning up KubernetesEventsService")
-        self.clear_cache()
 
 
 # Factory function

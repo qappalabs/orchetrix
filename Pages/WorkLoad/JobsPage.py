@@ -33,14 +33,11 @@ class JobsPage(BaseResourcePage):
         headers = ["", "Name", "Namespace", "Completions", "Age", "Conditions", ""]
         sortable_columns = {1, 2, 3, 4, 5}
 
-        # Set up the base UI components with styles
+        # Set up the base UI components
         super().setup_ui("Jobs", headers, sortable_columns)
 
-        # Table styling is already handled by BaseResourcePage
         # Configure column widths
         self.configure_columns()
-
-        # Add delete selected button
 
     def configure_columns(self):
         """Configure column widths for full screen utilization"""
@@ -52,11 +49,11 @@ class JobsPage(BaseResourcePage):
         # Column specifications with optimized default widths
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
-            (1, 140, "interactive"), # Name
+            (1, 140, "stretch"),     # Name - stretch to fill remaining space
             (2, 90, "interactive"),  # Namespace
             (3, 80, "interactive"),  # Completions
             (4, 70, "interactive"),  # Age
-            (5, 80, "stretch"),      # Conditions - stretch to fill remaining space
+            (5, 80, "interactive"),  # Conditions
             (6, 40, "fixed")        # Actions
         ]
 
@@ -76,41 +73,46 @@ class JobsPage(BaseResourcePage):
         # Ensure full width utilization after configuration
         QTimer.singleShot(100, self._ensure_full_width_utilization)
 
+    def _auto_resize_columns(self, max_col_widths=None, min_col_widths=None):
+        """Override to provide explicit widths for columns to let Name/Conditions stretch."""
+        explicit_mins = {
+            1: 140,  # Name
+            2: 90,   # Namespace
+            3: 80,   # Completions
+            4: 60,   # Age
+            5: 120,  # Conditions
+            6: 40,   # Actions
+        }
+        
+        if min_col_widths:
+            explicit_mins.update(min_col_widths)
+            
+        explicit_maxes = {
+            2: 150,  # Namespace
+            3: 110,  # Completions
+            4: 80,   # Age
+        }
+        
+        if max_col_widths:
+            explicit_maxes.update(max_col_widths)
+            
+        super()._auto_resize_columns(max_col_widths=explicit_maxes, min_col_widths=explicit_mins)
+
     def populate_resource_row(self, row, resource):
         """
         Populate a single row with Job data
         """
         # Set row height
-        self.table.setRowHeight(row, 40)
+        self.table.setRowHeight(row, 42)
 
         # Create checkbox for row selection - styling handled by BaseResourcePage
         resource_name = resource["name"]
         checkbox_container = self._create_checkbox_container(row, resource_name)
         self.table.setCellWidget(row, 0, checkbox_container)
 
-        # Extract additional data from the raw_data field if available
-        raw_data = resource.get("raw_data", {})
-
-        # Get job details
-        completions = "0/1"
-        conditions = ""
-
-        if raw_data:
-            spec = raw_data.get("spec", {})
-            status = raw_data.get("status", {})
-
-            # Get completions count
-            successful = status.get("succeeded", 0)
-            parallelism = spec.get("completions", 1)
-            completions = f"{successful}/{parallelism}"
-
-            # Get conditions
-            condition_list = status.get("conditions", [])
-            condition_types = []
-            for condition in condition_list:
-                if condition.get("status") == "True":
-                    condition_types.append(condition.get("type", ""))
-            conditions = " ".join(condition_types)
+        # Get job details from the pre-parsed resource fields
+        completions = resource.get("completions", "0/1")
+        conditions = resource.get("conditions", "")
 
         # Prepare data columns
         columns = [

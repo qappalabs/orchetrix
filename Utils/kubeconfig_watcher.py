@@ -6,7 +6,8 @@ to prevent signal storms from causing duplicate error dialogs.
 
 import os
 import logging
-from PyQt6.QtCore import QObject, pyqtSignal, QFileSystemWatcher, QTimer
+import threading
+from PyQt6.QtCore import QObject, pyqtSignal, QFileSystemWatcher, QTimer, QThread, QCoreApplication
 
 
 class KubeconfigWatcher(QObject):
@@ -251,20 +252,82 @@ class KubeconfigWatcher(QObject):
 
 # Singleton instance
 _kubeconfig_watcher_instance = None
+_kubeconfig_watcher_lock = threading.Lock()
 
 
 def get_kubeconfig_watcher() -> KubeconfigWatcher:
-    """Get or create the singleton KubeconfigWatcher instance."""
+    """
+    Get or create the singleton KubeconfigWatcher instance (thread-safe).
+
+    Must be initially called from the main Qt thread to ensure the underlying
+    QFileSystemWatcher and QTimer acquire the correct thread affinity. This
+    guarantees they reside in a thread with an active QEventLoop, preventing
+    silent failure of the Debounce-Validate-Reload mechanism.
+
+    Subsequent calls from background threads are safe and return the already-
+    constructed instance without any thread-affinity check.
+    """
     global _kubeconfig_watcher_instance
+
+    # First-pass unsynchronized check for rapid return of an already-constructed instance.
     if _kubeconfig_watcher_instance is None:
-        _kubeconfig_watcher_instance = KubeconfigWatcher()
+        with _kubeconfig_watcher_lock:
+            # Second-pass synchronized check inside the lock.
+            if _kubeconfig_watcher_instance is None:
+                # Enforce strict thread affinity before construction.
+                # QTimer and QFileSystemWatcher will silently fail (timers never fire,
+                # file events never delivered) if created on a thread without an event loop.
+                app_instance = QCoreApplication.instance()
+                if app_instance is not None:
+                    current_qthread = QThread.currentThread()
+                    main_qthread = app_instance.thread()
+                    if current_qthread != main_qthread:
+                        raise RuntimeError(
+                            "Critical Thread Affinity Violation: get_kubeconfig_watcher() "
+                            "was invoked from a background thread prior to instantiation. "
+                            "It must be initialized explicitly on the main Qt GUI thread "
+                            "before any background thread calls it."
+                        )
+                else:
+                    # QCoreApplication not yet created (e.g. headless unit-test environment).
+                    # Allow construction but note the absence of an event loop.
+                    logging.debug(
+                        "QCoreApplication absent during KubeconfigWatcher construction; "
+                        "skipping thread-affinity check."
+                    )
+
+                _kubeconfig_watcher_instance = KubeconfigWatcher()
+
     return _kubeconfig_watcher_instance
 
 
 def cleanup_kubeconfig_watcher():
-    """Cleanup the singleton instance (call on app shutdown)."""
+    """
+    Cleanup the singleton instance safely during application shutdown.
+
+    Transfers the global pointer to a thread-local variable under the lock so
+    that the nullification of the global is atomic with respect to
+    get_kubeconfig_watcher's double-checked locking.  The potentially blocking
+    stop() call is made *after* the lock is released to prevent a cross-thread
+    deadlock where Qt's BlockingQueuedConnection would wait on the main thread
+    while the main thread waits on this lock.
+    """
     global _kubeconfig_watcher_instance
-    if _kubeconfig_watcher_instance is not None:
-        _kubeconfig_watcher_instance.stop()
-        _kubeconfig_watcher_instance = None
+
+    # Capture the instance and nullify the global atomically under the lock.
+    local_instance = None
+    with _kubeconfig_watcher_lock:
+        if _kubeconfig_watcher_instance is not None:
+            local_instance = _kubeconfig_watcher_instance
+            _kubeconfig_watcher_instance = None
+
+    # Lock is now released.  Safe to call stop() without risking deadlock.
+    if local_instance is not None:
+        local_instance.stop()
         logging.info("Kubeconfig watcher cleaned up")
+
+__all__ = [
+    "KubeconfigWatcher",
+    "cleanup_kubeconfig_watcher",
+    "get_kubeconfig_watcher",
+]

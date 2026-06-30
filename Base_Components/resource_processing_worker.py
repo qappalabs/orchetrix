@@ -15,6 +15,7 @@ import time
 from datetime import datetime, timezone
 import threading
 from Utils.thread_manager import is_shutdown_requested
+from Utils.data_formatters import format_age
 from dateutil import parser as dateutil_parser
 
 
@@ -190,43 +191,7 @@ class ResourceProcessingWorker(QThread):
 
     def _calculate_age(self, creation_timestamp) -> str:
         """Calculate age from creation timestamp."""
-        try:
-            if not creation_timestamp:
-                return "Unknown"
-
-            # Parse timestamp
-            if isinstance(creation_timestamp, str):
-                # Parse ISO format
-                if creation_timestamp.endswith('Z'):
-                    created = datetime.fromisoformat(
-                        creation_timestamp.replace('Z', '+00:00'))
-                else:
-                    created = datetime.fromisoformat(creation_timestamp)
-            else:
-                # Assume it's already a datetime object
-                created = creation_timestamp
-
-            # Ensure timezone aware
-            if created.tzinfo is None:
-                created = created.replace(tzinfo=timezone.utc)
-
-            now = datetime.now(timezone.utc)
-            age_delta = now - created
-
-            days = age_delta.days
-            hours = age_delta.seconds // 3600
-            minutes = (age_delta.seconds % 3600) // 60
-
-            if days > 0:
-                return f"{days}d"
-            elif hours > 0:
-                return f"{hours}h"
-            else:
-                return f"{minutes}m"
-
-        except Exception as e:
-            logging.debug(f"Error calculating age: {e}")
-            return "Unknown"
+        return format_age(creation_timestamp)
 
 
 class PodProcessingWorker(ResourceProcessingWorker):

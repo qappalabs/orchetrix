@@ -5,10 +5,16 @@ Split from kubernetes_client.py for better architecture
 
 import logging
 import time
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
+
 from kubernetes.client.rest import ApiException
 from Services.kubernetes.api_config import APIClientConfig
+from Utils.data_formatters import parse_memory_value
 
+__all__ = [
+    'KubernetesMetricsService',
+    'create_kubernetes_metrics_service'
+]
 
 class KubernetesMetricsService:
     def __init__(self, api_service):
@@ -19,7 +25,7 @@ class KubernetesMetricsService:
         try:
             # Calculate metrics directly
             metrics = self._calculate_cluster_metrics()
-            logging.info(f"Calculated metrics for {cluster_name}")
+            logging.debug(f"Calculated metrics for {cluster_name}")
             return metrics
         except Exception as e:
             logging.error(f"Error getting cluster metrics: {e}")
@@ -27,15 +33,26 @@ class KubernetesMetricsService:
 
     def _calculate_cluster_metrics(self) -> Dict[str, Any]:
         try:
-            # Get nodes with their actual resource information
-            nodes_list = self.api_service.v1.list_node()
+            # Get nodes with their actual resource information (paginated with timeout)
+            all_nodes = []
+            continue_token = None
+            while True:
+                response = self.api_service.v1.list_node(
+                    limit=50,
+                    _continue=continue_token,
+                    _request_timeout=APIClientConfig.METRICS_COLLECTION_TIMEOUT,
+                )
+                all_nodes.extend(response.items)
+                continue_token = getattr(response.metadata, "_continue", None)
+                if not continue_token:
+                    break
             # Initialize totals
             cpu_total_cores = 0
             memory_total_bytes = 0
             pods_capacity_total = 0
             cpu_allocatable_cores = 0
             memory_allocatable_bytes = 0
-            for node in nodes_list.items:
+            for node in all_nodes:
                 if node.status and node.status.capacity:
                     # CPU capacity and allocatable
                     cpu_capacity = self._parse_cpu_value(
@@ -63,15 +80,26 @@ class KubernetesMetricsService:
                         memory_allocatable_bytes += memory_capacity
                     # Pod capacity
                     pods_capacity_total += int(node.status.capacity.get("pods", "110"))
-            # Get actual pod resource usage
-            pods_list = self.api_service.v1.list_pod_for_all_namespaces()
+            # Get actual pod resource usage (paginated with timeout)
+            all_pods = []
+            continue_token = None
+            while True:
+                response = self.api_service.v1.list_pod_for_all_namespaces(
+                    limit=5000,
+                    _continue=continue_token,
+                    _request_timeout=APIClientConfig.METRICS_COLLECTION_TIMEOUT,
+                )
+                all_pods.extend(response.items)
+                continue_token = getattr(response.metadata, "_continue", None)
+                if not continue_token:
+                    break
             # Calculate actual resource requests and usage
             cpu_requests_total = 0
             memory_requests_total = 0
             cpu_limits_total = 0
             memory_limits_total = 0
             running_pods_count = 0
-            for pod in pods_list.items:
+            for pod in all_pods:
                 # Only count running pods
                 if pod.status and pod.status.phase == "Running":
                     running_pods_count += 1
@@ -149,13 +177,37 @@ class KubernetesMetricsService:
                     "capacity": pods_capacity_total,
                 },
             }
-            logging.info(
-                f"Calculated real cluster metrics: CPU {cpu_usage_percent:.1f}%, Memory {memory_usage_percent:.1f}%, Pods {pods_usage_percent:.1f}%"
+            logging.debug(
+                f"Calculated cluster metrics: CPU {cpu_usage_percent:.1f}%, Memory {memory_usage_percent:.1f}%, Pods {pods_usage_percent:.1f}%"
             )
             return metrics
         except Exception as e:
             logging.error(f"Error calculating cluster metrics: {e}")
             return self._get_default_metrics()
+
+    def _calculate_pod_resource_requests(self, pods: list) -> Tuple[int, float, float, float]:
+        """Process a list of pods and sum up their resource requests along with running count."""
+        running_pods = 0
+        cpu_requests = 0.0
+        memory_requests = 0.0
+        storage_requests = 0.0
+        
+        for pod in pods:
+            if pod.status and pod.status.phase == "Running":
+                running_pods += 1
+                if pod.spec and pod.spec.containers:
+                    for container in pod.spec.containers:
+                        if container.resources and container.resources.requests:
+                            cpu_requests += self._parse_cpu_value(
+                                container.resources.requests.get("cpu", "0")
+                            )
+                            memory_requests += self._parse_memory_value(
+                                container.resources.requests.get("memory", "0")
+                            )
+                            storage_requests += self._parse_storage_value(
+                                container.resources.requests.get("ephemeral-storage", "0")
+                            )
+        return running_pods, cpu_requests, memory_requests, storage_requests
 
     def _get_default_metrics(self) -> Dict[str, Any]:
         return {
@@ -198,7 +250,7 @@ class KubernetesMetricsService:
                     break
             if not all_nodes_items:
                 return {}
-            logging.info(f"Total nodes fetched: {len(all_nodes_items)}")
+            logging.debug(f"Total nodes fetched: {len(all_nodes_items)}")
             # Filter nodes if specific names provided
             if node_names:
                 all_nodes_items = [
@@ -240,7 +292,7 @@ class KubernetesMetricsService:
                 continue_token = getattr(response.metadata, "_continue", None)
                 if not continue_token:
                     break
-            logging.info(f"Total pods fetched for node metrics: {total_pods_fetched}")
+            logging.debug(f"Total pods fetched for node metrics: {total_pods_fetched}")
             # Group pods by node for efficient lookup with optimized data structure
             pods_by_node = {}
             for pod in all_pods_items:
@@ -280,8 +332,8 @@ class KubernetesMetricsService:
                 logging.warning(
                     f"⚠️ [BATCH] {len(failed_nodes)} nodes failed metrics calculation: {failed_nodes[:5]}{'...' if len(failed_nodes) > 5 else ''}"
                 )
-            logging.info(
-                f"🚀 [FAST BATCH] Calculated {disk_text} metrics for {len(all_metrics)} nodes in {processing_time:.1f}ms"
+            logging.debug(
+                f"Calculated {disk_text} metrics for {len(all_metrics)} nodes in {processing_time:.1f}ms"
             )
             return all_metrics
         except Exception as e:
@@ -408,27 +460,8 @@ class KubernetesMetricsService:
                 )
             else:
                 # Fallback to resource requests calculation
-                cpu_requests = 0
-                memory_requests = 0
-                storage_requests = 0
-                running_pods = 0
-                for pod in node_pods:
-                    if pod.status and pod.status.phase == "Running":
-                        running_pods += 1
-                        if pod.spec and pod.spec.containers:
-                            for container in pod.spec.containers:
-                                if container.resources and container.resources.requests:
-                                    cpu_requests += self._parse_cpu_value(
-                                        container.resources.requests.get("cpu", "0")
-                                    )
-                                    memory_requests += self._parse_memory_value(
-                                        container.resources.requests.get("memory", "0")
-                                    )
-                                    storage_requests += self._parse_storage_value(
-                                        container.resources.requests.get(
-                                            "ephemeral-storage", "0"
-                                        )
-                                    )
+                running_pods, cpu_requests, memory_requests, storage_requests = self._calculate_pod_resource_requests(node_pods)
+                
                 # Calculate usage percentages based on requests
                 cpu_usage_percent = (
                     (cpu_requests / cpu_capacity * 100) if cpu_capacity > 0 else 0
@@ -587,27 +620,8 @@ class KubernetesMetricsService:
                 pods_list = self.api_service.v1.list_pod_for_all_namespaces(
                     field_selector=f"spec.nodeName={node_name}"
                 )
-                cpu_requests = 0
-                memory_requests = 0
-                storage_requests = 0
-                running_pods = 0
-                for pod in pods_list.items:
-                    if pod.status and pod.status.phase == "Running":
-                        running_pods += 1
-                        if pod.spec and pod.spec.containers:
-                            for container in pod.spec.containers:
-                                if container.resources and container.resources.requests:
-                                    cpu_requests += self._parse_cpu_value(
-                                        container.resources.requests.get("cpu", "0")
-                                    )
-                                    memory_requests += self._parse_memory_value(
-                                        container.resources.requests.get("memory", "0")
-                                    )
-                                    storage_requests += self._parse_storage_value(
-                                        container.resources.requests.get(
-                                            "ephemeral-storage", "0"
-                                        )
-                                    )
+                running_pods, cpu_requests, memory_requests, storage_requests = self._calculate_pod_resource_requests(pods_list.items)
+                
                 # Calculate usage percentages based on requests
                 cpu_usage_percent = (
                     (cpu_requests / cpu_capacity * 100) if cpu_capacity > 0 else 0
@@ -745,85 +759,11 @@ class KubernetesMetricsService:
             pods_list = self.api_service.v1.list_pod_for_all_namespaces(
                 field_selector=f"spec.nodeName={node_name}"
             )
-            total_estimated_usage = 0
-            running_pods_count = 0
-            for pod in pods_list.items:
-                if pod.status and pod.status.phase == "Running":
-                    running_pods_count += 1
-                    # Estimate storage usage per pod
-                    pod_storage_estimate = 0
-                    if pod.spec and pod.spec.containers:
-                        for container in pod.spec.containers:
-                            # Base container image size estimate
-                            container_base_size = (
-                                200 * 1024 * 1024
-                            )  # 200MB base per container
-                            pod_storage_estimate += container_base_size
-                            # Add storage requests if specified
-                            if container.resources and container.resources.requests:
-                                storage_request = container.resources.requests.get(
-                                    "ephemeral-storage", "0"
-                                )
-                                pod_storage_estimate += self._parse_storage_value(
-                                    storage_request
-                                )
-                    # Add persistent volume sizes
-                    if pod.spec and pod.spec.volumes:
-                        for volume in pod.spec.volumes:
-                            if volume.persistent_volume_claim:
-                                # Estimate PVC usage (we can't get exact usage, so estimate)
-                                try:
-                                    pvc = self.api_service.v1.read_namespaced_persistent_volume_claim(
-                                        name=volume.persistent_volume_claim.claim_name,
-                                        namespace=pod.metadata.namespace,
-                                    )
-                                    if (
-                                        pvc.spec
-                                        and pvc.spec.resources
-                                        and pvc.spec.resources.requests
-                                    ):
-                                        pvc_size_request = (
-                                            pvc.spec.resources.requests.get(
-                                                "storage", "0"
-                                            )
-                                        )
-                                        # Assume 60% usage of PVC capacity
-                                        pvc_estimated_usage = (
-                                            self._parse_storage_value(pvc_size_request)
-                                            * 0.6
-                                        )
-                                        pod_storage_estimate += pvc_estimated_usage
-                                except Exception:
-                                    # If we can't get PVC info, skip this volume
-                                    pass
-                            elif volume.empty_dir:
-                                # EmptyDir estimate
-                                pod_storage_estimate += (
-                                    100 * 1024 * 1024
-                                )  # 100MB estimate
-                    total_estimated_usage += pod_storage_estimate
-            # Add system overhead
-            system_overhead = storage_capacity * 0.15  # 15% for OS and system
-            total_estimated_usage += system_overhead
-            # Add container image layers overhead
-            if running_pods_count > 0:
-                # Estimate shared image layers and overlays
-                image_overhead = (
-                    running_pods_count * 50 * 1024 * 1024
-                )  # 50MB per pod for overlays
-                total_estimated_usage += image_overhead
-            # Calculate percentage
-            usage_percent = (total_estimated_usage / storage_capacity) * 100
-            # Cap at maximum 100%
-            usage_percent = min(usage_percent, 100.0)
-            logging.debug(
-                f"Calculated disk usage for {node_name}: {usage_percent:.1f}% "
-                f"({total_estimated_usage / (1024**3):.1f}GB used of {storage_capacity / (1024**3):.1f}GB)"
+            return self._estimate_disk_usage_from_pods(
+                node_name, storage_capacity, pods_list.items
             )
-            return usage_percent
         except Exception as e:
             logging.debug(f"Error calculating disk usage for {node_name}: {e}")
-            # Return 0 if we can't calculate real usage
             return 0.0
 
     def _calculate_real_disk_usage(self, node, pods: list) -> float:
@@ -836,86 +776,137 @@ class KubernetesMetricsService:
             )
             if storage_capacity <= 0:
                 return 0.0  # No capacity info available
-            total_estimated_usage = 0
-            running_pods_count = 0
-            for pod in pods:
-                if pod.status and pod.status.phase == "Running":
-                    running_pods_count += 1
-                    # Estimate storage usage per pod
-                    pod_storage_estimate = 0
-                    if pod.spec and pod.spec.containers:
-                        for container in pod.spec.containers:
-                            # Base container image size estimate
-                            container_base_size = (
-                                200 * 1024 * 1024
-                            )  # 200MB base per container
-                            pod_storage_estimate += container_base_size
-                            # Add storage requests if specified
-                            if container.resources and container.resources.requests:
-                                storage_request = container.resources.requests.get(
-                                    "ephemeral-storage", "0"
-                                )
-                                pod_storage_estimate += self._parse_storage_value(
-                                    storage_request
-                                )
-                    # Add persistent volume sizes
-                    if pod.spec and pod.spec.volumes:
-                        for volume in pod.spec.volumes:
-                            if volume.persistent_volume_claim:
-                                # Estimate PVC usage (we can't get exact usage, so estimate)
-                                try:
-                                    pvc = self.api_service.v1.read_namespaced_persistent_volume_claim(
-                                        name=volume.persistent_volume_claim.claim_name,
-                                        namespace=pod.metadata.namespace,
-                                    )
-                                    if (
-                                        pvc.spec
-                                        and pvc.spec.resources
-                                        and pvc.spec.resources.requests
-                                    ):
-                                        pvc_size_request = (
-                                            pvc.spec.resources.requests.get(
-                                                "storage", "0"
-                                            )
-                                        )
-                                        # Assume 60% usage of PVC capacity
-                                        pvc_estimated_usage = (
-                                            self._parse_storage_value(pvc_size_request)
-                                            * 0.6
-                                        )
-                                        pod_storage_estimate += pvc_estimated_usage
-                                except Exception:
-                                    # If we can't get PVC info, skip this volume
-                                    pass
-                            elif volume.empty_dir:
-                                # EmptyDir estimate
-                                pod_storage_estimate += (
-                                    100 * 1024 * 1024
-                                )  # 100MB estimate
-                    total_estimated_usage += pod_storage_estimate
-            # Add system overhead
-            system_overhead = storage_capacity * 0.15  # 15% for OS and system
-            total_estimated_usage += system_overhead
-            # Add container image layers overhead
-            if running_pods_count > 0:
-                # Estimate shared image layers and overlays
-                image_overhead = (
-                    running_pods_count * 50 * 1024 * 1024
-                )  # 50MB per pod for overlays
-                total_estimated_usage += image_overhead
-            # Calculate percentage
-            usage_percent = (total_estimated_usage / storage_capacity) * 100
-            # Cap at maximum 100%
-            usage_percent = min(usage_percent, 100.0)
-            logging.debug(
-                f"Calculated disk usage for {node_name}: {usage_percent:.1f}% "
-                f"({total_estimated_usage / (1024**3):.1f}GB used of {storage_capacity / (1024**3):.1f}GB)"
+            return self._estimate_disk_usage_from_pods(
+                node_name, storage_capacity, pods
             )
-            return usage_percent
         except Exception as e:
             logging.debug(f"Error calculating disk usage for {node.metadata.name}: {e}")
-            # Return 0 if we can't calculate real usage
             return 0.0
+
+    def _prefetch_pvcs_for_pods(self, pods: list) -> Dict[Tuple[str, str], Any]:
+        """Batch-read PVCs referenced by the given pods, keyed by (namespace, name).
+
+        Avoids the N+1 pattern of reading each PVC individually inside the disk
+        estimation loop. Only namespaces that actually contain PVC-backed volumes
+        are queried, and a failed list (e.g. RBAC) degrades to skipping that
+        namespace's PVCs rather than raising.
+        """
+        namespaces = {
+            pod.metadata.namespace
+            for pod in pods
+            if pod.status
+            and pod.status.phase == "Running"
+            and pod.spec
+            and pod.spec.volumes
+            and pod.metadata
+            and pod.metadata.namespace
+            and any(v.persistent_volume_claim for v in pod.spec.volumes)
+        }
+        pvc_lookup: Dict[Tuple[str, str], Any] = {}
+        for namespace in namespaces:
+            continue_token = None
+            try:
+                while True:
+                    response = self.api_service.v1.list_namespaced_persistent_volume_claim(
+                        namespace=namespace,
+                        limit=500,
+                        _continue=continue_token,
+                        _request_timeout=APIClientConfig.METRICS_COLLECTION_TIMEOUT,
+                    )
+                    for pvc in response.items:
+                        pvc_lookup[(namespace, pvc.metadata.name)] = pvc
+                    continue_token = getattr(response.metadata, "_continue", None)
+                    if not continue_token:
+                        break
+            except Exception as e:
+                logging.debug(
+                    f"Skipping PVC prefetch for namespace '{namespace}': {e}"
+                )
+        return pvc_lookup
+
+    def _estimate_disk_usage_from_pods(
+        self, node_name: str, storage_capacity: float, pods: list
+    ) -> float:
+        """Estimate disk usage percentage from pod list and node storage capacity.
+
+        Shared estimation logic used by both _calculate_real_disk_usage and
+        _calculate_real_disk_usage_legacy.
+        """
+        total_estimated_usage = 0
+        running_pods_count = 0
+        # Prefetch every PVC referenced by these pods in one batch per namespace,
+        # so the volume loop below is a dict lookup instead of an N+1 API read.
+        pvc_lookup = self._prefetch_pvcs_for_pods(pods)
+        for pod in pods:
+            if pod.status and pod.status.phase == "Running":
+                running_pods_count += 1
+                # Estimate storage usage per pod
+                pod_storage_estimate = 0
+                if pod.spec and pod.spec.containers:
+                    for container in pod.spec.containers:
+                        # Base container image size estimate
+                        container_base_size = (
+                            200 * 1024 * 1024
+                        )  # 200MB base per container
+                        pod_storage_estimate += container_base_size
+                        # Add storage requests if specified
+                        if container.resources and container.resources.requests:
+                            storage_request = container.resources.requests.get(
+                                "ephemeral-storage", "0"
+                            )
+                            pod_storage_estimate += self._parse_storage_value(
+                                storage_request
+                            )
+                # Add persistent volume sizes
+                if pod.spec and pod.spec.volumes:
+                    for volume in pod.spec.volumes:
+                        if volume.persistent_volume_claim:
+                            # Estimate PVC usage (we can't get exact usage, so estimate)
+                            pvc = pvc_lookup.get(
+                                (
+                                    pod.metadata.namespace,
+                                    volume.persistent_volume_claim.claim_name,
+                                )
+                            )
+                            if (
+                                pvc
+                                and pvc.spec
+                                and pvc.spec.resources
+                                and pvc.spec.resources.requests
+                            ):
+                                pvc_size_request = pvc.spec.resources.requests.get(
+                                    "storage", "0"
+                                )
+                                # Assume 60% usage of PVC capacity
+                                pvc_estimated_usage = (
+                                    self._parse_storage_value(pvc_size_request) * 0.6
+                                )
+                                pod_storage_estimate += pvc_estimated_usage
+                        elif volume.empty_dir:
+                            # EmptyDir estimate
+                            pod_storage_estimate += (
+                                100 * 1024 * 1024
+                            )  # 100MB estimate
+                total_estimated_usage += pod_storage_estimate
+        # Add system overhead
+        system_overhead = storage_capacity * 0.15  # 15% for OS and system
+        total_estimated_usage += system_overhead
+        # Add container image layers overhead
+        if running_pods_count > 0:
+            # Estimate shared image layers and overlays
+            image_overhead = (
+                running_pods_count * 50 * 1024 * 1024
+            )  # 50MB per pod for overlays
+            total_estimated_usage += image_overhead
+        # Calculate percentage
+        usage_percent = (total_estimated_usage / storage_capacity) * 100
+        # Cap at maximum 100%
+        usage_percent = min(usage_percent, 100.0)
+        logging.debug(
+            f"Calculated disk usage for {node_name}: {usage_percent:.1f}% "
+            f"({total_estimated_usage / (1024**3):.1f}GB used of {storage_capacity / (1024**3):.1f}GB)"
+        )
+        return usage_percent
 
     def is_metrics_server_available(self) -> bool:
         try:
@@ -953,29 +944,7 @@ class KubernetesMetricsService:
     def _parse_memory_value(self, memory_str: str) -> float:
         if not memory_str:
             return 0.0
-        try:
-            memory_str = str(memory_str).strip()
-            # Handle different memory formats
-            if memory_str.endswith("Ki"):
-                return float(memory_str[:-2]) * 1024
-            elif memory_str.endswith("Mi"):
-                return float(memory_str[:-2]) * 1024 * 1024
-            elif memory_str.endswith("Gi"):
-                return float(memory_str[:-2]) * 1024 * 1024 * 1024
-            elif memory_str.endswith("Ti"):
-                return float(memory_str[:-2]) * 1024 * 1024 * 1024 * 1024
-            elif memory_str.endswith("k"):
-                return float(memory_str[:-1]) * 1000
-            elif memory_str.endswith("M"):
-                return float(memory_str[:-1]) * 1000 * 1000
-            elif memory_str.endswith("G"):
-                return float(memory_str[:-1]) * 1000 * 1000 * 1000
-            else:
-                # Plain number (bytes)
-                return float(memory_str)
-        except (ValueError, TypeError):
-            logging.warning(f"Could not parse memory value: {memory_str}")
-            return 0.0
+        return float(parse_memory_value(str(memory_str)).value)
 
     def _parse_storage_value(self, storage_str: str) -> float:
         # Same logic as memory parsing

@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QGraphicsDropShadowEffect, QSizePolicy, QStyle, QStyleOptionHeader,
     QApplication, QProxyStyle, QMessageBox
 )
-from PyQt6.QtCore import Qt, QTimer, QRectF, QSize, QEventLoop
+from PyQt6.QtCore import Qt, QTimer, QRectF, QSize, QEventLoop, QThread, QObject, pyqtSignal
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QLinearGradient, QPainterPath
 
 from UI.Styles import AppStyles, AppColors, AppConstants
@@ -21,9 +21,11 @@ from Base_Components.base_resource_page import BaseResourcePage
 from Utils.cluster_connector import get_cluster_connector
 from UI.Icons import resource_path
 from Utils.data_formatters import parse_age_to_seconds
+from Utils.kubernetes_client import get_kubernetes_client
 import datetime
 import logging
 import time
+from Utils.time_utils import TimezoneManager
 from Utils.thread_manager import is_shutdown_requested
 
 
@@ -132,8 +134,6 @@ class GraphWidget(QFrame):
             return
 
         # IMPORTANT: Do metrics fetching in a separate thread to prevent UI freezing
-        from PyQt6.QtCore import QThread, QObject, pyqtSignal
-
         class MetricsWorker(QObject):
             metrics_ready = pyqtSignal(dict)
 
@@ -144,7 +144,6 @@ class GraphWidget(QFrame):
 
             def fetch_metrics(self):
                 try:
-                    from Utils.kubernetes_client import get_kubernetes_client
                     kube_client = get_kubernetes_client()
 
                     metrics_data = {}
@@ -337,7 +336,7 @@ class GraphWidget(QFrame):
         font.setPointSize(9)
         painter.setFont(font)
 
-        now = datetime.datetime.now()
+        now = TimezoneManager.get_instance().get_now()
         start_time = now - datetime.timedelta(minutes=10)
 
         painter.drawText(QRectF(16 - 15, self.height() - 16, 30, 12),
@@ -470,8 +469,8 @@ class NodesPage(BaseResourcePage):
         # Initialize data structure
         self.nodes_data = []
 
-        # Defer UI setup to ensure base class is fully initialized
-        QTimer.singleShot(0, self.setup_page_ui)
+        # Setup UI immediately
+        self.setup_page_ui()
 
     def setup_page_ui(self):
         headers = ["", "Name", "CPU", "Memory", "Disk", "Taints", "Roles", "Version", "Age", "Conditions", ""]
@@ -567,6 +566,28 @@ class NodesPage(BaseResourcePage):
 
         QTimer.singleShot(100, self._ensure_full_width_utilization)
 
+    def _auto_resize_columns(self, max_col_widths=None, min_col_widths=None):
+        """Override to provide explicit minimum widths for columns like Conditions that contain wide pill widgets."""
+        explicit_mins = {
+            # 0 is Checkbox
+            1: 140,  # Name
+            2: 110,  # CPU
+            3: 110,  # Memory
+            4: 110,  # Disk
+            5: 60,   # Taints
+            6: 90,   # Roles
+            7: 90,   # Version
+            8: 60,   # Age
+            9: 120,  # Conditions - must be wide enough for badges
+            10: 40,  # Actions
+        }
+        
+        # Merge with any caller overrides
+        if min_col_widths:
+            explicit_mins.update(min_col_widths)
+            
+        super()._auto_resize_columns(max_col_widths=max_col_widths, min_col_widths=explicit_mins)
+
     def show_no_data_message(self):
 
         self.table.hide()
@@ -582,6 +603,10 @@ class NodesPage(BaseResourcePage):
         self.is_loading = False
         self.hide_loading_indicator()  # FIXED: Ensure loading overlay is hidden
         self.is_showing_skeleton = False
+
+        if not hasattr(self, "table") or not self.table:
+            logging.warning("NodesPage: Cannot update nodes before table is initialized")
+            return
 
         if hasattr(self, 'skeleton_timer') and self.skeleton_timer.isActive():
             self.skeleton_timer.stop()
@@ -720,11 +745,14 @@ class NodesPage(BaseResourcePage):
         # Re - enable sorting after all rows are populated
         self.table.setSortingEnabled(True)
         logging.info(f"Successfully populated {len(nodes_data)} node rows")
+        # Auto-resize columns to fit content (no text clipping)
+        QTimer.singleShot(150, self._auto_resize_columns)
+
 
     def _populate_node_row_fast(self, row, resource):
 
         try:
-            self.table.setRowHeight(row, 40)
+            self.table.setRowHeight(row, 42)
 
             # Validate resource is a dictionary
             if not isinstance(resource, dict):
@@ -737,6 +765,11 @@ class NodesPage(BaseResourcePage):
                 logging.warning(f"Row {row}: Node has no valid name")
                 return
 
+            # Set a dummy item for the checkbox column for highlighting
+            dummy_check_item = SortableTableWidgetItem("")
+            dummy_check_item.setFlags(dummy_check_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 0, dummy_check_item)
+            
             # Create checkbox container (base class handles styling)
             checkbox_container = self._create_checkbox_container(
                 row, node_name)
@@ -836,8 +869,8 @@ class NodesPage(BaseResourcePage):
                     item.setTextAlignment(
                         Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
-                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                self.table.setItem(row, cell_col, item)
+                is_name = (col == 0) # node_name is at index 0 in columns list
+                self.table.setItem(row, cell_col, self.style_table_item(item, is_name=is_name))
 
             # Add Status column as a widget
             status_col = len(columns) + 1
@@ -847,6 +880,11 @@ class NodesPage(BaseResourcePage):
             else:
                 color = AppColors.STATUS_DISCONNECTED
 
+            # Set a dummy item for the status column for highlighting
+            dummy_status_item = SortableTableWidgetItem("")
+            dummy_status_item.setFlags(dummy_status_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, status_col, dummy_status_item)
+            
             status_widget = StatusLabel(status, color)
             status_widget.clicked.connect(lambda: self.table.selectRow(row))
             self.table.setCellWidget(row, status_col, status_widget)
@@ -864,6 +902,11 @@ class NodesPage(BaseResourcePage):
             action_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
             action_layout.addWidget(action_button)
 
+            # Set a dummy item for the action column for highlighting
+            dummy_action_item = SortableTableWidgetItem("")
+            dummy_action_item.setFlags(dummy_action_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, status_col + 1, dummy_action_item)
+            
             self.table.setCellWidget(row, status_col + 1, action_container)
 
             logging.debug(
@@ -1090,6 +1133,14 @@ class NodesPage(BaseResourcePage):
 
         # Add node - specific actions
         # Use node_name instead of row for actions to handle sorting correctly
+        view_metrics = menu.addAction("View Metrics")
+        try:
+            view_metrics.setIcon(QIcon(resource_path("icons/chart.png")))
+        except Exception:
+            pass  # Icon loading failure is not critical
+        view_metrics.triggered.connect(
+            partial(self._handle_action, "View Metrics", node_name))
+
         detail_action = menu.addAction("Detail")
         try:
             detail_action.setIcon(QIcon(resource_path("icons/edit.png")))
@@ -1106,14 +1157,6 @@ class NodesPage(BaseResourcePage):
         delete_action.setProperty("dangerous", True)
         delete_action.triggered.connect(
             partial(self._handle_action, "Delete", node_name))
-
-        view_metrics = menu.addAction("View Metrics")
-        try:
-            view_metrics.setIcon(QIcon(resource_path("icons/chart.png")))
-        except Exception:
-            pass  # Icon loading failure is not critical
-        view_metrics.triggered.connect(
-            partial(self._handle_action, "View Metrics", node_name))
 
         # Attach menu to button (button is already parent, so ownership is clear)
         button.setMenu(menu)

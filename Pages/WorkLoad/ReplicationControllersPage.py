@@ -9,38 +9,7 @@ from PyQt6.QtGui import QColor
 from Base_Components.base_components import SortableTableWidgetItem
 from Base_Components.base_resource_page import BaseResourcePage
 from UI.Styles import AppColors
-
-
-def singularize_resource_type(resource_type: str) -> str:
-    """
-    Convert plural resource type to singular form.
-    Handles known irregulars and falls back to removing trailing 's'.
-    """
-    # Map of known irregular plurals to singulars
-    irregular_map = {
-        'ingresses': 'ingress',
-        'replicationcontrollers': 'replicationcontroller',
-        'endpoints': 'endpoint',
-        'priorityclasses': 'priorityclass',
-        'runtimeclasses': 'runtimeclass',
-        'mutatingwebhookconfigurations': 'mutatingwebhookconfiguration',
-        'validatingwebhookconfigurations': 'validatingwebhookconfiguration',
-        'customresourcedefinitions': 'customresourcedefinition',
-        'horizontalpodautoscalers': 'horizontalpodautoscaler',
-        'poddisruptionbudgets': 'poddisruptionbudget',
-        'resourcequotas': 'resourcequota',
-        'limitranges': 'limitrange',
-    }
-
-    resource_lower = resource_type.lower()
-    if resource_lower in irregular_map:
-        return irregular_map[resource_lower]
-
-    # Default: remove trailing 's' if present
-    if resource_type.endswith('s'):
-        return resource_type[:-1]
-
-    return resource_type
+from Utils.resource_utils import singularize_resource_type
 
 class ReplicaControllersPage(BaseResourcePage):
     """
@@ -64,10 +33,8 @@ class ReplicaControllersPage(BaseResourcePage):
         headers = ["", "Name", "Namespace", "Replicas", "Desired Replicas", "Selector", ""]
         sortable_columns = {1, 2, 3, 4, 5}
 
-        # Set up the base UI components with styles
+        # Set up the base UI components
         super().setup_ui("Replication Controllers", headers, sortable_columns)
-
-        # Table styling is already handled by BaseResourcePage
 
         # Configure column widths
         self.configure_columns()
@@ -82,11 +49,11 @@ class ReplicaControllersPage(BaseResourcePage):
         # Column specifications with optimized default widths
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
-            (1, 140, "interactive"), # Name
+            (1, 140, "stretch"),     # Name - stretch to fill remaining space
             (2, 90, "interactive"),  # Namespace
             (3, 80, "interactive"),  # Replica
             (4, 70, "interactive"),  # Desired Replicas
-            (5, 80, "stretch"),      # Selector - stretch to fill remaining space
+            (5, 80, "interactive"),  # Selector
             (6, 40, "fixed")        # Actions
         ]
 
@@ -106,38 +73,47 @@ class ReplicaControllersPage(BaseResourcePage):
         # Ensure full width utilization after configuration
         QTimer.singleShot(100, self._ensure_full_width_utilization)
 
+    def _auto_resize_columns(self, max_col_widths=None, min_col_widths=None):
+        """Override to provide explicit widths for columns to let Name stretch."""
+        explicit_mins = {
+            1: 140,  # Name
+            2: 90,   # Namespace
+            3: 80,   # Replicas
+            4: 70,   # Desired Replicas
+            5: 80,   # Selector
+            6: 40,   # Actions
+        }
+        
+        if min_col_widths:
+            explicit_mins.update(min_col_widths)
+            
+        explicit_maxes = {
+            2: 150,  # Namespace
+            3: 110,  # Replicas
+            4: 110,  # Desired Replicas
+        }
+        
+        if max_col_widths:
+            explicit_maxes.update(max_col_widths)
+            
+        super()._auto_resize_columns(max_col_widths=explicit_maxes, min_col_widths=explicit_mins)
+
     def populate_resource_row(self, row, resource):
         """
         Populate a single row with ReplicationController data
         """
         # Set row height
-        self.table.setRowHeight(row, 40)
+        self.table.setRowHeight(row, 42)
 
         # Create checkbox for row selection - styling handled by BaseResourcePage
         resource_name = resource["name"]
         checkbox_container = self._create_checkbox_container(row, resource_name)
         self.table.setCellWidget(row, 0, checkbox_container)
 
-        # Extract additional data from the raw_data field if available
-        raw_data = resource.get("raw_data", {})
-
-        # Get replicas info
-        replicas = "0"
-        desired_replicas = "0"
-        selector = ""
-
-        if raw_data:
-            spec = raw_data.get("spec", {})
-            status = raw_data.get("status", {})
-
-            replicas = str(status.get("replicas", 0))
-            desired_replicas = str(spec.get("replicas", 0))
-
-            # Get selector as string
-            selectors = spec.get("selector", {})
-            selector = ", ".join([f"{k}={v}" for k, v in selectors.items()])
-            if not selector:
-                selector = "<none>"
+        # Get replicas info and selector directly from the pre-parsed resource fields
+        replicas = str(resource.get("replicas", 0))
+        desired_replicas = str(resource.get("desired_replicas", 0))
+        selector = resource.get("selector", "<none>")
 
         # Prepare data columns
         columns = [

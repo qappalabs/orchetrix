@@ -5,11 +5,20 @@ Split from kubernetes_client.py for better architecture
 
 import logging
 import threading
-from typing import Optional, Dict
+from typing import Optional, Dict, Any
+
 from kubernetes import client, config
 from kubernetes.config.config_exception import ConfigException
+
 from .api_config import APIClientConfig
 
+__all__ = [
+    'ThreadSafeAPIClient',
+    'KubernetesAPIService',
+    'get_kubernetes_api_service',
+    'reset_kubernetes_api_service',
+    'LazyAPIClient'
+]
 
 class ThreadSafeAPIClient:
     """Thread-safe wrapper for Kubernetes API clients with proper error isolation"""
@@ -314,6 +323,152 @@ class KubernetesAPIService:
         """Get VersionApi client"""
         return self.get_api_client('VersionApi').get_instance()
 
+    def delete_resource(self, resource_type: str, name: str, namespace: Optional[str] = None) -> bool:
+        """
+        Unified method to delete a Kubernetes resource by type, name, and namespace.
+        Returns True on success, raises Exception on failure.
+        """
+        try:
+            delete_options = client.V1DeleteOptions()
+            api_client = self._get_client_for_deletion(resource_type)
+            
+            # Map resource types to specific deletion methods
+            # Namespaced resources
+            if resource_type == "pods":
+                api_client.delete_namespaced_pod(name=name, namespace=namespace, body=delete_options)
+            elif resource_type == "services":
+                api_client.delete_namespaced_service(name=name, namespace=namespace, body=delete_options)
+            elif resource_type == "deployments":
+                api_client.delete_namespaced_deployment(name=name, namespace=namespace, body=delete_options)
+            elif resource_type == "configmaps":
+                api_client.delete_namespaced_config_map(name=name, namespace=namespace, body=delete_options)
+            elif resource_type == "secrets":
+                api_client.delete_namespaced_secret(name=name, namespace=namespace, body=delete_options)
+            elif resource_type == "persistentvolumeclaims":
+                api_client.delete_namespaced_persistent_volume_claim(name=name, namespace=namespace, body=delete_options)
+            elif resource_type == "ingresses":
+                api_client.delete_namespaced_ingress(name=name, namespace=namespace, body=delete_options)
+            elif resource_type == "daemonsets":
+                api_client.delete_namespaced_daemon_set(name=name, namespace=namespace, body=delete_options)
+            elif resource_type == "statefulsets":
+                api_client.delete_namespaced_stateful_set(name=name, namespace=namespace, body=delete_options)
+            elif resource_type == "replicasets":
+                api_client.delete_namespaced_replica_set(name=name, namespace=namespace, body=delete_options)
+            elif resource_type == "jobs":
+                api_client.delete_namespaced_job(name=name, namespace=namespace, body=delete_options)
+            elif resource_type == "cronjobs":
+                api_client.delete_namespaced_cron_job(name=name, namespace=namespace, body=delete_options)
+            elif resource_type == "roles":
+                api_client.delete_namespaced_role(name=name, namespace=namespace, body=delete_options)
+            elif resource_type == "rolebindings":
+                api_client.delete_namespaced_role_binding(name=name, namespace=namespace, body=delete_options)
+            elif resource_type == "serviceaccounts":
+                api_client.delete_namespaced_service_account(name=name, namespace=namespace, body=delete_options)
+            elif resource_type == "networkpolicies":
+                api_client.delete_namespaced_network_policy(name=name, namespace=namespace, body=delete_options)
+            elif resource_type == "endpoints":
+                api_client.delete_namespaced_endpoints(name=name, namespace=namespace, body=delete_options)
+            elif resource_type == "resourcequotas":
+                api_client.delete_namespaced_resource_quota(name=name, namespace=namespace, body=delete_options)
+            elif resource_type == "limitranges":
+                api_client.delete_namespaced_limit_range(name=name, namespace=namespace, body=delete_options)
+            elif resource_type == "horizontalpodautoscalers":
+                api_client.delete_namespaced_horizontal_pod_autoscaler(name=name, namespace=namespace, body=delete_options)
+            elif resource_type == "poddisruptionbudgets":
+                api_client.delete_namespaced_pod_disruption_budget(name=name, namespace=namespace, body=delete_options)
+            elif resource_type == "events":
+                api_client.delete_namespaced_event(name=name, namespace=namespace, body=delete_options)
+            elif resource_type == "leases":
+                api_client.delete_namespaced_lease(name=name, namespace=namespace, body=delete_options)
+            
+            # Cluster-wide resources
+            elif resource_type == "namespaces":
+                api_client.delete_namespace(name=name, body=delete_options)
+            elif resource_type == "nodes":
+                api_client.delete_node(name=name, body=delete_options)
+            elif resource_type == "persistentvolumes":
+                api_client.delete_persistent_volume(name=name, body=delete_options)
+            elif resource_type == "clusterroles":
+                api_client.delete_cluster_role(name=name, body=delete_options)
+            elif resource_type == "clusterrolebindings":
+                api_client.delete_cluster_role_binding(name=name, body=delete_options)
+            elif resource_type == "storageclasses":
+                api_client.delete_storage_class(name=name, body=delete_options)
+            elif resource_type == "ingressclasses":
+                api_client.delete_ingress_class(name=name, body=delete_options)
+            elif resource_type == "customresourcedefinitions":
+                api_client.delete_custom_resource_definition(name=name, body=delete_options)
+            elif resource_type == "validatingwebhookconfigurations":
+                api_client.delete_validating_admission_webhook_configuration(name=name, body=delete_options)
+            elif resource_type == "mutatingwebhookconfigurations":
+                api_client.delete_mutating_admission_webhook_configuration(name=name, body=delete_options)
+            elif resource_type == "priorityclasses":
+                api_client.delete_priority_class(name=name, body=delete_options)
+            elif resource_type == "runtimeclasses":
+                api_client.delete_runtime_class(name=name, body=delete_options)
+            else:
+                logging.error(f"Deletion logic not implemented for resource type: {resource_type}")
+                raise ValueError(f"Unsupported resource type for deletion: {resource_type}")
+
+            location = f"{resource_type}/{name}"
+            if namespace:
+                location += f" in namespace {namespace}"
+            logging.info(f"Successfully deleted {location}")
+            return True
+
+        except Exception as e:
+            logging.error(f"Failed to delete {resource_type}/{name}: {e}")
+            raise
+
+    def _get_client_for_deletion(self, resource_type: str):
+        """Map resource type to the appropriate API client instance."""
+        v1_types = [
+            "pods", "services", "namespaces", "nodes", "configmaps", "secrets",
+            "persistentvolumes", "persistentvolumeclaims", "serviceaccounts",
+            "endpoints", "resourcequotas", "limitranges", "events"
+        ]
+        apps_v1_types = ["deployments", "daemonsets", "statefulsets", "replicasets"]
+        batch_v1_types = ["jobs", "cronjobs"]
+        networking_v1_types = ["ingresses", "ingressclasses", "networkpolicies"]
+        rbac_v1_types = ["roles", "rolebindings", "clusterroles", "clusterrolebindings"]
+        storage_v1_types = ["storageclasses"]
+        policy_v1_types = ["poddisruptionbudgets"]
+        autoscaling_v1_types = ["horizontalpodautoscalers"] # Can be v1 or v2, v1 is common for delete
+        coordination_v1_types = ["leases"]
+        apiextensions_v1_types = ["customresourcedefinitions"]
+        admission_v1_types = ["validatingwebhookconfigurations", "mutatingwebhookconfigurations"]
+        scheduling_v1_types = ["priorityclasses"]
+        node_v1_types = ["runtimeclasses"]
+
+        if resource_type in v1_types:
+            return self.v1
+        if resource_type in apps_v1_types:
+            return self.apps_v1
+        if resource_type in batch_v1_types:
+            return self.batch_v1
+        if resource_type in networking_v1_types:
+            return self.networking_v1
+        if resource_type in rbac_v1_types:
+            return self.rbac_v1
+        if resource_type in storage_v1_types:
+            return self.storage_v1
+        if resource_type in policy_v1_types:
+            return self.policy_v1
+        if resource_type in autoscaling_v1_types:
+            return self.autoscaling_v1
+        if resource_type in coordination_v1_types:
+            return self.coordination_v1
+        if resource_type in apiextensions_v1_types:
+            return self.apiextensions_v1
+        if resource_type in admission_v1_types:
+            return self.admissionregistration_v1
+        if resource_type in scheduling_v1_types:
+            return self.scheduling_v1
+        if resource_type in node_v1_types:
+            return self.node_v1
+            
+        raise ValueError(f"No API client mapping for resource type: {resource_type}")
+
     def cleanup(self):
         """Cleanup API service resources"""
         logging.debug("Cleaning up KubernetesAPIService")
@@ -331,7 +486,13 @@ class KubernetesAPIService:
 
 # Singleton instance with thread-safe initialization
 _api_service_instance = None
-_api_service_lock = threading.Lock()
+
+# Utilizing RLock rather than standard Lock defensively. While no direct
+# recursive acquisition currently exists within the module, future cleanup
+# routines, audit logging, and potential PyQt6 GUI event hooks originating
+# from within the locked section might indirectly re-query the service getter.
+# An RLock prevents catastrophic silent self-deadlocking in these complex nested scenarios.
+_api_service_lock = threading.RLock()
 
 def get_kubernetes_api_service() -> KubernetesAPIService:
     """Get or create Kubernetes API service singleton with thread-safe initialization"""
@@ -349,11 +510,14 @@ def get_kubernetes_api_service() -> KubernetesAPIService:
         return _api_service_instance
 
 def reset_kubernetes_api_service():
-    """Reset the singleton instance"""
+    """Reset the singleton instance safely across multiple threads."""
     global _api_service_instance
-    if _api_service_instance:
-        _api_service_instance.cleanup()
-    _api_service_instance = None
+    with _api_service_lock:
+        if _api_service_instance:
+            try:
+                _api_service_instance.cleanup()
+            finally:
+                _api_service_instance = None
 
 
 # Backward compatibility alias

@@ -3,7 +3,7 @@ Updated PortForwardingPage with real port forwarding data integration
 Replaces the mock implementation with actual port forward management
 """
 
-from PyQt6.QtWidgets import (QHeaderView, QPushButton, QMessageBox)
+from PyQt6.QtWidgets import (QHeaderView, QPushButton, QMessageBox, QApplication)
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor, QIcon
 
@@ -15,6 +15,7 @@ from Styles.PortForwardingPageStyles import STOP_ALL_BUTTON_STYLE
 from functools import partial
 import time
 import logging
+import webbrowser
 from UI.Icons import resource_path
 
 
@@ -50,8 +51,6 @@ class PortForwardingPage(BaseResourcePage):
 
         # Set up the base UI components
         super().setup_ui("Port Forwarding", headers, sortable_columns)
-
-        # Table styling is already handled by BaseResourcePage
 
         # Configure column widths
         self.configure_columns()
@@ -116,14 +115,14 @@ class PortForwardingPage(BaseResourcePage):
         # Column specifications optimized for port forwarding data
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
-            (1, 160, "interactive"), # Resource
+            (1, 160, "stretch"),     # Resource - stretch to fill remaining space
             (2, 100, "interactive"), # Namespace
             (3, 80, "interactive"),  # Type
             (4, 80, "interactive"),  # Local Port
             (5, 80, "interactive"),  # Target Port
             (6, 80, "interactive"),  # Protocol
             (7, 100, "interactive"), # Uptime
-            (8, 100, "stretch"),     # Status - stretch to fill remaining space
+            (8, 100, "interactive"), # Status
             (9, 40, "fixed")         # Actions
         ]
 
@@ -142,6 +141,34 @@ class PortForwardingPage(BaseResourcePage):
 
         # Ensure full width utilization after configuration
         QTimer.singleShot(100, self._ensure_full_width_utilization)
+
+    def _auto_resize_columns(self, max_col_widths=None, min_col_widths=None):
+        """Override to provide explicit widths for columns to let Resource stretch and avoid clipping."""
+        explicit_mins = {
+            1: 120,  # Resource
+            2: 100,  # Namespace
+            3: 80,   # Type
+            4: 80,   # Local Port
+            5: 80,   # Target Port
+            6: 80,   # Protocol
+            7: 100,  # Uptime
+            8: 100,  # Status
+            9: 40,   # Actions
+        }
+        if min_col_widths:
+            explicit_mins.update(min_col_widths)
+        explicit_maxes = {
+            2: 150,  # Namespace
+            3: 120,  # Type
+            4: 100,  # Local Port
+            5: 100,  # Target Port
+            6: 100,  # Protocol
+            7: 120,  # Uptime
+            8: 120,  # Status
+        }
+        if max_col_widths:
+            explicit_maxes.update(max_col_widths)
+        super()._auto_resize_columns(max_col_widths=explicit_maxes, min_col_widths=explicit_mins)
 
     def force_load_data(self):
         """Override to prevent calling unified resource loader for port forwarding"""
@@ -176,6 +203,7 @@ class PortForwardingPage(BaseResourcePage):
                     'local_port': getattr(config, 'local_port', 0),
                     'target_port': getattr(config, 'target_port', 0),
                     'protocol': getattr(config, 'protocol', 'TCP'),
+                    'bind_address': getattr(config, 'bind_address', 'localhost'),
                     'status': getattr(config, 'status', 'unknown'),
                     'created_at': getattr(config, 'created_at', 0),
                     'error_message': getattr(config, 'error_message', ''),
@@ -236,7 +264,7 @@ class PortForwardingPage(BaseResourcePage):
 
     def populate_resource_row(self, row, resource):
         """Populate a single row with port forward data"""
-        self.table.setRowHeight(row, 40)
+        self.table.setRowHeight(row, 42)
 
         # Create checkbox for row selection - styling handled by BaseResourcePage
         resource_name = resource["name"]
@@ -405,7 +433,6 @@ class PortForwardingPage(BaseResourcePage):
     def _open_in_browser(self, resource):
         """Open port forward URL in browser"""
         try:
-            import webbrowser
             url = f"http://localhost:{resource['local_port']}"
             webbrowser.open(url)
         except Exception as e:
@@ -414,7 +441,6 @@ class PortForwardingPage(BaseResourcePage):
     def _copy_url_to_clipboard(self, resource):
         """Copy port forward URL to clipboard"""
         try:
-            from PyQt6.QtWidgets import QApplication
             url = f"http://localhost:{resource['local_port']}"
             clipboard = QApplication.clipboard()
             clipboard.setText(url)
@@ -448,7 +474,8 @@ class PortForwardingPage(BaseResourcePage):
                 namespace=resource['namespace'],
                 target_port=resource['target_port'],
                 local_port=resource['local_port'],
-                protocol=resource['protocol']
+                protocol=resource['protocol'],
+                bind_address=resource.get('bind_address', 'localhost')
             )
         except Exception as e:
             QMessageBox.critical(self, "Restart Error", f"Failed to recreate port forward: {str(e)}")

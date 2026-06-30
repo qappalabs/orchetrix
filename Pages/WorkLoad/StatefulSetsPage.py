@@ -2,29 +2,50 @@
 Dynamic implementation of the StatefulSets page with live Kubernetes data and resource operations.
 """
 
-from PyQt6.QtWidgets import QHeaderView
+import logging
+
+from PyQt6.QtWidgets import QHeaderView, QInputDialog, QMessageBox
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor
 
 from Base_Components.base_components import SortableTableWidgetItem
 from Base_Components.base_resource_page import BaseResourcePage
 from UI.Styles import AppColors
+from UI.toast_notification import get_toast_manager
 from Utils.data_formatters import parse_age_to_seconds
+from Utils.kubernetes_client import get_kubernetes_client
+from Utils.qt_utils import is_valid
 
 class StatefulSetsPage(BaseResourcePage):
     """
     Displays Kubernetes StatefulSets with live data and resource operations.
-    
+
     Features:
     1. Dynamic loading of StatefulSets from the cluster
     2. Editing StatefulSets with editor
     3. Deleting StatefulSets (individual and batch)
     4. Resource details viewer
+    5. Scale (with HPA pre-scan) and Restart Rollout (with OnDelete warning),
+       both guarded against duplicate concurrent operations and surfacing
+       async completion feedback.
     """
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.resource_type = "statefulsets"
+        # Concurrency guardrail keyed by (name, namespace) — matches the
+        # completion-signal payload shape for O(1) lookup. Added on confirmed
+        # Scale/Restart, dropped in the completion handler's finally block.
+        self._in_flight_ops: set = set()
+        # Connect once at construction, then filter by payload in the slot —
+        # see DeploymentsPage for why per-click connections misfire under
+        # concurrent operations.
+        kc = get_kubernetes_client()
+        try:
+            kc.statefulset_scale_completed.connect(self._on_scale_completed)
+            kc.statefulset_restart_completed.connect(self._on_restart_completed)
+        except Exception as e:
+            logging.warning(f"StatefulSetsPage: signal wiring failed: {e}")
         self.setup_page_ui()
 
     def setup_page_ui(self):
@@ -33,10 +54,8 @@ class StatefulSetsPage(BaseResourcePage):
         headers = ["", "Name", "Namespace", "Pods", "Replicas", "Age", ""]
         sortable_columns = {1, 2, 3, 4, 5}
 
-        # Set up the base UI components with styles
+        # Set up the base UI components
         super().setup_ui("Stateful Sets", headers, sortable_columns)
-
-        # Table styling is already handled by BaseResourcePage
 
         # Configure column widths
         self.configure_columns()
@@ -51,12 +70,12 @@ class StatefulSetsPage(BaseResourcePage):
         # Column specifications with optimized default widths
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
-            (1, 140, "interactive"), # Name
+            (1, 140, "stretch"),     # Name
             (2, 90, "interactive"),  # Namespace
             (3, 80, "interactive"),  # POds
             (4, 70, "interactive"),  # Replicas
-            (5, 80, "stretch"),      # Age - stretch to fill remaining space
-            (6, 40, "fixed")        # Actions
+            (5, 80, "interactive"),  # Age
+            (6, 40, "fixed")         # Actions
         ]
 
         # Apply column configuration
@@ -75,34 +94,47 @@ class StatefulSetsPage(BaseResourcePage):
         # Ensure full width utilization after configuration
         QTimer.singleShot(100, self._ensure_full_width_utilization)
 
+    def _auto_resize_columns(self, max_col_widths=None, min_col_widths=None):
+        """Override to provide explicit widths for columns to let Name stretch."""
+        explicit_mins = {
+            1: 140,  # Name
+            2: 100,  # Namespace
+            3: 90,   # Pods
+            4: 90,   # Replicas
+            5: 60,   # Age
+            6: 40,   # Actions
+        }
+        
+        if min_col_widths:
+            explicit_mins.update(min_col_widths)
+            
+        explicit_maxes = {
+            2: 150,  # Namespace
+            3: 110,  # Pods
+            4: 110,  # Replicas
+            5: 80,   # Age
+        }
+        
+        if max_col_widths:
+            explicit_maxes.update(max_col_widths)
+            
+        super()._auto_resize_columns(max_col_widths=explicit_maxes, min_col_widths=explicit_mins)
+
     def populate_resource_row(self, row, resource):
         """
         Populate a single row with StatefulSet data
         """
         # Set row height
-        self.table.setRowHeight(row, 40)
+        self.table.setRowHeight(row, 42)
 
         # Create checkbox for row selection - styling handled by BaseResourcePage
         resource_name = resource["name"]
         checkbox_container = self._create_checkbox_container(row, resource_name)
         self.table.setCellWidget(row, 0, checkbox_container)
 
-        # Extract additional data from the raw_data field if available
-        raw_data = resource.get("raw_data", {})
-
-        # Get pod status
-        pods_str = "0/0"
-        if raw_data:
-            status = raw_data.get("status", {})
-            current_replicas = status.get("currentReplicas", 0)
-            replicas = status.get("replicas", 0)
-            pods_str = f"{current_replicas}/{replicas}"
-
-        # Get replicas count
-        replicas_str = "0"
-        if raw_data:
-            spec = raw_data.get("spec", {})
-            replicas_str = str(spec.get("replicas", 0))
+        # Get pre-parsed pods and replicas count from resource dict
+        pods_str = resource.get("pods", "0/0")
+        replicas_str = str(resource.get("replicas", "0"))
 
         # Prepare data columns
         columns = [
@@ -156,6 +188,236 @@ class StatefulSetsPage(BaseResourcePage):
         action_button = self._create_action_button(row, resource_name, resource["namespace"])
         action_container = self._create_action_container(row, action_button)
         self.table.setCellWidget(row, len(columns) + 1, action_container)
+
+    # ── Action dispatch: Scale + Restart Rollout with safeguards ─────────
+
+    def _handle_action(self, action, target):
+        """Intercept Scale / Restart Rollout to add StatefulSet-specific
+        safeguards; everything else defers to the base dispatcher."""
+        if action == "Scale":
+            self._handle_scale_action(target)
+        elif action == "Restart Rollout":
+            self._handle_restart_rollout_action(target)
+        else:
+            super()._handle_action(action, target)
+
+    def _handle_scale_action(self, target):
+        resolved = self._get_action_resource(target)
+        if resolved is None:
+            return
+        resource, name, namespace = resolved
+        key = (name, namespace)
+
+        if key in self._in_flight_ops:
+            self._notify_in_flight(name)
+            return
+
+        # Sync HPA pre-scan: blocks the main thread briefly while we query
+        # autoscaling/v{2,1}. Done synchronously because QInputDialog can't be
+        # mutated after show() — we need the HPA result to build the message.
+        hpa_warning = ""
+        try:
+            scan = get_kubernetes_client().find_hpas_for_workload(
+                "StatefulSet", name, namespace
+            )
+            if scan.get("success") and scan.get("hpas"):
+                hpa_names = ", ".join(scan["hpas"])
+                hpa_warning = (
+                    f"\n\nWarning: this StatefulSet is managed by HorizontalPodAutoscaler"
+                    f" ({hpa_names}). A manual scale will be reverted by the HPA's "
+                    f"next reconciliation pass."
+                )
+        except Exception as e:
+            logging.debug(f"HPA pre-scan failed for {name}/{namespace}: {e}")
+
+        current = self._current_replicas(resource)
+        # Surface the PVC-retention default at the decision point: scaling a
+        # StatefulSet down does NOT delete the terminated pods' PVCs by
+        # default (persistentVolumeClaimRetentionPolicy.whenScaled = Retain),
+        # so storage lingers unless reclaimed by hand.
+        prompt = (
+            f"Set replica count for '{name}'."
+            f"\nCurrent: {current}."
+            f"\n\nPersistent volume claims for terminated pods are retained "
+            f"by default. Delete manually if you need to reclaim storage."
+            f"{hpa_warning}"
+        )
+        new_replicas, ok = QInputDialog.getInt(
+            self, "Scale StatefulSet", prompt,
+            value=current, min=0, max=1000, step=1,
+        )
+        if not ok:
+            return
+        if new_replicas == current:
+            # No-op edit; skip the API round trip.
+            return
+
+        self._in_flight_ops.add(key)
+        try:
+            get_kubernetes_client().scale_statefulset_async(name, namespace, new_replicas)
+        except Exception as e:
+            self._in_flight_ops.discard(key)
+            QMessageBox.critical(
+                self, "Scale Failed", f"Could not start scale operation: {e}"
+            )
+
+    def _handle_restart_rollout_action(self, target):
+        resolved = self._get_action_resource(target)
+        if resolved is None:
+            return
+        resource, name, namespace = resolved
+        key = (name, namespace)
+
+        if key in self._in_flight_ops:
+            self._notify_in_flight(name)
+            return
+
+        spec = (resource.get("raw_data") or {}).get("spec") or {}
+
+        # Pre-flight — OnDelete update strategy. The restart annotation lands
+        # successfully, but no pods rotate until each is deleted manually.
+        # StatefulSet deletion is ordered (highest ordinal first), so the
+        # rollout is stuck per-pod rather than cluster-wide (cf. DaemonSet).
+        update_strategy = (spec.get("updateStrategy") or {}).get("type")
+        if update_strategy == "OnDelete":
+            choice = QMessageBox.warning(
+                self,
+                "OnDelete Strategy — Stuck Rollout",
+                f"'{name}' uses the OnDelete update strategy. The restart "
+                f"annotation will be applied successfully, but no pods will "
+                f"rotate until you delete each one manually (in reverse "
+                f"ordinal order). Until then every replica keeps running the "
+                f"current pod template.\n\nContinue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if choice != QMessageBox.StandardButton.Yes:
+                return
+        else:
+            # Standard confirmation for RollingUpdate (the default). Pods
+            # cycle one ordinal at a time, gated by the partition cursor.
+            choice = QMessageBox.question(
+                self,
+                "Restart Rollout",
+                f"Restart all pods of StatefulSet '{name}' in "
+                f"'{namespace or 'cluster'}'?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if choice != QMessageBox.StandardButton.Yes:
+                return
+
+        self._in_flight_ops.add(key)
+        try:
+            get_kubernetes_client().restart_statefulset_rollout_async(name, namespace)
+        except Exception as e:
+            self._in_flight_ops.discard(key)
+            QMessageBox.critical(
+                self, "Restart Failed", f"Could not start restart operation: {e}"
+            )
+
+    # ── Completion handlers (filter by payload, drop from in-flight set) ──
+
+    def _on_scale_completed(self, result):
+        if not is_valid(self):
+            return
+        try:
+            name = result.get("statefulset", "")
+            namespace = result.get("namespace", "")
+            key = (name, namespace)
+            if key not in self._in_flight_ops:
+                # Not ours — another StatefulSetsPage instance, a stale
+                # connection, or a completion after teardown. Ignore.
+                return
+            try:
+                if result.get("success"):
+                    replicas = result.get("replicas", "?")
+                    self._show_success_toast(
+                        "Scale succeeded",
+                        f"{name} scaled to {replicas} replicas.",
+                    )
+                else:
+                    self._show_error_modal("Scale Failed", result)
+            finally:
+                self._in_flight_ops.discard(key)
+        except Exception as e:
+            logging.error(f"StatefulSetsPage._on_scale_completed: {e}")
+
+    def _on_restart_completed(self, result):
+        if not is_valid(self):
+            return
+        try:
+            name = result.get("statefulset", "")
+            namespace = result.get("namespace", "")
+            key = (name, namespace)
+            if key not in self._in_flight_ops:
+                return
+            try:
+                if result.get("success"):
+                    self._show_success_toast(
+                        "Restart triggered",
+                        f"Rollout restart triggered for {name}.",
+                    )
+                else:
+                    self._show_error_modal("Restart Failed", result)
+            finally:
+                self._in_flight_ops.discard(key)
+        except Exception as e:
+            logging.error(f"StatefulSetsPage._on_restart_completed: {e}")
+
+    # ── Small helpers ────────────────────────────────────────────────────
+
+    @staticmethod
+    def _current_replicas(resource) -> int:
+        """Pull current replica count from the resource's raw payload.
+
+        Prefers spec.replicas (desired); falls back to status.replicas
+        (actual); defaults to 0 on a brand-new or malformed StatefulSet.
+        """
+        raw = resource.get("raw_data") or {}
+        spec_replicas = (raw.get("spec") or {}).get("replicas")
+        if spec_replicas is not None:
+            try:
+                return int(spec_replicas)
+            except (TypeError, ValueError):
+                pass
+        status_replicas = (raw.get("status") or {}).get("replicas")
+        if status_replicas is not None:
+            try:
+                return int(status_replicas)
+            except (TypeError, ValueError):
+                pass
+        return 0
+
+    def _notify_in_flight(self, name: str):
+        try:
+            tm = get_toast_manager()
+            if tm is not None:
+                tm.show_info(
+                    "Operation in progress",
+                    f"An operation on {name} is still running.",
+                    duration=2000,
+                )
+        except Exception as e:
+            logging.debug(f"in-flight toast failed: {e}")
+
+    def _show_success_toast(self, title: str, message: str):
+        try:
+            tm = get_toast_manager()
+            if tm is not None:
+                tm.show_success(title, message)
+        except Exception as e:
+            logging.debug(f"success toast failed: {e}")
+
+    def _show_error_modal(self, title: str, result: dict):
+        """Errors get a modal (blocking) so the operator can't miss them;
+        the toast manager is reserved for success."""
+        try:
+            QMessageBox.critical(
+                self, title, result.get("message", "Unknown error")
+            )
+        except Exception as e:
+            logging.debug(f"error modal failed: {e}")
 
     def handle_row_click(self, row, column):
         if column != self.table.columnCount() - 1:  # Skip action column

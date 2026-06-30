@@ -1,5 +1,10 @@
-from UI.ThemeManager import get_theme_manager
+"""
+ClusterPage-specific styles with theme-aware support.
+Contains styles for the cluster overview page including charts, metrics,
+and status panels. Chart rendering colors are intentionally fixed constants.
+"""
 from UI.Styles import AppStyles
+from UI.ThemeManager import get_theme_manager
 
 def _get_theme():
     """Get current theme"""
@@ -197,10 +202,40 @@ def get_issues_table_style():
             background-color: {theme.colors.SELECTED_BG};
             border: none;
         }}
+        
+        QHeaderView {{
+            background-color: {theme.colors.TABLE_HEADER};
+            border: none;
+        }}
+
+        QHeaderView::section {{
+            background-color: transparent;
+            color: {theme.colors.TEXT_LIGHT};
+            padding: 10px 16px;
+            border: none;
+            font-size: 14px;
+            text-align: left;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }}
+
+        QHeaderView::section:hover {{
+            background-color: rgba(255, 255, 255, 0.1);
+        }}
+
+        QHeaderView::down-arrow, QHeaderView::up-arrow {{
+            image: none;
+            width: 0px;
+            height: 0px;
+            border: none;
+        }}
+        
         {AppStyles.UNIFIED_SCROLL_BAR_STYLE}
     """
 
-# Phase 2 placeholders (returning hardcoded values for now)
+# Chart rendering color constants.
+# These are passed to native paint routines (not QSS), so they are fixed hex values
+# and are not routed through the theme system.
 def get_chart_colors():
     return {
         'background': '#2d2d2d',

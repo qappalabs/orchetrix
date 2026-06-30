@@ -9,8 +9,10 @@ from Base_Components.base_components import SortableTableWidgetItem, StatusLabel
 from Base_Components.base_resource_page import BaseResourcePage
 from UI.Styles import AppColors
 from Utils.port_forward_manager import get_port_forward_manager, PortForwardConfig
-from Utils.port_forward_dialog import PortForwardDialog, ActivePortForwardsDialog
+from UI.PortForwardDialog import PortForwardDialog, ActivePortForwardsDialog
 from Utils.data_formatters import parse_age_to_seconds
+from Utils.kubernetes_client import get_kubernetes_client
+from Styles.ServicesPageStyles import get_port_forward_button_style
 
 
 class ServicesPage(BaseResourcePage):
@@ -22,15 +24,12 @@ class ServicesPage(BaseResourcePage):
         super().__init__(parent)
         self.resource_type = "services"
         self.port_manager = get_port_forward_manager()
-        # Use managed kubernetes client instead of direct client instantiation
-        from Utils.kubernetes_client import get_kubernetes_client
         managed_client = get_kubernetes_client()
         self.kube_client = managed_client.v1 if managed_client else None
-        self.port_manager = get_port_forward_manager()
-        
+
         # Store widget references for theme updates
         self.port_forward_button = None
-        
+
         self.setup_page_ui()
 
         # Connect to port forward manager signals
@@ -69,7 +68,6 @@ class ServicesPage(BaseResourcePage):
     def _apply_port_forward_button_style(self):
         """Apply theme-aware styling to port forward button"""
         if self.port_forward_button:
-            from Styles.ServicesPageStyles import get_port_forward_button_style
             self.port_forward_button.setStyleSheet(get_port_forward_button_style())
 
     def _on_theme_changed(self, theme_name):
@@ -87,15 +85,15 @@ class ServicesPage(BaseResourcePage):
         # Column specifications with optimized default widths
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
-            (1, 160, "interactive"), # Name
-            (2, 100, "interactive"),  # Namespace
+            (1, 160, "stretch"),     # Name - stretch to fill remaining space
+            (2, 100, "interactive"), # Namespace
             (3, 80, "interactive"),  # Type
             (4, 90, "interactive"),  # Cluster IP
-            (5, 100, "interactive"),  # Port
-            (6, 100, "interactive"),  # External IP
-            (7, 100, "interactive"),  # Selector
+            (5, 100, "interactive"), # Port
+            (6, 100, "interactive"), # External IP
+            (7, 100, "interactive"), # Selector
             (8, 60, "interactive"),  # Age
-            (9, 60, "stretch"),      # Status - stretch to fill remaining space
+            (9, 60, "interactive"),  # Status
             (10, 40, "fixed")        # Actions
         ]
 
@@ -114,9 +112,44 @@ class ServicesPage(BaseResourcePage):
         # Ensure full width utilization after configuration
         QTimer.singleShot(100, self._ensure_full_width_utilization)
 
+    def _auto_resize_columns(self, max_col_widths=None, min_col_widths=None):
+        """Override to provide explicit widths for columns where headers are clipping."""
+        explicit_mins = {
+            # 0 is Checkbox
+            1: 120,  # Name - lower floor
+            2: 120,  # Namespace
+            3: 80,   # Type
+            4: 100,  # Cluster IP
+            5: 100,  # Port
+            6: 110,  # External IP
+            7: 100,  # Selector
+            8: 60,   # Age
+            9: 80,   # Status
+            10: 40,  # Actions
+        }
+        
+        # Merge with any caller overrides
+        if min_col_widths:
+            explicit_mins.update(min_col_widths)
+            
+        explicit_maxes = {
+            2: 150,  # Namespace
+            3: 110,  # Type
+            4: 120,  # Cluster IP
+            5: 120,  # Port
+            6: 150,  # External IP
+            7: 150,  # Selector
+            8: 80,   # Age
+            9: 100,  # Status
+        }
+        if max_col_widths:
+            explicit_maxes.update(max_col_widths)
+            
+        super()._auto_resize_columns(max_col_widths=explicit_maxes, min_col_widths=explicit_mins)
+
     def populate_resource_row(self, row, resource):
         """Populate a single row with Service data including status"""
-        self.table.setRowHeight(row, 40)
+        self.table.setRowHeight(row, 42)
 
         resource_name = resource["name"]
         # Checkbox styling handled by BaseResourcePage
@@ -218,8 +251,6 @@ class ServicesPage(BaseResourcePage):
         action_container = self._create_action_container(row, action_button)
         self.table.setCellWidget(row, len(columns) + 2, action_container)
 
-    # Removed duplicate _create_action_button - now uses base class implementation
-
     def _get_service_ports(self, service_resource):
         """Extract ports from service resource"""
         if not service_resource or not service_resource.get("raw_data"):
@@ -276,10 +307,6 @@ class ServicesPage(BaseResourcePage):
         except Exception:
             return "Unknown"
 
-    # Removed duplicate _handle_action_with_data - now uses base class _handle_action
-
-    # Removed duplicate _handle_action method - now using base class implementation
-
     def _handle_port_forward(self, service_name, namespace, resource):
         """Handle port forwarding for a service"""
         try:
@@ -315,27 +342,18 @@ class ServicesPage(BaseResourcePage):
             )
 
     def _create_port_forward(self, config):
-        """Create a port forward from configuration"""
         try:
-            port_config = self.port_manager.start_port_forward(
+            self.port_manager.start_port_forward(
                 resource_name=config['resource_name'],
                 resource_type=config['resource_type'],
                 namespace=config['namespace'],
                 target_port=config['target_port'],
                 local_port=config.get('local_port'),
-                protocol=config.get('protocol', 'TCP')
+                protocol=config.get('protocol', 'TCP'),
+                bind_address=config.get('bind_address', 'localhost')
             )
-
-            QMessageBox.information(
-                self, "Port Forward Created",
-                f"Port forward created successfully!\n\n"
-                f"Resource: {config['resource_type']}/{config['resource_name']}\n"
-                f"Local: localhost:{port_config.local_port}\n"
-                f"Target: {port_config.target_port}\n"
-                f"Protocol: {port_config.protocol}\n\n"
-                f"Access at: http://localhost:{port_config.local_port}"
-            )
-
+            # Success / error feedback is dispatched centrally by MainWindow via
+            # port_forward_active / port_forward_error signals → toasts.
         except Exception as e:
             QMessageBox.critical(
                 self, "Port Forward Failed",

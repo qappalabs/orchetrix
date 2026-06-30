@@ -4,14 +4,19 @@ Provides high - performance access to the new service architecture while maintai
 Designed for minimal overhead and maximum performance.
 """
 
+import datetime as _dt
 import logging
 import sys
+import threading
+import time
 from typing import Optional, Dict, List, Any
+from kubernetes.client.rest import ApiException
 from PyQt6.QtCore import QObject, pyqtSignal as Signal, QProcess
 
 # Import the new service architecture
 from Services.kubernetes.kubernetes_service import get_kubernetes_service
 from Services.kubernetes.api_config import APIClientConfig
+from Utils import SUBPROCESS_FLAGS
 from Utils.enhanced_worker import EnhancedBaseWorker
 from Utils.thread_manager import get_thread_manager
 
@@ -20,6 +25,7 @@ class ResourceUpdateWorker(EnhancedBaseWorker):
 
     def __init__(self, client_instance, resource_type, resource_name, namespace, yaml_data):
 
+        super().__init__(f"resource_update_{resource_type}_{resource_name}")
         self.client_instance = client_instance
         self.resource_type = resource_type
         self.resource_name = resource_name
@@ -55,6 +61,45 @@ class KubernetesClient(QObject):
     deployment_history_loaded = Signal(list)
     deployment_rollback_completed = Signal(dict)
 
+    # Deployment scale / restart-rollout signals (Phase 2).
+    # Both emit a dict shaped like rollback's: success bool, message, deployment,
+    # namespace, plus op-specific fields ("replicas" for scale, "restarted_at"
+    # for restart).  Failures are emitted on the SAME signal with success=False.
+    deployment_scale_completed = Signal(dict)
+    deployment_restart_completed = Signal(dict)
+    # HPA discovery for scale-pre-flight: emits {"deployment", "namespace",
+    # "hpas": [names...]} so the UI can warn the operator that any manual scale
+    # will be reverted by the autoscaler's next reconciliation pass.
+    hpas_for_deployment_loaded = Signal(dict)
+
+    # Fork B: StatefulSet / DaemonSet mutation signals.  Same payload shape as
+    # the Deployment variants, with the workload kind in the dict key for the
+    # name field ("statefulset" / "daemonset" rather than "deployment").
+    statefulset_scale_completed = Signal(dict)
+    statefulset_restart_completed = Signal(dict)
+    daemonset_restart_completed = Signal(dict)
+
+    # ── Phase 4: live watch event bus ─────────────────────────────────────
+    # Global firehose carrying ADDED/MODIFIED/DELETED events parsed from
+    # every active watch stream in unified_resource_loader.  Payload shape:
+    #   {
+    #     "type": "ADDED" | "MODIFIED" | "DELETED",
+    #     "resource_type": str,        # e.g. "deployments"
+    #     "namespace": Optional[str],  # None for cluster-scoped
+    #     "name": str,
+    #     "uid": Optional[str],
+    #     "raw_object": dict,          # the marshalled resource dict
+    #   }
+    # Consumers (DetailManager, dropdowns, etc.) filter by (resource_type,
+    # namespace, name) and short-circuit on mismatches.  Separate from the
+    # legacy resource_updated signal which is dedicated to post-edit results.
+    global_resource_watch_event = Signal(dict)
+    # Namespace lifecycle signals — derived from the app-lifetime namespace
+    # watch daemon started in __init__.  Emit just the namespace name so
+    # dropdown slots can findText/addItem/removeItem without parsing.
+    namespace_added_signal = Signal(str)
+    namespace_deleted_signal = Signal(str)
+
     # Pod data signals
     pods_data_loaded = Signal(list)
     api_error = Signal(str)
@@ -73,8 +118,25 @@ class KubernetesClient(QObject):
         self.current_cluster = None
         self._shutting_down = False
 
-        logging.info(
-            "KubernetesClient initialized with new service architecture")
+        # Phase 4: subscribe to our own global watch event so namespace
+        # ADDED/DELETED events fan out as namespace_added_signal /
+        # namespace_deleted_signal for dropdown consumers without each
+        # dropdown having to filter the firehose itself.
+        self.global_resource_watch_event.connect(self._fanout_namespace_events)
+        # Started lazily on first cluster connect — see _ensure_namespace_watch.
+        self._namespace_watch_manager = None
+        self._namespace_watch_cluster = None
+        self._namespace_watch_lock = threading.Lock()
+        # Phase 5: authoritative in-memory set of namespaces currently known
+        # to exist in the connected cluster.  Maintained silently by the
+        # _fanout_namespace_events fanout — ADDED -> add, DELETED -> discard.
+        # Pages consult this BEFORE starting watches to avoid issuing
+        # requests against namespaces that were deleted out-of-band while
+        # the page was hidden.  Empty until the namespace daemon fires its
+        # initial bulk of ADDED events on first cluster connect.
+        self._known_namespaces: set = set()
+
+        logging.info("KubernetesClient initialized")
 
     def _connect_service_signals(self):
 
@@ -89,6 +151,98 @@ class KubernetesClient(QObject):
         self.service.resource_updated.connect(self.resource_updated.emit)
         self.service.pod_logs_loaded.connect(self.pod_logs_loaded.emit)
         self.service.error_occurred.connect(self.error_occurred.emit)
+
+    # ── Phase 4: namespace lifecycle plumbing ──────────────────────────────
+
+    def _fanout_namespace_events(self, payload):
+        """Translate global watch events for resource_type == 'namespaces'
+        into the high-level namespace_added_signal / namespace_deleted_signal
+        consumed by dropdowns.  Other resource types pass through untouched.
+
+        Phase 5: also maintain the authoritative _known_namespaces set so
+        pages can synchronously validate their namespace_filter against
+        cluster reality before starting watches (see
+        get_known_namespaces and BaseResourcePage.showEvent).
+        """
+        try:
+            if payload.get("resource_type") != "namespaces":
+                return
+            event_type = payload.get("type")
+            name = payload.get("name")
+            if not name:
+                return
+            if event_type == "ADDED":
+                self._known_namespaces.add(name)
+                self.namespace_added_signal.emit(name)
+            elif event_type == "DELETED":
+                self._known_namespaces.discard(name)
+                self.namespace_deleted_signal.emit(name)
+            # MODIFIED events for namespaces (label/annotation changes) do
+            # not affect the dropdown list or the existence set — ignore.
+        except Exception as e:
+            logging.debug(f"namespace event fanout failed: {e}")
+
+    def get_known_namespaces(self) -> set:
+        """Return a snapshot of namespaces currently known to exist in the
+        connected cluster.
+
+        Phase 5 oracle for synchronous filter validation.  Returns an empty
+        set when the namespace daemon has not yet fired any events (early
+        startup or pre-connect) — callers must guard against this empty
+        case to avoid false-positive "filter dead" verdicts during boot.
+
+        Returns a copy so downstream callers cannot mutate internal state.
+        """
+        return set(self._known_namespaces)
+
+    def ensure_namespace_watch(self):
+        """Start the app-lifetime namespace watch daemon if not already running.
+
+        Called on successful cluster connection so namespace add/delete events
+        flow regardless of which page the user is on.  The underlying
+        ResourceWatchManager uses a dedicated daemon thread (not the
+        QThreadPool), already handles 410 Gone via re-list, and pushes events
+        through the global_resource_watch_event bus the same as every other
+        watch.  Idempotent — safe to call repeatedly.
+        
+        Thread-safe and cluster-aware: detects cluster switches and restarts
+        the watch to prevent stale namespace events from leaking across clusters.
+        """
+        current_context = self.service.get_current_cluster()
+        
+        with self._namespace_watch_lock:
+            # Check if we have a watch manager and if it's for the current cluster
+            if self._namespace_watch_manager is not None:
+                # If we're on the same cluster, nothing to do
+                if self._namespace_watch_cluster == current_context:
+                    return
+                # Different cluster - stop the old watch
+                try:
+                    self._namespace_watch_manager.stop()
+                except Exception as e:
+                    logging.debug(f"namespace watch stop failed during cluster switch: {e}")
+                self._namespace_watch_manager = None
+                self._namespace_watch_cluster = None
+                self._known_namespaces.clear()
+            
+            try:
+                from Utils.unified_resource_loader import (
+                    get_unified_resource_loader,
+                    ResourceWatchManager,
+                )
+                loader = get_unified_resource_loader()
+                self._namespace_watch_manager = ResourceWatchManager(
+                    loader=loader,
+                    resource_type="namespaces",
+                    namespace=None,  # cluster-scoped
+                )
+                self._namespace_watch_manager.start()
+                self._namespace_watch_cluster = current_context
+                logging.info(f"App-lifetime namespace watch daemon started for cluster {current_context}")
+            except Exception as e:
+                logging.warning(f"Failed to start namespace watch daemon: {e}")
+                self._namespace_watch_manager = None
+                self._namespace_watch_cluster = None
 
     def _disconnect_service_signals(self):
         """Disconnect service signals to prevent emission during cleanup"""
@@ -208,12 +362,28 @@ class KubernetesClient(QObject):
         result = self.service.connect_to_cluster(cluster_name, context)
         if result:
             self.current_cluster = cluster_name
+            # Phase 4: kick off the app-lifetime namespace watch so dropdowns
+            # stay live regardless of which page the user is on.
+            self.ensure_namespace_watch()
         return result
 
     def disconnect_from_cluster(self):
 
         self.service.disconnect_from_cluster()
         self.current_cluster = None
+        # Phase 4: stop the namespace watch on disconnect so cluster-switch
+        # picks up a fresh namespace list on the next connect (ResourceWatch
+        # Manager's daemon thread is unjoined; setting None lets a new one
+        # spin up cleanly via ensure_namespace_watch).
+        if self._namespace_watch_manager is not None:
+            try:
+                self._namespace_watch_manager.stop()
+            except Exception as e:
+                logging.debug(f"namespace watch stop failed: {e}")
+            self._namespace_watch_manager = None
+        # Phase 5: purge the namespace authority cache so the new cluster
+        # context does not inherit dead namespaces from the prior one.
+        self._known_namespaces.clear()
 
     def get_cluster_metrics(self) -> Optional[Dict[str, Any]]:
 
@@ -386,6 +556,631 @@ class KubernetesClient(QObject):
         # Submit to thread manager
         thread_manager = get_thread_manager()
         thread_manager.submit_worker(f"rollback_{deployment_name}", worker)
+
+    # ──── Phase 2: Scale / Restart Rollout / HPA discovery ─────────────────
+
+    @staticmethod
+    def _format_api_exception(error):
+        """Map a kubernetes ApiException to a human-readable message.
+
+        Returns str(error) for non-ApiException errors.  Centralises the
+        401/403/409/422 → readable-string mapping so each operation handler
+        does not duplicate the table.
+        """
+        if not isinstance(error, ApiException):
+            return str(error)
+        status_messages = {
+            401: "Authentication failed (401). Re-authenticate to the cluster.",
+            403: "Permission denied (403). The current user lacks the required RBAC permission for this operation.",
+            409: "Conflict (409). The resource was modified concurrently — refresh and retry.",
+            422: "Invalid request payload (422). The Kubernetes API rejected the patch structure.",
+        }
+        return status_messages.get(
+            error.status,
+            f"Kubernetes API error {error.status}: {error.reason}",
+        )
+
+    def _scale_deployment_sync(self, deployment_name: str, namespace: str, replicas: int) -> dict:
+        """Patch the deployment's scale subresource and return a result dict.
+
+        Uses the dedicated /scale endpoint so RBAC policies that grant
+        deployments/scale without deployments/patch continue to work.
+
+        Defensively coalesces ``result.spec.replicas`` from None to 0: the
+        kubernetes client has been observed to deserialize scale-to-zero
+        responses as None (Go's omitempty interacting with the OpenAPI
+        generator).  Harmless if the upstream library has been fixed.
+        """
+        body = {"spec": {"replicas": int(replicas)}}
+        try:
+            result = self.apps_v1.patch_namespaced_deployment_scale(
+                name=deployment_name,
+                namespace=namespace,
+                body=body,
+                _request_timeout=APIClientConfig.DEPLOYMENT_OPERATION_TIMEOUT,
+            )
+            resolved_replicas = (
+                result.spec.replicas if result.spec.replicas is not None else 0
+            )
+            return {
+                "success": True,
+                "message": f"Scaled deployment {deployment_name} to {resolved_replicas} replicas.",
+                "deployment": deployment_name,
+                "namespace": namespace,
+                "replicas": resolved_replicas,
+            }
+        except Exception as e:
+            msg = self._format_api_exception(e)
+            logging.error(f"Scale failed for {deployment_name}: {msg}")
+            return {
+                "success": False,
+                "message": msg,
+                "deployment": deployment_name,
+                "namespace": namespace,
+                "replicas": int(replicas),
+                "error_type": type(e).__name__,
+            }
+
+    def scale_deployment_async(self, deployment_name: str, namespace: str, replicas: int):
+        logging.info(
+            f"Scaling deployment {deployment_name} in {namespace} to {replicas} replicas"
+        )
+
+        class ScaleWorker(EnhancedBaseWorker):
+            def __init__(self, client_instance, deployment_name, namespace, replicas):
+                super().__init__(f"scale_{deployment_name}")
+                self.client_instance = client_instance
+                self.deployment_name = deployment_name
+                self.namespace = namespace
+                self.replicas = replicas
+
+            def execute(self):
+                return self.client_instance._scale_deployment_sync(
+                    self.deployment_name, self.namespace, self.replicas
+                )
+
+        worker = ScaleWorker(self, deployment_name, namespace, replicas)
+
+        def handle_success(result):
+            try:
+                self.deployment_scale_completed.emit(result)
+            except Exception as e:
+                logging.error(f"Error emitting scale result: {str(e)}")
+
+        def handle_error(error):
+            # Defensive: exceptions that escape _scale_deployment_sync's own
+            # try/except still produce a failure dict on the same signal so
+            # the UI never silently misses an error.
+            try:
+                self.deployment_scale_completed.emit({
+                    "success": False,
+                    "message": self._format_api_exception(error),
+                    "deployment": deployment_name,
+                    "namespace": namespace,
+                    "replicas": int(replicas),
+                    "error_type": type(error).__name__,
+                })
+            except Exception as e:
+                logging.error(f"Error emitting scale error: {str(e)}")
+
+        worker.signals.finished.connect(handle_success)
+        worker.signals.error.connect(handle_error)
+
+        get_thread_manager().submit_worker(f"scale_{deployment_name}", worker)
+
+    def _restart_deployment_rollout_sync(self, deployment_name: str, namespace: str) -> dict:
+        """Trigger a rollout restart by patching the kubectl.kubernetes.io/restartedAt
+        annotation in spec.template.metadata.annotations.
+
+        Strategic merge patch leaves sibling annotations and template fields
+        untouched, so service-mesh sidecar injection markers, Prometheus scrape
+        configs, etc. survive.  The new template hash makes the controller
+        provision a new ReplicaSet and rotate pods per the deployment's
+        configured strategy (RollingUpdate or Recreate).
+        """
+
+        # Timezone-aware UTC, second precision — mirrors kubectl rollout restart.
+        current_timestamp = _dt.datetime.now(_dt.timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        body = {
+            "spec": {
+                "template": {
+                    "metadata": {
+                        "annotations": {
+                            "kubectl.kubernetes.io/restartedAt": current_timestamp
+                        }
+                    }
+                }
+            }
+        }
+        try:
+            self.apps_v1.patch_namespaced_deployment(
+                name=deployment_name,
+                namespace=namespace,
+                body=body,
+                _request_timeout=APIClientConfig.DEPLOYMENT_OPERATION_TIMEOUT,
+            )
+            return {
+                "success": True,
+                "message": f"Restart triggered for deployment {deployment_name}.",
+                "deployment": deployment_name,
+                "namespace": namespace,
+                "restarted_at": current_timestamp,
+            }
+        except Exception as e:
+            msg = self._format_api_exception(e)
+            logging.error(f"Restart rollout failed for {deployment_name}: {msg}")
+            return {
+                "success": False,
+                "message": msg,
+                "deployment": deployment_name,
+                "namespace": namespace,
+                "restarted_at": current_timestamp,
+                "error_type": type(e).__name__,
+            }
+
+    def restart_deployment_rollout_async(self, deployment_name: str, namespace: str):
+        logging.info(
+            f"Restarting rollout for deployment {deployment_name} in {namespace}"
+        )
+
+        class RestartWorker(EnhancedBaseWorker):
+            def __init__(self, client_instance, deployment_name, namespace):
+                super().__init__(f"restart_{deployment_name}")
+                self.client_instance = client_instance
+                self.deployment_name = deployment_name
+                self.namespace = namespace
+
+            def execute(self):
+                return self.client_instance._restart_deployment_rollout_sync(
+                    self.deployment_name, self.namespace
+                )
+
+        worker = RestartWorker(self, deployment_name, namespace)
+
+        def handle_success(result):
+            try:
+                self.deployment_restart_completed.emit(result)
+            except Exception as e:
+                logging.error(f"Error emitting restart result: {str(e)}")
+
+        def handle_error(error):
+            try:
+                self.deployment_restart_completed.emit({
+                    "success": False,
+                    "message": self._format_api_exception(error),
+                    "deployment": deployment_name,
+                    "namespace": namespace,
+                    "error_type": type(error).__name__,
+                })
+            except Exception as e:
+                logging.error(f"Error emitting restart error: {str(e)}")
+
+        worker.signals.finished.connect(handle_success)
+        worker.signals.error.connect(handle_error)
+
+        get_thread_manager().submit_worker(f"restart_{deployment_name}", worker)
+
+    def _find_hpas_for_workload_sync(self, kind: str, name: str, namespace: str) -> dict:
+        """List HPAs in the namespace, return those targeting (kind, name).
+
+        Fork B generalisation of the Deployment-only HPA scan.  HPAs can target
+        anything with a /scale subresource: Deployments, StatefulSets,
+        ReplicaSets, and certain CRDs.  The discovery logic is identical
+        regardless of kind — only the scaleTargetRef.kind comparison changes.
+
+        Prefers autoscaling/v2 (used elsewhere in the codebase); falls back
+        to autoscaling/v1 on 404 so legacy clusters still work.  Returns the
+        names of all matching HPAs (typically zero or one in practice).
+        """
+        try:
+            try:
+                hpas = self.autoscaling_v2.list_namespaced_horizontal_pod_autoscaler(
+                    namespace=namespace,
+                    _request_timeout=APIClientConfig.DEPLOYMENT_OPERATION_TIMEOUT,
+                )
+            except ApiException as e:
+                if getattr(e, "status", None) == 404:
+                    hpas = self.autoscaling_v1.list_namespaced_horizontal_pod_autoscaler(
+                        namespace=namespace,
+                        _request_timeout=APIClientConfig.DEPLOYMENT_OPERATION_TIMEOUT,
+                    )
+                else:
+                    raise
+
+            matches = []
+            for hpa in (hpas.items or []):
+                try:
+                    ref = hpa.spec.scale_target_ref
+                    if (
+                        ref
+                        and getattr(ref, "kind", "") == kind
+                        and getattr(ref, "name", "") == name
+                    ):
+                        matches.append(hpa.metadata.name)
+                except AttributeError:
+                    continue
+            return {
+                "success": True,
+                "kind": kind,
+                "name": name,
+                "namespace": namespace,
+                "hpas": matches,
+            }
+        except Exception as e:
+            msg = self._format_api_exception(e)
+            logging.warning(f"HPA scan failed for {kind}/{name}: {msg}")
+            return {
+                "success": False,
+                "message": msg,
+                "kind": kind,
+                "name": name,
+                "namespace": namespace,
+                "hpas": [],
+                "error_type": type(e).__name__,
+            }
+
+    def _find_hpas_for_deployment_sync(self, deployment_name: str, namespace: str) -> dict:
+        """Backward-compat wrapper preserving the original (deployment, namespace)
+        payload shape used by the Phase 2 deployment_scale flow.  New code
+        should call _find_hpas_for_workload_sync directly."""
+        result = self._find_hpas_for_workload_sync("Deployment", deployment_name, namespace)
+        # Translate the workload-shape payload back to the deployment-shape
+        # payload that existing callers expect.
+        if result.get("success"):
+            return {
+                "success": True,
+                "deployment": deployment_name,
+                "namespace": namespace,
+                "hpas": result.get("hpas", []),
+            }
+        # Failure path: preserve original keys.
+        return {
+            "success": False,
+            "message": result.get("message", ""),
+            "deployment": deployment_name,
+            "namespace": namespace,
+            "hpas": [],
+            "error_type": result.get("error_type", "Exception"),
+        }
+
+    def find_hpas_for_deployment(self, deployment_name: str, namespace: str) -> dict:
+        """Synchronous version of find_hpas_for_deployment_async.
+
+        Used by the Scale dialog's HPA pre-scan: blocks the calling thread
+        for up to ~DEPLOYMENT_OPERATION_TIMEOUT (10s worst case, typically
+        <500ms).  Acceptable on the main thread only as a deliberate
+        user-initiated pre-flight before a modal dialog opens.  Do NOT call
+        this from background watch handlers or paint paths.
+        """
+        return self._find_hpas_for_deployment_sync(deployment_name, namespace)
+
+    def find_hpas_for_deployment_async(self, deployment_name: str, namespace: str):
+        logging.debug(
+            f"Scanning HPAs for deployment {deployment_name} in {namespace}"
+        )
+
+        class HpaScanWorker(EnhancedBaseWorker):
+            def __init__(self, client_instance, deployment_name, namespace):
+                super().__init__(f"hpa_scan_{deployment_name}")
+                self.client_instance = client_instance
+                self.deployment_name = deployment_name
+                self.namespace = namespace
+
+            def execute(self):
+                return self.client_instance._find_hpas_for_deployment_sync(
+                    self.deployment_name, self.namespace
+                )
+
+        worker = HpaScanWorker(self, deployment_name, namespace)
+
+        def handle_success(result):
+            try:
+                self.hpas_for_deployment_loaded.emit(result)
+            except Exception as e:
+                logging.error(f"Error emitting HPA scan result: {str(e)}")
+
+        def handle_error(error):
+            try:
+                self.hpas_for_deployment_loaded.emit({
+                    "success": False,
+                    "message": self._format_api_exception(error),
+                    "deployment": deployment_name,
+                    "namespace": namespace,
+                    "hpas": [],
+                    "error_type": type(error).__name__,
+                })
+            except Exception as e:
+                logging.error(f"Error emitting HPA scan error: {str(e)}")
+
+        worker.signals.finished.connect(handle_success)
+        worker.signals.error.connect(handle_error)
+
+        get_thread_manager().submit_worker(f"hpa_scan_{deployment_name}", worker)
+
+    # ──── Fork B: StatefulSet Scale ───────────────────────────────────────
+
+    def _scale_statefulset_sync(self, statefulset_name: str, namespace: str, replicas: int) -> dict:
+        """Patch the StatefulSet's /scale subresource and return a result dict.
+
+        Mirrors _scale_deployment_sync.  StatefulSets share the same OpenAPI
+        client generator, so the same defensive None-to-0 coalesce applies
+        on scale-to-zero responses (harmless if the upstream library returns
+        0 correctly).  Uses the dedicated subresource so RBAC policies that
+        grant statefulsets/scale without statefulsets/patch still work.
+        """
+        body = {"spec": {"replicas": int(replicas)}}
+        try:
+            result = self.apps_v1.patch_namespaced_stateful_set_scale(
+                name=statefulset_name,
+                namespace=namespace,
+                body=body,
+                _request_timeout=APIClientConfig.DEPLOYMENT_OPERATION_TIMEOUT,
+            )
+            resolved_replicas = (
+                result.spec.replicas if result.spec.replicas is not None else 0
+            )
+            return {
+                "success": True,
+                "message": f"Scaled StatefulSet {statefulset_name} to {resolved_replicas} replicas.",
+                "statefulset": statefulset_name,
+                "namespace": namespace,
+                "replicas": resolved_replicas,
+            }
+        except Exception as e:
+            msg = self._format_api_exception(e)
+            logging.error(f"StatefulSet scale failed for {statefulset_name}: {msg}")
+            return {
+                "success": False,
+                "message": msg,
+                "statefulset": statefulset_name,
+                "namespace": namespace,
+                "replicas": int(replicas),
+                "error_type": type(e).__name__,
+            }
+
+    def scale_statefulset_async(self, statefulset_name: str, namespace: str, replicas: int):
+        logging.info(
+            f"Scaling StatefulSet {statefulset_name} in {namespace} to {replicas} replicas"
+        )
+
+        class ScaleStatefulSetWorker(EnhancedBaseWorker):
+            def __init__(self, client_instance, statefulset_name, namespace, replicas):
+                super().__init__(f"scale_ss_{statefulset_name}")
+                self.client_instance = client_instance
+                self.statefulset_name = statefulset_name
+                self.namespace = namespace
+                self.replicas = replicas
+
+            def execute(self):
+                return self.client_instance._scale_statefulset_sync(
+                    self.statefulset_name, self.namespace, self.replicas
+                )
+
+        worker = ScaleStatefulSetWorker(self, statefulset_name, namespace, replicas)
+
+        def handle_success(result):
+            try:
+                self.statefulset_scale_completed.emit(result)
+            except Exception as e:
+                logging.error(f"Error emitting statefulset scale result: {str(e)}")
+
+        def handle_error(error):
+            try:
+                self.statefulset_scale_completed.emit({
+                    "success": False,
+                    "message": self._format_api_exception(error),
+                    "statefulset": statefulset_name,
+                    "namespace": namespace,
+                    "replicas": int(replicas),
+                    "error_type": type(error).__name__,
+                })
+            except Exception as e:
+                logging.error(f"Error emitting statefulset scale error: {str(e)}")
+
+        worker.signals.finished.connect(handle_success)
+        worker.signals.error.connect(handle_error)
+
+        get_thread_manager().submit_worker(f"scale_ss_{statefulset_name}", worker)
+
+    # ──── Fork B: StatefulSet Restart Rollout ────────────────────────────
+
+    def _restart_statefulset_rollout_sync(self, statefulset_name: str, namespace: str) -> dict:
+        """Trigger a StatefulSet restart by patching the restartedAt annotation.
+
+        Same RFC3339 second-precision UTC format the Deployment restart uses,
+        for consistency with kubectl rollout restart.  Uses strategic merge
+        patch via patch_namespaced_stateful_set so sibling annotations are
+        preserved.  Note: StatefulSets cannot be paused (no spec.paused), so
+        the only no-op-warning pre-flight is OnDelete strategy — handled by
+        the page-side handler before this dispatches.
+        """
+        current_timestamp = _dt.datetime.now(_dt.timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        body = {
+            "spec": {
+                "template": {
+                    "metadata": {
+                        "annotations": {
+                            "kubectl.kubernetes.io/restartedAt": current_timestamp
+                        }
+                    }
+                }
+            }
+        }
+        try:
+            self.apps_v1.patch_namespaced_stateful_set(
+                name=statefulset_name,
+                namespace=namespace,
+                body=body,
+                _request_timeout=APIClientConfig.DEPLOYMENT_OPERATION_TIMEOUT,
+            )
+            return {
+                "success": True,
+                "message": f"Restart triggered for StatefulSet {statefulset_name}.",
+                "statefulset": statefulset_name,
+                "namespace": namespace,
+                "restarted_at": current_timestamp,
+            }
+        except Exception as e:
+            msg = self._format_api_exception(e)
+            logging.error(f"StatefulSet restart failed for {statefulset_name}: {msg}")
+            return {
+                "success": False,
+                "message": msg,
+                "statefulset": statefulset_name,
+                "namespace": namespace,
+                "restarted_at": current_timestamp,
+                "error_type": type(e).__name__,
+            }
+
+    def restart_statefulset_rollout_async(self, statefulset_name: str, namespace: str):
+        logging.info(
+            f"Restarting rollout for StatefulSet {statefulset_name} in {namespace}"
+        )
+
+        class RestartStatefulSetWorker(EnhancedBaseWorker):
+            def __init__(self, client_instance, statefulset_name, namespace):
+                super().__init__(f"restart_ss_{statefulset_name}")
+                self.client_instance = client_instance
+                self.statefulset_name = statefulset_name
+                self.namespace = namespace
+
+            def execute(self):
+                return self.client_instance._restart_statefulset_rollout_sync(
+                    self.statefulset_name, self.namespace
+                )
+
+        worker = RestartStatefulSetWorker(self, statefulset_name, namespace)
+
+        def handle_success(result):
+            try:
+                self.statefulset_restart_completed.emit(result)
+            except Exception as e:
+                logging.error(f"Error emitting statefulset restart result: {str(e)}")
+
+        def handle_error(error):
+            try:
+                self.statefulset_restart_completed.emit({
+                    "success": False,
+                    "message": self._format_api_exception(error),
+                    "statefulset": statefulset_name,
+                    "namespace": namespace,
+                    "error_type": type(error).__name__,
+                })
+            except Exception as e:
+                logging.error(f"Error emitting statefulset restart error: {str(e)}")
+
+        worker.signals.finished.connect(handle_success)
+        worker.signals.error.connect(handle_error)
+
+        get_thread_manager().submit_worker(f"restart_ss_{statefulset_name}", worker)
+
+    # ──── Fork B: DaemonSet Restart Rollout ──────────────────────────────
+
+    def _restart_daemonset_rollout_sync(self, daemonset_name: str, namespace: str) -> dict:
+        """Trigger a DaemonSet restart by patching the restartedAt annotation.
+
+        Identical mechanism to Deployment/StatefulSet restart — strategic
+        merge patch of spec.template.metadata.annotations with kubectl's
+        canonical restartedAt key.  DaemonSet has no replicas concept, so
+        no scale operation.  No spec.paused either, so the only pre-flight
+        warning is OnDelete (which produces a cluster-wide stuck rollout —
+        page-side handler distinguishes this from StatefulSet's
+        ordered-pod stuck rollout in the user-facing copy).
+        """
+        current_timestamp = _dt.datetime.now(_dt.timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        body = {
+            "spec": {
+                "template": {
+                    "metadata": {
+                        "annotations": {
+                            "kubectl.kubernetes.io/restartedAt": current_timestamp
+                        }
+                    }
+                }
+            }
+        }
+        try:
+            self.apps_v1.patch_namespaced_daemon_set(
+                name=daemonset_name,
+                namespace=namespace,
+                body=body,
+                _request_timeout=APIClientConfig.DEPLOYMENT_OPERATION_TIMEOUT,
+            )
+            return {
+                "success": True,
+                "message": f"Restart triggered for DaemonSet {daemonset_name}.",
+                "daemonset": daemonset_name,
+                "namespace": namespace,
+                "restarted_at": current_timestamp,
+            }
+        except Exception as e:
+            msg = self._format_api_exception(e)
+            logging.error(f"DaemonSet restart failed for {daemonset_name}: {msg}")
+            return {
+                "success": False,
+                "message": msg,
+                "daemonset": daemonset_name,
+                "namespace": namespace,
+                "restarted_at": current_timestamp,
+                "error_type": type(e).__name__,
+            }
+
+    def restart_daemonset_rollout_async(self, daemonset_name: str, namespace: str):
+        logging.info(
+            f"Restarting rollout for DaemonSet {daemonset_name} in {namespace}"
+        )
+
+        class RestartDaemonSetWorker(EnhancedBaseWorker):
+            def __init__(self, client_instance, daemonset_name, namespace):
+                super().__init__(f"restart_ds_{daemonset_name}")
+                self.client_instance = client_instance
+                self.daemonset_name = daemonset_name
+                self.namespace = namespace
+
+            def execute(self):
+                return self.client_instance._restart_daemonset_rollout_sync(
+                    self.daemonset_name, self.namespace
+                )
+
+        worker = RestartDaemonSetWorker(self, daemonset_name, namespace)
+
+        def handle_success(result):
+            try:
+                self.daemonset_restart_completed.emit(result)
+            except Exception as e:
+                logging.error(f"Error emitting daemonset restart result: {str(e)}")
+
+        def handle_error(error):
+            try:
+                self.daemonset_restart_completed.emit({
+                    "success": False,
+                    "message": self._format_api_exception(error),
+                    "daemonset": daemonset_name,
+                    "namespace": namespace,
+                    "error_type": type(error).__name__,
+                })
+            except Exception as e:
+                logging.error(f"Error emitting daemonset restart error: {str(e)}")
+
+        worker.signals.finished.connect(handle_success)
+        worker.signals.error.connect(handle_error)
+
+        get_thread_manager().submit_worker(f"restart_ds_{daemonset_name}", worker)
+
+    # ──── Fork B: public sync HPA wrapper for any workload kind ──────────
+
+    def find_hpas_for_workload(self, kind: str, name: str, namespace: str) -> dict:
+        """Synchronous HPA scan for any workload kind.  Used by StatefulSet
+        and DaemonSet scale dialogs (DaemonSets cannot scale, but the public
+        helper supports them for future-proofing).  Same blocking caveats
+        as find_hpas_for_deployment."""
+        return self._find_hpas_for_workload_sync(kind, name, namespace)
 
     def get_cluster_metrics_async(self):
 
@@ -1038,20 +1833,19 @@ class KubernetesClient(QObject):
 
     def _get_nodes(self):
 
-        import time
         from Utils import get_timestamp_with_ms
         start_time = time.time()
-        logging.info(
-            f"🚀 [API FETCH] {get_timestamp_with_ms()} - Kubernetes Client: Starting to fetch nodes from API")
+        logging.debug(
+            f"[API FETCH] {get_timestamp_with_ms()} - Kubernetes Client: Starting to fetch nodes from API")
         try:
             api_call_start = time.time()
             logging.debug(
-                f"📡 [API CALL] {get_timestamp_with_ms()} - Kubernetes Client: Calling v1.list_node() API")
+                f"[API CALL] {get_timestamp_with_ms()} - Calling v1.list_node() API")
             nodes = self.v1.list_node().items
             api_call_time = (time.time() - api_call_start) * 1000
 
             logging.info(
-                f"✅ [API SUCCESS] {get_timestamp_with_ms()} - Kubernetes Client: Successfully fetched {len(nodes)} nodes from API in {api_call_time:.1f}ms")
+                f"[API SUCCESS] {get_timestamp_with_ms()} - Fetched {len(nodes)} nodes in {api_call_time:.1f}ms")
 
             # Log detailed node data
             for i, node in enumerate(nodes[:5]):  # Log first 5 nodes in detail
@@ -1065,20 +1859,20 @@ class KubernetesClient(QObject):
                             break
 
                 logging.debug(
-                    f"📊 [NODE DATA] {get_timestamp_with_ms()} - Node {i + 1}: name='{node_name}', status='{node_status}', has_capacity={hasattr(node.status, 'capacity') if hasattr(node, 'status') and node.status else False}")
+                    f"[NODE DATA] {get_timestamp_with_ms()} - Node {i + 1}: name='{node_name}', status='{node_status}', has_capacity={hasattr(node.status, 'capacity') if hasattr(node, 'status') and node.status else False}")
 
             if len(nodes) > 5:
                 logging.debug(
-                    f"📊 [NODE DATA] {get_timestamp_with_ms()} - ... and {len(nodes) - 5} more nodes")
+                    f"[NODE DATA] {get_timestamp_with_ms()} - ... and {len(nodes) - 5} more nodes")
 
             total_time = (time.time() - start_time) * 1000
-            logging.info(
-                f"⏱️  [API COMPLETE] {get_timestamp_with_ms()} - Total API fetch time: {total_time:.1f}ms")
+            logging.debug(
+                f"[API COMPLETE] {get_timestamp_with_ms()} - Total API fetch time: {total_time:.1f}ms")
             return nodes
         except Exception as e:
             error_time = (time.time() - start_time) * 1000
             logging.error(
-                f'❌ [API ERROR] {get_timestamp_with_ms()} - Kubernetes Client: Failed to get nodes from API after {error_time:.1f}ms: {e}')
+                f'[API ERROR] {get_timestamp_with_ms()} - Failed to get nodes after {error_time:.1f}ms: {e}')
             return []
 
     def _get_namespaces(self):
@@ -1152,27 +1946,6 @@ class KubernetesClient(QObject):
         # Submit to thread manager
         thread_manager = get_thread_manager()
         thread_manager.submit_worker(f"node_pods_{node_name}", worker)
-
-    def _calculate_age(self, creation_timestamp):
-
-        try:
-            from datetime import datetime, timezone
-            now = datetime.now(timezone.utc)
-            created = creation_timestamp.replace(tzinfo=timezone.utc)
-            delta = now - created
-
-            days = delta.days
-            hours, remainder = divmod(delta.seconds, 3600)
-            minutes, _ = divmod(remainder, 60)
-
-            if days > 0:
-                return f"{days}d"
-            elif hours > 0:
-                return f"{hours}h"
-            else:
-                return f"{minutes}m"
-        except Exception:
-            return "Unknown"
 
     def _get_deployment_rollout_history_sync(self, deployment_name: str, namespace: str = "default"):
 
@@ -1394,7 +2167,6 @@ class KubernetesClient(QObject):
                         raise e
                     logging.warning(
                         f"Rollback attempt {attempt + 1} failed: {str(e)}, retrying...")
-                    import time
                     time.sleep(1)  # Brief delay before retry
 
             # Step 5: Verify rollback success
@@ -1441,13 +2213,16 @@ class KubernetesClient(QObject):
 
 # Singleton management - backward compatibility
 _instance = None
+_instance_lock = threading.Lock()
 
 
 def get_kubernetes_client():
 
     global _instance
     if _instance is None:
-        _instance = KubernetesClient()
+        with _instance_lock:
+            if _instance is None:
+                _instance = KubernetesClient()
     return _instance
 
 
@@ -1457,6 +2232,24 @@ def reset_kubernetes_client():
     if _instance:
         _instance.cleanup()
     _instance = None
+
+
+def get_kubernetes_client_for_cluster(cluster_name: str):
+    """Build an ApiClient bound strictly to a kubeconfig context.
+
+    Unlike get_kubernetes_client() (a process-wide singleton whose context is
+    mutated when the user switches clusters), this returns a fresh ApiClient
+    isolated from global state — safe to use from background workers across
+    fast cluster switches. Caller owns the client and must close() it.
+    """
+    if not cluster_name:
+        return None
+    try:
+        from kubernetes import config as k8s_config
+        return k8s_config.new_client_from_config(context=cluster_name)
+    except Exception as e:
+        logging.warning(f"get_kubernetes_client_for_cluster({cluster_name}) failed: {e}")
+        return None
 
 
 class KubernetesPodSSH(QObject):
@@ -1500,7 +2293,7 @@ class KubernetesPodSSH(QObject):
                     # Try to use setCreateProcessArgumentsModifier if available (PyQt6.5+)
                     if hasattr(self.process, 'setCreateProcessArgumentsModifier'):
                         self.process.setCreateProcessArgumentsModifier(
-                            lambda args: args.setFlags(0x08000000)  # CREATE_NO_WINDOW
+                            lambda args: args.setFlags(SUBPROCESS_FLAGS)
                         )
                 except Exception as e:
                     # Fallback: method not available in this PyQt6 version
@@ -1583,7 +2376,7 @@ class KubernetesPodSSH(QObject):
                 try:
                     if hasattr(self.process, 'setCreateProcessArgumentsModifier'):
                         self.process.setCreateProcessArgumentsModifier(
-                            lambda args: args.setFlags(0x08000000)  # CREATE_NO_WINDOW
+                            lambda args: args.setFlags(SUBPROCESS_FLAGS)
                         )
                 except Exception:
                     pass
@@ -1644,6 +2437,9 @@ class KubernetesPodSSH(QObject):
             if self.process:
                 self.process.terminate()
                 self.process.waitForFinished(2000)
+                if self.process.state() == QProcess.ProcessState.Running:
+                    self.process.kill()
+                    self.process.waitForFinished(500)
 
             self.process = QProcess()
             self.process.readyReadStandardOutput.connect(self._handle_stdout)
@@ -1657,7 +2453,7 @@ class KubernetesPodSSH(QObject):
                 try:
                     if hasattr(self.process, 'setCreateProcessArgumentsModifier'):
                         self.process.setCreateProcessArgumentsModifier(
-                            lambda args: args.setFlags(0x08000000)  # CREATE_NO_WINDOW
+                            lambda args: args.setFlags(SUBPROCESS_FLAGS)
                         )
                 except Exception as e:
                     print(f"Note: setCreateProcessArgumentsModifier not available: {e}")

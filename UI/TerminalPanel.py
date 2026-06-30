@@ -4,15 +4,10 @@ Terminal Panel - Refactored from large monolithic file
 This module contains the main TerminalPanel class which manages multiple terminal types
 including regular terminals, SSH sessions, and log viewers.
 """
-
-import os
-
-import platform
-
-import shutil
-
 import logging
-
+import os
+import platform
+import shutil
 import sys
 
 from PyQt6.QtWidgets import (
@@ -24,33 +19,24 @@ from PyQt6.QtWidgets import (
     QLabel,
     QPushButton,
 )
-
 from PyQt6.QtGui import QIcon
-
 from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QPoint, QTimer, QProcess
 
 from UI.Styles import AppStyles
-
 from UI.Icons import resource_path
-
 from UI.ThemeAwarePage import ThemeAwareMixin
-
 from Styles.TerminalPanelStyles import (
     get_logs_tab_label_style,
     get_logs_tab_button_style,
     get_ssh_tab_label_style,
     get_ssh_tab_button_style,
 )
-
 from .terminal.terminal_constants import CommandConstants, StyleConstants
-
 from .terminal.terminal_widget import UnifiedTerminalWidget
-
 from .terminal.ssh_terminal_widget import SSHTerminalWidget
-
 from .terminal.terminal_components import UnifiedTerminalHeader
-
 from .terminal.logs_components import EnhancedLogsViewer
+
 
 
 class TerminalPanel(QWidget, ThemeAwareMixin):
@@ -75,7 +61,7 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
         self.add_terminal_tab()
         self.parent_window.installEventFilter(self)
         QApplication.instance().aboutToQuit.connect(self.terminate_all_processes)
-        print(
+        logging.debug(
             f"TerminalPanel initialized with copy_paste_enabled={self.copy_paste_enabled}"
         )
 
@@ -84,8 +70,8 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
         target_dir = os.path.normpath(os.path.join(base_dir, relative_path))
         if os.path.isdir(target_dir):
             return target_dir
-        print(
-            f"Warning: Working directory '{target_dir}' does not exist. Using default: {base_dir}"
+        logging.warning(
+            f"Working directory '{target_dir}' does not exist. Using default: {base_dir}"
         )
         return base_dir
 
@@ -124,41 +110,41 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
         self.preferences.copy_paste_changed.connect(self.apply_copy_paste_to_terminals)
         self.preferences.font_changed.connect(self.apply_font_to_terminals)
         self.preferences.font_size_changed.connect(self.apply_font_size_to_terminals)
-        print(
+        logging.debug(
             "TerminalPanel: Preferences set, connected copy_paste_changed, font_changed, and font_size_changed signals"
         )
 
     def apply_font_to_terminals(self, font_family):
-        print(f"TerminalPanel.apply_font_to_terminals: font_family={font_family}")
+        logging.debug(f"TerminalPanel.apply_font_to_terminals: font_family={font_family}")
         for terminal_data in self.terminal_tabs:
             terminal_widget = terminal_data.get("terminal_widget")
             if terminal_widget and terminal_widget.is_valid:
                 terminal_widget.set_font(font_family)
 
     def apply_font_size_to_terminals(self, font_size):
-        print(
+        logging.debug(
             f"TerminalPanel.apply_font_size_to_terminals: font_size={font_size}, terminals={len(self.terminal_tabs)}"
         )
         for i, terminal_data in enumerate(self.terminal_tabs):
             terminal_widget = terminal_data.get("terminal_widget")
             if terminal_widget and terminal_widget.is_valid:
-                print(f"Applying font size to terminal {i}")
+                logging.debug(f"Applying font size to terminal {i}")
                 terminal_widget.set_font(terminal_widget.font_family, font_size)
             else:
-                print(f"Terminal {i} is invalid or not found")
+                logging.debug(f"Terminal {i} is invalid or not found")
 
     def apply_copy_paste_to_terminals(self, enabled):
         self.copy_paste_enabled = enabled
-        print(
+        logging.debug(
             f"TerminalPanel.apply_copy_paste_to_terminals: enabled={enabled}, terminals={len(self.terminal_tabs)}"
         )
         for i, terminal_data in enumerate(self.terminal_tabs):
             terminal_widget = terminal_data.get("terminal_widget")
             if terminal_widget and terminal_widget.is_valid:
-                print(f"Applying copy-paste to terminal {i}: enabled={enabled}")
+                logging.debug(f"Applying copy-paste to terminal {i}: enabled={enabled}")
                 terminal_widget.set_copy_paste_enabled(enabled)
             else:
-                print(f"Terminal {i} is invalid or not found")
+                logging.debug(f"Terminal {i} is invalid or not found")
 
     def closeEvent(self, event):
         self.terminate_all_processes()
@@ -184,11 +170,11 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
                         if process.state() == QProcess.ProcessState.Running:
                             process.kill()
                             process.waitForFinished(200)
-                    print(
+                    logging.debug(
                         f"Terminated process for terminal {terminal_data.get('tab_button').text()}"
                     )
                 except Exception as e:
-                    print(
+                    logging.warning(
                         f"Error terminating process for terminal {terminal_data.get('tab_button').text()}: {e}"
                     )
 
@@ -221,7 +207,7 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
                 if platform.system() != "Windows"
                 else "powershell.exe"
             )
-            print(f"Selected shell {shell} not found, falling back to {selected_shell}")
+            logging.warning(f"Selected shell {shell} not found, falling back to {selected_shell}")
         tab_widget = QWidget()
         tab_widget.setFixedHeight(28)
         tab_widget.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -261,14 +247,12 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
         # Windows configuration to prevent terminal window
         if sys.platform == "win32":
             try:
-                # Try to use setCreateProcessArgumentsModifier if available (PyQt6.5+)
                 if hasattr(process, "setCreateProcessArgumentsModifier"):
                     process.setCreateProcessArgumentsModifier(
-                        lambda args: args.setFlags(0x08000000)  # CREATE_NO_WINDOW
+                        lambda args: args.setFlags(0x08000000)  # CREATE_NO_WINDOW flag
                     )
             except Exception as e:
-                # Fallback: method not available in this PyQt6 version
-                print(f"Note: setCreateProcessArgumentsModifier not available: {e}")
+                logging.debug(f"setCreateProcessArgumentsModifier not available: {e}")
         process.readyReadStandardOutput.connect(lambda: self.handle_stdout(tab_index))
         process.readyReadStandardError.connect(lambda: self.handle_stderr(tab_index))
         process.finished.connect(
@@ -302,7 +286,7 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
         self.switch_to_terminal_tab(tab_index)
         if self.is_visible:
             self.start_terminal_process(tab_index)
-        print(
+        logging.debug(
             f"TerminalPanel: Added terminal tab {tab_index} with shell {selected_shell}, copy_paste_enabled={self.copy_paste_enabled}"
         )
         return tab_index
@@ -353,7 +337,7 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
                     f"\nShell {shell} not found. Falling back to {shell}\n",
                     StyleConstants.get_ssh_warning_color(),
                 )
-                print(
+                logging.warning(
                     f"Shell {shell} not found, falling back to {shell} for terminal {tab_index}"
                 )
             try:
@@ -361,7 +345,7 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
                 process.start(shell)
                 if process.waitForStarted(1000):
                     terminal_data["started"] = True
-                    print(
+                    logging.debug(
                         f"Started {shell} for terminal {tab_index} in {self.working_directory}"
                     )
                 else:
@@ -369,13 +353,13 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
                         f"\nFailed to start {shell}. Ensure it is installed and in PATH.\n",
                         StyleConstants.get_error_color(),
                     )
-                    print(f"Failed to start {shell} for terminal {tab_index}")
+                    logging.error(f"Failed to start {shell} for terminal {tab_index}")
             except Exception as e:
                 terminal_data["terminal_widget"].append_output(
                     f"\nError starting {shell}: {str(e)}\n",
                     StyleConstants.get_error_color(),
                 )
-                print(f"Error starting {shell} for terminal {tab_index}: {e}")
+                logging.error(f"Error starting {shell} for terminal {tab_index}: {e}")
 
     def execute_command(self, command, tab_index=None):
         tab_index = tab_index if tab_index is not None else self.active_terminal_index

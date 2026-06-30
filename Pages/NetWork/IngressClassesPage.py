@@ -1,3 +1,6 @@
+"""
+Dynamic implementation of the IngressClasses page with live Kubernetes data and resource operations.
+"""
 from PyQt6.QtWidgets import QHeaderView
 from PyQt6.QtCore import Qt, QTimer
 
@@ -24,14 +27,12 @@ class IngressClassesPage(BaseResourcePage):
 
     def setup_page_ui(self):
         """Set up the main UI elements for the IngressClasses page"""
-        # Define headers and sortable columns - KEEP ORIGINAL
+        # Define headers and sortable columns
         headers = ["", "Name", "Controller", "API Group", "Scope", "Kind", "Age", ""]
         sortable_columns = {1, 2, 3, 4, 5, 6}
 
         # Set up the base UI components
         super().setup_ui("Ingress Classes", headers, sortable_columns)
-
-        # Table styling is already handled by BaseResourcePage
 
         # Configure column widths
         self.configure_columns()
@@ -46,13 +47,13 @@ class IngressClassesPage(BaseResourcePage):
         # Column specifications with optimized default widths
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
-            (1, 140, "interactive"), # Name
+            (1, 140, "stretch"),     # Name - stretch to fill remaining space
             (2, 90, "interactive"),  # controller
             (3, 80, "interactive"),  # API Group
             (4, 80, "interactive"),  # Scope
             (5, 60, "interactive"),  # Kind
-            (6, 80, "stretch"),      # Age - stretch to fill remaining space
-            (7, 40, "fixed")        # Actions
+            (6, 80, "interactive"),  # Age
+            (7, 40, "fixed")         # Actions
         ]
 
         # Apply column configuration
@@ -71,12 +72,36 @@ class IngressClassesPage(BaseResourcePage):
         # Ensure full width utilization after configuration
         QTimer.singleShot(100, self._ensure_full_width_utilization)
 
+    def _auto_resize_columns(self, max_col_widths=None, min_col_widths=None):
+        """Override to provide explicit widths for columns to let Name stretch and avoid clipping."""
+        explicit_mins = {
+            1: 120,  # Name
+            2: 120,  # Controller
+            3: 100,  # API Group
+            4: 80,   # Scope
+            5: 80,   # Kind
+            6: 60,   # Age
+            7: 40,   # Actions
+        }
+        if min_col_widths:
+            explicit_mins.update(min_col_widths)
+        explicit_maxes = {
+            2: 250,  # Controller
+            3: 150,  # API Group
+            4: 100,  # Scope
+            5: 100,  # Kind
+            6: 80,   # Age
+        }
+        if max_col_widths:
+            explicit_maxes.update(max_col_widths)
+        super()._auto_resize_columns(max_col_widths=explicit_maxes, min_col_widths=explicit_mins)
+
     def populate_resource_row(self, row, resource):
         """
         Populate a single row with IngressClass data extracted from raw_data
         """
         # Set row height once
-        self.table.setRowHeight(row, 40)
+        self.table.setRowHeight(row, 42)
 
         # Create checkbox for row selection
         resource_name = resource["name"]

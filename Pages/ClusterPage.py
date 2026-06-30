@@ -1,17 +1,22 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
                              QGridLayout, QSizePolicy, QFrame, QToolTip,
-                             QTableWidget, QTableWidgetItem, QHeaderView, QStackedLayout)
+                             QTableWidget, QTableWidgetItem, QHeaderView, QStackedLayout,
+                             QAbstractScrollArea, QAbstractItemView, QGraphicsDropShadowEffect)
 from PyQt6.QtCore import Qt, QSize, QRect, QTimer
 from PyQt6.QtGui import QColor, QPainter, QPen, QBrush, QFont, QCursor
 import math
 import datetime
 import logging
+import traceback
 
 from UI.Styles import AppColors
 from UI.ThemeManager import get_theme_manager
 import Styles.ClusterPageStyles as ClusterPageStyles
+from Styles.BaseTablePageStyles import get_table_style, get_table_container_style
 from UI.ThemeAwarePage import ThemeAwareMixin
 from Utils.cluster_connector import get_cluster_connector
+from Utils.time_utils import TimezoneManager
+from Base_Components.virtual_scroll_table import HighPerformanceDelegate
 
 class BarChart(QWidget):
     def __init__(self, color="#ff0000", title="", unit=""):
@@ -19,7 +24,7 @@ class BarChart(QWidget):
         self.color = QColor(color)
         self.data = []
         self.current_value = 0
-        self.setMinimumHeight(300)
+        self.setMinimumHeight(240)
         self.setStyleSheet(ClusterPageStyles.get_bar_chart_tooltip_style())
 
         # Use provided title, or fall back to color-based titles
@@ -117,7 +122,7 @@ class BarChart(QWidget):
     def _generate_time_labels(self, count):
         """Generate time labels for the chart"""
         try:
-            now = datetime.datetime.now()
+            now = TimezoneManager.get_instance().get_now()
             times = []
 
             # Calculate interval based on count
@@ -157,16 +162,16 @@ class BarChart(QWidget):
             )
             return
 
-        # Calculate chart area
-        chart_height = height - 140
-        bottom_y = height - 50
+        # Lock chart drawing to a fixed size to prevent squishing or distance issues
+        chart_height = 170
+        x_axis_y = 180
 
         self.bar_positions = []
 
         # Draw y-axis grid and labels
         y_labels = ["0%", "20%", "40%", "60%", "80%", "100%"]
         for i, label in enumerate(y_labels):
-            y = bottom_y - 70 - (i * chart_height / 5)
+            y = x_axis_y - (i * chart_height / 5)
             # Draw grid line
             painter.setPen(QPen(QColor("#333333"), 1, Qt.PenStyle.DotLine))
             painter.drawLine(40, int(y), width - 20, int(y))
@@ -182,14 +187,14 @@ class BarChart(QWidget):
 
         # Draw x-axis
         painter.setPen(QPen(QColor("#333333"), 1, Qt.PenStyle.SolidLine))
-        painter.drawLine(40, bottom_y - 70, width - 20, bottom_y - 70)
+        painter.drawLine(40, int(x_axis_y), width - 20, int(x_axis_y))
 
         # Draw bars and x-axis labels
         for i, value in enumerate(self.data):
             # Calculate bar position
             bar_height = (value / 100) * chart_height if value <= 100 else chart_height
             x = 40 + (bar_width + bar_spacing) * i + bar_spacing/2
-            y = bottom_y - 70 - bar_height
+            y = x_axis_y - bar_height
 
             bar_rect = QRect(int(x), int(y), int(bar_width), int(bar_height))
             self.bar_positions.append(bar_rect)
@@ -221,7 +226,7 @@ class BarChart(QWidget):
                 time_label = self.times[i] if i < len(self.times) else ""
                 painter.drawText(
                     int(x_center - 25),
-                    bottom_y - 50,
+                    int(x_axis_y + 10),
                     50,
                     30,
                     int(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignTop),
@@ -437,7 +442,7 @@ class ResourceCircularIndicator(QWidget):
                                 start_angle, segment_angle)
 
     def sizeHint(self):
-        return QSize(150, 150)
+        return QSize(160, 160)
 
 
 class ResourceStatusWidget(QWidget):
@@ -469,7 +474,7 @@ class ResourceStatusWidget(QWidget):
         # Create the progress indicator
         self.progress = ResourceCircularIndicator(usage, requests, limits, allocated, capacity, resource_type)
         self.progress.set_title(title)
-        self.progress.setFixedSize(130, 130)
+        self.progress.setFixedSize(140, 140)
 
         progress_container = QWidget()
         progress_layout = QVBoxLayout(progress_container)
@@ -589,10 +594,10 @@ class ResourceStatusWidget(QWidget):
             return "Unknown"
 
     def sizeHint(self):
-        return QSize(170, 300)
+        return QSize(170, 260)
 
     def minimumSizeHint(self):
-        return QSize(150, 270)
+        return QSize(150, 240)
 
 
 class IssuesTable(QTableWidget):
@@ -601,17 +606,89 @@ class IssuesTable(QTableWidget):
         super().__init__(parent)
         self.setColumnCount(5)
         self.setHorizontalHeaderLabels(["Type", "Reason", "Object", "Age", "Message"])
-        self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-        self.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
-        self.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
-        self.setColumnWidth(0, 80)
-        self.setColumnWidth(1, 120)
-        self.setColumnWidth(3, 80)
-        self.setStyleSheet(ClusterPageStyles.get_issues_table_style())
+        header = self.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(True)
+        header.setMinimumSectionSize(40)
+        
+        self.setColumnWidth(0, 80)   # Type
+        self.setColumnWidth(1, 120)  # Reason
+        self.setColumnWidth(2, 350)  # Object
+        self.setColumnWidth(3, 80)   # Age
+        modified_style = get_table_style() + "\nQTableWidget::item { padding: 4px 8px; border: none; background-color: transparent !important; }"
+        self.setStyleSheet(modified_style)
         self.verticalHeader().setVisible(False)
-        self.setAlternatingRowColors(True)
-        self.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.setAlternatingRowColors(False)
+        # Enable full row hover natively with QTableWidget Selection
+        self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.setMouseTracking(True)
+        self.setShowGrid(False)
+        
+        self.delegate = HighPerformanceDelegate(self)
+        self.setItemDelegate(self.delegate)
+        self.entered.connect(self._on_entered)
+
+    def _on_entered(self, index):
+        """Update delegate hovered row when mouse enters a cell"""
+        try:
+            if index is None or not index.isValid():
+                self.delegate.hovered_row = -1
+            else:
+                self.delegate.hovered_row = index.row()
+            self.viewport().update()
+        except Exception:
+            pass
+
+    def leaveEvent(self, event):
+        """Clear hovered row when mouse leaves the widget"""
+        try:
+            self.delegate.hovered_row = -1
+            self.viewport().update()
+        except Exception:
+            pass
+        super().leaveEvent(event)
+
+    def _update_table_height(self):
+        """Scale table bounds. Limit maximum height but allow shrinking without overflowing."""
+        try:
+            num_rows = self.rowCount()
+            rows_height = sum(self.rowHeight(r) if self.rowHeight(r) > 0 else 40 for r in range(num_rows))
+            header = self.horizontalHeader()
+            header_height = header.height() if header and header.height() > 0 else 42
+            
+            total_height = rows_height + header_height + 16
+            
+            if self.horizontalScrollBar().isVisible():
+                total_height += self.horizontalScrollBar().height()
+
+            # Prevent empty space inside table by setting maximum height to exact size,
+            # but letting it shrink naturally if its container shrinks
+            self.setMaximumHeight(min(max(total_height, 100), 1200) if self.rowCount() > 0 else 1200)
+            self.setMinimumHeight(0)
+            self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+            self.updateGeometry()
+        except Exception as e:
+            logging.error(f"Error updating issue table height: {e}")
+
+    def sizeHint(self):
+        """Return optimal size based on rows to prevent layout expanding unnecessarily."""
+        rows_height = sum(self.rowHeight(r) for r in range(self.rowCount()))
+        header_height = self.horizontalHeader().height()
+        
+        total_height = rows_height + header_height + 16 
+        
+        if self.horizontalScrollBar().isVisible():
+            total_height += self.horizontalScrollBar().height()
+            
+        return QSize(super().sizeHint().width(), total_height if self.rowCount() > 0 else header_height + 2)
+
+    def minimumSizeHint(self):
+        """Allow shrinking down to just the header when layout squashes it."""
+        header_height = self.horizontalHeader().height() if self.horizontalHeader() else 30
+        return QSize(super().minimumSizeHint().width(), header_height)
+
+
 
     def update_issues(self, issues):
         """Update the table with a list of issues"""
@@ -624,7 +701,8 @@ class IssuesTable(QTableWidget):
             self.insertRow(i)
 
             # Type
-            type_item = QTableWidgetItem(issue.get("type", "Unknown"))
+            type_item = QTableWidgetItem(str(issue.get("type", "Unknown")))
+            type_item.setFlags(type_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             type_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             if issue.get("type", "").lower() == "warning":
                 type_item.setForeground(QColor(AppColors.STATUS_WARNING))
@@ -633,28 +711,34 @@ class IssuesTable(QTableWidget):
             self.setItem(i, 0, type_item)
 
             # Reason
-            reason_item = QTableWidgetItem(issue.get("reason", "Unknown"))
+            reason_item = QTableWidgetItem(str(issue.get("reason", "Unknown")))
+            reason_item.setFlags(reason_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             reason_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.setItem(i, 1, reason_item)
 
             # Object
-            object_item = QTableWidgetItem(issue.get("object", "Unknown"))
+            object_item = QTableWidgetItem(str(issue.get("object", "Unknown")))
+            object_item.setFlags(object_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             object_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             self.setItem(i, 2, object_item)
 
             # Age
-            age_item = QTableWidgetItem(issue.get("age", "Unknown"))
+            age_item = QTableWidgetItem(str(issue.get("age", "Unknown")))
+            age_item.setFlags(age_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             age_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.setItem(i, 3, age_item)
 
             # Message
-            message_item = QTableWidgetItem(issue.get("message", "Unknown"))
+            message_item = QTableWidgetItem(str(issue.get("message", "Unknown")))
+            message_item.setFlags(message_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             message_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             self.setItem(i, 4, message_item)
 
         # Adjust row heights
         for row in range(self.rowCount()):
-            self.setRowHeight(row, 40)
+            self.setRowHeight(row, 42)
+            
+        self._update_table_height()
 
 
 class ClusterPage(ThemeAwareMixin, QWidget):
@@ -768,7 +852,12 @@ class ClusterPage(ThemeAwareMixin, QWidget):
         
         # Refresh issues table
         if hasattr(self, 'issues_table'):
-            self.issues_table.setStyleSheet(ClusterPageStyles.get_issues_table_style())
+            modified_style = get_table_style() + "\nQTableWidget::item { padding: 4px 8px; border: none; background-color: transparent !important; }"
+            self.issues_table.setStyleSheet(modified_style)
+        
+        # Refresh container if it exists
+        if hasattr(self, 'table_container'):
+            self.table_container.setStyleSheet(get_table_container_style())
         
         # Refresh issues header
         if hasattr(self, 'issues_header'):
@@ -825,6 +914,7 @@ class ClusterPage(ThemeAwareMixin, QWidget):
         self.metrics_container = QWidget()
         self.metrics_container.setStyleSheet(ClusterPageStyles.get_metrics_panel_style())
         self.metrics_container.setMinimumWidth(600)
+        self.metrics_container.setMaximumHeight(300)
 
         metrics_grid = QGridLayout(self.metrics_container)
         metrics_grid.setContentsMargins(16, 16, 16, 16)
@@ -858,16 +948,19 @@ class ClusterPage(ThemeAwareMixin, QWidget):
         # Status panel for issues
         self.status_panel = self.create_status_panel()
 
-        # Add sections to main layout
-        content_layout.addWidget(top_section)
-        content_layout.addWidget(self.status_panel)
+        # Add sections to main layout with stretch factors explicitly
+        # 0 stretch on top_section ensures it only takes its required minimum space
+        # 1 stretch on status_panel forces it to expand and push the top section UP
+        content_layout.addWidget(top_section, 0)
+        content_layout.addWidget(self.status_panel, 1)
 
         return content_widget
 
     def create_chart_panel(self):
         panel = QWidget()
         panel.setStyleSheet(ClusterPageStyles.get_chart_panel_style())
-        panel.setMinimumHeight(380)
+        panel.setMinimumHeight(280)
+        panel.setMaximumHeight(300)
 
         main_layout = QVBoxLayout(panel)
         main_layout.setContentsMargins(16, 16, 16, 16)
@@ -918,8 +1011,8 @@ class ClusterPage(ThemeAwareMixin, QWidget):
         self.memory_chart = BarChart(color="#00ffff", title="Memory Usage", unit="%")
 
         # Set minimum size to ensure charts are visible
-        self.cpu_chart.setMinimumSize(400, 300)
-        self.memory_chart.setMinimumSize(400, 300)
+        self.cpu_chart.setMinimumSize(400, 240)
+        self.memory_chart.setMinimumSize(400, 240)
 
         # Add charts to stacked layout
         self.charts_layout.addWidget(self.cpu_chart)
@@ -973,6 +1066,8 @@ class ClusterPage(ThemeAwareMixin, QWidget):
 
         self.status_widget = QWidget()
         self.status_widget.setStyleSheet(ClusterPageStyles.get_status_panel_style())
+        self.status_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.status_widget.setMinimumHeight(60)
 
         self.stacked_layout = QStackedLayout(self.status_widget)
         self.stacked_layout.setContentsMargins(0, 0, 0, 0)
@@ -1011,13 +1106,43 @@ class ClusterPage(ThemeAwareMixin, QWidget):
         self.issues_header.setAlignment(Qt.AlignmentFlag.AlignLeft)
 
         self.issues_table = IssuesTable()
+        
+        # Apply the global card container CSS but scoped natively to the issues card only
+        self.table_container = QFrame()
+        self.table_container.setObjectName("table_container")
+        self.table_container.setStyleSheet(get_table_container_style())
+        table_layout = QVBoxLayout(self.table_container)
+        table_layout.setContentsMargins(0, 0, 0, 0)
+        table_layout.setSpacing(0)
+        table_layout.addWidget(self.issues_table)
+        
+        # Apply shadow just to the issues card
+        shadow = QGraphicsDropShadowEffect(self.table_container)
+        shadow.setBlurRadius(8)
+        shadow.setOffset(0, 0)
+        shadow.setColor(QColor(0, 0, 0, 40))
+        self.table_container.setGraphicsEffect(shadow)
 
         issues_layout.addWidget(self.issues_header)
-        issues_layout.addWidget(self.issues_table)
+        issues_layout.addWidget(self.table_container)
+        issues_layout.addStretch(1)
 
         # Add both widgets to stacked layout
         self.stacked_layout.addWidget(no_issues_widget)  # index 0
         self.stacked_layout.addWidget(issues_widget)     # index 1
+
+        # Force stacked layout to adopt ONLY the height of the currently visible widget
+        def _on_cluster_stack_changed(index):
+            for i in range(self.stacked_layout.count()):
+                widget = self.stacked_layout.widget(i)
+                policy = widget.sizePolicy()
+                policy.setVerticalPolicy(QSizePolicy.Policy.Expanding if i == index else QSizePolicy.Policy.Ignored)
+                widget.setSizePolicy(policy)
+            # Re-evaluate layout
+            self.status_widget.adjustSize()
+
+        self.stacked_layout.currentChanged.connect(_on_cluster_stack_changed)
+        _on_cluster_stack_changed(self.stacked_layout.currentIndex())
 
         container_layout.addWidget(self.status_widget)
         return container
@@ -1157,7 +1282,6 @@ class ClusterPage(ThemeAwareMixin, QWidget):
 
         except Exception as e:
             logging.error(f"ClusterPage: Error updating metrics UI: {e}")
-            import traceback
             logging.error(f"ClusterPage: Full traceback: {traceback.format_exc()}")
 
     def update_issues(self, issues):
@@ -1225,7 +1349,7 @@ class ClusterPage(ThemeAwareMixin, QWidget):
     def _generate_time_points(self, count):
         """Generate time points for charts"""
         try:
-            now = datetime.datetime.now()
+            now = TimezoneManager.get_instance().get_now()
             times = []
 
             # Calculate interval based on count

@@ -1,3 +1,8 @@
+"""
+Preferences-specific styles with theme-aware support.
+Contains styles for the Preferences/Settings page including cards, inputs,
+toggle switches, dropdowns, radio groups, sidebar nav, and scroll areas.
+"""
 from UI.ThemeManager import get_theme_manager
 
 def _get_theme():
@@ -31,8 +36,9 @@ def get_header_style():
         QLabel {{
             padding: 20px;
             color: {theme.colors.TEXT_SUBTLE};
-            font-size: 12px;
+            font-size: 11px;
             font-weight: bold;
+            letter-spacing: 1px;
         }}
     """
 
@@ -41,22 +47,47 @@ def get_section_header_style():
     return f"""
         QLabel#header {{
             color: {theme.colors.TEXT_LIGHT};
-            font-size: 22px;
+            font-size: 32px;
             font-weight: bold;
-            padding-bottom: 10px;
+            letter-spacing: -0.5px;
+            padding-bottom: 20px;
         }}
     """
 
 def get_subsection_header_style():
+    """Card title bar - small grey uppercase label (used inside cards)"""
     theme = _get_theme()
     return f"""
         QLabel#sectionHeader {{
             color: {theme.colors.TEXT_SUBTLE};
-            font-size: 12px;
+            font-size: 11px;
             font-weight: bold;
-            text-transform: uppercase;
-            padding-top: 20px;
-            padding-bottom: 10px;
+            letter-spacing: 0.8px;
+            padding: 16px 24px 14px 24px;
+            background-color: {theme.colors.BG_DARK};
+            border-bottom: 1px solid {theme.colors.BORDER_LIGHT};
+            border-top-left-radius: 11px;
+            border-top-right-radius: 11px;
+        }}
+    """
+
+def get_card_outer_style():
+    """Outer QFrame for a settings card with rounded corners and border"""
+    theme = _get_theme()
+    return f"""
+        QFrame#SettingsCard {{
+            background-color: {theme.colors.BG_MEDIUM};
+            border: 1px solid {theme.colors.BORDER_LIGHT};
+            border-radius: 12px;
+        }}
+    """
+
+def get_card_content_style():
+    """Content widget inside a card - transparent so card bg shows through"""
+    theme = _get_theme()
+    return f"""
+        QWidget {{
+            background-color: transparent;
         }}
     """
 
@@ -75,13 +106,15 @@ def get_description_style():
         QLabel {{
             color: {theme.colors.TEXT_SUBTLE};
             font-size: 13px;
-            padding: 10px 0px;
+            padding: 8px 0px 0px 0px;
+            line-height: 1.6;
         }}
     """
 
 def get_status_text_style(enabled=False):
     theme = _get_theme()
-    color = theme.colors.ACCENT_BLUE if enabled else theme.colors.TEXT_SUBTLE
+    accent = getattr(theme.colors, 'ACCENT_ORANGE', '#FF5733')
+    color = accent if enabled else theme.colors.TEXT_SUBTLE
     return f"""
         QLabel {{
             color: {color};
@@ -92,25 +125,37 @@ def get_status_text_style(enabled=False):
 
 def get_input_style():
     theme = _get_theme()
+    accent = getattr(theme.colors, 'ACCENT_ORANGE', '#FF5733')
     return f"""
         QLineEdit {{
-            background-color: {theme.colors.HEADER_BG};
-            border: 1px solid {theme.colors.BORDER_DARK};
-            border-radius: 4px;
-            padding: 8px 12px;
+            background-color: {theme.colors.BG_DARK};
+            border: 1px solid {theme.colors.BORDER_COLOR};
+            border-radius: 8px;
+            padding: 10px 14px;
             color: {theme.colors.TEXT_LIGHT};
+            font-size: 14px;
+        }}
+        QLineEdit:focus {{
+            border: 1px solid {accent};
+        }}
+        QLineEdit:hover {{
+            border-color: {accent};
         }}
     """
 
 def get_dropdown_style():
     theme = _get_theme()
+    accent = getattr(theme.colors, 'ACCENT_ORANGE', '#FF5733')
+    accent_light = f"rgba(255, 107, 53, 0.12)"
+    accent_selected = f"rgba(255, 107, 53, 0.18)"
     return f"""
         QComboBox {{
-            background-color: {theme.colors.HEADER_BG};
-            border: 1px solid {theme.colors.BORDER_DARK};
-            border-radius: 4px;
-            padding: 8px 12px;
+            background-color: {theme.colors.BG_DARK};
+            border: 1px solid {theme.colors.BORDER_COLOR};
+            border-radius: 8px;
+            padding: 10px 14px;
             color: {theme.colors.TEXT_LIGHT};
+            font-size: 14px;
             min-width: 200px;
         }}
         QComboBox::drop-down {{
@@ -118,17 +163,72 @@ def get_dropdown_style():
             width: 30px;
         }}
         QComboBox:hover {{
-            background-color: {theme.colors.HOVER_BG};
+            border-color: {accent};
+        }}
+        QComboBox:focus {{
+            border-color: {accent};
+        }}
+        QComboBox:on {{
+            border-color: {accent};
+            border-bottom-left-radius: 0px;
+            border-bottom-right-radius: 0px;
+        }}
+        QComboBox QAbstractItemView {{
+            background-color: {theme.colors.BG_MEDIUM};
+            border: 1px solid {theme.colors.BORDER_COLOR};
+            border-radius: 8px;
+            outline: none;
+            padding: 4px;
+            color: {theme.colors.TEXT_LIGHT};
+        }}
+        QComboBox QAbstractItemView::item {{
+            padding: 10px 16px;
+            border-radius: 6px;
+            margin: 2px 4px;
+            color: {theme.colors.TEXT_LIGHT};
+            min-height: 24px;
+        }}
+        QComboBox QAbstractItemView::item:hover {{
+            background-color: {accent_light};
+            color: {accent};
+        }}
+        QComboBox QAbstractItemView::item:selected {{
+            background-color: {accent_selected};
+            color: {accent};
+            font-weight: 600;
         }}
     """
 
+def style_combo(combo):
+    """Apply reliable styling for QComboBox popups in PyQt6.
+    No-op for CustomComboBox (which styles itself)."""
+    # CustomComboBox is self-styling — skip entirely
+    try:
+        from UI.CustomComboBox import CustomComboBox as _CCB
+        if isinstance(combo, _CCB):
+            return combo
+    except ImportError:
+        pass
+
+    from PyQt6.QtWidgets import QStyledItemDelegate, QListView, QFrame
+
+    combo.setStyleSheet(get_dropdown_style())
+    combo.setItemDelegate(QStyledItemDelegate(combo))
+    view = QListView()
+    view.setFrameShape(QFrame.Shape.NoFrame)
+    combo.setView(view)
+
+    return combo
+
+
 def get_divider_style():
+    """Kept for compatibility but no longer used in the card layout"""
     theme = _get_theme()
     return f"""
         QFrame#divider {{
-            background-color: {theme.colors.BORDER_DARK};
+            background-color: {theme.colors.BORDER_LIGHT};
             max-height: 1px;
-            margin: 20px 0px;
+            margin: 8px 0px;
         }}
     """
 
@@ -159,30 +259,37 @@ def get_delete_button_style():
     """
 
 def get_button_primary_style():
+    """Primary button uses ACCENT_ORANGE per the design reference"""
     theme = _get_theme()
-    hover_bg = "#3A8EDF" if hasattr(theme.colors, 'BG_DARK') else "#5AB4FF"
+    accent = getattr(theme.colors, 'ACCENT_ORANGE', '#FF5733')
     return f"""
         QPushButton {{
-            background-color: {theme.colors.ACCENT_BLUE};
-            color: {theme.colors.TEXT_LIGHT};
+            background-color: {accent};
+            color: #ffffff;
             border: none;
-            padding: 8px 15px;
-            border-radius: 4px;
+            padding: 10px 22px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
         }}
         QPushButton:hover {{
-            background-color: {hover_bg};
+            background-color: #ff8555;
+        }}
+        QPushButton:pressed {{
+            background-color: #e55a2a;
         }}
     """
 
 def get_button_secondary_style():
     theme = _get_theme()
+    accent = getattr(theme.colors, 'ACCENT_ORANGE', '#FF5733')
     return f"""
         QPushButton {{
             background-color: {theme.colors.HEADER_BG};
             color: {theme.colors.TEXT_SUBTLE};
-            border: 1px solid {theme.colors.ACCENT_BLUE};
+            border: 1px solid {accent};
             padding: 8px 15px;
-            border-radius: 4px;
+            border-radius: 8px;
         }}
         QPushButton:hover {{
             background-color: {theme.colors.BG_MEDIUM};
@@ -200,24 +307,36 @@ def get_placeholder_style():
     """
 
 def get_sidebar_button_style():
+    """Sidebar nav buttons — active state uses ACCENT_ORANGE (SIDEBAR_ACTIVE_TEXT) with orange accent left border"""
     theme = _get_theme()
+    accent = getattr(theme.colors, 'SIDEBAR_ACTIVE_TEXT', getattr(theme.colors, 'ACCENT_ORANGE', '#FF5733'))
+    hover_bg = getattr(theme.colors, 'SIDEBAR_HOVER_BG', theme.colors.HOVER_BG)
+    active_bg = getattr(theme.colors, 'SIDEBAR_HOVER_BG', theme.colors.HOVER_BG)
     return f"""
         QPushButton {{
             background-color: transparent;
             color: {theme.colors.TEXT_SUBTLE};
             text-align: left;
-            padding: 10px 20px;
+            padding: 10px 16px;
             border: none;
+            border-left: 3px solid transparent;
+            border-radius: 8px;
             font-size: 14px;
+            font-weight: 500;
+            margin: 2px 8px;
         }}
         QPushButton:hover {{
-            background-color: {theme.colors.HOVER_BG};
+            background-color: {hover_bg};
             color: {theme.colors.TEXT_LIGHT};
         }}
         QPushButton:checked {{
-            background-color: {theme.colors.HOVER_BG};
-            color: {theme.colors.TEXT_LIGHT};
-            border-left: 3px solid {theme.colors.ACCENT_BLUE};
+            background-color: {active_bg};
+            color: {accent};
+            font-weight: 600;
+            border-left: 3px solid {accent};
+            border-radius: 0px 8px 8px 0px;
+            margin-left: 0px;
+            padding-left: 19px;
         }}
     """
 
@@ -229,18 +348,56 @@ def get_scroll_style():
             border: none;
             outline: none;
         }}
+        QScrollArea > QWidget > QWidget {{
+            background-color: {theme.colors.BG_DARK};
+        }}
     """
     return scroll_area_style + theme.get_scrollbar_style()
 
 def get_toggle_switch_colors():
-    """Get theme-aware colors for toggle switch"""
+    """Toggle switch uses ACCENT_ORANGE when checked"""
     theme = _get_theme()
+    accent = getattr(theme.colors, 'ACCENT_ORANGE', '#FF5733')
+    unchecked = getattr(theme.colors, 'TEXT_SECONDARY', '#888888')
     return {
-        'checked_bg': theme.colors.ACCENT_BLUE,
-        'unchecked_bg': theme.colors.TEXT_SECONDARY,
-        'circle': theme.colors.TEXT_LIGHT
+        'checked_bg': accent,
+        'unchecked_bg': unchecked,
+        'circle': '#ffffff'
     }
 
 def get_back_button_style():
     """Get theme-aware back button style"""
     return "QPushButton { background-color: transparent; border: none; }"
+
+def get_radio_group_style():
+    """Radio button group container"""
+    theme = _get_theme()
+    accent = getattr(theme.colors, 'ACCENT_ORANGE', '#FF5733')
+    return f"""
+        QWidget#RadioGroup {{
+            background-color: {theme.colors.BG_DARK};
+            border-radius: 8px;
+            padding: 12px;
+        }}
+        QRadioButton {{
+            color: {theme.colors.TEXT_LIGHT};
+            font-size: 14px;
+            font-weight: 500;
+            spacing: 8px;
+            background-color: transparent;
+        }}
+        QRadioButton::indicator {{
+            width: 18px;
+            height: 18px;
+            border-radius: 9px;
+            border: 2px solid {theme.colors.BORDER_COLOR};
+            background-color: {theme.colors.BG_DARK};
+        }}
+        QRadioButton::indicator:hover {{
+            border-color: {accent};
+        }}
+        QRadioButton::indicator:checked {{
+            background-color: {accent};
+            border-color: {accent};
+        }}
+    """

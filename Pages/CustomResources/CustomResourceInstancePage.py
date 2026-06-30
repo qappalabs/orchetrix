@@ -4,14 +4,19 @@ Similar to how OpenLens displays custom resource instances when clicking on a CR
 """
 
 import logging
-from PyQt6.QtWidgets import QHeaderView, QApplication
+from PyQt6.QtWidgets import (
+    QHeaderView, QApplication, QMessageBox, QProgressDialog, QLabel
+)
 from PyQt6.QtCore import Qt, QTimer, QEventLoop
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QFont
 
 from Base_Components.base_components import SortableTableWidgetItem
 from Base_Components.base_resource_page import BaseResourcePage
 from UI.Styles import AppColors
 from Utils.data_formatters import parse_age_to_seconds
+from Utils.kubernetes_client import get_kubernetes_client
+from datetime import datetime
+import dateutil.parser
 import Styles.CustomResourceInstancePageStyles as CustomResourceInstancePageStyles
 
 
@@ -30,7 +35,7 @@ class CustomResourceInstancePage(BaseResourcePage):
         # Extract and store CRD configuration
         self._extract_crd_config(crd_spec)
 
-        # IMPORTANT: Disable unified loader search for CRD instances
+        # Disable unified loader search for CRD instances
         self.resource_type = None
 
         self.setup_page_ui()
@@ -125,8 +130,8 @@ class CustomResourceInstancePage(BaseResourcePage):
         self.configure_columns()
 
     def _apply_table_styling(self):
+        """Table styling is handled by BaseResourcePage."""
         pass
-        # Table styling is already handled by BaseResourcePage
 
     def configure_columns(self):
         if not self.table:
@@ -154,7 +159,7 @@ class CustomResourceInstancePage(BaseResourcePage):
         Populate a single row with custom resource instance data
         """
         # Set row height once
-        self.table.setRowHeight(row, 40)
+        self.table.setRowHeight(row, 42)
 
         # Create checkbox for row selection
         resource_name = resource["name"]
@@ -344,23 +349,13 @@ class CustomResourceInstancePage(BaseResourcePage):
                 parent = parent.parent()
 
             if cluster_view and hasattr(cluster_view, 'detail_manager'):
-                # Use self.plural for custom resources (e.g., "certificaterequests")
                 resource_type = self.plural
-
-                # Extract raw_data from resource if available
                 raw_data = resource.get("raw_data", {}) if resource else {}
-
-                # Show the detail page first with raw_data
                 cluster_view.detail_manager.show_detail(
                     resource_type, resource_name, resource_namespace, raw_data)
-
-                # After showing detail page, trigger edit mode
                 QTimer.singleShot(500, lambda: self._trigger_edit_mode(cluster_view))
-
                 logging.info(f"Opening {self.plural}/{resource_name} in edit mode")
             else:
-                # Fallback: show error if detail manager not found
-                from PyQt6.QtWidgets import QMessageBox
                 QMessageBox.information(
                     self, "Edit Resource",
                     f"Cannot edit {self.plural}/{resource_name}: Detail panel not available"
@@ -369,33 +364,25 @@ class CustomResourceInstancePage(BaseResourcePage):
 
         except Exception as e:
             logging.error(f"Failed to open {resource_name} for editing: {e}")
-            from PyQt6.QtWidgets import QMessageBox
             QMessageBox.critical(
                 self, "Error",
                 f"Failed to open {resource_name} for editing: {str(e)}"
             )
 
     def _perform_deletion_without_confirmation(self):
-        """Perform custom resource deletion without confirmation dialog.
-        
-        Called by ResourceDeletionManager after confirmation has already been shown.
-        Uses the Custom Objects API since resource_type is None for CRD instances.
-        """
-        from PyQt6.QtWidgets import QMessageBox, QProgressDialog, QApplication
-        from PyQt6.QtCore import Qt
-        from Utils.kubernetes_client import get_kubernetes_client
+        """Delete selected custom resource instances.
 
+        Called by ResourceDeletionManager after confirmation has already been shown.
+        Uses the Custom Objects API since resource_type=None for CRD instances.
+        """
         if not self.selected_items:
             return
 
-        # Copy to list to avoid set modification during iteration
         items_to_delete = list(self.selected_items)
-        
         success_count = 0
         error_list = []
         total = len(items_to_delete)
 
-        # Create progress dialog
         progress = QProgressDialog(f"Deleting {total} {self.plural}...", "Cancel", 0, total, self)
         progress.setWindowTitle("Deleting Resources")
         progress.setWindowModality(Qt.WindowModality.WindowModal)
@@ -407,6 +394,7 @@ class CustomResourceInstancePage(BaseResourcePage):
             kubernetes_client = get_kubernetes_client()
             if not kubernetes_client:
                 QMessageBox.critical(self, "Error", "Kubernetes client not available")
+                progress.close()
                 return
 
             for i, (resource_name, namespace) in enumerate(items_to_delete):
@@ -626,9 +614,8 @@ class CustomResourceInstancePage(BaseResourcePage):
         self._load_custom_resource_instances()
 
     def _load_custom_resource_instances(self):
-
+        """Load CRD instances directly from the Kubernetes API."""
         try:
-            from Utils.kubernetes_client import get_kubernetes_client
             kubernetes_client = get_kubernetes_client()
             if not kubernetes_client:
                 self.hide_loading_indicator()
@@ -741,14 +728,11 @@ class CustomResourceInstancePage(BaseResourcePage):
         }
 
     def _calculate_age(self, creation_timestamp):
-
+        """Calculate human-readable age from a Kubernetes creation timestamp."""
         if not creation_timestamp:
             return "Unknown"
 
         try:
-            from datetime import datetime
-            import dateutil.parser
-
             created = dateutil.parser.parse(creation_timestamp)
             now = datetime.now(created.tzinfo)
             delta = now - created
@@ -775,20 +759,14 @@ class CustomResourceInstancePage(BaseResourcePage):
         self._create_empty_overlay(empty_message, "empty_state_label")
 
     def _create_empty_overlay(self, message, object_name):
-
+        """Create a centered overlay label for empty/search states."""
         try:
             logging.info(f"Creating empty overlay: '{message}'")
 
-            from PyQt6.QtWidgets import QLabel
-            from PyQt6.QtCore import Qt
-            from PyQt6.QtGui import QFont
-
-            # Find container and create overlay
             container = self.table.parent() or self
             self.empty_state_overlay = QLabel(message, container)
             self.empty_state_overlay.setObjectName(object_name)
 
-            # Apply consistent styling
             font = QFont()
             font.setBold(True)
             font.setPointSize(14)

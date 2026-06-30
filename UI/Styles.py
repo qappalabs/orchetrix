@@ -11,10 +11,12 @@ class AppColors:
     BG_HEADER = "#1e1e1e"
     BG_MEDIUM = "#2d2d2d"
     BG_LIGHT = "#3a3a3a"
+    DIALOG_BG = "#0f1115"
+    SECTION_CARD_BG = "#1f2228"  # Section card inner background (dark)
 
     # Text colors
     TEXT_LIGHT = "#ffffff"
-    TEXT_SECONDARY = "#888888"
+    TEXT_SECONDARY = "#94a3b8"
     TEXT_SUBTLE = "#8e9ba9"
     TEXT_LINK = "#4FC3F7"
     TEXT_DANGER = "#FF5252"
@@ -51,14 +53,16 @@ class AppColors:
     CARD_BG = "#1e1e1e"
     TAB_INACTIVE = "#2d2d2d"
     HEADER_BG = "#252525"
-    TABLE_HEADER = "#323232"
+    TABLE_HEADER = "#E65C00"  # Table header background (uses accent orange)
 
     # Hover states
     HOVER_BG = "rgba(255, 255, 255, 0.1)"
     HOVER_BG_DARKER = "rgba(255, 255, 255, 0.05)"
-    SELECTED_BG = "rgba(33, 150, 243, 0.2)"
+    SELECTED_BG = "rgba(255, 140, 50, 0.15)"  # Selected background (orange tint from ACCENT_ORANGE)
+    HOVER_HIGHLIGHT = "rgba(255, 140, 50, 0.08)"  # Table row hover 
+    SELECTION_HOVER = "rgba(255, 140, 50, 0.22)"  # Selected+hovered row (deeper orange)
     SIDEBAR_ACTIVE_BG = HOVER_BG  # Alias - dark theme keeps existing behavior
-    SIDEBAR_ACTIVE_TEXT = TEXT_LIGHT  # Alias - dark theme active text stays white
+    SIDEBAR_ACTIVE_TEXT = ACCENT_ORANGE  # Sidebar active text (uses accent orange)
     SIDEBAR_HOVER_BG = HOVER_BG  # Alias - dark theme hover stays the same
     DANGER_HOVER_BG = "rgba(255, 68, 68, 0.1)"
     DANGER_PRESSED_BG = "#C41019"  # Darker red for pressed state
@@ -72,12 +76,12 @@ class AppColors:
     # Status colors
     STATUS_ACTIVE = "#4CAF50"    # Green
     STATUS_AVAILABLE = "#00FF00"
-    STATUS_DISCONNECTED = "#FF0000"  # Red
+    STATUS_DISCONNECTED = TEXT_DANGER  # Muted Red to match detail page
     STATUS_PENDING = "#FFA500"    # Orange
     STATUS_WARNING = "#FFC107"
     STATUS_PROGRESS = "#969efa"
     STATUS_INFO = "#2196F3"      # Blue - for informational status
-    STATUS_ERROR = STATUS_DISCONNECTED
+    STATUS_ERROR = TEXT_DANGER
 
     # Text on accent colors
     TEXT_ON_ACCENT = "#ffffff"  # White text on accent backgrounds
@@ -259,6 +263,9 @@ class AppStyles:
         QScrollBar::add-page:horizontal,
         QScrollBar::sub-page:horizontal {
             background: none;
+        }
+        QAbstractScrollArea::corner {
+            background: transparent;
         }
     """
 
@@ -469,7 +476,7 @@ class AppStyles:
     
     TABLE_STYLE = f"""
         QTableWidget {{
-            background-color: {AppColors.CARD_BG};
+            background-color: transparent;
             border: none;
             gridline-color: transparent;
             outline: none;
@@ -501,18 +508,20 @@ class AppStyles:
         }}
         
         QHeaderView::section {{
-            background-color: {AppColors.HEADER_BG};
-            color: {AppColors.TEXT_LIGHT};
-            padding: 10px 8px;
+            background-color: transparent;
+            color: {AppColors.TEXT_SECONDARY};
+            padding: 12px 8px;
             border: none;
             border-bottom: 1px solid {AppColors.BORDER_COLOR};
-            font-size: 12px;
+            font-size: 11px;
             text-align: center;
-            font-weight: bold;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }}
         
         QHeaderView::section:hover {{
-            background-color: {AppColors.BG_MEDIUM};
+            background-color: rgba(255, 255, 255, 0.05);
         }}
         
         QHeaderView::down-arrow, QHeaderView::up-arrow {{
@@ -579,7 +588,7 @@ class AppStyles:
     SELECT_ALL_CHECKBOX_STYLE = f"""
         QCheckBox {{
             spacing: 3px;
-            background-color: transparent;  # Changed from {AppColors.HEADER_BG}
+            background-color: transparent;
         }}
         QCheckBox::indicator {{
             width: 14px;
@@ -726,42 +735,46 @@ class AppStyles:
         
         QApplication {{
             font-family: 'Segoe UI', Arial, sans-serif;
-            font-size: 9pt;
+            font-size: 9.5pt;
         }}
         
         /* Force consistent table styling across platforms */
         QTableWidget, QTreeWidget {{
             alternate-background-color: transparent;
-            selection-background-color: rgba(53, 132, 228, 0.15) !important;
+            selection-background-color: {AppColors.SELECTED_BG} !important;
             selection-color: {AppColors.TEXT_LIGHT} !important;
+            font-size: 14px !important;
         }}
         
         QTableWidget::item, QTreeWidget::item {{
             border: none !important;
             outline: none !important;
+            padding: 10px 16px !important;
         }}
         
         QTableWidget::item:selected, QTreeWidget::item:selected {{
-            background-color: rgba(53, 132, 228, 0.15) !important;
+            background-color: {AppColors.SELECTED_BG} !important;
             color: {AppColors.TEXT_LIGHT} !important;
         }}
         
         QTableWidget::item:hover, QTreeWidget::item:hover {{
-            background-color: rgba(53, 132, 228, 0.10) !important;
+            background-color: {AppColors.HOVER_HIGHLIGHT} !important;
         }}
         
         /* Force consistent header styling */
         QHeaderView::section {{
-            background-color: {AppColors.HEADER_BG} !important;
-            color: {AppColors.TEXT_LIGHT} !important;
+            background-color: transparent !important;
+            color: {AppColors.TEXT_SECONDARY} !important;
             border: none !important;
             border-bottom: 1px solid {AppColors.BORDER_COLOR} !important;
-            padding: 8px !important;
-            text-align: center !important;
+            padding: 16px 16px !important;
+            font-weight: 600 !important;
+            font-size: 14px !important;
+            letter-spacing: 0.5px !important;
         }}
         
         QHeaderView::section:hover {{
-            background-color: {AppColors.BG_MEDIUM} !important;
+            background-color: rgba(255, 255, 255, 0.05) !important;
         }}
         
         /* Custom sort indicator positioning */
@@ -1521,9 +1534,9 @@ class AppStyles:
     FILTER_BUTTON_ARROW_STYLE = f"color: {AppColors.TEXT_SECONDARY}; background: transparent;"
 
     # Detail Page-specific styles
-    DETAIL_PAGE_WIDTH = 450
-    DETAIL_PAGE_MIN_WIDTH = 400
-    DETAIL_PAGE_MAX_WIDTH = 800
+    DETAIL_PAGE_WIDTH = 530
+    DETAIL_PAGE_MIN_WIDTH = 450
+    DETAIL_PAGE_MAX_WIDTH = 900
     DETAIL_PAGE_SHADOW_BLUR_RADIUS = 20
     DETAIL_PAGE_SHADOW_COLOR = (0, 0, 0, 180)
     DETAIL_PAGE_SHADOW_OFFSET_X = -5
@@ -1736,7 +1749,7 @@ class AppStyles:
         """Generate dropdown style with properly resolved icon path"""
         try:
             from UI.Icons import resource_path
-            down_arrow_icon = resource_path("Icons/down_btn.svg")
+            down_arrow_icon = resource_path("Icons/down_arrow.svg")
 
             return f"""
             QComboBox {{
@@ -1950,6 +1963,9 @@ class AppStyles:
             border: none;
             outline: none;
         }}
+        QScrollArea::viewport {{
+            border: none;
+        }}
         {UNIFIED_SCROLL_BAR_STYLE}
     """
 
@@ -1958,6 +1974,9 @@ class AppStyles:
             background-color: {AppColors.BG_SIDEBAR};
             border: none;
             outline: none;
+        }}
+        QScrollArea::viewport {{
+            border: none;
         }}
         {UNIFIED_SCROLL_BAR_STYLE}
     """

@@ -13,6 +13,8 @@ from PyQt6.QtGui import QColor, QIcon
 
 import subprocess
 import json
+import re
+import yaml
 import datetime
 import os
 import platform
@@ -21,8 +23,10 @@ import tempfile
 import logging
 import sys
 from Utils.thread_manager import is_shutdown_requested
+from Services.kubernetes.kubernetes_service import get_kubernetes_service
+from Styles.BaseTablePageStyles import get_menu_style
 
-# Windows subprocess configuration to prevent terminal popup
+# Suppress terminal popup on Windows
 if sys.platform == 'win32':
     SUBPROCESS_FLAGS = subprocess.CREATE_NO_WINDOW
 else:
@@ -54,6 +58,10 @@ class HelmOperationThread(QThread):
         self.operation_type = operation_type
         self.args = args
         self.kwargs = kwargs
+        # Cluster context the operation must target, so mutating Helm commands
+        # hit the same cluster the page lists from — not the kubeconfig's
+        # current-context.
+        self.kube_context = kwargs.get("kube_context")
         self._is_cancelled = False
 
     def cancel(self):
@@ -99,6 +107,8 @@ class HelmOperationThread(QThread):
 
         try:
             cmd = [helm_path, "uninstall", release_name, "-n", namespace]
+            if self.kube_context:
+                cmd.extend(["--kube-context", self.kube_context])
             logging.info(f"Executing delete command: {' '.join(cmd)}")
 
             # Start the process
@@ -204,6 +214,8 @@ class HelmOperationThread(QThread):
                 self.progress_percentage.emit(25)
 
                 info_cmd = [helm_path, "list", "--filter", f"^{release_name}$", "-n", namespace, "-o", "json"]
+                if self.kube_context:
+                    info_cmd.extend(["--kube-context", self.kube_context])
                 result = subprocess.run(info_cmd, capture_output=True, text=True, timeout=15,
                                         creationflags=SUBPROCESS_FLAGS if sys.platform == 'win32' else 0)
 
@@ -225,8 +237,12 @@ class HelmOperationThread(QThread):
                                 else:
                                     chart = chart_full
                             else:
-                                chart = chart_full.split('-')[0]
-                                chart = f"bitnami/{chart}"  # Default to bitnami
+                                # No repo prefix in the chart field, so there is
+                                # no reliable way to reconstruct the chart
+                                # reference. Leave chart unset so the guard below
+                                # asks the user to specify it explicitly instead
+                                # of guessing a (possibly wrong) bitnami chart.
+                                chart = None
                     except json.JSONDecodeError:
                         pass
 
@@ -236,6 +252,8 @@ class HelmOperationThread(QThread):
 
             cmd.append(chart)
             cmd.extend(["-n", namespace])
+            if self.kube_context:
+                cmd.extend(["--kube-context", self.kube_context])
 
             # Add version if specified
             if upgrade_options.get("version"):
@@ -338,6 +356,8 @@ class HelmOperationThread(QThread):
 
             try:
                 cmd = [helm_path, "uninstall", release_name, "-n", namespace]
+                if self.kube_context:
+                    cmd.extend(["--kube-context", self.kube_context])
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=30,
                                         creationflags=SUBPROCESS_FLAGS if sys.platform == 'win32' else 0)
 
@@ -367,8 +387,8 @@ class HelmOperationThread(QThread):
                 if error_count > 5:
                     message += f"\n... and {error_count - 5} more."
 
-            # Consider it successful if at least some were deleted
-            self.operation_complete.emit(success_count > 0, message)
+            # Only report overall success when every release was deleted
+            self.operation_complete.emit(error_count == 0, message)
 
 
 class HelmReleasesLoader(QThread):
@@ -668,18 +688,79 @@ def parse_timestamp(timestamp):
         return None
 
 
-class ReleaseUpgradeDialog(QDialog):
-    """Dialog for upgrading Helm releases with version and values input"""
+class ReleaseValuesLoader(QThread):
+    """Loads a release's current chart and values off the UI thread so the
+    upgrade dialog can open immediately instead of blocking on Helm."""
 
-    def __init__(self, release_name, namespace, parent=None):
+    values_loaded = pyqtSignal(str, str)  # chart, values YAML
+
+    def __init__(self, release_name, namespace, parent=None, kube_context=None):
         super().__init__(parent)
         self.release_name = release_name
         self.namespace = namespace
+        self.kube_context = kube_context
+
+    def run(self):
+        chart = ""
+        values_text = "# Could not retrieve current values"
+        try:
+            helm_path = find_helm_executable()
+            if not helm_path:
+                self.values_loaded.emit("", "# Helm CLI not found")
+                return
+
+            # Current chart from helm list
+            list_cmd = [helm_path, "list", "--filter", f"^{self.release_name}$",
+                        "-n", self.namespace, "-o", "json"]
+            if self.kube_context:
+                list_cmd.extend(["--kube-context", self.kube_context])
+            result = subprocess.run(
+                list_cmd, capture_output=True, text=True, timeout=15,
+                creationflags=SUBPROCESS_FLAGS if sys.platform == 'win32' else 0
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                try:
+                    releases = json.loads(result.stdout)
+                    if releases:
+                        chart = releases[0].get("chart", "") or ""
+                except json.JSONDecodeError:
+                    pass
+
+            # Current values
+            values_cmd = [helm_path, "get", "values", self.release_name,
+                          "-n", self.namespace, "-o", "yaml"]
+            if self.kube_context:
+                values_cmd.extend(["--kube-context", self.kube_context])
+            result = subprocess.run(
+                values_cmd, capture_output=True, text=True, timeout=15,
+                creationflags=SUBPROCESS_FLAGS if sys.platform == 'win32' else 0
+            )
+            if result.returncode == 0:
+                yaml_content = result.stdout.strip()
+                if not yaml_content or yaml_content == "null":
+                    yaml_content = "# No custom values set for this release"
+                values_text = yaml_content
+        except Exception as e:
+            logging.warning(f"Error loading current values: {e}")
+            values_text = "# Error loading current values"
+
+        self.values_loaded.emit(chart, values_text)
+
+
+class ReleaseUpgradeDialog(QDialog):
+    """Dialog for upgrading Helm releases with version and values input"""
+
+    def __init__(self, release_name, namespace, parent=None, kube_context=None):
+        super().__init__(parent)
+        self.release_name = release_name
+        self.namespace = namespace
+        self.kube_context = kube_context
         self.setWindowTitle(f"Upgrade Release: {release_name}")
         self.setMinimumWidth(550)
         self.setStyleSheet(get_upgrade_dialog_style())
+        self._values_loader = None
         self.setup_ui()
-        self.load_current_values()
+        self._begin_async_load()
 
     def setup_ui(self):
         """Set up the dialog UI with inputs for upgrade parameters"""
@@ -737,54 +818,45 @@ class ReleaseUpgradeDialog(QDialog):
 
         layout.addLayout(button_layout)
 
-    def load_current_values(self):
-        """Load the current chart and values for the release"""
+    def _begin_async_load(self):
+        """Kick off the current chart/values lookup on a background thread so
+        the dialog renders immediately instead of blocking on Helm."""
+        self.values_editor.setPlainText("# Loading current values...")
+        # Disable upgrade until the current values are loaded; this also avoids
+        # sending the placeholder text to `helm upgrade` if clicked too early.
+        self.upgrade_button.setEnabled(False)
+
+        # Parent the loader to the page so it outlives this dialog if the user
+        # closes before the lookup finishes.
+        self._values_loader = ReleaseValuesLoader(
+            self.release_name, self.namespace, self.parent(),
+            kube_context=self.kube_context
+        )
+        self._values_loader.values_loaded.connect(self._on_values_loaded)
+        self._values_loader.finished.connect(self._values_loader.deleteLater)
+        self._values_loader.start()
+
+    def _on_values_loaded(self, chart, values_text):
+        """Populate the dialog once the background lookup completes."""
         try:
-            # Find helm executable
-            helm_path = find_helm_executable()
-            if not helm_path:
-                return
+            if chart:
+                self.chart_input.setPlaceholderText(f"Current: {chart}")
+            self.values_editor.setPlainText(values_text)
+            self.upgrade_button.setEnabled(True)
+        except RuntimeError:
+            # Dialog widgets already destroyed; ignore a late signal.
+            pass
 
-            # Get current chart from helm list
-            list_cmd = [helm_path, "list", "--filter", f"^{self.release_name}$", "-n", self.namespace, "-o", "json"]
-            result = subprocess.run(list_cmd, capture_output=True, text=True, timeout=15,
-                                    creationflags=SUBPROCESS_FLAGS if sys.platform == 'win32' else 0)
-
-            if result.returncode == 0 and result.stdout.strip():
-                try:
-                    releases = json.loads(result.stdout)
-                    if releases and len(releases) > 0:
-                        # Get chart name and set as placeholder
-                        chart = releases[0].get("chart", "")
-                        if chart:
-                            self.chart_input.setPlaceholderText(f"Current: {chart}")
-                except json.JSONDecodeError:
-                    pass
-
-            # Get current values
-            values_cmd = [helm_path, "get", "values", self.release_name, "-n", self.namespace, "-o", "yaml"]
-            result = subprocess.run(values_cmd, capture_output=True, text=True, timeout=15,
-                                    creationflags=SUBPROCESS_FLAGS if sys.platform == 'win32' else 0)
-
-            if result.returncode == 0:
-                # Check if stdout is empty
-                yaml_content = result.stdout.strip()
-                if not yaml_content:
-                    yaml_content = "# No custom values set for this release"
-
-                # Make sure we're not setting the text to "null"
-                if yaml_content == "null":
-                    yaml_content = "# No custom values set for this release"
-
-                # Set values in editor
-                self.values_editor.setPlainText(yaml_content)
-            else:
-                # Failed to get values
-                self.values_editor.setPlainText("# Could not retrieve current values")
-
-        except Exception as e:
-            logging.warning(f"Error loading current values: {e}")
-            self.values_editor.setPlainText("# Error loading current values")
+    def done(self, result):
+        """Detach from the loader before closing so a late result can never
+        touch destroyed widgets."""
+        loader = getattr(self, "_values_loader", None)
+        if loader is not None:
+            try:
+                loader.values_loaded.disconnect(self._on_values_loaded)
+            except (TypeError, RuntimeError):
+                pass
+        super().done(result)
 
     def get_values(self):
         """Get values from the dialog"""
@@ -829,29 +901,8 @@ class ReleasesPage(BaseResourcePage):
         # Configure column widths
         self.configure_columns()
 
-    # def configure_columns(self):
-    #     """Configure column widths and behaviors"""
-    #     self.table.setColumnWidth(1, 150)  # Name
-
-    #     fixed_widths = {
-    #         2: 120,  # Namespace
-    #         4: 80,   # Revision
-    #         7: 100,  # Status
-    #         8: 120,  # Updated
-    #         9: 40    # Actions
-    #     }
-
-    #     for col, width in fixed_widths.items():
-    #         self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
-    #         self.table.setColumnWidth(col, width)
-
-    #     # Set flexible columns
-    #     self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)  # Chart
-    #     self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)  # Version
-    #     self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)  # App Version
-
     def configure_columns(self):
-        """Configure column widths for full screen utilization"""
+        """Configure column widths for full screen utilization."""
         if not self.table:
             return
 
@@ -860,15 +911,15 @@ class ReleasesPage(BaseResourcePage):
         # Column specifications with optimized default widths
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
-            (1, 140, "interactive"),  # Name
+            (1, 140, "stretch"),     # Name - stretch to fill remaining space
             (2, 90, "interactive"),  # Namespace
             (3, 80, "interactive"),  # Chart
             (4, 60, "interactive"),  # Revision
             (5, 60, "interactive"),  # Version
             (6, 60, "interactive"),  # App Version
             (7, 60, "interactive"),  # Status
-            (8, 80, "stretch"),      # Update - stretch to fill remaining space
-            (9, 40, "fixed")        # Actions
+            (8, 80, "interactive"),  # Updated
+            (9, 40, "fixed")         # Actions
         ]
 
         # Apply column configuration
@@ -886,12 +937,54 @@ class ReleasesPage(BaseResourcePage):
         # Ensure full width utilization after configuration
         QTimer.singleShot(100, self._ensure_full_width_utilization)
 
+    def _auto_resize_columns(self, max_col_widths=None, min_col_widths=None):
+        """Override to provide explicit widths for columns to let Name stretch and avoid clipping."""
+        explicit_mins = {
+            1: 120,  # Name
+            2: 100,  # Namespace
+            3: 120,  # Chart
+            4: 60,   # Revision
+            5: 80,   # Version
+            6: 80,   # App Version
+            7: 80,   # Status
+            8: 120,  # Updated
+            9: 40,   # Actions
+        }
+        if min_col_widths:
+            explicit_mins.update(min_col_widths)
+        explicit_maxes = {
+            2: 150,  # Namespace
+            3: 200,  # Chart
+            4: 80,   # Revision
+            5: 120,  # Version
+            6: 120,  # App Version
+            7: 100,  # Status
+            8: 200,  # Updated
+        }
+        if max_col_widths:
+            explicit_maxes.update(max_col_widths)
+        super()._auto_resize_columns(max_col_widths=explicit_maxes, min_col_widths=explicit_mins)
+
+    def _get_current_kube_context(self):
+        """Return the kube-context for the cluster the user has open, or None.
+
+        Mirrors the context HelmReleasesLoader lists from so that mutating Helm
+        operations (uninstall/upgrade) target that same cluster rather than the
+        local kubeconfig's current-context.
+        """
+        try:
+            service = get_kubernetes_service()
+            if service and service.current_cluster:
+                return service.current_cluster
+        except Exception as e:
+            logging.warning(f"Failed to get current cluster context: {e}")
+        return None
+
     def load_data(self, load_more=False):
-        """Load resource data with improved detection of all releases including partial ones"""
+        """Load Helm releases with threaded loading to avoid UI freezing."""
         if hasattr(self, 'is_loading') and self.is_loading:
             return
 
-        # Clean up any existing loading thread
         if hasattr(self, 'loading_thread') and self.loading_thread and self.loading_thread.isRunning():
             self.loading_thread.wait(300)
 
@@ -901,23 +994,12 @@ class ReleasesPage(BaseResourcePage):
         self.table.setRowCount(0)
         self.table.setSortingEnabled(False)
 
-        # Show loading indicator using base class method for consistent styling
         self.show_loading_indicator("Loading Helm releases...")
 
-        # Get namespace filter value using managed class attribute (consistent with base class)
         namespace_filter = None if self.namespace_filter == "All Namespaces" else self.namespace_filter
-            
-        # Get current cluster context
-        kube_context = None
-        try:
-            from Services.kubernetes.kubernetes_service import get_kubernetes_service
-            service = get_kubernetes_service()
-            if service and service.current_cluster:
-                kube_context = service.current_cluster
-        except Exception as e:
-            logging.warning(f"Failed to get current cluster context: {e}")
 
-        # Start loading thread
+        kube_context = self._get_current_kube_context()
+
         self.loading_thread = HelmReleasesLoader(namespace_filter, kube_context)
         self.loading_thread.releases_loaded.connect(self.on_resources_loaded)
         self.loading_thread.error_occurred.connect(self.on_load_error)
@@ -996,6 +1078,9 @@ class ReleasesPage(BaseResourcePage):
                     "--filter", f"^{release_name}$",
                     "--output", "json"
                 ]
+                context = self._get_current_kube_context()
+                if context:
+                    cmd.extend(["--kube-context", context])
 
                 result = subprocess.run(
                     cmd,
@@ -1082,7 +1167,7 @@ class ReleasesPage(BaseResourcePage):
     def populate_resource_row(self, row, resource):
         """Populate a row with improved status indication for failed/partial installations"""
         # Set row height
-        self.table.setRowHeight(row, 40)
+        self.table.setRowHeight(row, 42)
 
         # Create checkbox for row selection
         checkbox_container = self._create_checkbox_container(row, resource["name"])
@@ -1153,11 +1238,8 @@ class ReleasesPage(BaseResourcePage):
             else:
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
-            # Make cells non-editable
-            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-
-            # Add the item to the table
-            self.table.setItem(row, cell_col, item)
+            # Set item styling and alignment
+            self.table.setItem(row, cell_col, self.style_table_item(item, is_name=(col == 0)))
 
         # Create action button and container using base class method for consistent styling
         action_button = self._create_action_button(row, resource["name"], resource["namespace"])
@@ -1165,39 +1247,28 @@ class ReleasesPage(BaseResourcePage):
         self.table.setCellWidget(row, len(columns) + 1, action_container)
 
     def _create_action_button(self, row, resource_name, resource_namespace):
-        """Create an action button with enhanced upgrade and delete options"""
-        from Styles.BaseTablePageStyles import get_menu_style
-
+        """Create an action button with upgrade and delete options."""
         button = QToolButton()
-
-        # Use theme-aware icon from parent class (cached and updates with theme)
         button.setIcon(self.action_button_icon)
         button.setIconSize(QSize(AppConstants.SIZES["ICON_SIZE"], AppConstants.SIZES["ICON_SIZE"]))
-
-        # Remove text and change to icon-only style
         button.setText("")
         button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-
         button.setFixedWidth(30)
-        button.setStyleSheet(AppStyles.HOME_ACTION_BUTTON_STYLE +
-                             """
-                QToolButton::menu-indicator { image: none; width: 0px; }
-                """
-                             )
+        button.setStyleSheet(
+            AppStyles.HOME_ACTION_BUTTON_STYLE +
+            "\n        QToolButton::menu-indicator { image: none; width: 0px; }"
+        )
         button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         button.setCursor(Qt.CursorShape.PointingHandCursor)
 
-        # Create menu with standard styling from BaseTablePageStyles
         menu = QMenu(button)
         menu.setStyleSheet(get_menu_style())
 
-        # Add actions with icons
         actions = [
             {"text": "Upgrade", "icon": "Icons/edit.png", "dangerous": False},
             {"text": "Delete", "icon": "Icons/delete.png", "dangerous": True}
         ]
 
-        # Add actions to menu
         for action_info in actions:
             action = menu.addAction(action_info["text"])
             if "icon" in action_info:
@@ -1230,7 +1301,10 @@ class ReleasesPage(BaseResourcePage):
             return
 
         # Create and show upgrade dialog
-        dialog = ReleaseUpgradeDialog(release_name, namespace, self)
+        dialog = ReleaseUpgradeDialog(
+            release_name, namespace, self,
+            kube_context=self._get_current_kube_context()
+        )
         if dialog.exec() == QDialog.DialogCode.Accepted:
             # Get upgrade options from dialog
             options = dialog.get_values()
@@ -1246,7 +1320,10 @@ class ReleasesPage(BaseResourcePage):
             QApplication.processEvents()
 
             # Create and start the operation thread
-            self.active_operation = HelmOperationThread("upgrade", release_name, namespace, options)
+            self.active_operation = HelmOperationThread(
+                "upgrade", release_name, namespace, options,
+                kube_context=self._get_current_kube_context()
+            )
 
             def on_progress_update(message):
                 if not progress.wasCanceled():
@@ -1330,7 +1407,10 @@ class ReleasesPage(BaseResourcePage):
         user_cancelled = {"cancelled": False}
 
         # Create and start the operation thread
-        self.active_operation = HelmOperationThread("delete", resource_name, resource_namespace)
+        self.active_operation = HelmOperationThread(
+            "delete", resource_name, resource_namespace,
+            kube_context=self._get_current_kube_context()
+        )
 
         def on_progress_update(message):
             try:
@@ -1452,7 +1532,10 @@ class ReleasesPage(BaseResourcePage):
         QApplication.processEvents()
 
         # Create and start the operation thread
-        self.active_operation = HelmOperationThread("batch_delete", resources_list)
+        self.active_operation = HelmOperationThread(
+            "batch_delete", resources_list,
+            kube_context=self._get_current_kube_context()
+        )
 
         def on_progress_update(message):
             if not progress.wasCanceled():
@@ -1470,8 +1553,10 @@ class ReleasesPage(BaseResourcePage):
 
             QMessageBox.information(self, "Deletion Results", message)
 
-            # Clear selected items and refresh
-            self.selected_items.clear()
+            # Clear selection only when every release was deleted; on partial
+            # failure keep it so the user can retry the ones that failed.
+            if success:
+                self.selected_items.clear()
             QTimer.singleShot(1000, self.load_data)
 
         def on_progress_cancelled():
@@ -1772,10 +1857,8 @@ class ReleasesPage(BaseResourcePage):
 
             if values_result.returncode == 0:
                 try:
-                    import yaml
                     values_output = values_result.stdout.strip()
 
-                    # Comprehensive null/empty value detection
                     null_patterns = ["null", "nil", "{}", "", "null\n", "\nnull", "null\r\n", "\r\nnull"]
                     is_null_value = (
                         not values_output or
@@ -1788,18 +1871,16 @@ class ReleasesPage(BaseResourcePage):
 
                     if is_null_value:
                         detailed_release["config"] = {}
-                        logging.info(f"No custom values set for {release_name} (null/empty output: '{values_output.strip()}')")
                     else:
                         try:
                             values_data = yaml.safe_load(values_output)
                             detailed_release["config"] = values_data or {}
-                            logging.info(f"Successfully loaded values for {release_name}")
                         except yaml.YAMLError as e:
                             logging.warning(f"Failed to parse values YAML for {release_name}: {e}")
                             detailed_release["config"] = {"raw_output": values_output}
 
                 except Exception as e:
-                    logging.info(f"Values parsing handled for {release_name}: {e} - setting empty config")
+                    logging.warning(f"Values parsing error for {release_name}: {e}")
                     detailed_release["config"] = {}
             else:
                 detailed_release["config"] = {}
@@ -1904,41 +1985,26 @@ class ReleasesPage(BaseResourcePage):
                                     creationflags=SUBPROCESS_FLAGS if sys.platform == 'win32' else 0)
 
             if result.returncode == 0 and result.stdout.strip():
-                import yaml
                 resources = []
 
-                # Parse YAML documents from the manifest
                 for doc in yaml.safe_load_all(result.stdout):
-                    if doc and isinstance(doc, dict) and doc is not None:
+                    if doc and isinstance(doc, dict):
                         try:
-                            # Ensure metadata exists and is a dict
-                            if 'metadata' not in doc or doc['metadata'] is None:
-                                doc['metadata'] = {}
-                            elif not isinstance(doc['metadata'], dict):
-                                doc['metadata'] = {}
+                            # Ensure nested dicts exist before mutating
+                            meta = doc.setdefault('metadata', {})
+                            if not isinstance(meta, dict):
+                                doc['metadata'] = meta = {}
+                            meta.setdefault('labels', {})
+                            meta.setdefault('annotations', {})
 
-                            # Ensure labels exists and is a dict
-                            if 'labels' not in doc['metadata'] or doc['metadata']['labels'] is None:
-                                doc['metadata']['labels'] = {}
-                            elif not isinstance(doc['metadata']['labels'], dict):
-                                doc['metadata']['labels'] = {}
-
-                            # Ensure annotations exists and is a dict
-                            if 'annotations' not in doc['metadata'] or doc['metadata']['annotations'] is None:
-                                doc['metadata']['annotations'] = {}
-                            elif not isinstance(doc['metadata']['annotations'], dict):
-                                doc['metadata']['annotations'] = {}
-
-                            # Add Helm-specific labels and annotations safely
-                            doc['metadata']['labels']['app.kubernetes.io/managed-by'] = 'Helm'
-                            doc['metadata']['labels']['app.kubernetes.io/instance'] = release_name
-                            doc['metadata']['annotations']['meta.helm.sh/release-name'] = release_name
-                            doc['metadata']['annotations']['meta.helm.sh/release-namespace'] = namespace
+                            meta['labels']['app.kubernetes.io/managed-by'] = 'Helm'
+                            meta['labels']['app.kubernetes.io/instance'] = release_name
+                            meta['annotations']['meta.helm.sh/release-name'] = release_name
+                            meta['annotations']['meta.helm.sh/release-namespace'] = namespace
 
                             resources.append(doc)
                         except (TypeError, AttributeError) as e:
                             logging.warning(f"Error processing resource document: {e}")
-                            # Still add the document even if we can't add metadata
                             resources.append(doc)
 
                 return resources

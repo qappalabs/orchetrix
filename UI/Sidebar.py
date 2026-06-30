@@ -145,8 +145,14 @@ class NavIconButton(QToolButton):
         if new_icon and not new_icon.isNull():
             self.icon = new_icon
             self.icon_loaded = True
-            if hasattr(self, 'icon_label') and self.icon_label:
-                self.icon_label.setPixmap(self.icon.pixmap(QSize(20, 20)))
+        
+        # Refresh dropdown if it exists to update the header icon color
+        if self.has_dropdown:
+            self.setup_dropdown()
+            
+        # Always call update_style so the active tint is re-applied
+        # with the new icon (don't set pixmap directly — that bypasses the tint)
+        self.update_style()
 
     def setup_ui(self):
         self.setFixedHeight(40)
@@ -188,15 +194,16 @@ class NavIconButton(QToolButton):
             self.text_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             self.text_label.setFont(QFont("Segoe UI", 14))
 
-            # Apply styles to labels - don't override background for coming soon
+            # Apply styles to labels
+            self.icon_label.setStyleSheet(SidebarStyles.get_nav_icon_button_icon_label_style() + "; font-size: 14px;")
+            self.text_label.setStyleSheet(SidebarStyles.get_nav_icon_button_text_label_style() + "; font-size: 14px;")
+
             if self.coming_soon:
-                # For coming soon buttons, use same text color as regular buttons
-                text_color = SidebarStyles.get_text_subtle()
-                self.icon_label.setStyleSheet(f"color: {text_color}; background: transparent; font-size: 14px;")
-                self.text_label.setStyleSheet(f"color: {text_color}; background: transparent; font-size: 14px;")
-            else:
-                self.icon_label.setStyleSheet(SidebarStyles.get_nav_icon_button_icon_label_style() + "; font-size: 14px;")
-                self.text_label.setStyleSheet(SidebarStyles.get_nav_icon_button_text_label_style() + "; font-size: 14px;")
+                # Coming soon items have unique background but standard text color
+                text_style = f"color: {SidebarStyles.get_text_subtle()}; background: transparent; font-size: 14px;"
+                self.icon_label.setStyleSheet(text_style)
+                self.text_label.setStyleSheet(text_style)
+                # Note: The indicator circle is added separately and remains orange
 
             # Add coming soon indicator if needed
             if self.coming_soon:
@@ -379,7 +386,20 @@ class NavIconButton(QToolButton):
 
             self.dropdown_menu = NavMenuDropdown(self.parent_window)
 
-            title_action = QAction(f"{self.icon_text} {self.item_text}", self)
+            # Use SVG icon if loaded, otherwise fallback to emoji text
+            if self.icon_loaded:
+                title_action = QAction(self.item_text, self)
+                # Tint the icon to match the menu title text color
+                pixmap = self.icon.pixmap(QSize(20, 20))
+                tinted_pixmap = QPixmap(pixmap)
+                painter = QPainter(tinted_pixmap)
+                painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+                painter.fillRect(tinted_pixmap.rect(), QColor(SidebarStyles.get_text_light()))
+                painter.end()
+                title_action.setIcon(QIcon(tinted_pixmap))
+            else:
+                title_action = QAction(f"{self.icon_text} {self.item_text}", self)
+                
             title_action.setEnabled(False)
             self.dropdown_menu.addAction(title_action)
             self.dropdown_menu.addSeparator()
@@ -522,32 +542,36 @@ class NavIconButton(QToolButton):
                 text_color=self.get_text_color()
             ))
 
-        # Update label colors based on active state (skip for coming_soon buttons)
-        if not self.coming_soon:
-            text_color = self.get_text_color()
-            font_weight = "bold" if self.is_active else "normal"
-            if hasattr(self, 'icon_label') and self.icon_label:
-                self.icon_label.setStyleSheet(f"background-color: transparent; color: {text_color}; font-size: 14px; font-weight: {font_weight};")
-                # Apply exact color tint to icon when active using QPainter
-                if self.icon_loaded:
-                    if self.is_active:
-                        # Create a colored copy preserving the original alpha channel
-                        original_pixmap = self.icon.pixmap(QSize(20, 20))
-                        colored_pixmap = QPixmap(original_pixmap)
-                        painter = QPainter(colored_pixmap)
-                        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
-                        painter.fillRect(colored_pixmap.rect(), QColor(SidebarStyles.get_sidebar_active_text()))
-                        painter.end()
-                        self.icon_label.setPixmap(colored_pixmap)
-                    else:
-                        # Restore original icon
-                        self.icon_label.setPixmap(self.icon.pixmap(QSize(20, 20)))
-            if hasattr(self, 'text_label') and self.text_label:
-                self.text_label.setStyleSheet(f"background-color: transparent; color: {text_color}; font-size: 14px; font-weight: {font_weight};")
+        # Update label colors based on state
+        text_color = self.get_text_color()
+        font_weight = "bold" if self.is_active else "normal"
+
+        if hasattr(self, 'icon_label') and self.icon_label:
+            # Apply color tint to icon ONLY when active
+            if self.icon_loaded:
+                if self.is_active:
+                    # Active buttons use theme color
+                    tint_color = SidebarStyles.get_sidebar_active_text()
+                    
+                    original_pixmap = self.icon.pixmap(QSize(20, 20))
+                    colored_pixmap = QPixmap(original_pixmap)
+                    painter = QPainter(colored_pixmap)
+                    painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+                    painter.fillRect(colored_pixmap.rect(), QColor(tint_color))
+                    painter.end()
+                    self.icon_label.setPixmap(colored_pixmap)
+                else:
+                    # Restore original icon (standard color for inactive or coming_soon)
+                    self.icon_label.setPixmap(self.icon.pixmap(QSize(20, 20)))
+
+            self.icon_label.setStyleSheet(f"background-color: transparent; color: {text_color}; font-size: 14px; font-weight: {font_weight};")
+
+        if hasattr(self, 'text_label') and self.text_label:
+            self.text_label.setStyleSheet(f"background-color: transparent; color: {text_color}; font-size: 14px; font-weight: {font_weight};")
 
     def get_background_color(self):
         if self.coming_soon:
-            return "rgba(255, 149, 0, 0.15)"  # Orange tint for coming soon
+            return "rgba(255, 149, 0, 0.15)"  # Restore distinct orange background for coming soon
         elif self.is_active:
             return SidebarStyles.get_sidebar_active_bg()
         return "transparent"
@@ -643,8 +667,7 @@ class Sidebar(ThemeAwareMixin, QWidget):
         # Refresh all nav buttons
         if hasattr(self, 'nav_buttons'):
             for button in self.nav_buttons:
-                button.update_style()
-                # Update theme-specific icons for nav buttons
+                # Load new theme icons FIRST, then apply style/tinting
                 button.update_theme_icons(theme_name)
                 # Also refresh dropdown menu if it exists
                 if hasattr(button, 'dropdown_menu') and button.dropdown_menu:

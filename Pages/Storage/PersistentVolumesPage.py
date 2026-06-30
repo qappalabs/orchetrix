@@ -9,7 +9,17 @@ from PyQt6.QtGui import QColor
 from Base_Components.base_components import SortableTableWidgetItem, StatusLabel
 from Base_Components.base_resource_page import BaseResourcePage
 from UI.Styles import AppColors
-from Utils.data_formatters import parse_age_to_seconds
+from Utils.data_formatters import parse_age_to_seconds, parse_memory_value
+
+
+def _memory_to_bytes(value):
+    """Convert a Kubernetes resource-quantity string ("10Gi", "500M") to
+    an integer byte count usable as a sort key. Empty / unparseable values
+    sort to the bottom via -1."""
+    try:
+        return parse_memory_value(value).value
+    except Exception:
+        return -1
 
 
 class PersistentVolumesPage(BaseResourcePage):
@@ -29,10 +39,8 @@ class PersistentVolumesPage(BaseResourcePage):
         headers = ["", "Name", "Storage Class", "Capacity", "Claim", "Age", "Status", ""]
         sortable_columns = {1, 2, 3, 4, 5, 6}
 
-        # Set up the base UI components with styles
+        # Set up the base UI components
         super().setup_ui("Persistent Volumes", headers, sortable_columns)
-
-        # Table styling is already handled by BaseResourcePage
 
         # Configure column widths
         self.configure_columns()
@@ -47,13 +55,13 @@ class PersistentVolumesPage(BaseResourcePage):
         # Column specifications with optimized default widths
         column_specs = [
             (0, 40, "fixed"),        # Checkbox
-            (1, 140, "interactive"),  # Name
+            (1, 140, "stretch"),     # Name - stretch to fill remaining space
             (2, 90, "interactive"),  # Storage class
             (3, 80, "interactive"),  # Capacity
             (4, 70, "interactive"),  # Claim
             (5, 60, "interactive"),  # Age
-            (6, 80, "stretch"),      # Status - stretch to fill remaining space
-            (7, 40, "fixed")        # Actions
+            (6, 80, "interactive"),  # Status
+            (7, 40, "fixed")         # Actions
         ]
 
         # Apply column configuration
@@ -75,12 +83,36 @@ class PersistentVolumesPage(BaseResourcePage):
         # Ensure full width utilization after configuration
         QTimer.singleShot(100, self._ensure_full_width_utilization)
 
+    def _auto_resize_columns(self, max_col_widths=None, min_col_widths=None):
+        """Override to provide explicit widths for columns to let Name stretch and avoid clipping."""
+        explicit_mins = {
+            1: 120,  # Name
+            2: 120,  # Storage class
+            3: 100,  # Capacity
+            4: 120,  # Claim
+            5: 60,   # Age
+            6: 80,   # Status
+            7: 40,   # Actions
+        }
+        if min_col_widths:
+            explicit_mins.update(min_col_widths)
+        explicit_maxes = {
+            2: 180,  # Storage class
+            3: 120,  # Capacity
+            4: 250,  # Claim
+            5: 80,   # Age
+            6: 100,  # Status
+        }
+        if max_col_widths:
+            explicit_maxes.update(max_col_widths)
+        super()._auto_resize_columns(max_col_widths=explicit_maxes, min_col_widths=explicit_mins)
+
     def populate_resource_row(self, row, resource):
         """
         Populate a single row with persistent volume data from live Kubernetes resources
         """
         # Set row height once
-        self.table.setRowHeight(row, 40)
+        self.table.setRowHeight(row, 42)
 
         # Create checkbox for row selection
         resource_name = resource["name"]
@@ -120,9 +152,11 @@ class PersistentVolumesPage(BaseResourcePage):
         for col, value in enumerate(columns):
             cell_col = col + 1  # Adjust for checkbox column
 
-            # Handle numeric columns for sorting (Age column)
+            # Handle numeric columns for sorting
             if col == 4:  # Age column
                 item = SortableTableWidgetItem(value, parse_age_to_seconds(value))
+            elif col == 2:  # Capacity column
+                item = SortableTableWidgetItem(value, _memory_to_bytes(value))
             else:
                 item = SortableTableWidgetItem(value)
 

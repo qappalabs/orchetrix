@@ -1,4 +1,11 @@
-from PyQt6.QtCore import QObject, pyqtSignal
+"""
+ThemeManager — singleton theme manager for the application.
+Provides Dark and Light themes via a centralized ThemeManager object.
+All UI components connect to the `theme_changed` signal to refresh styles.
+"""
+import logging
+
+from PyQt6.QtCore import QObject, QSettings, pyqtSignal
 
 
 class ThemeManager(QObject):
@@ -6,7 +13,10 @@ class ThemeManager(QObject):
 
     def __init__(self):
         super().__init__()
-        self._current_theme = "Light"  # Match preferences dropdown values
+        self.settings = QSettings("Orchetrix", "OX")
+        saved_theme = self.settings.value("theme", "Light")
+        self._current_theme = saved_theme
+
         self._themes = {
             "Dark": self._get_dark_theme(),
             "Light": self._get_light_theme(),
@@ -20,30 +30,36 @@ class ThemeManager(QObject):
         return self._current_theme
 
     def set_theme(self, theme_name: str):
-        if theme_name in self._themes and self._current_theme != theme_name:
+        if theme_name in self._themes:
+            is_changed = self._current_theme != theme_name
             self._current_theme = theme_name
 
+            # Save preference
+            self.settings.setValue("theme", theme_name)
+
             # Clear empty cache entries on theme change to prevent stale data issues
-            # This fixes the bug where theme change could cause pages to show empty data
-            try:
-                from Utils.unified_cache_system import get_unified_cache
+            if is_changed:
+                try:
+                    from Utils.unified_cache_system import get_unified_cache
 
-                cache = get_unified_cache()
-                cleared = cache.clear_empty_entries()
-                if cleared > 0:
-                    import logging
-
+                    cache = get_unified_cache()
+                    cleared = cache.clear_empty_entries()
+                    if cleared > 0:
+                        logging.debug(
+                            f"ThemeManager: Cleared {cleared} empty cache entries on theme change"
+                        )
+                except Exception as e:
                     logging.debug(
-                        f"ThemeManager: Cleared {cleared} empty cache entries on theme change"
+                        f"ThemeManager: Could not clear cache on theme change: {e}"
                     )
-            except Exception as e:
-                import logging
 
-                logging.debug(
-                    f"ThemeManager: Could not clear cache on theme change: {e}"
-                )
+                try:
+                    from UI.Icons import Icons
+                    Icons.clear_cache()
+                except Exception as e:
+                    logging.debug(f"ThemeManager: Could not clear icon cache: {e}")
 
-            self.theme_changed.emit(theme_name)
+                self.theme_changed.emit(theme_name)
 
     def apply_theme_to_widget(self, widget, component_type="default"):
         theme = self.get_current_theme()
@@ -212,6 +228,9 @@ class BaseTheme:
             QScrollBar::add-page:horizontal,
             QScrollBar::sub-page:horizontal {{
                 background: none;
+            }}
+            QAbstractScrollArea::corner {{
+                background: transparent;
             }}
         """
 
@@ -781,6 +800,9 @@ class BaseTheme:
             QScrollBar::sub-page:horizontal {{
                 background: none;
             }}
+            QAbstractScrollArea::corner {{
+                background: transparent;
+            }}
         """
 
     @staticmethod
@@ -874,6 +896,9 @@ class BaseTheme:
             QScrollBar::add-page:horizontal,
             QScrollBar::sub-page:horizontal {{
                 background: none;
+            }}
+            QAbstractScrollArea::corner {{
+                background: transparent;
             }}
         """
 
@@ -1126,7 +1151,13 @@ class DarkTheme(BaseTheme):
         return self.styles.STATUS_SCROLL_STYLE
 
     def get_main_style(self):
-        return self.styles.MAIN_STYLE
+        # Break circular dependency by importing AppStyles here
+        from UI.Styles import AppStyles
+
+        main_style = self.styles.MAIN_STYLE
+        if hasattr(AppStyles, "GLOBAL_PLATFORM_OVERRIDE_STYLE"):
+            return AppStyles.GLOBAL_PLATFORM_OVERRIDE_STYLE + "\n" + main_style
+        return main_style
 
 
 class LightColors:
@@ -1138,6 +1169,8 @@ class LightColors:
     BG_MEDIUM = "#ffffff"  # Main background
     BG_DARK = "#f1f1f1"  # Darker gray
     BG_DARKER = "#e8e8e8"  # Darkest gray
+    DIALOG_BG = "#fafafa"  # Dialog specific background
+    SECTION_CARD_BG = "#f0f2f4"  # Section card inner background (light)
 
     # Semantic backgrounds
     BG_SIDEBAR = "#F8F8F8"  # Sidebar background
@@ -1177,6 +1210,8 @@ class LightColors:
     HOVER_BG = "rgba(0, 0, 0, 0.05)"  # Light hover background
     HOVER_BG_DARKER = "rgba(0, 0, 0, 0.1)"  # Darker hover
     SELECTED_BG = "rgba(245, 150, 78, 0.10)"  # Selected background (orange tint)
+    HOVER_HIGHLIGHT = "rgba(245, 150, 78, 0.07)"  # Table row hover (subtle warm peach)
+    SELECTION_HOVER = "rgba(245, 150, 78, 0.15)"  # Table selected+hover (deeper warm peach)
     SIDEBAR_ACTIVE_BG = HOVER_BG  # Same as hover - subtle gray selection background
     SIDEBAR_ACTIVE_TEXT = "#F5964E"  # Sidebar active text color (orange)
     SIDEBAR_HOVER_BG = "rgba(245, 150, 78, 0.15)"  # Sidebar hover (orange tint)
@@ -1233,9 +1268,9 @@ class LightTheme(BaseTheme):
             text_color=self.colors.TEXT_LIGHT,
             border_color=self.colors.BORDER_COLOR,
             border_light=self.colors.BORDER_LIGHT,
-            header_bg=self.colors.TABLE_HEADER,
-            header_text=self.colors.TEXT_LIGHT,
-            header_hover_bg=self.colors.BG_MEDIUM,
+            header_bg="transparent",
+            header_text=self.colors.TEXT_SECONDARY,
+            header_hover_bg=self.colors.BG_LIGHT,
             hover_bg_color=self.colors.HOVER_BG,
         )
 
@@ -1549,7 +1584,10 @@ class LightTheme(BaseTheme):
         return self._status_scroll_template(bg_color="transparent")
 
     def get_main_style(self):
-        return f"""
+        # Break circular dependency by importing AppStyles here
+        from UI.Styles import AppStyles
+
+        main_style = f"""
             QMainWindow, QWidget {{
                 background-color: {self.colors.BG_DARK};
                 color: {self.colors.TEXT_DARK};
@@ -1576,6 +1614,10 @@ class LightTheme(BaseTheme):
                 color: {self.colors.TEXT_DARK};
             }}
         """
+
+        if hasattr(AppStyles, "GLOBAL_PLATFORM_OVERRIDE_STYLE"):
+            return AppStyles.GLOBAL_PLATFORM_OVERRIDE_STYLE + "\n" + main_style
+        return main_style
 
 
 # Global instance

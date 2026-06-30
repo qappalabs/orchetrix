@@ -42,11 +42,6 @@ class ResourcePageStyleManager:
     def get_namespace_label_style():
         return BaseResourcePageStyles.get_namespace_label_style()
 
-    @staticmethod
-    def apply_namespace_combo_style(combo):
-        """Apply style to namespace combobox."""
-        if combo:
-            combo.setStyleSheet(BaseResourcePageStyles.get_namespace_combo_style())
 
     @staticmethod
     def get_empty_title_style():

@@ -5,10 +5,11 @@ Includes comprehensive search, filtering, and browsing capabilities with support
 
 from PyQt6.QtWidgets import (
     QHeaderView, QWidget, QLabel, QHBoxLayout, QVBoxLayout,
-    QToolButton, QMenu, QProgressBar, QPushButton, QMessageBox, QDialog, QComboBox
+    QToolButton, QMenu, QProgressBar, QPushButton, QMessageBox, QDialog,
+    QComboBox, QScrollArea, QTextEdit, QGroupBox
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt6.QtGui import QColor, QPixmap
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QSize
+from PyQt6.QtGui import QColor, QPixmap, QIcon
 
 import requests
 import os
@@ -18,10 +19,13 @@ import logging
 import threading
 from urllib.parse import urljoin
 
-from Base_Components.base_components import SortableTableWidgetItem
+from Base_Components.base_components import SortableTableWidgetItem, BaseTablePageStyles
 from Base_Components.base_resource_page import BaseResourcePage
 from Base_Components.resource_page_style_manager import ResourcePageStyleManager
-from UI.Styles import AppColors, AppStyles
+from UI.Styles import AppColors, AppStyles, AppConstants
+from UI.CustomComboBox import CustomComboBox
+from UI.Icons import resource_path
+from functools import partial
 
 
 class ChartDataThread(QThread):
@@ -317,8 +321,6 @@ class ChartDataThread(QThread):
         return icon_url, icon_path
 
 
-# Removed unused ChartSearchThread class - search functionality handled directly by ChartDataThread
-
 
 class ChartsPage(BaseResourcePage):
     """
@@ -332,7 +334,6 @@ class ChartsPage(BaseResourcePage):
         self.is_loading_more = False
         self.is_searching = False
         self.is_loading = False
-        self.resource_type = "charts"  # Set resource type for BaseResourcePage
         self.show_namespace_dropdown = False  # Charts are not namespaced
         
         # Add state management for chart installation
@@ -350,9 +351,9 @@ class ChartsPage(BaseResourcePage):
         
         # Disable automatic resource loading from BaseResourcePage
         self._disable_auto_loading = True
-        
-        # Override the base class resource loading to prevent it from trying to load "charts" as Kubernetes resources
-        self.resource_type = None  # Clear resource type so base class doesn't try to load it
+
+        # resource_type=None prevents base class from treating charts as Kubernetes resources
+        self.resource_type = None
         
         # Add loading state management to prevent concurrent requests
         self._is_initializing = True
@@ -390,9 +391,9 @@ class ChartsPage(BaseResourcePage):
                                                 ResourcePageStyleManager.get_namespace_label_style())
                                             break
         
-        # Refresh repository dropdown if it exists
-        if hasattr(self, 'repository_combo') and self.repository_combo:
-            ResourcePageStyleManager.apply_namespace_combo_style(self.repository_combo)
+        # CustomComboBox natively recalculates styles on theme change
+        # so no explicit label or widget overriding is required here for repository_combo
+        pass
         
         # Refresh action buttons in table rows
         # Note: Action button styling is handled automatically by BaseTablePage._on_theme_changed()
@@ -405,7 +406,8 @@ class ChartsPage(BaseResourcePage):
         if hasattr(self, 'table'):
             self.table.setEnabled(True)
             if hasattr(self, '_table_stack') and self._table_stack:
-                self._table_stack.setCurrentWidget(self.table)
+                if hasattr(self, 'table_container'):
+                    self._table_stack.setCurrentWidget(self.table_container)
     
     def _deferred_load_data(self):
         """Perform deferred data loading to avoid concurrent requests"""
@@ -482,10 +484,10 @@ class ChartsPage(BaseResourcePage):
         
         return layout
     
-    def _add_filter_controls(self, header_layout):
+    def _add_controls_to_header(self, header_layout):
         """Override to add chart-specific filter controls with proper layout"""
-        # Call parent to add search bar first
-        super()._add_filter_controls(header_layout)
+        # Call parent to add search bar and standard buttons
+        super()._add_controls_to_header(header_layout)
         
         # Create a container widget for our additional filters to prevent overlap
         additional_filters_container = QWidget()
@@ -498,13 +500,13 @@ class ChartsPage(BaseResourcePage):
         repo_label.setStyleSheet(ResourcePageStyleManager.get_namespace_label_style())
         repo_label.setMinimumWidth(70)
         
-        self.repository_combo = QComboBox()
+        self.repository_combo = CustomComboBox()
         self.repository_combo.addItems([
             "all", "bitnami", "stable", "prometheus-community", 
             "grafana", "jetstack", "ingress-nginx", "elastic", "hashicorp"
         ])
         self.repository_combo.setCurrentText(self.current_repository)
-        ResourcePageStyleManager.apply_namespace_combo_style(self.repository_combo)
+        # Style is implicitly handled by CustomComboBox
         self.repository_combo.currentTextChanged.connect(self.on_repository_changed)
         self.repository_combo.setFixedWidth(150)
         self.repository_combo.setFixedHeight(32)
@@ -519,9 +521,8 @@ class ChartsPage(BaseResourcePage):
         additional_filters_layout.addSpacing(20)  # Space after repository dropdown
         additional_filters_layout.addStretch()  # Add stretch to prevent expansion
         
-        # Add the container to the header layout with proper spacing
-        header_layout.addSpacing(30)  # Increased space before our controls
-        header_layout.addWidget(additional_filters_container)
+        # Insert the container right after the search controls (index 1)
+        header_layout.insertWidget(1, additional_filters_container)
     
     
     def on_repository_changed(self, repository):
@@ -602,7 +603,8 @@ class ChartsPage(BaseResourcePage):
         if hasattr(self, 'table'):
             self.table.setEnabled(True)
             if hasattr(self, '_table_stack') and self._table_stack:
-                self._table_stack.setCurrentWidget(self.table)
+                if hasattr(self, 'table_container'):
+                    self._table_stack.setCurrentWidget(self.table_container)
         
         # Only load data if we haven't completed initial load and aren't already loading
         if (not getattr(self, '_initial_load_completed', False) and 
@@ -745,7 +747,8 @@ class ChartsPage(BaseResourcePage):
             logging.info(f"ChartsPage.load_chart_data: Data already loaded ({len(self.resources)} items), ensuring UI state")
             # Ensure table is visible and enabled
             if hasattr(self, '_table_stack') and self._table_stack:
-                self._table_stack.setCurrentWidget(self.table)
+                if hasattr(self, 'table_container'):
+                    self._table_stack.setCurrentWidget(self.table_container)
             self.table.setEnabled(True)
             self.table.show()
             # Ensure data is displayed
@@ -873,7 +876,8 @@ class ChartsPage(BaseResourcePage):
         # Ensure table is visible
         if hasattr(self, '_table_stack') and self._table_stack:
             logging.info("ChartsPage.on_data_loaded: Setting table as current widget")
-            self._table_stack.setCurrentWidget(self.table)
+            if hasattr(self, 'table_container'):
+                self._table_stack.setCurrentWidget(self.table_container)
         
         if data:
             repo_text = f" from {self.current_repository}" if self.current_repository != "all" else ""
@@ -895,23 +899,20 @@ class ChartsPage(BaseResourcePage):
             self.items_count.setText("0 items")
     
     def populate_table(self, charts, append=False):
-        """Populate table with chart data"""
-        logging.info(f"ChartsPage.populate_table: Starting to populate table with {len(charts)} charts, append={append}")
-        
+        """Populate table with chart data."""
         if not append:
-            self.table.setRowCount(0)
             self.table.setSortingEnabled(False)
-            start_row = 0
+            self.table.setRowCount(0)
+            self.table.setRowCount(len(charts))
+            for i, chart in enumerate(charts):
+                self.populate_chart_row(i, chart)
         else:
             start_row = self.table.rowCount()
             self.table.setSortingEnabled(False)
-        
-        for i, chart in enumerate(charts):
-            row_index = start_row + i
-            self.table.setRowCount(row_index + 1)
-            self.populate_chart_row(row_index, chart)
-        
-        logging.info(f"ChartsPage.populate_table: Finished populating table with {self.table.rowCount()} rows")
+            self.table.setRowCount(start_row + len(charts))
+            for i, chart in enumerate(charts):
+                self.populate_chart_row(start_row + i, chart)
+
         self.table.setSortingEnabled(True)
     
     def on_more_data_loaded(self, data, is_more_available):
@@ -1086,26 +1087,23 @@ class ChartsPage(BaseResourcePage):
         columns = [chart_name, description, version, app_version, repository, stars]
 
         for col, value in enumerate(columns, 1):
-            item = SortableTableWidgetItem(str(value))
-
-            if col == 1:  # Name column
-                item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-                item.setForeground(QColor("#e2e8f0"))
-            elif col == 6:  # Stars column
+            if col == 6:  # Stars column
                 try:
                     sort_value = int(value)
                 except (ValueError, TypeError):
                     sort_value = 0
                 item = SortableTableWidgetItem(value, sort_value)
-                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                item.setForeground(QColor("#ffd700"))
+            else:
+                item = SortableTableWidgetItem(str(value))
+
+            # Use centered alignment for everything except description and name
+            if col in [1, 2]:
+                item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             else:
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                item.setForeground(QColor("#e2e8f0"))
             
-            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            
-            self.table.setItem(row, col, item)
+            # Apply styling including bold orange for name (col 1)
+            self.table.setItem(row, col, self.style_table_item(item, is_name=(col == 1)))
         
         # Create and add action button
         action_button = self._create_action_button(row, chart_name)
@@ -1113,44 +1111,24 @@ class ChartsPage(BaseResourcePage):
         self.table.setCellWidget(row, len(columns) + 1, action_container)
    
     def _create_action_button(self, row, chart_name):
-        """Create a standard more action button following the app's pattern"""
-        from PyQt6.QtCore import QSize
-        from UI.Styles import AppConstants
-        from Base_Components.base_components import BaseTablePageStyles
-        from functools import partial
-        
+        """Create a standard more action button following the app pattern."""
         button = QToolButton()
-
-        # Use pre-loaded theme-aware icon from parent class
         button.setIcon(self.action_button_icon)
         button.setIconSize(QSize(AppConstants.SIZES["ICON_SIZE"], AppConstants.SIZES["ICON_SIZE"]))
-
-        # Remove text and change to icon-only style
         button.setText("")
         button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-
         button.setFixedWidth(30)
         button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         button.setCursor(Qt.CursorShape.PointingHandCursor)
-
-        # Apply theme-aware action button styling (same as BaseTablePage)
         button.setStyleSheet(BaseTablePageStyles.get_action_button_style())
-
-        # Create menu using base class method
         self._create_action_menu(button, row)
-        
         return button
     
     def _create_action_menu(self, button, row):
-        """Override to create Helm Charts specific action menu"""
-        from Base_Components.base_components import BaseTablePageStyles
-        from functools import partial
-        
-        # Create menu with button as parent for proper Qt ownership
+        """Create Helm Charts specific action menu."""
         menu = QMenu(button)
         menu.setStyleSheet(BaseTablePageStyles.get_menu_style())
 
-        # Connect signals to change row appearance when menu opens/closes
         menu.aboutToShow.connect(lambda: self._highlight_active_row(row, True))
         menu.aboutToHide.connect(lambda: self._highlight_active_row(row, False))
 
@@ -1159,16 +1137,13 @@ class ChartsPage(BaseResourcePage):
             {"text": "Install Chart", "icon": "Icons/install.png", "dangerous": False}
         ]
 
-        # Add actions to menu
         for action_info in actions:
             action = menu.addAction(action_info["text"])
             if "icon" in action_info:
                 try:
-                    from UI.Icons import resource_path
-                    from PyQt6.QtGui import QIcon
                     action.setIcon(QIcon(resource_path(action_info["icon"])))
                 except Exception:
-                    pass  # Icon loading failed, continue without icon
+                    pass
             if action_info.get("dangerous", False):
                 action.setProperty("dangerous", True)
             action.triggered.connect(
@@ -1198,7 +1173,7 @@ class ChartsPage(BaseResourcePage):
             return
         
         # Import the install dialog
-        from Utils.helm_utils import ChartInstallDialog, install_helm_chart
+        from UI.ChartInstallDialog import ChartInstallDialog, install_helm_chart
         
         # Create and show install dialog
         dialog = ChartInstallDialog(chart_name, repository, self)
@@ -1397,7 +1372,8 @@ class ChartsPage(BaseResourcePage):
         
         # Ensure table is visible
         if hasattr(self, '_table_stack') and self._table_stack:
-            self._table_stack.setCurrentWidget(self.table)
+            if hasattr(self, 'table_container'):
+                self._table_stack.setCurrentWidget(self.table_container)
         
         if data:
             logging.info(f"ChartsPage.on_search_data_loaded: Populating table with {len(data)} search results")
@@ -1419,7 +1395,7 @@ class ChartsPage(BaseResourcePage):
             self.items_count.setText(f"No results found for '{search_term}'")
             self.table.setEnabled(True)
 
-    # Removed duplicate on_search_completed method - functionality handled by on_search_data_loaded
+    # search completion is handled by on_search_data_loaded
 
     def on_search_error(self, error_message):
         """Handle search errors"""
@@ -1439,7 +1415,8 @@ class ChartsPage(BaseResourcePage):
         
         # Show error message and enable table
         if hasattr(self, '_table_stack') and self._table_stack:
-            self._table_stack.setCurrentWidget(self.table)
+            if hasattr(self, 'table_container'):
+                self._table_stack.setCurrentWidget(self.table_container)
         self.table.setEnabled(True)
         
         # Show empty message for error
@@ -1468,14 +1445,8 @@ class ChartsPage(BaseResourcePage):
             if row < len(self.resources):
                 self._handle_view_details(row)
     
-    # Removed _apply_filters method - search is handled server-side via ArtifactHub API
-    
     def _show_chart_detail_dialog(self, chart):
-        """Show a detailed dialog for the selected Helm chart"""
-        from PyQt6.QtWidgets import QDialog, QHBoxLayout, QScrollArea, QTextEdit, QGroupBox
-        from PyQt6.QtGui import QPixmap
-        
-        # Create dialog
+        """Show a detailed dialog for the selected Helm chart (fallback if detail manager unavailable)."""
         dialog = QDialog(self)
         dialog.setWindowTitle(f"Chart Details - {chart.get('name', 'Unknown')}")
         dialog.setMinimumSize(800, 600)
@@ -1517,7 +1488,9 @@ class ChartsPage(BaseResourcePage):
         icon_label = QLabel()
         icon_label.setFixedSize(64, 64)
         icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon_label.setStyleSheet("border: 1px solid #ddd; border-radius: 8px;")
+        icon_label.setStyleSheet(
+            f"border: 1px solid {AppColors.BORDER_COLOR}; border-radius: 8px;"
+        )
         
         # Try to load chart icon
         icon_path = chart.get("icon_path")
@@ -1536,7 +1509,7 @@ class ChartsPage(BaseResourcePage):
         
         # Name
         name_label = QLabel(f"<h2>{chart.get('name', 'Unknown')}</h2>")
-        name_label.setStyleSheet("color: #2196F3; margin-bottom: 5px;")
+        name_label.setStyleSheet(f"color: {AppColors.ACCENT_BLUE}; margin-bottom: 5px;")
         info_layout.addWidget(name_label)
         
         # Version and App Version
@@ -1565,7 +1538,9 @@ class ChartsPage(BaseResourcePage):
         desc_text.setPlainText(description)
         desc_text.setReadOnly(True)
         desc_text.setMaximumHeight(120)
-        desc_text.setStyleSheet("QTextEdit { background-color: #f5f5f5; border: 1px solid #ddd; }")
+        desc_text.setStyleSheet(
+            f"QTextEdit {{ background-color: {AppColors.BG_MEDIUM}; border: 1px solid {AppColors.BORDER_COLOR}; }}"
+        )
         
         desc_layout.addWidget(desc_text)
         scroll_layout.addWidget(desc_group)

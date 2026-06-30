@@ -1,7 +1,8 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
                              QLabel, QPushButton, QLineEdit, QTreeWidget,
                              QTreeWidgetItem, QFrame, QMenu, QHeaderView, QApplication,
-                             QMessageBox, QToolButton, QGraphicsOpacityEffect)
+                             QMessageBox, QToolButton, QGraphicsOpacityEffect,
+                             QAbstractScrollArea)
 from PyQt6.QtCore import Qt, QObject, pyqtSignal, QPoint, QSize, QTimer
 from PyQt6.QtGui import QColor, QPainter, QIcon, QFont, QPixmap
 
@@ -15,8 +16,11 @@ from Utils.pin_storage import get_pin_storage_manager
 import logging
 from collections import defaultdict
 from log_handler import class_logger
-import webbrowser  # Added for opening URLs
-import os  # Added for os.path.basename
+import webbrowser
+import os
+
+from Utils.cluster_state_manager import get_cluster_state_manager, ClusterState
+from Utils.error_handler import get_error_handler
 
 from math import sin, cos
 from UI.Icons import Icons, resource_path
@@ -181,7 +185,6 @@ class OrchestrixGUI(ThemeAwareMainWindow):
         self.cluster_connector = get_cluster_connector()
 
         try:
-            from Utils.cluster_state_manager import get_cluster_state_manager
             self.cluster_state_manager = get_cluster_state_manager()
             logging.info("Cluster state manager initialized in HomePage")
 
@@ -533,13 +536,22 @@ class OrchestrixGUI(ThemeAwareMainWindow):
                         
                     # Emit signal so main.py can redirect if needed
                     self.signals.cluster_deleted_signal.emit(name)
+                    
+                    # Also remove from pinned items if exists
+                    if name in self.pinned_items:
+                        self.pinned_items.remove(name)
+                        logging.info(f"HomePage: Removed deleted cluster {name} from pinned items")
+                        # Save to persistent storage
+                        try:
+                            self.pin_storage.save_pinned_items(self.pinned_items)
+                        except Exception as e:
+                            logging.error(f"HomePage: Failed to save pinned items after deletion: {e}")
 
         for cluster in clusters:
             logging.debug(f"HomePage: Processing cluster {cluster.name} with status {cluster.status}")
             # FIXED: Check actual cluster state instead of just cluster.status
             actual_status = "available"
             if self.cluster_state_manager:
-                from Utils.cluster_state_manager import ClusterState
                 cluster_state = self.cluster_state_manager.get_cluster_state(cluster.name)
 
                 if cluster_state == ClusterState.CONNECTED:
@@ -587,8 +599,6 @@ class OrchestrixGUI(ThemeAwareMainWindow):
     def _on_cluster_state_changed(self, cluster_name, state):
         """Handle cluster state changes from cluster state manager"""
         try:
-            from Utils.cluster_state_manager import ClusterState
-
             # FIXED: Update status mapping to properly reflect cluster states
             status_mapping = {
                 ClusterState.DISCONNECTED: "available",
@@ -695,7 +705,6 @@ class OrchestrixGUI(ThemeAwareMainWindow):
 
                 # Check if cluster is actually connected via state manager
                 if self.cluster_state_manager:
-                    from Utils.cluster_state_manager import ClusterState
                     actual_state = self.cluster_state_manager.get_cluster_state(cluster_name)
 
                     if actual_state == ClusterState.CONNECTED:
@@ -759,7 +768,6 @@ class OrchestrixGUI(ThemeAwareMainWindow):
             logging.error(f"HomePage error: {error_message}")
 
             # Use centralized error handler - this prevents duplicate dialogs
-            from Utils.error_handler import get_error_handler
             error_handler = get_error_handler()
             error_handler.handle_error(
                 Exception(error_message),
@@ -789,7 +797,7 @@ class OrchestrixGUI(ThemeAwareMainWindow):
         name_widget.setStyleSheet(HomePageStyles.TRANSPARENT_WIDGET)
         name_widget.setCursor(Qt.CursorShape.PointingHandCursor)
         name_layout = QHBoxLayout(name_widget)
-        name_layout.setContentsMargins(0, 0, 0, 0)
+        name_layout.setContentsMargins(12, 0, 0, 0)
         name_layout.setSpacing(6)  # Spacing between icon, text, and pin button
         name_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
@@ -889,6 +897,7 @@ class OrchestrixGUI(ThemeAwareMainWindow):
         status_layout.setSpacing(5)
         status_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
+        # Status as pill badge
         if is_cluster:
             if status in ["connecting", "loading"]:
                 loading_indicator = SmallLoadingIndicator()
@@ -896,7 +905,7 @@ class OrchestrixGUI(ThemeAwareMainWindow):
                 status_text = "Connecting..." if status == "connecting" else "Loading data..."
                 status_label = QLabel(status_text)
                 status_color = HomePageStyles.get_status_color(status)
-                status_label.setStyleSheet(HomePageStyles.get_status_label_style(status_color))
+                status_label.setStyleSheet(HomePageStyles.get_home_status_badge_style(status_color))
                 status_layout.addWidget(status_label)
             else:
                 if status == "available":
@@ -909,13 +918,13 @@ class OrchestrixGUI(ThemeAwareMainWindow):
                     status_text = status.capitalize()
                 status_label = QLabel(status_text)
                 status_color = HomePageStyles.get_status_color(status)
-                status_label.setStyleSheet(HomePageStyles.get_status_label_style(status_color))
+                status_label.setStyleSheet(HomePageStyles.get_home_status_badge_style(status_color))
                 status_layout.addWidget(status_label)
         else:
             status_text = status
             status_label = QLabel(status_text)
             status_color = HomePageStyles.get_status_color(status)
-            status_label.setStyleSheet(HomePageStyles.get_status_label_style(status_color))
+            status_label.setStyleSheet(HomePageStyles.get_home_status_badge_style(status_color))
             status_layout.addWidget(status_label)
         self.tree_widget.setItemWidget(item, 4, status_widget)
 
@@ -995,14 +1004,14 @@ class OrchestrixGUI(ThemeAwareMainWindow):
             menu_btn.clicked.connect(show_menu)
         action_layout.addWidget(menu_btn)
         self.tree_widget.setItemWidget(item, 5, action_widget)
-        item.setSizeHint(5, QSize(AppConstants.SIZES["ACTION_WIDTH"], AppConstants.SIZES["ROW_HEIGHT"]))
+        # Set size hints for all columns (44px height avoids badge clipping)
+        item.setSizeHint(0, QSize(0, 44))
+        item.setSizeHint(1, QSize(0, 44))
+        item.setSizeHint(2, QSize(0, 44))
+        item.setSizeHint(3, QSize(0, 44))
+        item.setSizeHint(4, QSize(0, 44))
+        item.setSizeHint(5, QSize(AppConstants.SIZES["ACTION_WIDTH"], 44))
 
-        # Set size hints for all columns
-        item.setSizeHint(0, QSize(0, AppConstants.SIZES["ROW_HEIGHT"]))
-        item.setSizeHint(1, QSize(0, AppConstants.SIZES["ROW_HEIGHT"]))
-        item.setSizeHint(2, QSize(0, AppConstants.SIZES["ROW_HEIGHT"]))
-        item.setSizeHint(3, QSize(0, AppConstants.SIZES["ROW_HEIGHT"]))
-        item.setSizeHint(4, QSize(0, AppConstants.SIZES["ROW_HEIGHT"]))
 
 
     def create_colored_icon_alternative(self, icon_path: str, color: QColor, size: int) -> QPixmap:
@@ -1096,14 +1105,20 @@ class OrchestrixGUI(ThemeAwareMainWindow):
         tree_widget.setColumnCount(6)
         tree_widget.setHeaderLabels(["Name", "Kind", "Source", "Label", "Status", ""])
         tree_widget.setHeaderHidden(False)
-        column_widths = [300, 180, 150, 120, 120, AppConstants.SIZES["ACTION_WIDTH"]]
-        for i, width in enumerate(column_widths):
-            tree_widget.setColumnWidth(i, width)
+        # Column widths: Name stretches, others are interactive (resizable) so text never cuts
+        action_w = AppConstants.SIZES["ACTION_WIDTH"]
         header = tree_widget.header()
+        header.setStretchLastSection(False)
+        # Name column stretches to fill remaining space
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for i in range(1, len(column_widths)):
-            header.setSectionResizeMode(i, QHeaderView.ResizeMode.Fixed)
-        header.resizeSection(5, AppConstants.SIZES["ACTION_WIDTH"])
+        # Content columns: Interactive so user can resize but they start at comfortable widths
+        for col, width in [(1, 160), (2, 130), (3, 100), (4, 130)]:
+            header.setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
+            tree_widget.setColumnWidth(col, width)
+        # Action column: fixed narrow width
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
+        header.resizeSection(5, action_w)
+
         font = QFont("Segoe UI", 13)
         font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
         tree_widget.setFont(font)
@@ -1115,6 +1130,8 @@ class OrchestrixGUI(ThemeAwareMainWindow):
         tree_widget.setItemsExpandable(False)
         tree_widget.setHorizontalScrollMode(QTreeWidget.ScrollMode.ScrollPerPixel)
         tree_widget.setContentsMargins(0, 0, 0, 0)
+        # Auto-resize height to fit content (shrinks/grows with rows)
+        tree_widget.setSizeAdjustPolicy(QAbstractScrollArea.SizeAdjustPolicy.AdjustToContents)
         tree_widget.itemClicked.connect(self.handle_item_single_click)
         return tree_widget
 
@@ -1227,7 +1244,6 @@ class OrchestrixGUI(ThemeAwareMainWindow):
 
         # FIXED: Check actual cluster state before proceeding
         if self.cluster_state_manager:
-            from Utils.cluster_state_manager import ClusterState
             actual_state = self.cluster_state_manager.get_cluster_state(cluster_name)
 
             # If already connected, go directly to cluster view
@@ -1315,7 +1331,7 @@ class OrchestrixGUI(ThemeAwareMainWindow):
             {"text": "Browse All", "icon": "🔍", "icon_path": "Icons/browse.svg", "action": lambda: self.update_content_view("Browse All")},
             {"text": "General", "icon": "⚙️", "icon_path": "Icons/settings.svg", "action": lambda: self.update_content_view("General")},
             {"text": "All Clusters", "icon": "🔄", "icon_path": "Icons/clusters.svg", "action": lambda: self.update_content_view("All Clusters")},
-            {"text": "Web Links", "icon": "🔗", "icon_path": "Icons/links.svg", "action": lambda: self.update_content_view("Web Links")}
+            {"text": "Web Links", "icon": "🔗", "icon_path": "Icons/globe.svg", "action": lambda: self.update_content_view("Web Links")}
         ]
         self.sidebar_buttons = []
         for option in sidebar_options:
@@ -1362,6 +1378,7 @@ class OrchestrixGUI(ThemeAwareMainWindow):
         self.main_content_layout.setContentsMargins(20, 20, 20, 20)
         self.main_content_layout.setSpacing(0)
         self.table_container = QFrame()
+        self.table_container.setObjectName("table_container")
         self.table_container.setFrameShape(QFrame.Shape.NoFrame)
         self.table_container.setStyleSheet(HomePageStyles.get_content_area_style())
         self.table_container_layout = QVBoxLayout(self.table_container)
@@ -1369,7 +1386,9 @@ class OrchestrixGUI(ThemeAwareMainWindow):
         self.table_container_layout.setSpacing(0)
         self.tree_widget = self.create_table_widget()
         self.table_container_layout.addWidget(self.tree_widget)
-        self.main_content_layout.addWidget(self.table_container)
+        # Align the card to the top so it shrinks/grows with the number of rows
+        self.main_content_layout.addWidget(self.table_container, 0, Qt.AlignmentFlag.AlignTop)
+        self.main_content_layout.addStretch(1)
         self.content_layout.addWidget(self.main_content)
 
     def fix_action_column_width(self):
@@ -1398,28 +1417,27 @@ class OrchestrixGUI(ThemeAwareMainWindow):
                             # its layout or padding would handle spacing.
 
     def toggle_pin_item(self, name):
-        data_item = None
-        # Iterate through all_data to find the item, as current_view might not always be "Browse All"
-        # and cluster_data is part of the items in "Browse All" initially
-        for item_in_all_data in self.all_data.get("Browse All", []):
-            if item_in_all_data.get("name") == name and 'cluster_data' in item_in_all_data:
-                data_item = item_in_all_data
-                break
-
-        if not data_item:
-            # Fallback or safety check if not found in "Browse All" (though it should be for pinnable items)
-            # This part of the logic might need adjustment if items can be pinned from other views
-            # without being in "Browse All" with 'cluster_data'.
-            # For now, we rely on the 'cluster_data' check which implies it's from kube_client.
-            # print(f"Debug: Item {name} not found with cluster_data for pinning.")
-            return
-
-        # Toggle pin state
         was_pinned = name in self.pinned_items
         if was_pinned:
             self.pinned_items.remove(name)
             logging.info(f"Unpinned item: {name}")
         else:
+            data_item = None
+            # Iterate through all_data to find the item, as current_view might not always be "Browse All"
+            # and cluster_data is part of the items in "Browse All" initially
+            for item_in_all_data in self.all_data.get("Browse All", []):
+                if item_in_all_data.get("name") == name and 'cluster_data' in item_in_all_data:
+                    data_item = item_in_all_data
+                    break
+
+            if not data_item:
+                # Fallback or safety check if not found in "Browse All" (though it should be for pinnable items)
+                # This part of the logic might need adjustment if items can be pinned from other views
+                # without being in "Browse All" with 'cluster_data'.
+                # For now, we rely on the 'cluster_data' check which implies it's from kube_client.
+                # print(f"Debug: Item {name} not found with cluster_data for pinning.")
+                return
+
             self.pinned_items.add(name)
             logging.info(f"Pinned item: {name}")
 

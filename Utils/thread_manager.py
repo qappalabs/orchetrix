@@ -1,4 +1,4 @@
-from PyQt6.QtCore import QObject, QThreadPool, QTimer, Qt
+from PyQt6.QtCore import QObject, QThreadPool, QTimer, Qt, pyqtSlot
 import threading
 import weakref
 import logging
@@ -40,6 +40,7 @@ class EnhancedThreadPoolManager(QObject):
         self.cleanup_timer.timeout.connect(self._cleanup_expired_workers)
         self.cleanup_timer.start(30000)  # Cleanup every 30 seconds for better performance
 
+    @pyqtSlot()
     def _setup_timers_on_main_thread(self):
         """Setup timers on main thread - called via QMetaObject.invokeMethod"""
         self._setup_timers()
@@ -158,7 +159,6 @@ class EnhancedThreadPoolManager(QObject):
             self.thread_pool.clear()
 
             # Iterate through all threads and attempt join
-            import threading
             current = threading.current_thread()
             for thread in threading.enumerate():
                 if thread != current:
