@@ -2,6 +2,7 @@
 Dynamic implementation of the StatefulSets page with live Kubernetes data and resource operations.
 """
 
+import concurrent.futures
 import logging
 
 from PyQt6.QtWidgets import QHeaderView, QInputDialog, QMessageBox
@@ -29,6 +30,11 @@ class StatefulSetsPage(BaseResourcePage):
        both guarded against duplicate concurrent operations and surfacing
        async completion feedback.
     """
+
+    # Upper bound (seconds) on the HPA pre-scan before the Scale dialog opens.
+    # A healthy cluster answers well within this; past it we open the dialog
+    # without the HPA warning rather than freeze the UI on a slow API server.
+    _HPA_SCAN_TIMEOUT = 1.5
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -212,14 +218,20 @@ class StatefulSetsPage(BaseResourcePage):
             self._notify_in_flight(name)
             return
 
-        # Sync HPA pre-scan: blocks the main thread briefly while we query
-        # autoscaling/v{2,1}. Done synchronously because QInputDialog can't be
-        # mutated after show() — we need the HPA result to build the message.
+        # HPA pre-scan, bounded so a slow or unreachable API server can't
+        # freeze the UI. QInputDialog can't be mutated after show(), so we need
+        # the result up front to build the message — but instead of blocking on
+        # it we run the autoscaling/v{2,1} lookup on a worker thread and wait
+        # only briefly. If it overruns the budget we open the dialog without the
+        # warning rather than stall on it.
         hpa_warning = ""
+        hpa_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         try:
-            scan = get_kubernetes_client().find_hpas_for_workload(
-                "StatefulSet", name, namespace
+            future = hpa_executor.submit(
+                get_kubernetes_client().find_hpas_for_workload,
+                "StatefulSet", name, namespace,
             )
+            scan = future.result(timeout=self._HPA_SCAN_TIMEOUT)
             if scan.get("success") and scan.get("hpas"):
                 hpa_names = ", ".join(scan["hpas"])
                 hpa_warning = (
@@ -227,8 +239,17 @@ class StatefulSetsPage(BaseResourcePage):
                     f" ({hpa_names}). A manual scale will be reverted by the HPA's "
                     f"next reconciliation pass."
                 )
+        except concurrent.futures.TimeoutError:
+            logging.debug(
+                f"HPA pre-scan for {name}/{namespace} exceeded "
+                f"{self._HPA_SCAN_TIMEOUT}s; opening scale dialog without warning"
+            )
         except Exception as e:
             logging.debug(f"HPA pre-scan failed for {name}/{namespace}: {e}")
+        finally:
+            # Don't join the worker; on the timeout path it exits on its own
+            # once the bounded API call returns.
+            hpa_executor.shutdown(wait=False)
 
         current = self._current_replicas(resource)
         # Surface the PVC-retention default at the decision point: scaling a

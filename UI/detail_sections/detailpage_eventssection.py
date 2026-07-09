@@ -25,6 +25,9 @@ class DetailPageEventsSection(BaseDetailSection):
         self.current_data = None
         # Initialize deterministic state flag to prevent UI desynchronization
         self._skip_async_load = False
+        # Monotonic token identifying the most recent events fetch so stale
+        # results from a previously displayed resource can be ignored
+        self._events_request_seq = 0
         self.setup_events_ui()
         # Note: Theme signals connected via ThemeAwareMixin in BaseDetailSection
 
@@ -136,10 +139,22 @@ class DetailPageEventsSection(BaseDetailSection):
             success = pyqtSignal(list)
             error = pyqtSignal(str)
 
+        # Tie this request to the resource it was started for so a late result
+        # from an earlier resource cannot overwrite the current panel
+        self._events_request_seq += 1
+        request_id = self._events_request_seq
+        requested_key = (resource_type, resource_name, namespace)
+
         # Create signals object and connect to main thread slots
-        self._fetch_signals = EventFetcherSignals()
-        self._fetch_signals.success.connect(self._on_events_received)
-        self._fetch_signals.error.connect(self._on_events_error)
+        signals = EventFetcherSignals()
+        signals.success.connect(
+            lambda events, rid=request_id, key=requested_key: self._on_events_received(events, rid, key)
+        )
+        signals.error.connect(
+            lambda message, rid=request_id, key=requested_key: self._on_events_error(message, rid, key)
+        )
+        # Keep a reference so the latest signals object is not garbage collected
+        self._fetch_signals = signals
 
         def _fetch():
             try:
@@ -177,26 +192,47 @@ class DetailPageEventsSection(BaseDetailSection):
                         "reason":  evt.reason or "",
                         "message": evt.message or "",
                         "age":     local_age,
+                        "raw_timestamp": raw_age,
                         "count":   evt.count or 1,
                     })
                 logging.info(f"Events section API fetch: Found {len(events)} events")
-                self._fetch_signals.success.emit(events)
+                signals.success.emit(events)
             except Exception as e:
                 logging.error(f"Events section API fetch: Failed: {e}")
-                self._fetch_signals.error.emit(str(e))
+                signals.error.emit(str(e))
 
         t = threading.Thread(target=_fetch, daemon=True)
         t.start()
 
-    def _on_events_received(self, events):
+    def _is_current_events_request(self, request_id, requested_key):
+        """Return True only if an async result belongs to the resource shown now."""
+        if request_id is not None and request_id != self._events_request_seq:
+            return False
+        if requested_key is not None:
+            current_key = (
+                self.resource_type or "",
+                self.resource_name or "",
+                self.resource_namespace or "default",
+            )
+            if requested_key != current_key:
+                return False
+        return True
+
+    def _on_events_received(self, events, request_id=None, requested_key=None):
         """Called on main thread when events have been fetched."""
         try:
+            # Drop results that belong to a resource that is no longer displayed
+            if not self._is_current_events_request(request_id, requested_key):
+                return
             # This calls update_ui_with_data
             self.handle_data_loaded({"events": events})
         except Exception as e:
             self.handle_error(f"Error displaying events: {str(e)}")
 
-    def _on_events_error(self, error_message):
+    def _on_events_error(self, error_message, request_id=None, requested_key=None):
+        # Ignore errors from a fetch that no longer matches the current resource
+        if not self._is_current_events_request(request_id, requested_key):
+            return
         self.handle_error(f"Could not fetch events: {error_message}")
 
     def handle_api_data_loaded(self, data):
@@ -218,7 +254,7 @@ class DetailPageEventsSection(BaseDetailSection):
                 self.events_list.addItem(no_events_item)
                 return
 
-            sorted_events = sorted(events, key=lambda e: e.get("age", ""), reverse=True)
+            sorted_events = sorted(events, key=lambda e: e.get("raw_timestamp", ""), reverse=True)
 
             for event in sorted_events:
                 self.add_event_to_list(event)

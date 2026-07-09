@@ -149,6 +149,9 @@ class DotLoadingWidget(QWidget):
         self.progress = float(value)
         self.update()
 
+    def stop_animation(self):
+        self.anim.stop()
+
     def _dot_positions(self):
         """Return (x, y, depth) for each dot, depth in [0, 1]."""
         cx, cy = self.width() / 2, self.height() / 2
@@ -394,4 +397,6 @@ class SplashScreen(QWidget, ThemeAwareMixin):
         # Clean up resources when the window is closed
         if hasattr(self, "loading_label"):
             self.loading_label.stop_animation()
+        if hasattr(self, "dot_animation"):
+            self.dot_animation.stop_animation()
         super().closeEvent(event)

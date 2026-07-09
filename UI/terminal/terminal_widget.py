@@ -491,7 +491,7 @@ class UnifiedTerminalWidget(QTextEdit, ThemeAwareMixin):
                 # Use the base class paste to handle the actual insertion
                 super().paste()
                 self.current_input = self.toPlainText()[self.input_position:]
-                logging.debug(f"UnifiedTerminalWidget: Pasted text: {text_to_paste[:50]}...")
+                logging.debug(f"UnifiedTerminalWidget: Paste occurred ({len(text_to_paste)} characters)")
         else:
             logging.debug("UnifiedTerminalWidget: Paste blocked (cursor in read-only area)")
 

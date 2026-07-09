@@ -22,6 +22,7 @@ from UI.ThemeManager import get_theme_manager
 
 # Import Kubernetes client
 from Utils.kubernetes_client import get_kubernetes_client
+from Utils.resource_utils import singularize_resource_type
 
 # Import section components
 from .detail_sections.detailpage_overviewsection import DetailPageOverviewSection
@@ -119,11 +120,7 @@ class DetailPageComponent(ThemeAwareMixin, QWidget):
         
         # Clean and normalize resource type for mapping
         res_type = self.resource_type.lower()
-        # Don't strip 's' from resources that end in 's' naturally or plural forms we want to handle in map
-        if res_type.endswith('s') and res_type not in ["nodes", "pods", "services", "ingress", "storageclasses", "storageclass"]:
-             icon_id = res_type[:-1]
-        else:
-             icon_id = res_type
+        icon_id = singularize_resource_type(res_type)
 
         # Specific mapping for icons
         icon_map = {
@@ -193,6 +190,8 @@ class DetailPageComponent(ThemeAwareMixin, QWidget):
             svg_data = re.sub(rf'(stroke|fill)\s*:\s*{sentinel_pattern}', rf'\1: {color}', svg_data, flags=re.IGNORECASE)
 
             renderer = QSvgRenderer(QByteArray(svg_data.encode('utf-8')))
+            if not renderer.isValid():
+                return None
             pixmap = QPixmap(size, size)
             pixmap.fill(Qt.GlobalColor.transparent)
             painter = QPainter(pixmap)
@@ -385,10 +384,8 @@ class DetailPageComponent(ThemeAwareMixin, QWidget):
         self.resource_namespace = namespace
         
         # Format resource type for display (capitalize sections if needed)
-        # e.g. "nodes" -> "Node"
-        resource_type_display = resource_type.capitalize()
-        if resource_type_display.endswith('s'):
-             resource_type_display = resource_type_display[:-1]
+        # e.g. "nodes" -> "Node", "ingress" -> "Ingress"
+        resource_type_display = singularize_resource_type(resource_type).capitalize()
 
         # Update title
         title_text = f"{resource_type_display}: {resource_name}"

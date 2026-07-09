@@ -236,6 +236,14 @@ class KubernetesClient(QObject):
                     resource_type="namespaces",
                     namespace=None,  # cluster-scoped
                 )
+                # Seed the authority set from a one-shot LIST before the watch
+                # opens.  The stream begins at the LIST resourceVersion and only
+                # carries namespaces created/deleted afterwards, so it never
+                # replays the namespaces that already exist at connect time —
+                # without this seed _known_namespaces would stay empty for every
+                # pre-existing namespace and get_known_namespaces() callers would
+                # wrongly treat live namespaces as gone.
+                self._seed_known_namespaces()
                 self._namespace_watch_manager.start()
                 self._namespace_watch_cluster = current_context
                 logging.info(f"App-lifetime namespace watch daemon started for cluster {current_context}")
@@ -243,6 +251,27 @@ class KubernetesClient(QObject):
                 logging.warning(f"Failed to start namespace watch daemon: {e}")
                 self._namespace_watch_manager = None
                 self._namespace_watch_cluster = None
+
+    def _seed_known_namespaces(self):
+        """Populate _known_namespaces from a one-shot namespace LIST.
+
+        The namespace watch opens its stream at the LIST resourceVersion and
+        therefore only delivers namespaces created or deleted AFTER it starts;
+        it never replays the namespaces that already existed at connect time.
+        This best-effort seed captures that initial state so the authority set
+        is complete from the first connect.  A failed LIST leaves the set as-is
+        and callers fall back to their existing empty-set guard.
+        """
+        try:
+            response = self.v1.list_namespace(
+                _request_timeout=APIClientConfig.REQUEST_TIMEOUT,
+            )
+            for item in (getattr(response, "items", None) or []):
+                name = getattr(getattr(item, "metadata", None), "name", None)
+                if name:
+                    self._known_namespaces.add(name)
+        except Exception as e:
+            logging.debug(f"namespace seed LIST failed: {e}")
 
     def _disconnect_service_signals(self):
         """Disconnect service signals to prevent emission during cleanup"""
@@ -628,7 +657,7 @@ class KubernetesClient(QObject):
 
         class ScaleWorker(EnhancedBaseWorker):
             def __init__(self, client_instance, deployment_name, namespace, replicas):
-                super().__init__(f"scale_{deployment_name}")
+                super().__init__(f"scale_{namespace}/{deployment_name}")
                 self.client_instance = client_instance
                 self.deployment_name = deployment_name
                 self.namespace = namespace
@@ -666,7 +695,7 @@ class KubernetesClient(QObject):
         worker.signals.finished.connect(handle_success)
         worker.signals.error.connect(handle_error)
 
-        get_thread_manager().submit_worker(f"scale_{deployment_name}", worker)
+        get_thread_manager().submit_worker(f"scale_{namespace}/{deployment_name}", worker)
 
     def _restart_deployment_rollout_sync(self, deployment_name: str, namespace: str) -> dict:
         """Trigger a rollout restart by patching the kubectl.kubernetes.io/restartedAt
@@ -727,7 +756,7 @@ class KubernetesClient(QObject):
 
         class RestartWorker(EnhancedBaseWorker):
             def __init__(self, client_instance, deployment_name, namespace):
-                super().__init__(f"restart_{deployment_name}")
+                super().__init__(f"restart_{namespace}/{deployment_name}")
                 self.client_instance = client_instance
                 self.deployment_name = deployment_name
                 self.namespace = namespace
@@ -760,7 +789,7 @@ class KubernetesClient(QObject):
         worker.signals.finished.connect(handle_success)
         worker.signals.error.connect(handle_error)
 
-        get_thread_manager().submit_worker(f"restart_{deployment_name}", worker)
+        get_thread_manager().submit_worker(f"restart_{namespace}/{deployment_name}", worker)
 
     def _find_hpas_for_workload_sync(self, kind: str, name: str, namespace: str) -> dict:
         """List HPAs in the namespace, return those targeting (kind, name).
@@ -863,7 +892,7 @@ class KubernetesClient(QObject):
 
         class HpaScanWorker(EnhancedBaseWorker):
             def __init__(self, client_instance, deployment_name, namespace):
-                super().__init__(f"hpa_scan_{deployment_name}")
+                super().__init__(f"hpa_scan_{namespace}/{deployment_name}")
                 self.client_instance = client_instance
                 self.deployment_name = deployment_name
                 self.namespace = namespace
@@ -897,7 +926,7 @@ class KubernetesClient(QObject):
         worker.signals.finished.connect(handle_success)
         worker.signals.error.connect(handle_error)
 
-        get_thread_manager().submit_worker(f"hpa_scan_{deployment_name}", worker)
+        get_thread_manager().submit_worker(f"hpa_scan_{namespace}/{deployment_name}", worker)
 
     # ──── Fork B: StatefulSet Scale ───────────────────────────────────────
 
@@ -947,7 +976,7 @@ class KubernetesClient(QObject):
 
         class ScaleStatefulSetWorker(EnhancedBaseWorker):
             def __init__(self, client_instance, statefulset_name, namespace, replicas):
-                super().__init__(f"scale_ss_{statefulset_name}")
+                super().__init__(f"scale_ss_{namespace}/{statefulset_name}")
                 self.client_instance = client_instance
                 self.statefulset_name = statefulset_name
                 self.namespace = namespace
@@ -982,7 +1011,7 @@ class KubernetesClient(QObject):
         worker.signals.finished.connect(handle_success)
         worker.signals.error.connect(handle_error)
 
-        get_thread_manager().submit_worker(f"scale_ss_{statefulset_name}", worker)
+        get_thread_manager().submit_worker(f"scale_ss_{namespace}/{statefulset_name}", worker)
 
     # ──── Fork B: StatefulSet Restart Rollout ────────────────────────────
 
@@ -1043,7 +1072,7 @@ class KubernetesClient(QObject):
 
         class RestartStatefulSetWorker(EnhancedBaseWorker):
             def __init__(self, client_instance, statefulset_name, namespace):
-                super().__init__(f"restart_ss_{statefulset_name}")
+                super().__init__(f"restart_ss_{namespace}/{statefulset_name}")
                 self.client_instance = client_instance
                 self.statefulset_name = statefulset_name
                 self.namespace = namespace
@@ -1076,7 +1105,7 @@ class KubernetesClient(QObject):
         worker.signals.finished.connect(handle_success)
         worker.signals.error.connect(handle_error)
 
-        get_thread_manager().submit_worker(f"restart_ss_{statefulset_name}", worker)
+        get_thread_manager().submit_worker(f"restart_ss_{namespace}/{statefulset_name}", worker)
 
     # ──── Fork B: DaemonSet Restart Rollout ──────────────────────────────
 
@@ -1138,7 +1167,7 @@ class KubernetesClient(QObject):
 
         class RestartDaemonSetWorker(EnhancedBaseWorker):
             def __init__(self, client_instance, daemonset_name, namespace):
-                super().__init__(f"restart_ds_{daemonset_name}")
+                super().__init__(f"restart_ds_{namespace}/{daemonset_name}")
                 self.client_instance = client_instance
                 self.daemonset_name = daemonset_name
                 self.namespace = namespace
@@ -1171,7 +1200,7 @@ class KubernetesClient(QObject):
         worker.signals.finished.connect(handle_success)
         worker.signals.error.connect(handle_error)
 
-        get_thread_manager().submit_worker(f"restart_ds_{daemonset_name}", worker)
+        get_thread_manager().submit_worker(f"restart_ds_{namespace}/{daemonset_name}", worker)
 
     # ──── Fork B: public sync HPA wrapper for any workload kind ──────────
 

@@ -73,9 +73,12 @@ class UnifiedCache:
             logging.debug(f"Cleaned up {total_expired} expired cache entries")
 
     def clear_empty_entries(self) -> int:
-        """Clear all empty cache entries (None, empty list, empty dict).
+        """Clear cache entries that never loaded (None values only).
 
-        Called on startup or theme change to remove stale data.
+        Called on startup or theme change to remove stale data. Empty
+        collections (empty list/dict) are preserved: they represent a
+        successfully loaded result with zero items, which is a valid cache
+        hit and must stay distinguishable from a cache miss.
         """
         empty_keys = []
         with self._lock:
@@ -83,7 +86,7 @@ class UnifiedCache:
                 # TTLCache.keys() filters expired entries, so .get() here only sees live values.
                 for cache_key in list(bucket.keys()):
                     data = bucket.get(cache_key)
-                    if data is None or (isinstance(data, (list, dict)) and not data):
+                    if data is None:
                         empty_keys.append((resource_type, cache_key))
 
             for resource_type, cache_key in empty_keys:

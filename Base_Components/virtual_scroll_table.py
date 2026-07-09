@@ -195,7 +195,7 @@ class VirtualScrollTable(QTableView):
             logging.warning(f"Error adjusting columns to screen: {e}")
 
     def sizeHint(self):
-        """Return optimal size based on rows to prevent layout expanding unnecessarily."""
+        """Return a bounded size hint so the table stays virtual for large datasets."""
         if not self._model:
             return QSize(super().sizeHint().width(), self.horizontalHeader().height() + 2)
             
@@ -203,8 +203,11 @@ class VirtualScrollTable(QTableView):
         row_height = self.verticalHeader().defaultSectionSize()
         header_height = self.horizontalHeader().height()
         
-        # Calculate precise height needed for all items
-        total_height = header_height + (row_count * row_height) + 2
+        # Cap the rows used for the height so the hint stays bounded for large
+        # datasets and never grows with the full model; keeps scrolling virtual.
+        max_visible_rows = 20
+        visible_rows = min(row_count, max_visible_rows)
+        total_height = header_height + (visible_rows * row_height) + 2
         
         if self.horizontalScrollBar().isVisible():
             total_height += self.horizontalScrollBar().height()

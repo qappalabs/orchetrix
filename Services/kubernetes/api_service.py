@@ -328,10 +328,23 @@ class KubernetesAPIService:
         Unified method to delete a Kubernetes resource by type, name, and namespace.
         Returns True on success, raises Exception on failure.
         """
+        namespaced_types = {
+            "pods", "services", "deployments", "configmaps", "secrets",
+            "persistentvolumeclaims", "ingresses", "daemonsets", "statefulsets",
+            "replicasets", "jobs", "cronjobs", "roles", "rolebindings",
+            "serviceaccounts", "networkpolicies", "endpoints", "resourcequotas",
+            "limitranges", "horizontalpodautoscalers", "poddisruptionbudgets",
+            "events", "leases"
+        }
+        if resource_type in namespaced_types and not namespace:
+            raise ValueError(
+                f"Namespace is required to delete a namespaced resource: {resource_type}/{name}"
+            )
+
         try:
             delete_options = client.V1DeleteOptions()
             api_client = self._get_client_for_deletion(resource_type)
-            
+
             # Map resource types to specific deletion methods
             # Namespaced resources
             if resource_type == "pods":

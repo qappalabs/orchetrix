@@ -14,12 +14,14 @@ from Utils.data_formatters import parse_age_to_seconds, parse_memory_value
 
 def _memory_to_bytes(value):
     """Convert a Kubernetes resource-quantity string ("10Gi", "500M") to
-    an integer byte count usable as a sort key. Empty / unparseable values
-    sort to the bottom via -1."""
+    an integer byte count usable as a sort key. Empty, missing, or
+    unparseable values return a sentinel that ranks after all real sizes."""
+    if not isinstance(value, str) or value.strip() in ("", "<none>"):
+        return float("inf")
     try:
         return parse_memory_value(value).value
     except Exception:
-        return -1
+        return float("inf")
 
 
 class PersistentVolumesPage(BaseResourcePage):

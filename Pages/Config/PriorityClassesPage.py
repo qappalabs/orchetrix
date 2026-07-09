@@ -147,15 +147,10 @@ class PriorityClassesPage(BaseResourcePage):
 
             # Get resource details
             resource_name = None
-            namespace = None
 
             # Get the resource name
             if self.table.item(row, 1) is not None:
                 resource_name = self.table.item(row, 1).text()
-
-            # Get namespace if applicable
-            if self.table.item(row, 2) is not None:
-                namespace = self.table.item(row, 2).text()
 
             # Show detail view
             if resource_name:
@@ -166,4 +161,4 @@ class PriorityClassesPage(BaseResourcePage):
 
 
                 if parent and hasattr(parent, 'detail_manager'):
-                    parent.detail_manager.show_detail("priorityclasses", resource_name, namespace)
+                    parent.detail_manager.show_detail("priorityclass", resource_name)

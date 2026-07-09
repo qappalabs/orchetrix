@@ -150,6 +150,9 @@ class EventsPage(BaseResourcePage):
         self.table.setItem(row, 0, dummy_item)
 
         row_data = self._project_row_data(resource)
+        # Stash the stable UID on the hidden marker cell so a theme refresh can
+        # map a visible (possibly sorted) row back to its backing resource.
+        dummy_item.setData(Qt.ItemDataRole.UserRole, row_data["uid"])
         display_values = [
             row_data["type"],
             row_data["message"],
@@ -482,7 +485,22 @@ class EventsPage(BaseResourcePage):
     def _on_theme_changed(self, theme_name):
         """Refresh UI and row cell colors when theme changes."""
         super()._on_theme_changed(theme_name)
-        if hasattr(self, 'table') and self.table:
-            for row in range(self.table.rowCount()):
-                if row < len(self.resources):
-                    self.populate_resource_row(row, self.resources[row])
+        if not (hasattr(self, 'table') and self.table):
+            return
+
+        # Visible row order diverges from self.resources once the user sorts a
+        # column, so resolve each row back to its resource by the projected UID
+        # rather than indexing self.resources by the visual row number.
+        resources_by_uid = {
+            self._build_uid_from_resource(resource): resource
+            for resource in self.resources
+        }
+
+        for row in range(self.table.rowCount()):
+            marker = self.table.item(row, 0)
+            uid = marker.data(Qt.ItemDataRole.UserRole) if marker else None
+            resource = resources_by_uid.get(uid)
+            if resource is None and row < len(self.resources):
+                resource = self.resources[row]
+            if resource is not None:
+                self.populate_resource_row(row, resource)

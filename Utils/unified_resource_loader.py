@@ -3458,6 +3458,8 @@ class ResourceWatchManager(QObject):
         Best-effort — failures are swallowed because the table-side
         emit pipeline is the authoritative source of truth for the row.
         """
+        if not self._running:
+            return
         try:
             kc = get_kubernetes_client()
             if kc is None or not hasattr(kc, "global_resource_watch_event"):
@@ -3494,13 +3496,15 @@ class ResourceWatchManager(QObject):
         timer so the final state of a burst is always emitted once it settles.
 
         Thread-safety: _emit_update runs on the watch background thread (from
-        _full_list and the WATCH event loop). _emit_timer was created on the
-        main thread in __init__ (where start_watch constructed this QObject),
-        and a QTimer's start()/stop() must run on its owner thread — so those
-        are dispatched via QMetaObject.invokeMethod(QueuedConnection). The
-        leading-edge _do_emit() is called directly: it only snapshots the
-        cache and emits a Qt signal, which Qt delivers to the main-thread slots
-        via a queued connection, exactly like _emit_global_watch_event does.
+        _full_list and the WATCH event loop).  ALL cross-thread interactions
+        are dispatched via QMetaObject.invokeMethod(QueuedConnection) so they
+        execute on the main thread.  This is critical on Windows: calling
+        _do_emit() directly from the background thread touches Qt internals
+        linked to the main thread's COM STA, triggering 0x8001010d
+        (RPC_E_CANTCALLOUT_ININPUTSYNCCALL) when the main thread is inside
+        an input-synchronous dispatch.  Routing through QueuedConnection
+        posts a QMetaCallEvent to the main thread's event queue, completely
+        avoiding cross-apartment COM transitions.
         _last_emit_time is a plain float touched from both threads; reads and
         writes are atomic under the GIL and the throttle tolerates minor skew.
         """
@@ -3513,7 +3517,12 @@ class ResourceWatchManager(QObject):
             QMetaObject.invokeMethod(
                 self._emit_timer, "stop", Qt.ConnectionType.QueuedConnection
             )
-            self._do_emit()
+            # Route through QueuedConnection so _do_emit() executes on the
+            # main thread.  Never call _do_emit() directly from a background
+            # thread — see docstring above for the Windows COM rationale.
+            QMetaObject.invokeMethod(
+                self, "_do_emit", Qt.ConnectionType.QueuedConnection
+            )
         else:
             # Inside the window: (re)arm the single-shot trailing timer so the
             # burst's final state is emitted once it quiets down.
@@ -3521,8 +3530,16 @@ class ResourceWatchManager(QObject):
                 self._emit_timer, "start", Qt.ConnectionType.QueuedConnection
             )
 
+    @pyqtSlot()
     def _do_emit(self):
-        """Emit the current cache snapshot as a LoadResult signal."""
+        """Emit the current cache snapshot as a LoadResult signal.
+
+        Decorated with @pyqtSlot() so QMetaObject.invokeMethod can resolve
+        the method by its string name during dynamic dispatch from the
+        background thread.  Always runs on the main thread (either via the
+        trailing-edge QTimer timeout or via the leading-edge invokeMethod
+        QueuedConnection posted by _emit_update).
+        """
         if not self._running:
             return
         # Stamp the emit time so the leading-edge check in _emit_update opens a

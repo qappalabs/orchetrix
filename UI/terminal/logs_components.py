@@ -29,6 +29,42 @@ from Styles.logs_componentsStyles import (
 )
 
 
+class ContainerLoaderWorker(QThread):
+    """
+    Worker thread for loading a pod's container list from the Kubernetes API.
+
+    Running the read_namespaced_pod() call here keeps the potentially slow
+    network request off the UI thread so the logs view stays responsive while
+    the container selector is being populated.
+    """
+
+    containers_loaded = pyqtSignal(list)
+    error_occurred = pyqtSignal(str)
+
+    def __init__(self, pod_name, namespace, parent=None):
+        super().__init__(parent)
+        self.pod_name = pod_name
+        self.namespace = namespace
+
+    def run(self):
+        """Fetch the container names for the pod."""
+        try:
+            kube_client = get_kubernetes_client()
+
+            if not kube_client or not kube_client.v1:
+                self.containers_loaded.emit([])
+                return
+
+            pod = kube_client.v1.read_namespaced_pod(name=self.pod_name, namespace=self.namespace)
+            if pod.spec and pod.spec.containers:
+                self.containers_loaded.emit([c.name for c in pod.spec.containers])
+            else:
+                self.containers_loaded.emit([])
+
+        except Exception as e:
+            self.error_occurred.emit(str(e))
+
+
 class LogsHeaderWidget(QWidget):
     """
     Simplified header widget for logs viewer.
@@ -47,6 +83,7 @@ class LogsHeaderWidget(QWidget):
         self.pod_name = pod_name
         self.namespace = namespace
         self.containers = []
+        self._container_loader = None
         self.setup_ui()
 
     def setup_ui(self):
@@ -115,29 +152,32 @@ class LogsHeaderWidget(QWidget):
         return name[:max_length-3] + "..."
 
     def load_containers(self):
-        """Load available containers for the pod."""
-        try:
-            kube_client = get_kubernetes_client()
+        """Load available containers for the pod without blocking the UI thread."""
+        self._container_loader = ContainerLoaderWorker(self.pod_name, self.namespace, self)
+        self._container_loader.containers_loaded.connect(self._on_containers_loaded)
+        self._container_loader.error_occurred.connect(self._on_container_load_error)
+        self._container_loader.start()
 
-            if kube_client and kube_client.v1:
-                pod = kube_client.v1.read_namespaced_pod(name=self.pod_name, namespace=self.namespace)
-                if pod.spec and pod.spec.containers:
-                    self.containers = [c.name for c in pod.spec.containers]
-                    
-                    self.container_combo.blockSignals(True)
-                    self.container_combo.clear()
-                    self.container_combo.addItems(self.containers)
-                    self.container_combo.blockSignals(False)
+    def _on_containers_loaded(self, containers):
+        """Populate the container selector once loading finishes (runs on the UI thread)."""
+        self.containers = containers
+        if not containers:
+            return
 
-                    if self.containers:
-                        # Always select the first container by default and notify viewer
-                        first_container = self.containers[0]
-                        self.container_combo.setCurrentText(first_container)
-                        self.container_changed.emit(first_container)
+        self.container_combo.blockSignals(True)
+        self.container_combo.clear()
+        self.container_combo.addItems(self.containers)
+        self.container_combo.blockSignals(False)
 
-        except Exception as e:
-            logging.error(f"Error loading containers for {self.pod_name}: {e}")
-            self.containers = []
+        # Always select the first container by default and notify viewer
+        first_container = self.containers[0]
+        self.container_combo.setCurrentText(first_container)
+        self.container_changed.emit(first_container)
+
+    def _on_container_load_error(self, message):
+        """Handle a failure while loading the container list."""
+        logging.error(f"Error loading containers for {self.pod_name}: {message}")
+        self.containers = []
 
     def _on_lines_changed(self, text):
         """Handle tail lines change."""

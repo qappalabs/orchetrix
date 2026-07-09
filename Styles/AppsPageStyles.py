@@ -46,9 +46,9 @@ def get_live_monitor_btn_start_style():
             background-color: {theme.colors.SUCCESS_PRESSED_BG};
         }}
         QPushButton:disabled {{
-            background-color: rgba(255, 255, 255, 0.05);
-            border-color: {theme.colors.TEXT_SUBTLE};
-            color: {theme.colors.TEXT_SECONDARY};
+            background-color: {theme.colors.BUTTON_DISABLED_BG};
+            border: 1px solid {theme.colors.BORDER_LIGHT};
+            color: {theme.colors.BUTTON_DISABLED_TEXT};
         }}
     """
 
@@ -73,9 +73,9 @@ def get_live_monitor_btn_stop_style():
             background-color: {theme.colors.DANGER_PRESSED_BG};
         }}
         QPushButton:disabled {{
-            background-color: rgba(232, 17, 35, 0.15);
-            border: 1px solid rgba(232, 17, 35, 0.25);
-            color: rgba(142, 155, 169, 0.6);
+            background-color: {theme.colors.BUTTON_DISABLED_BG};
+            border: 1px solid {theme.colors.BORDER_LIGHT};
+            color: {theme.colors.BUTTON_DISABLED_TEXT};
         }}
     """
 

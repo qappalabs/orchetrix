@@ -41,6 +41,10 @@ class TimezoneManager(QObject):
         self.settings = QSettings("Orchetrix", "OX")
         self._current_tz_name = self.settings.value("timezone", "UTC")
         self._current_tz = self._load_tz(self._current_tz_name)
+        # If the stored name was invalid, _load_tz() falls back to UTC; keep the
+        # reported name in sync so get_current_timezone_name() cannot lie.
+        if self._current_tz is dt_timezone.utc:
+            self._current_tz_name = "UTC"
         
     def _load_tz(self, tz_name):
         try:

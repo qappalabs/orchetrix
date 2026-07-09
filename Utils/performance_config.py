@@ -113,9 +113,16 @@ def apply_performance_optimizations():
     try:
         import psutil
     except ImportError:
-        # Fallback: psutil not available, use resource-constrained profile
-        logger.debug("psutil not available, using resource_constrained profile")
-        return get_performance_config("resource_constrained")
+        # psutil not available: fall back to CPU-count-based detection so
+        # capable machines are not needlessly pinned to the lowest profile.
+        logger.debug("psutil not available, using CPU-based profile detection")
+        cpu_count = os.cpu_count() or 4
+        if cpu_count >= 8:
+            return get_performance_config("resource_rich")
+        elif cpu_count >= 4:
+            return get_performance_config("balanced")
+        else:
+            return get_performance_config("resource_constrained")
 
     # Detect system resources
     cpu_count = os.cpu_count() or 4

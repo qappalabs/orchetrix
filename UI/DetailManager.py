@@ -275,18 +275,25 @@ class DetailManager(QObject):
                 self.force_refresh_current()
                 return
             # Direct payload injection: feed the fresh resource dict to
-            # each section's handle_data_loaded.  This sets current_data
-            # AND triggers update_ui_with_data, bypassing the section's
-            # "data is current, skip load" short-circuit.
-            sections = []
+            # each resource-consuming section's handle_data_loaded.  This
+            # sets current_data AND triggers update_ui_with_data, bypassing
+            # the section's "data is current, skip load" short-circuit.
+            #
+            # The events section is the exception: it consumes an
+            # {"events": [...]} payload, not the raw resource object.  Handing
+            # it raw_object blanks the list to "No events found".  Instead we
+            # re-run its own loader so it rebuilds the correct events payload
+            # from the current cluster events.
             for attr in ("overview_section", "details_section",
                          "yaml_section", "events_section"):
                 section = getattr(self._detail_page, attr, None)
-                if section is not None:
-                    sections.append(section)
-            for section in sections:
+                if section is None:
+                    continue
                 try:
-                    if hasattr(section, "handle_data_loaded"):
+                    if attr == "events_section":
+                        if hasattr(section, "load_data"):
+                            section.load_data()
+                    elif hasattr(section, "handle_data_loaded"):
                         section.handle_data_loaded(raw_object)
                 except Exception as e:
                     logging.debug(

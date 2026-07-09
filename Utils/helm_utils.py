@@ -244,9 +244,12 @@ def update_helm_repositories():
 
 def install_helm_chart_cli(release_name, chart, namespace, values_file=None, values=None,
                            version=None, create_namespace=False, timeout=None,
-                           wait=False, atomic=False, dry_run=False):
+                           wait=False, atomic=False, dry_run=False, kube_context=None):
     """Install a chart using Helm CLI"""
     cmd = ['install', release_name, chart, '--namespace', namespace]
+
+    if kube_context:
+        cmd.extend(['--kube-context', kube_context])
 
     if create_namespace:
         cmd.append('--create-namespace')
@@ -287,9 +290,12 @@ def install_helm_chart_cli(release_name, chart, namespace, values_file=None, val
     return run_helm_command(cmd, timeout=cmd_timeout)
 
 
-def upgrade_helm_chart_cli(release_name, chart, namespace, values_file=None, values=None, version=None):
+def upgrade_helm_chart_cli(release_name, chart, namespace, values_file=None, values=None, version=None, kube_context=None):
     """Upgrade a chart using Helm CLI"""
     cmd = ['upgrade', release_name, chart, '--namespace', namespace]
+
+    if kube_context:
+        cmd.extend(['--kube-context', kube_context])
 
     if version:
         cmd.extend(['--version', version])
@@ -304,9 +310,12 @@ def upgrade_helm_chart_cli(release_name, chart, namespace, values_file=None, val
     return run_helm_command(cmd, timeout=300)
 
 
-def uninstall_helm_release_cli(release_name, namespace, keep_history=False):
+def uninstall_helm_release_cli(release_name, namespace, keep_history=False, kube_context=None):
     """Uninstall a Helm release using Helm CLI"""
     cmd = ['uninstall', release_name, '--namespace', namespace]
+
+    if kube_context:
+        cmd.extend(['--kube-context', kube_context])
 
     if keep_history:
         cmd.append('--keep-history')

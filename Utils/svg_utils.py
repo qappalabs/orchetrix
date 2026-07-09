@@ -50,6 +50,12 @@ def render_svg_icon(icon_filename: str, color: str, size: int = 18) -> QPixmap:
         )
 
         renderer = QSvgRenderer(QByteArray(svg_content.encode('utf-8')))
+        if not renderer.isValid():
+            logging.error(f"svg_utils: Invalid or malformed SVG content for '{icon_filename}'")
+            pixmap = QPixmap(size, size)
+            pixmap.fill(Qt.GlobalColor.transparent)
+            return pixmap
+
         pixmap = QPixmap(size, size)
         pixmap.fill(Qt.GlobalColor.transparent)
         painter = QPainter(pixmap)

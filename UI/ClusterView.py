@@ -1038,8 +1038,13 @@ class ClusterView(ThemeAwareMixin, QWidget):
                 reason = result.get("reason")
 
                 if reason == "no_client":
-                    logging.warning(f"No kubernetes client available for CRD fetch: {cn}")
-                    self._cached_crds[cn] = []
+                    # Client wasn't ready yet (connection still in progress).
+                    # Treat this as transient: leave the cache untouched so a
+                    # later client-backed fetch can still populate it. Writing []
+                    # here would make get_available_crds() treat it as a terminal
+                    # result and never re-fetch once the client becomes ready, and
+                    # would also clobber any CRDs already cached for this cluster.
+                    logging.warning(f"Kubernetes client not ready for CRD fetch: {cn}; will retry once connected")
                 elif reason == "empty":
                     logging.info(f"ClusterView: No CRDs found for cluster {cn}")
                     self._cached_crds[cn] = []
@@ -1047,7 +1052,9 @@ class ClusterView(ThemeAwareMixin, QWidget):
                     self._cached_crds[cn] = crds or []
                     logging.info(f"ClusterView: Cached {len(self._cached_crds[cn])} CRDs for cluster {cn}")
 
-                if cn == self.active_cluster:
+                # Only refresh the sidebar for a definitive result; a transient
+                # no_client must not overwrite the currently displayed CRDs.
+                if cn == self.active_cluster and reason != "no_client":
                     self._update_sidebar_crd_dropdown()
             finally:
                 self._crd_fetch_in_progress.discard(result.get("cluster") if isinstance(result, dict) else cluster_name)

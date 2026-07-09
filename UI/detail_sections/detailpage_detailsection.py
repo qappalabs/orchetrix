@@ -1074,23 +1074,22 @@ class DetailPageDetailsSection(BaseDetailSection):
         header_layout.setContentsMargins(0, 0, 0, 0)
         
         # Icon (container-images.svg)
+        theme = BaseDetailSectionStyles._get_theme()
         base_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
         icon_path = os.path.join(base_path, "Icons", "container-images.svg")
-        
+
         if os.path.exists(icon_path):
              icon_label = QLabel()
-             theme = BaseDetailSectionStyles._get_theme()
              icon_label.setPixmap(self._render_svg_icon(icon_path, BaseDetailSectionStyles.get_section_header_color(), size=18))
              header_layout.addWidget(icon_label)
-        
+
         title_label = QLabel("CONTAINER IMAGES")
         title_label.setStyleSheet(BaseDetailSectionStyles.get_section_header_style())
-        
+
         # Total count
         count_label = QLabel(f"Total: {len(images)}")
         count_label.setStyleSheet(f"color: {theme.colors.TEXT_SECONDARY}; font-size: 11px; font-weight: 500;")
-        
-        header_layout.addWidget(icon_label)
+
         header_layout.addWidget(title_label)
         header_layout.addStretch()
         header_layout.addWidget(count_label)

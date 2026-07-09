@@ -2668,6 +2668,7 @@ class DetailPageOverviewSection(BaseDetailSection):
 
             # Clear existing content and prepare for new data
             self.pods_table.clearContents()
+            self.pods_table.clearSpans()
             self.pods_table.setRowCount(len(pods_data))
             
             # Keep strong references to widgets to prevent GC issues
@@ -3088,9 +3089,9 @@ class DetailPageOverviewSection(BaseDetailSection):
                 "labels", {}).get("repository", "Unknown"))
             if repository:
                 chart_info += f" / {repository}"
-            self.resource_info_label.setText(chart_info)
+            self.resource_type_label.setText(chart_info)
 
-            # Update creation / updated time
+            # Update creation / updated time card
             created_time = metadata.get("creationTimestamp", metadata.get(
                 "annotations", {}).get("updated", ""))
             if created_time:
@@ -3098,10 +3099,11 @@ class DetailPageOverviewSection(BaseDetailSection):
                     created_time = TimezoneManager.get_instance().format_time(created_time)
                 except Exception:
                     pass
-                self.creation_time_label.setText(
-                    f"Last Updated: {created_time}")
+                self.created_card.title_label.setText("LAST UPDATED")
+                self.created_card.value_label.setText(created_time)
             else:
-                self.creation_time_label.setText("Created: unknown")
+                self.created_card.title_label.setText("CREATED")
+                self.created_card.value_label.setText("Unknown")
 
             # Update chart - specific status
             self._update_chart_status(data)
@@ -3123,9 +3125,9 @@ class DetailPageOverviewSection(BaseDetailSection):
             namespace = metadata.get("namespace")
             if namespace:
                 release_info += f" / {namespace}"
-            self.resource_info_label.setText(release_info)
+            self.resource_type_label.setText(release_info)
 
-            # Update creation / deployed time
+            # Update creation / deployed time card
             deployed_time = status.get(
                 "lastDeployed", metadata.get("creationTimestamp", ""))
             if deployed_time:
@@ -3133,10 +3135,11 @@ class DetailPageOverviewSection(BaseDetailSection):
                     deployed_time = TimezoneManager.get_instance().format_time(deployed_time)
                 except Exception:
                     pass
-                self.creation_time_label.setText(
-                    f"Last Deployed: {deployed_time}")
+                self.created_card.title_label.setText("LAST DEPLOYED")
+                self.created_card.value_label.setText(deployed_time)
             else:
-                self.creation_time_label.setText("Deployed: unknown")
+                self.created_card.title_label.setText("DEPLOYED")
+                self.created_card.value_label.setText("Unknown")
 
             # Update release - specific status
             self._update_release_status(data)

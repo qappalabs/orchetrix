@@ -23,6 +23,7 @@ class DeploymentAnalyzer(QThread):
         self.kube_client = get_kubernetes_client()
 
     def run(self):
+        """Fetch deployments across namespaces, filter by labels, and emit analysis results."""
         try:
             if not self.kube_client or not self.kube_client.v1 or not self.kube_client.apps_v1:
                 self.error_occurred.emit("Kubernetes client not initialized")
@@ -33,17 +34,18 @@ class DeploymentAnalyzer(QThread):
             # Use paginated fetching for better performance
             all_deployments = []
             if self.namespace == "All Namespaces":
-                # Get list of namespaces first, then fetch deployments per namespace
                 try:
-                    namespaces = self.kube_client.v1.list_namespace(limit=100)
-                    for ns in namespaces.items:
+                    namespaces = self._list_all_pages(
+                        self.kube_client.v1.list_namespace, limit=100
+                    )
+                    for ns in namespaces:
                         try:
-                            # Fetch deployments for each namespace with pagination
-                            deployments = self.kube_client.apps_v1.list_namespaced_deployment(
+                            deployments = self._list_all_pages(
+                                self.kube_client.apps_v1.list_namespaced_deployment,
                                 namespace=ns.metadata.name,
-                                limit=50  # Limit per namespace for performance
+                                limit=50
                             )
-                            all_deployments.extend(deployments.items)
+                            all_deployments.extend(deployments)
                             self.progress_updated.emit(f"Processed namespace: {ns.metadata.name}")
                         except Exception as ns_error:
                             logging.warning(f"Could not fetch deployments from namespace {ns.metadata.name}: {ns_error}")
@@ -51,24 +53,21 @@ class DeploymentAnalyzer(QThread):
                 except Exception as e:
                     logging.error(f"Could not fetch namespaces, falling back to specific namespace: {e}")
                     # Fallback to default namespace
-                    deployments = self.kube_client.apps_v1.list_namespaced_deployment(
+                    all_deployments = self._list_all_pages(
+                        self.kube_client.apps_v1.list_namespaced_deployment,
                         namespace="default", limit=50
                     )
-                    all_deployments = deployments.items
             else:
-                # Fetch from specific namespace with pagination
-                deployments = self.kube_client.apps_v1.list_namespaced_deployment(
+                all_deployments = self._list_all_pages(
+                    self.kube_client.apps_v1.list_namespaced_deployment,
                     namespace=self.namespace, limit=100
                 )
-                all_deployments = deployments.items
 
             self.progress_updated.emit(f"Found {len(all_deployments)} deployments. Analyzing...")
 
-            # Filter deployments by labels if provided
-            filtered_deployments = []
-            for deployment in all_deployments:
-                if self._matches_label_filter(deployment):
-                    filtered_deployments.append(deployment)
+            filtered_deployments = [
+                dep for dep in all_deployments if self._matches_label_filter(dep)
+            ]
 
             if not filtered_deployments:
                 self.error_occurred.emit(f"No deployments found matching labels {self.key_filter}={self.value_filter}")
@@ -76,7 +75,6 @@ class DeploymentAnalyzer(QThread):
 
             self.progress_updated.emit(f"Analyzing {len(filtered_deployments)} matching deployments...")
 
-            # Analyze deployments and create diagram data
             diagram_data = self._analyze_deployments(filtered_deployments)
 
             self.progress_updated.emit("Analysis complete!")
@@ -86,6 +84,21 @@ class DeploymentAnalyzer(QThread):
             self.error_occurred.emit(f"API error: {e.reason}")
         except Exception as e:
             self.error_occurred.emit(f"Analysis failed: {str(e)}")
+
+    def _list_all_pages(self, list_func, **kwargs):
+        """Call a paginated list function, following continue tokens until all items are collected."""
+        items = []
+        continue_token = None
+        while True:
+            if continue_token:
+                page = list_func(_continue=continue_token, **kwargs)
+            else:
+                page = list_func(**kwargs)
+            items.extend(page.items)
+            continue_token = getattr(page.metadata, "_continue", None)
+            if not continue_token:
+                break
+        return items
 
     def _matches_label_filter(self, deployment):
         """Check if deployment matches the label filter"""
@@ -146,25 +159,19 @@ class DeploymentAnalyzer(QThread):
         }
 
     def _find_related_services(self, deployment):
-        """Find services that target this deployment"""
+        """Find services that target this deployment via label selectors."""
         services = []
         try:
-            # Get services only from the deployment's namespace for performance
-            if deployment.metadata.namespace:
-                svc_list = self.kube_client.v1.list_namespaced_service(
-                    namespace=deployment.metadata.namespace,
-                    limit=50  # Limit services per namespace
-                )
-            else:
-                # Fallback to default namespace only instead of all namespaces
-                svc_list = self.kube_client.v1.list_namespaced_service(
-                    namespace="default",
-                    limit=50
-                )
+            namespace = deployment.metadata.namespace or "default"
+            svc_list = self._list_all_pages(
+                self.kube_client.v1.list_namespaced_service,
+                namespace=namespace,
+                limit=50
+            )
 
             deployment_labels = deployment.spec.selector.match_labels or {}
 
-            for service in svc_list.items:
+            for service in svc_list:
                 service_selector = service.spec.selector or {}
 
                 # Check if service selector matches deployment labels

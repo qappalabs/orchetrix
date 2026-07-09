@@ -101,13 +101,23 @@ class ResourceNamespaceMixin:
             return
             
         logging.info(f"Namespace changed: {old_ns} -> {namespace}")
+
+        # Release the watch bound to the previous namespace before switching so
+        # the loader stops streaming stale data for the namespace we are leaving.
+        if hasattr(self, '_stop_resource_watch'):
+            self._stop_resource_watch()
+
         self.namespace_filter = namespace
-        
+
         if hasattr(self, 'current_continue_token'):
             self.current_continue_token = None
         if hasattr(self, 'all_data_loaded'):
             self.all_data_loaded = False
-            
+
+        # Bind a fresh watch to the newly selected namespace scope.
+        if hasattr(self, '_start_resource_watch'):
+            self._start_resource_watch()
+
         if hasattr(self, 'force_load_data'):
             self.force_load_data()
 
@@ -181,7 +191,7 @@ class ResourceUtilityMixin:
 class ResourceLoadingMixin:
     """Mixin for handling Kubernetes resource loading and pagination."""
     
-    def _start_loading_thread(self, continue_token=None):
+    def _start_loading_thread(self):
         """Start the unified resource loading thread."""
         unified_loader = get_unified_resource_loader()
         
@@ -318,7 +328,3 @@ class ResourceLoadingMixin:
         if scrollbar.value() >= scrollbar.maximum() - 10:
             if getattr(self, '_large_dataset_mode', False) and getattr(self, '_remaining_resources', []):
                 self._load_more_data_batch()
-            elif not getattr(self, 'all_data_loaded', False) and getattr(self, 'current_continue_token', None):
-                # Handle traditional API-based pagination if continue token exists
-                self.is_loading_more = True
-                self._start_loading_thread(continue_token=self.current_continue_token)

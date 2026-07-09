@@ -11,7 +11,7 @@ import weakref
 import yaml
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass
-from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot, QTimer, QThreadPool, Qt, QThread, QMetaObject
+from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot, QTimer, QThreadPool, Qt, QThread, QMetaObject, QCoreApplication
 
 from .api_service import get_kubernetes_api_service, reset_kubernetes_api_service
 from .log_service import create_kubernetes_log_service
@@ -111,13 +111,18 @@ class KubernetesService(QObject):
 
     def _setup_timers(self):
         """Setup polling timers"""
-        # Ensure timers are created on the thread that owns this object (main thread).
-        # Compare the *calling* thread against the object's owning thread, matching
-        # the same idiom used in start_polling.  The previous check
-        # (self.thread() != QApplication.instance().thread()) tested object ownership
-        # rather than caller identity and would never trigger in normal usage.
-        if QThread.currentThread() != self.thread():
+        # Timers own an event loop and must live on the application's main thread.
+        # First-time construction can happen on a worker thread (whichever thread
+        # first calls get_kubernetes_service()), in which case this object's initial
+        # affinity is that worker thread.  Gate against the real main thread rather
+        # than self.thread(): move ourselves onto the main thread and reschedule so
+        # the queued invocation lands on a thread that actually runs an event loop.
+        app = QCoreApplication.instance()
+        main_thread = app.thread() if app is not None else self.thread()
+        if QThread.currentThread() != main_thread:
             logging.warning("KubernetesService timers being created from non-main thread - deferring to main thread")
+            if self.thread() != main_thread:
+                self.moveToThread(main_thread)
             QMetaObject.invokeMethod(self, "_setup_timers_on_main_thread", Qt.ConnectionType.QueuedConnection)
             return
 
@@ -210,12 +215,15 @@ class KubernetesService(QObject):
         if not self.current_cluster:
             return
 
-        # Timers must be started from the thread that owns them (main thread).
+        # Timers must be started from the application's main thread.
         # Use QMetaObject.invokeMethod instead of QTimer.singleShot: singleShot
         # posts to the *calling* thread's event loop, which does not exist for
         # QRunnable/QThreadPool workers.  invokeMethod posts to the owning
-        # thread's event loop, which is always the main thread for this object.
-        if QThread.currentThread() != self.thread():
+        # thread's event loop, which is the main thread once this object has been
+        # affined there in _setup_timers.
+        app = QCoreApplication.instance()
+        main_thread = app.thread() if app is not None else self.thread()
+        if QThread.currentThread() != main_thread:
             self._pending_metrics_interval = metrics_interval
             self._pending_issues_interval = issues_interval
             QMetaObject.invokeMethod(self, "_start_polling_on_main_thread", Qt.ConnectionType.QueuedConnection)
@@ -537,14 +545,14 @@ _kubernetes_service_lock = threading.RLock()
 def get_kubernetes_service() -> KubernetesService:
     """Get or create Kubernetes service singleton (thread-safe)."""
     global _kubernetes_service_instance
-    if _kubernetes_service_instance is None:
-        with _kubernetes_service_lock:
-            # Double-checked locking: re-test inside the lock so that a second
-            # thread which was waiting at 'with' doesn't create a second instance
-            # after the first thread has already assigned one.
-            if _kubernetes_service_instance is None:
-                _kubernetes_service_instance = KubernetesService()
-    return _kubernetes_service_instance
+    # Hold the lock across the whole read/create/return path.  reset_kubernetes_service()
+    # runs cleanup() while holding this same lock, so returning the instance without it
+    # could hand a caller a half-cleaned singleton mid-reset.  The inner None-check still
+    # guarantees a single instance is ever created.
+    with _kubernetes_service_lock:
+        if _kubernetes_service_instance is None:
+            _kubernetes_service_instance = KubernetesService()
+        return _kubernetes_service_instance
 
 def reset_kubernetes_service():
     """Reset the singleton instance"""

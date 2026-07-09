@@ -287,9 +287,7 @@ class PersistentVolumeClaimsPage(BaseResourcePage):
         # in flight (worker runs on the thread pool and can finish late).
         if sip.isdeleted(self) or not getattr(self, "table", None) or sip.isdeleted(self.table):
             return
-        if not pvc_to_pods:
-            return
-        self._pvc_pods_map.update(pvc_to_pods)
+        self._pvc_pods_map = pvc_to_pods or {}
 
         pods_col_index = 5
         for row in range(self.table.rowCount()):
@@ -300,15 +298,14 @@ class PersistentVolumeClaimsPage(BaseResourcePage):
             name = name_item.text()
             namespace = ns_item.text()
             key = (namespace, name)
-            if key in pvc_to_pods:
-                pods_list = pvc_to_pods[key]
-                new_text = ", ".join(pods_list) if pods_list else "<none>"
-                num = len(pods_list)
+            pods_list = self._pvc_pods_map.get(key, [])
+            new_text = ", ".join(pods_list) if pods_list else "<none>"
+            num = len(pods_list)
 
-                item = self.table.item(row, pods_col_index)
-                if item:
-                    item.setText(new_text)
-                    item.value = num
+            item = self.table.item(row, pods_col_index)
+            if item:
+                item.setText(new_text)
+                item.value = num
 
     def handle_row_click(self, row, column):
         if column != self.table.columnCount() - 1:  # Skip action column

@@ -281,7 +281,7 @@ class Icons:
         to a temp file the first time and reuse it on subsequent calls.
         """
         if not isinstance(icon_filename, str):
-            return resource_path(os.path.join(Icons.ICONS_BASE_PATH, icon_filename))
+            return ""
 
         color = Icons._theme_icon_color(theme_name)
         cache_key = (icon_filename, color)
@@ -445,4 +445,4 @@ class Icons:
         except Exception as e:
             logging.debug(f"Failed to load app logo SVG: {e}")
 
-        return Icons.create_logo(size, "Orchestrix")
+        return Icons.create_logo(size, "Orchetrix")

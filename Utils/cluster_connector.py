@@ -267,13 +267,9 @@ class EnhancedClusterConnector(QObject):
         # Polling management with load detection
         self._polling_active = False
         self._polling_lock = threading.RLock()
-        self._metrics_timer = QTimer()
-        self._issues_timer = QTimer()
-        self._cleanup_timer = QTimer()
         self._events_watch_active = False  # True when watch replaces issues polling
-        self._events_debounce_timer = QTimer()  # Coalesces rapid event deltas
-        self._events_debounce_timer.setSingleShot(True)
-        self._events_debounce_timer.setInterval(3000)  # 3 s quiet window
+        # QTimer instances are created in _setup_timers so their thread affinity
+        # is bound to the UI thread rather than whatever thread built the connector.
         # Shared-Informer-style incremental cache: only holds Warning/Error events
         # updated one item at a time by on_added/on_modified/on_deleted handlers.
         self._issues_delta_cache: Dict[str, Dict] = {}  # keyed by event uid
@@ -324,6 +320,15 @@ class EnhancedClusterConnector(QObject):
             logging.warning("ClusterConnector timers being created from non-main thread - deferring to main thread")
             QMetaObject.invokeMethod(self, "_setup_timers_on_main_thread", Qt.ConnectionType.QueuedConnection)
             return
+
+        # Create timers here so both creation and configuration happen on the
+        # UI thread, giving the QTimer instances the correct thread affinity.
+        self._metrics_timer = QTimer()
+        self._issues_timer = QTimer()
+        self._cleanup_timer = QTimer()
+        self._events_debounce_timer = QTimer()  # Coalesces rapid event deltas
+        self._events_debounce_timer.setSingleShot(True)
+        self._events_debounce_timer.setInterval(3000)  # 3 s quiet window
 
         # Metrics polling timer
         self._metrics_timer.timeout.connect(self._poll_metrics)
@@ -933,6 +938,10 @@ class EnhancedClusterConnector(QObject):
         The delta handlers dispatch here via QMetaObject.invokeMethod with
         QueuedConnection so the call is always delivered to the main thread.
         """
+        # A queued start can arrive after _stop_polling has torn the watch down
+        # and cleared the delta cache; ignore it so the timer is not resurrected.
+        if self._shutting_down or not self._events_watch_active:
+            return
         self._events_debounce_timer.start()
 
     def _on_event_added(self, item: dict) -> None:

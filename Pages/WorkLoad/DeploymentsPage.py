@@ -315,7 +315,9 @@ class DeploymentsPage(BaseResourcePage):
         # the HPA result before constructing the dialog message.
         hpa_warning = ""
         try:
-            scan = get_kubernetes_client().find_hpas_for_deployment(name, namespace)
+            scan = get_kubernetes_client().find_hpas_for_workload(
+                "Deployment", name, namespace
+            )
             if scan.get("success") and scan.get("hpas"):
                 hpa_names = ", ".join(scan["hpas"])
                 hpa_warning = (

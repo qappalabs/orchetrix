@@ -425,7 +425,10 @@ class PodsPage(BaseResourcePage):
         color = self._get_status_color(pod_status)
         # Backing item carries the status text so the column sorts by status
         # (the StatusLabel widget below provides the colored display).
-        status_sort_item = SortableTableWidgetItem(pod_status)
+        # Empty display text so the backing item paints nothing behind the
+        # transparent StatusLabel badge (was rendering the status text twice);
+        # keep pod_status as the sort key so the column still sorts by status.
+        status_sort_item = SortableTableWidgetItem("", pod_status)
         status_sort_item.setFlags(status_sort_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
         self.table.setItem(row, status_col, status_sort_item)
         

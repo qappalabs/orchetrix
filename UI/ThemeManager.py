@@ -14,13 +14,14 @@ class ThemeManager(QObject):
     def __init__(self):
         super().__init__()
         self.settings = QSettings("Orchetrix", "OX")
-        saved_theme = self.settings.value("theme", "Light")
-        self._current_theme = saved_theme
 
         self._themes = {
             "Dark": self._get_dark_theme(),
             "Light": self._get_light_theme(),
         }
+
+        saved_theme = self.settings.value("theme", "Light")
+        self._current_theme = saved_theme if saved_theme in self._themes else "Light"
 
     def get_current_theme(self):
         return self._themes[self._current_theme]

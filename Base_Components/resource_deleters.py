@@ -62,7 +62,10 @@ class ResourceDeleterThread(QThread):
 
     def _format_error(self, e):
         """Standardize error message formatting."""
+        status_code = getattr(e, 'status', None)
         reason = getattr(e, 'reason', None)
+        if status_code == 404:
+            return "Resource not found (already deleted)"
         if reason:
             return f"API error: {reason}"
         return str(e)

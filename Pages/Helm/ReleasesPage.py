@@ -371,6 +371,11 @@ class HelmOperationThread(QThread):
 
         self.progress_percentage.emit(100)
 
+        # Expose the outcome so callers can reconcile their selection with what
+        # actually got deleted.
+        self.successful_deletions = successful_deletions
+        self.failed_deletions = failed_deletions
+
         # Generate result message
         success_count = len(successful_deletions)
         error_count = len(failed_deletions)
@@ -1549,14 +1554,19 @@ class ReleasesPage(BaseResourcePage):
 
         def on_operation_complete(success, message):
             progress.close()
+            operation = self.active_operation
             self.active_operation = None
 
             QMessageBox.information(self, "Deletion Results", message)
 
-            # Clear selection only when every release was deleted; on partial
-            # failure keep it so the user can retry the ones that failed.
+            # Clear selection when every release was deleted; on partial failure
+            # drop only the ones that were removed and keep the failures selected
+            # so the user can retry just those.
             if success:
                 self.selected_items.clear()
+            elif operation is not None:
+                for item in getattr(operation, "successful_deletions", []):
+                    self.selected_items.discard(item)
             QTimer.singleShot(1000, self.load_data)
 
         def on_progress_cancelled():
@@ -1775,8 +1785,14 @@ class ReleasesPage(BaseResourcePage):
                 logging.warning("Helm executable not found")
                 return {}
 
+            # Target the same cluster the page is viewing so detail reads stay
+            # consistent with the list/delete/upgrade paths.
+            kube_context = self._get_current_kube_context()
+
             # Get release status information first (this is more reliable)
             status_cmd = [helm_path, "list", "--filter", f"^{release_name}$", "-n", namespace]
+            if kube_context:
+                status_cmd.extend(["--kube-context", kube_context])
             logging.info(f"Running status command: {' '.join(status_cmd)}")
             status_result = subprocess.run(status_cmd, capture_output=True, text=True, timeout=10,
                                            creationflags=SUBPROCESS_FLAGS if sys.platform == 'win32' else 0)
@@ -1851,6 +1867,8 @@ class ReleasesPage(BaseResourcePage):
 
             # Get values
             values_cmd = [helm_path, "get", "values", release_name, "-n", namespace]
+            if kube_context:
+                values_cmd.extend(["--kube-context", kube_context])
             logging.info(f"Running values command: {' '.join(values_cmd)}")
             values_result = subprocess.run(values_cmd, capture_output=True, text=True, timeout=10,
                                            creationflags=SUBPROCESS_FLAGS if sys.platform == 'win32' else 0)
@@ -1887,6 +1905,8 @@ class ReleasesPage(BaseResourcePage):
 
             # Get manifest
             manifest_cmd = [helm_path, "get", "manifest", release_name, "-n", namespace]
+            if kube_context:
+                manifest_cmd.extend(["--kube-context", kube_context])
             logging.info(f"Running manifest command: {' '.join(manifest_cmd)}")
             manifest_result = subprocess.run(manifest_cmd, capture_output=True, text=True, timeout=10,
                                              creationflags=SUBPROCESS_FLAGS if sys.platform == 'win32' else 0)
@@ -1899,6 +1919,8 @@ class ReleasesPage(BaseResourcePage):
 
             # Get notes if available
             notes_cmd = [helm_path, "get", "notes", release_name, "-n", namespace]
+            if kube_context:
+                notes_cmd.extend(["--kube-context", kube_context])
             notes_result = subprocess.run(notes_cmd, capture_output=True, text=True, timeout=10,
                                           creationflags=SUBPROCESS_FLAGS if sys.platform == 'win32' else 0)
 

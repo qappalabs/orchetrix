@@ -161,6 +161,15 @@ def get_checkbox_style():
     theme = get_theme_manager().get_current_theme()
     accent_orange = getattr(theme.colors, 'ACCENT_ORANGE', '#FF5733')
 
+    # Subtle hover tint derived from the active accent so it stays aligned
+    # with the accent-colored border and checked fill.
+    _accent_hex = accent_orange.lstrip('#')
+    if len(_accent_hex) == 6:
+        _r, _g, _b = (int(_accent_hex[i:i + 2], 16) for i in (0, 2, 4))
+        accent_hover = f"rgba({_r}, {_g}, {_b}, 0.1)"
+    else:
+        accent_hover = accent_orange
+
     return f"""
         QCheckBox {{
             background: none;
@@ -191,7 +200,7 @@ def get_checkbox_style():
             image: url({white_checkmark.replace(os.sep, '/')});
         }}
         QCheckBox::indicator:unchecked:hover {{
-            background-color: rgba(255, 107, 0, 0.1);
+            background-color: {accent_hover};
         }}
         QCheckBox::indicator:checked:hover {{
             background-color: {accent_orange};

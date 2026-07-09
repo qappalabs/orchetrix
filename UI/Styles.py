@@ -733,7 +733,7 @@ class AppStyles:
             outline: none;
         }}
         
-        QApplication {{
+        QWidget {{
             font-family: 'Segoe UI', Arial, sans-serif;
             font-size: 9.5pt;
         }}

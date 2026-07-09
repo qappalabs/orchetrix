@@ -3,15 +3,25 @@ Kubernetes Log Service - Handles log streaming and management
 Split from kubernetes_client.py for better architecture
 """
 
-import gc
 import logging
 from collections import defaultdict, deque
 from datetime import datetime
 from typing import Optional
+
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer, QThread
 from kubernetes import watch
 from kubernetes.client.rest import ApiException
+
+from Utils.time_utils import TimezoneManager
 from Utils.thread_manager import is_shutdown_requested
+
+__all__ = [
+    'LogStreamThread',
+    'KubernetesLogStreamer',
+    'KubernetesLogService',
+    'create_kubernetes_log_service'
+]
+
 
 # Log configuration constants
 LOG_BUFFER_SIZE = 1000
@@ -117,20 +127,20 @@ class LogStreamThread(QThread):
 
     def _parse_log_line(self, line: str) -> tuple:
         """Parse log line to extract timestamp and content"""
+        content = line
         try:
             # Format: "2023-01-01T00:00:00.000000000Z log content"
-            if 'T' in line and 'Z' in line:
+            if ' ' in line and line.startswith('20'):
                 parts = line.split(' ', 1)
                 if len(parts) == 2:
                     timestamp_str, content = parts
-                    timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
-                    return timestamp.strftime('%H:%M:%S'), content
+                    return TimezoneManager.get_instance().format_time(timestamp_str), content
 
             # Fallback: use current time
-            return datetime.now().strftime('%H:%M:%S'), line
+            return TimezoneManager.get_instance().get_now().strftime('%H:%M:%S'), content
 
         except Exception:
-            return datetime.now().strftime('%H:%M:%S'), line
+            return TimezoneManager.get_instance().get_now().strftime('%H:%M:%S'), content
 
 
 class KubernetesLogStreamer(QObject):
@@ -226,9 +236,6 @@ class KubernetesLogStreamer(QObject):
         """Periodic cleanup to prevent memory accumulation"""
         if self._shutdown:
             return
-
-        # Force garbage collection
-        gc.collect()
 
         # Clean up empty buffers
         empty_buffers = [key for key, buffer in self.log_buffers.items() if len(buffer) == 0]

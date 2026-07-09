@@ -7,9 +7,18 @@ import logging
 import time
 from typing import Dict, Optional
 from dataclasses import dataclass
+
 from kubernetes import client
 from kubernetes.client.rest import ApiException
-from Utils.kubernetes_client import get_kubernetes_client
+
+from Services.kubernetes.api_service import get_kubernetes_api_service
+
+__all__ = [
+    'DeleteResult',
+    'KubernetesResourceDeleteService',
+    'get_resource_delete_service'
+]
+
 
 
 @dataclass
@@ -30,7 +39,7 @@ class KubernetesResourceDeleteService:
     """
 
     def __init__(self):
-        self.kube_client = get_kubernetes_client()
+        self.kube_client = get_kubernetes_api_service()
         self._delete_method_mapping = self._build_delete_method_mapping()
 
     def _build_delete_method_mapping(self) -> Dict[str, Dict[str, any]]:
@@ -38,170 +47,170 @@ class KubernetesResourceDeleteService:
         return {
             # Core v1 resources (namespaced)
             'pods': {
-                'api': self.kube_client.v1,
+                'api': 'v1',
                 'method': 'delete_namespaced_pod',
                 'namespaced': True
             },
             'services': {
-                'api': self.kube_client.v1,
+                'api': 'v1',
                 'method': 'delete_namespaced_service',
                 'namespaced': True
             },
             'configmaps': {
-                'api': self.kube_client.v1,
+                'api': 'v1',
                 'method': 'delete_namespaced_config_map',
                 'namespaced': True
             },
             'secrets': {
-                'api': self.kube_client.v1,
+                'api': 'v1',
                 'method': 'delete_namespaced_secret',
                 'namespaced': True
             },
             'endpoints': {
-                'api': self.kube_client.v1,
+                'api': 'v1',
                 'method': 'delete_namespaced_endpoints',
                 'namespaced': True
             },
             'events': {
-                'api': self.kube_client.v1,
+                'api': 'v1',
                 'method': 'delete_namespaced_event',
                 'namespaced': True
             },
             'persistentvolumeclaims': {
-                'api': self.kube_client.v1,
+                'api': 'v1',
                 'method': 'delete_namespaced_persistent_volume_claim',
                 'namespaced': True
             },
             'resourcequotas': {
-                'api': self.kube_client.v1,
+                'api': 'v1',
                 'method': 'delete_namespaced_resource_quota',
                 'namespaced': True
             },
             'limitranges': {
-                'api': self.kube_client.v1,
+                'api': 'v1',
                 'method': 'delete_namespaced_limit_range',
                 'namespaced': True
             },
             'serviceaccounts': {
-                'api': self.kube_client.v1,
+                'api': 'v1',
                 'method': 'delete_namespaced_service_account',
                 'namespaced': True
             },
 
             # Core v1 resources (cluster-scoped)
             'nodes': {
-                'api': self.kube_client.v1,
+                'api': 'v1',
                 'method': 'delete_node',
                 'namespaced': False
             },
             'namespaces': {
-                'api': self.kube_client.v1,
+                'api': 'v1',
                 'method': 'delete_namespace',
                 'namespaced': False
             },
             'persistentvolumes': {
-                'api': self.kube_client.v1,
+                'api': 'v1',
                 'method': 'delete_persistent_volume',
                 'namespaced': False
             },
 
             # Apps v1 resources
             'deployments': {
-                'api': self.kube_client.apps_v1,
+                'api': 'apps_v1',
                 'method': 'delete_namespaced_deployment',
                 'namespaced': True
             },
             'replicasets': {
-                'api': self.kube_client.apps_v1,
+                'api': 'apps_v1',
                 'method': 'delete_namespaced_replica_set',
                 'namespaced': True
             },
             'daemonsets': {
-                'api': self.kube_client.apps_v1,
+                'api': 'apps_v1',
                 'method': 'delete_namespaced_daemon_set',
                 'namespaced': True
             },
             'statefulsets': {
-                'api': self.kube_client.apps_v1,
+                'api': 'apps_v1',
                 'method': 'delete_namespaced_stateful_set',
                 'namespaced': True
             },
 
             # Networking v1 resources
             'ingresses': {
-                'api': self.kube_client.networking_v1,
+                'api': 'networking_v1',
                 'method': 'delete_namespaced_ingress',
                 'namespaced': True
             },
             'networkpolicies': {
-                'api': self.kube_client.networking_v1,
+                'api': 'networking_v1',
                 'method': 'delete_namespaced_network_policy',
                 'namespaced': True
             },
             'ingressclasses': {
-                'api': self.kube_client.networking_v1,
+                'api': 'networking_v1',
                 'method': 'delete_ingress_class',
                 'namespaced': False
             },
 
             # Storage v1 resources
             'storageclasses': {
-                'api': self.kube_client.storage_v1,
+                'api': 'storage_v1',
                 'method': 'delete_storage_class',
                 'namespaced': False
             },
 
             # Batch v1 resources
             'jobs': {
-                'api': self.kube_client.batch_v1,
+                'api': 'batch_v1',
                 'method': 'delete_namespaced_job',
                 'namespaced': True
             },
             'cronjobs': {
-                'api': self.kube_client.batch_v1,
+                'api': 'batch_v1',
                 'method': 'delete_namespaced_cron_job',
                 'namespaced': True
             },
 
             # RBAC v1 resources
             'roles': {
-                'api': self.kube_client.rbac_v1,
+                'api': 'rbac_v1',
                 'method': 'delete_namespaced_role',
                 'namespaced': True
             },
             'rolebindings': {
-                'api': self.kube_client.rbac_v1,
+                'api': 'rbac_v1',
                 'method': 'delete_namespaced_role_binding',
                 'namespaced': True
             },
             'clusterroles': {
-                'api': self.kube_client.rbac_v1,
+                'api': 'rbac_v1',
                 'method': 'delete_cluster_role',
                 'namespaced': False
             },
             'clusterrolebindings': {
-                'api': self.kube_client.rbac_v1,
+                'api': 'rbac_v1',
                 'method': 'delete_cluster_role_binding',
                 'namespaced': False
             },
 
             # Policy v1 resources
             'poddisruptionbudgets': {
-                'api': self.kube_client.policy_v1,
+                'api': 'policy_v1',
                 'method': 'delete_namespaced_pod_disruption_budget',
                 'namespaced': True
             },
 
             # Autoscaling v1/v2 resources
             'horizontalpodautoscalers': {
-                'api': self.kube_client.autoscaling_v1,
+                'api': 'autoscaling_v1',
                 'method': 'delete_namespaced_horizontal_pod_autoscaler',
                 'namespaced': True
             },
 
             # Custom Resources
             'customresourcedefinitions': {
-                'api': self.kube_client.apiextensions_v1,
+                'api': 'apiextensions_v1',
                 'method': 'delete_custom_resource_definition',
                 'namespaced': False
             }
@@ -245,8 +254,9 @@ class KubernetesResourceDeleteService:
                     execution_time_ms=(time.time() - start_time) * 1000
                 )
 
-            # Execute delete operation
-            api_client = delete_config['api']
+            # Execute delete operation - resolve the current API client at call
+            # time so a context switch cannot route deletes to a stale cluster
+            api_client = getattr(self.kube_client, delete_config['api'])
             delete_method = getattr(api_client, delete_config['method'])
 
             # Create delete options
