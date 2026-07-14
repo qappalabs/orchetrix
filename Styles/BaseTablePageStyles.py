@@ -31,9 +31,9 @@ def get_table_style():
     """Theme-aware table style for resource pages"""
     theme = _get_theme()
     # Get selection/hover colors from theme with fallbacks
-    selection_bg = getattr(theme.colors, 'SELECTED_BG', 'rgba(255, 87, 51, 0.18)')
-    hover_highlight = getattr(theme.colors, 'HOVER_HIGHLIGHT', 'rgba(255, 87, 51, 0.08)')
-    selection_hover = getattr(theme.colors, 'SELECTION_HOVER', 'rgba(255, 87, 51, 0.25)')
+    selection_bg = getattr(theme.colors, 'SELECTED_BG', 'rgba(255, 87, 51, 46)')
+    hover_highlight = getattr(theme.colors, 'HOVER_HIGHLIGHT', 'rgba(255, 87, 51, 20)')
+    selection_hover = getattr(theme.colors, 'SELECTION_HOVER', 'rgba(255, 87, 51, 64)')
     accent_orange = getattr(theme.colors, 'ACCENT_ORANGE', '#FF5733')
     
     return f"""
@@ -92,13 +92,12 @@ def get_table_header_style():
             padding: 10px 16px;
             border: none;
             font-size: 14px;
-            text-align: center;
             font-weight: 600;
             letter-spacing: 0.5px;
         }}
 
         QHeaderView::section:hover {{
-            background-color: rgba(255, 255, 255, 0.1);
+            background-color: #1AFFFFFF;
         }}
 
         /* Completely hide default sort indicators */
@@ -151,11 +150,9 @@ def get_count_style():
 
 def get_checkbox_style():
     """Theme-aware checkbox style with icon paths from current theme folder"""
-    from UI.Icons import Icons
+    from UI.Icons import resource_path
 
-    # Get current theme and load theme-specific icon paths
-    theme_name = get_theme_manager().get_current_theme_name() or "Dark"
-    white_checkmark = Icons.get_theme_icon_path("checkmark_white.svg", theme_name)
+    white_checkmark = resource_path("Icons/checkmark_white.svg").replace(os.sep, '/')
 
     # Use Accent Orange for the border and checked background
     theme = get_theme_manager().get_current_theme()

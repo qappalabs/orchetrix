@@ -56,21 +56,21 @@ class AppColors:
     TABLE_HEADER = "#E65C00"  # Table header background (uses accent orange)
 
     # Hover states
-    HOVER_BG = "rgba(255, 255, 255, 0.1)"
-    HOVER_BG_DARKER = "rgba(255, 255, 255, 0.05)"
-    SELECTED_BG = "rgba(255, 140, 50, 0.15)"  # Selected background (orange tint from ACCENT_ORANGE)
-    HOVER_HIGHLIGHT = "rgba(255, 140, 50, 0.08)"  # Table row hover 
-    SELECTION_HOVER = "rgba(255, 140, 50, 0.22)"  # Selected+hovered row (deeper orange)
+    HOVER_BG = "rgba(255, 255, 255, 26)"
+    HOVER_BG_DARKER = "rgba(255, 255, 255, 13)"
+    SELECTED_BG = "rgba(255, 140, 50, 38)"  # Selected background (orange tint from ACCENT_ORANGE)
+    HOVER_HIGHLIGHT = "rgba(255, 140, 50, 20)"  # Table row hover 
+    SELECTION_HOVER = "rgba(255, 140, 50, 56)"  # Selected+hovered row (deeper orange)
     SIDEBAR_ACTIVE_BG = HOVER_BG  # Alias - dark theme keeps existing behavior
     SIDEBAR_ACTIVE_TEXT = ACCENT_ORANGE  # Sidebar active text (uses accent orange)
     SIDEBAR_HOVER_BG = HOVER_BG  # Alias - dark theme hover stays the same
-    DANGER_HOVER_BG = "rgba(255, 68, 68, 0.1)"
+    DANGER_HOVER_BG = "rgba(255, 68, 68, 26)"
     DANGER_PRESSED_BG = "#C41019"  # Darker red for pressed state
     SUCCESS_HOVER_BG = "#43A047"  # Darker green for hover state
     SUCCESS_PRESSED_BG = "#388E3C"  # Even darker green for pressed state
 
     # Overlay colors
-    OVERLAY_BG_COLOR = "rgba(0, 0, 0, 0.7)"
+    OVERLAY_BG_COLOR = "rgba(0, 0, 0, 179)"
     OVERLAY_TEXT_COLOR = TEXT_LIGHT
 
     # Status colors
@@ -166,17 +166,17 @@ class AppStyles:
 
     CLUSTER_DISABLED_BTN_STYLE = """
         QPushButton {
-            background-color: rgba(42, 42, 42, 0.6);
-            color: rgba(102, 102, 102, 0.6);
-            border: 1px solid rgba(68, 68, 68, 0.6);
+            background-color: rgba(42, 42, 42, 153);
+            color: rgba(102, 102, 102, 153);
+            border: 1px solid rgba(68, 68, 68, 153);
             border-radius: 4px;
             padding: 8px 16px;
             font-weight: normal;
         }
         QPushButton:disabled {
-            background-color: rgba(42, 42, 42, 0.5);
-            color: rgba(85, 85, 85, 0.5);
-            border: 1px solid rgba(51, 51, 51, 0.5);
+            background-color: rgba(42, 42, 42, 128);
+            color: rgba(85, 85, 85, 128);
+            border: 1px solid rgba(51, 51, 51, 128);
         }
     """
 
@@ -481,7 +481,7 @@ class AppStyles:
             gridline-color: transparent;
             outline: none;
             color: {AppColors.TEXT_TABLE};
-            selection-background-color: rgba(53, 132, 228, 0.15);
+            selection-background-color: rgba(53, 132, 228, 38);
             alternate-background-color: transparent;
         }}
         
@@ -494,17 +494,17 @@ class AppStyles:
         }}
         
         QTableWidget::item:hover {{
-            background-color: rgba(53, 132, 228, 0.10);
+            background-color: rgba(53, 132, 228, 26);
         }}
         
         QTableWidget::item:selected {{
-            background-color: rgba(53, 132, 228, 0.15);
+            background-color: rgba(53, 132, 228, 38);
             color: {AppColors.TEXT_LIGHT};
             border: none;
         }}
         
         QTableWidget::item:selected:hover {{
-            background-color: rgba(53, 132, 228, 0.20);
+            background-color: rgba(53, 132, 228, 51);
         }}
         
         QHeaderView::section {{
@@ -521,7 +521,7 @@ class AppStyles:
         }}
         
         QHeaderView::section:hover {{
-            background-color: rgba(255, 255, 255, 0.05);
+            background-color: rgba(255, 255, 255, 13);
         }}
         
         QHeaderView::down-arrow, QHeaderView::up-arrow {{
@@ -774,7 +774,7 @@ class AppStyles:
         }}
         
         QHeaderView::section:hover {{
-            background-color: rgba(255, 255, 255, 0.05) !important;
+            background-color: rgba(255, 255, 255, 13) !important;
         }}
         
         /* Custom sort indicator positioning */
@@ -1192,7 +1192,7 @@ class AppStyles:
 
     # Terminal resize handle style
     TERMINAL_RESIZE_HANDLE = """
-        background-color: rgba(80, 80, 80, 0.3);
+        background-color: rgba(80, 80, 80, 76);
         border: none;
     """
 
@@ -1372,15 +1372,15 @@ class AppStyles:
             font-size: 14px;
         }}
         QMenu::item:selected {{
-            background-color: rgba(33, 150, 243, 0.15);
+            background-color: rgba(33, 150, 243, 38);
         }}
         QMenu::item[under_development="true"] {{
         color: #FF9500 !important;
-        background-color: rgba(255, 149, 0, 0.15) !important;
+        background-color: rgba(255, 149, 0, 38) !important;
         }}
         QMenu::item[under_development="true"]:hover {{
         color: #FF9500 !important;
-        background-color: rgba(255, 149, 0, 0.25) !important;
+        background-color: rgba(255, 149, 0, 64) !important;
         }}
         QMenu::separator {{
             height: 1px;
@@ -1395,7 +1395,7 @@ class AppStyles:
             border-top: none;
         }}
         QToolButton:hover {{
-            background-color: rgba(255, 255, 255, 0.1);
+            background-color: rgba(255, 255, 255, 26);
         }}
     """
 

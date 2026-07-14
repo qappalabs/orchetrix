@@ -1078,8 +1078,9 @@ class DetailPageDetailsSection(BaseDetailSection):
         base_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
         icon_path = os.path.join(base_path, "Icons", "container-images.svg")
 
+        icon_label = QLabel()
+
         if os.path.exists(icon_path):
-             icon_label = QLabel()
              icon_label.setPixmap(self._render_svg_icon(icon_path, BaseDetailSectionStyles.get_section_header_color(), size=18))
              header_layout.addWidget(icon_label)
 

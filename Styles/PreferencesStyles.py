@@ -3,6 +3,7 @@ Preferences-specific styles with theme-aware support.
 Contains styles for the Preferences/Settings page including cards, inputs,
 toggle switches, dropdowns, radio groups, sidebar nav, and scroll areas.
 """
+from PyQt6.QtGui import QColor
 from UI.ThemeManager import get_theme_manager
 
 def _get_theme():
@@ -107,7 +108,6 @@ def get_description_style():
             color: {theme.colors.TEXT_SUBTLE};
             font-size: 13px;
             padding: 8px 0px 0px 0px;
-            line-height: 1.6;
         }}
     """
 
@@ -146,8 +146,9 @@ def get_input_style():
 def get_dropdown_style():
     theme = _get_theme()
     accent = getattr(theme.colors, 'ACCENT_ORANGE', '#FF5733')
-    accent_light = f"rgba(255, 107, 53, 0.12)"
-    accent_selected = f"rgba(255, 107, 53, 0.18)"
+    _qc = QColor(accent)
+    accent_light = f"rgba({_qc.red()}, {_qc.green()}, {_qc.blue()}, 31)"
+    accent_selected = f"rgba({_qc.red()}, {_qc.green()}, {_qc.blue()}, 46)"
     return f"""
         QComboBox {{
             background-color: {theme.colors.BG_DARK};
@@ -262,6 +263,7 @@ def get_button_primary_style():
     """Primary button uses ACCENT_ORANGE per the design reference"""
     theme = _get_theme()
     accent = getattr(theme.colors, 'ACCENT_ORANGE', '#FF5733')
+    _qc = QColor(accent)
     return f"""
         QPushButton {{
             background-color: {accent};
@@ -273,10 +275,10 @@ def get_button_primary_style():
             font-weight: 600;
         }}
         QPushButton:hover {{
-            background-color: #ff8555;
+            background-color: {_qc.lighter(130).name()};
         }}
         QPushButton:pressed {{
-            background-color: #e55a2a;
+            background-color: {_qc.darker(115).name()};
         }}
     """
 

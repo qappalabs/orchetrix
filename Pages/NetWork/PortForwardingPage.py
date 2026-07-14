@@ -16,7 +16,8 @@ from functools import partial
 import time
 import logging
 import webbrowser
-from UI.Icons import resource_path
+from UI.Icons import Icons
+from UI.ThemeManager import get_theme_manager
 
 
 
@@ -203,7 +204,6 @@ class PortForwardingPage(BaseResourcePage):
                     'local_port': getattr(config, 'local_port', 0),
                     'target_port': getattr(config, 'target_port', 0),
                     'protocol': getattr(config, 'protocol', 'TCP'),
-                    'bind_address': getattr(config, 'bind_address', 'localhost'),
                     'status': getattr(config, 'status', 'unknown'),
                     'created_at': getattr(config, 'created_at', 0),
                     'error_message': getattr(config, 'error_message', ''),
@@ -365,45 +365,64 @@ class PortForwardingPage(BaseResourcePage):
         if resource:
             # Clear existing actions to rebuild with port forward specific actions
             menu.clear()
-            
+            theme_name = get_theme_manager().get_current_theme_name() or "Dark"
+
             # Add port forward specific actions based on status
             if resource['status'] == 'active':
                 # Active port forward actions
                 open_browser_action = menu.addAction("Open in Browser")
-                open_browser_action.setIcon(QIcon(resource_path("Icons/web.png")))
+                try:
+                    open_browser_action.setIcon(Icons.get_theme_icon_by_id("web", theme_name))
+                except Exception:
+                    pass
                 open_browser_action.triggered.connect(
                     partial(self._handle_action, "Open in Browser", row)
                 )
                 
                 copy_url_action = menu.addAction("Copy URL")
-                copy_url_action.setIcon(QIcon(resource_path("Icons/copy.png")))
+                try:
+                    copy_url_action.setIcon(Icons.get_theme_icon_by_id("copy", theme_name))
+                except Exception:
+                    pass
                 copy_url_action.triggered.connect(
                     partial(self._handle_action, "Copy URL", row)
                 )
                 
                 restart_action = menu.addAction("Restart")
-                restart_action.setIcon(QIcon(resource_path("Icons/refresh.png")))
+                try:
+                    restart_action.setIcon(Icons.get_theme_icon_by_id("refresh", theme_name))
+                except Exception:
+                    pass
                 restart_action.triggered.connect(
                     partial(self._handle_action, "Restart", row)
                 )
             elif resource['status'] in ['inactive', 'error']:
                 # Inactive/error port forward actions
                 restart_action = menu.addAction("Restart")
-                restart_action.setIcon(QIcon(resource_path("Icons/refresh.png")))
+                try:
+                    restart_action.setIcon(Icons.get_theme_icon_by_id("refresh", theme_name))
+                except Exception:
+                    pass
                 restart_action.triggered.connect(
                     partial(self._handle_action, "Restart", row)
                 )
 
             # Add common actions
             stop_action = menu.addAction("Stop")
-            stop_action.setIcon(QIcon(resource_path("Icons/stop.png")))
+            try:
+                stop_action.setIcon(Icons.get_theme_icon_by_id("stop", theme_name))
+            except Exception:
+                pass
             stop_action.setProperty("dangerous", True)
             stop_action.triggered.connect(
                 partial(self._handle_action, "Stop", row)
             )
             
             delete_action = menu.addAction("Delete")
-            delete_action.setIcon(QIcon(resource_path("Icons/delete.png")))
+            try:
+                delete_action.setIcon(Icons.get_theme_icon_by_id("delete", theme_name))
+            except Exception:
+                pass
             delete_action.setProperty("dangerous", True)
             delete_action.triggered.connect(
                 partial(self._handle_action, "Delete", row)
@@ -474,8 +493,7 @@ class PortForwardingPage(BaseResourcePage):
                 namespace=resource['namespace'],
                 target_port=resource['target_port'],
                 local_port=resource['local_port'],
-                protocol=resource['protocol'],
-                bind_address=resource.get('bind_address', 'localhost')
+                protocol=resource['protocol']
             )
         except Exception as e:
             QMessageBox.critical(self, "Restart Error", f"Failed to recreate port forward: {str(e)}")

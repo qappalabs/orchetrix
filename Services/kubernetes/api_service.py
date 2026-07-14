@@ -348,77 +348,77 @@ class KubernetesAPIService:
             # Map resource types to specific deletion methods
             # Namespaced resources
             if resource_type == "pods":
-                api_client.delete_namespaced_pod(name=name, namespace=namespace, body=delete_options)
+                api_client.delete_namespaced_pod(name=name, namespace=namespace, body=delete_options, _request_timeout=APIClientConfig.REQUEST_TIMEOUT)
             elif resource_type == "services":
-                api_client.delete_namespaced_service(name=name, namespace=namespace, body=delete_options)
+                api_client.delete_namespaced_service(name=name, namespace=namespace, body=delete_options, _request_timeout=APIClientConfig.REQUEST_TIMEOUT)
             elif resource_type == "deployments":
-                api_client.delete_namespaced_deployment(name=name, namespace=namespace, body=delete_options)
+                api_client.delete_namespaced_deployment(name=name, namespace=namespace, body=delete_options, _request_timeout=APIClientConfig.REQUEST_TIMEOUT)
             elif resource_type == "configmaps":
-                api_client.delete_namespaced_config_map(name=name, namespace=namespace, body=delete_options)
+                api_client.delete_namespaced_config_map(name=name, namespace=namespace, body=delete_options, _request_timeout=APIClientConfig.REQUEST_TIMEOUT)
             elif resource_type == "secrets":
-                api_client.delete_namespaced_secret(name=name, namespace=namespace, body=delete_options)
+                api_client.delete_namespaced_secret(name=name, namespace=namespace, body=delete_options, _request_timeout=APIClientConfig.REQUEST_TIMEOUT)
             elif resource_type == "persistentvolumeclaims":
-                api_client.delete_namespaced_persistent_volume_claim(name=name, namespace=namespace, body=delete_options)
+                api_client.delete_namespaced_persistent_volume_claim(name=name, namespace=namespace, body=delete_options, _request_timeout=APIClientConfig.REQUEST_TIMEOUT)
             elif resource_type == "ingresses":
-                api_client.delete_namespaced_ingress(name=name, namespace=namespace, body=delete_options)
+                api_client.delete_namespaced_ingress(name=name, namespace=namespace, body=delete_options, _request_timeout=APIClientConfig.REQUEST_TIMEOUT)
             elif resource_type == "daemonsets":
-                api_client.delete_namespaced_daemon_set(name=name, namespace=namespace, body=delete_options)
+                api_client.delete_namespaced_daemon_set(name=name, namespace=namespace, body=delete_options, _request_timeout=APIClientConfig.REQUEST_TIMEOUT)
             elif resource_type == "statefulsets":
-                api_client.delete_namespaced_stateful_set(name=name, namespace=namespace, body=delete_options)
+                api_client.delete_namespaced_stateful_set(name=name, namespace=namespace, body=delete_options, _request_timeout=APIClientConfig.REQUEST_TIMEOUT)
             elif resource_type == "replicasets":
-                api_client.delete_namespaced_replica_set(name=name, namespace=namespace, body=delete_options)
+                api_client.delete_namespaced_replica_set(name=name, namespace=namespace, body=delete_options, _request_timeout=APIClientConfig.REQUEST_TIMEOUT)
             elif resource_type == "jobs":
-                api_client.delete_namespaced_job(name=name, namespace=namespace, body=delete_options)
+                api_client.delete_namespaced_job(name=name, namespace=namespace, body=delete_options, _request_timeout=APIClientConfig.REQUEST_TIMEOUT)
             elif resource_type == "cronjobs":
-                api_client.delete_namespaced_cron_job(name=name, namespace=namespace, body=delete_options)
+                api_client.delete_namespaced_cron_job(name=name, namespace=namespace, body=delete_options, _request_timeout=APIClientConfig.REQUEST_TIMEOUT)
             elif resource_type == "roles":
-                api_client.delete_namespaced_role(name=name, namespace=namespace, body=delete_options)
+                api_client.delete_namespaced_role(name=name, namespace=namespace, body=delete_options, _request_timeout=APIClientConfig.REQUEST_TIMEOUT)
             elif resource_type == "rolebindings":
-                api_client.delete_namespaced_role_binding(name=name, namespace=namespace, body=delete_options)
+                api_client.delete_namespaced_role_binding(name=name, namespace=namespace, body=delete_options, _request_timeout=APIClientConfig.REQUEST_TIMEOUT)
             elif resource_type == "serviceaccounts":
-                api_client.delete_namespaced_service_account(name=name, namespace=namespace, body=delete_options)
+                api_client.delete_namespaced_service_account(name=name, namespace=namespace, body=delete_options, _request_timeout=APIClientConfig.REQUEST_TIMEOUT)
             elif resource_type == "networkpolicies":
-                api_client.delete_namespaced_network_policy(name=name, namespace=namespace, body=delete_options)
+                api_client.delete_namespaced_network_policy(name=name, namespace=namespace, body=delete_options, _request_timeout=APIClientConfig.REQUEST_TIMEOUT)
             elif resource_type == "endpoints":
-                api_client.delete_namespaced_endpoints(name=name, namespace=namespace, body=delete_options)
+                api_client.delete_namespaced_endpoints(name=name, namespace=namespace, body=delete_options, _request_timeout=APIClientConfig.REQUEST_TIMEOUT)
             elif resource_type == "resourcequotas":
-                api_client.delete_namespaced_resource_quota(name=name, namespace=namespace, body=delete_options)
+                api_client.delete_namespaced_resource_quota(name=name, namespace=namespace, body=delete_options, _request_timeout=APIClientConfig.REQUEST_TIMEOUT)
             elif resource_type == "limitranges":
-                api_client.delete_namespaced_limit_range(name=name, namespace=namespace, body=delete_options)
+                api_client.delete_namespaced_limit_range(name=name, namespace=namespace, body=delete_options, _request_timeout=APIClientConfig.REQUEST_TIMEOUT)
             elif resource_type == "horizontalpodautoscalers":
-                api_client.delete_namespaced_horizontal_pod_autoscaler(name=name, namespace=namespace, body=delete_options)
+                api_client.delete_namespaced_horizontal_pod_autoscaler(name=name, namespace=namespace, body=delete_options, _request_timeout=APIClientConfig.REQUEST_TIMEOUT)
             elif resource_type == "poddisruptionbudgets":
-                api_client.delete_namespaced_pod_disruption_budget(name=name, namespace=namespace, body=delete_options)
+                api_client.delete_namespaced_pod_disruption_budget(name=name, namespace=namespace, body=delete_options, _request_timeout=APIClientConfig.REQUEST_TIMEOUT)
             elif resource_type == "events":
-                api_client.delete_namespaced_event(name=name, namespace=namespace, body=delete_options)
+                api_client.delete_namespaced_event(name=name, namespace=namespace, body=delete_options, _request_timeout=APIClientConfig.REQUEST_TIMEOUT)
             elif resource_type == "leases":
-                api_client.delete_namespaced_lease(name=name, namespace=namespace, body=delete_options)
-            
+                api_client.delete_namespaced_lease(name=name, namespace=namespace, body=delete_options, _request_timeout=APIClientConfig.REQUEST_TIMEOUT)
+
             # Cluster-wide resources
             elif resource_type == "namespaces":
-                api_client.delete_namespace(name=name, body=delete_options)
+                api_client.delete_namespace(name=name, body=delete_options, _request_timeout=APIClientConfig.REQUEST_TIMEOUT)
             elif resource_type == "nodes":
-                api_client.delete_node(name=name, body=delete_options)
+                api_client.delete_node(name=name, body=delete_options, _request_timeout=APIClientConfig.REQUEST_TIMEOUT)
             elif resource_type == "persistentvolumes":
-                api_client.delete_persistent_volume(name=name, body=delete_options)
+                api_client.delete_persistent_volume(name=name, body=delete_options, _request_timeout=APIClientConfig.REQUEST_TIMEOUT)
             elif resource_type == "clusterroles":
-                api_client.delete_cluster_role(name=name, body=delete_options)
+                api_client.delete_cluster_role(name=name, body=delete_options, _request_timeout=APIClientConfig.REQUEST_TIMEOUT)
             elif resource_type == "clusterrolebindings":
-                api_client.delete_cluster_role_binding(name=name, body=delete_options)
+                api_client.delete_cluster_role_binding(name=name, body=delete_options, _request_timeout=APIClientConfig.REQUEST_TIMEOUT)
             elif resource_type == "storageclasses":
-                api_client.delete_storage_class(name=name, body=delete_options)
+                api_client.delete_storage_class(name=name, body=delete_options, _request_timeout=APIClientConfig.REQUEST_TIMEOUT)
             elif resource_type == "ingressclasses":
-                api_client.delete_ingress_class(name=name, body=delete_options)
+                api_client.delete_ingress_class(name=name, body=delete_options, _request_timeout=APIClientConfig.REQUEST_TIMEOUT)
             elif resource_type == "customresourcedefinitions":
-                api_client.delete_custom_resource_definition(name=name, body=delete_options)
+                api_client.delete_custom_resource_definition(name=name, body=delete_options, _request_timeout=APIClientConfig.REQUEST_TIMEOUT)
             elif resource_type == "validatingwebhookconfigurations":
-                api_client.delete_validating_admission_webhook_configuration(name=name, body=delete_options)
+                api_client.delete_validating_admission_webhook_configuration(name=name, body=delete_options, _request_timeout=APIClientConfig.REQUEST_TIMEOUT)
             elif resource_type == "mutatingwebhookconfigurations":
-                api_client.delete_mutating_admission_webhook_configuration(name=name, body=delete_options)
+                api_client.delete_mutating_admission_webhook_configuration(name=name, body=delete_options, _request_timeout=APIClientConfig.REQUEST_TIMEOUT)
             elif resource_type == "priorityclasses":
-                api_client.delete_priority_class(name=name, body=delete_options)
+                api_client.delete_priority_class(name=name, body=delete_options, _request_timeout=APIClientConfig.REQUEST_TIMEOUT)
             elif resource_type == "runtimeclasses":
-                api_client.delete_runtime_class(name=name, body=delete_options)
+                api_client.delete_runtime_class(name=name, body=delete_options, _request_timeout=APIClientConfig.REQUEST_TIMEOUT)
             else:
                 logging.error(f"Deletion logic not implemented for resource type: {resource_type}")
                 raise ValueError(f"Unsupported resource type for deletion: {resource_type}")

@@ -23,21 +23,22 @@ def _memory_to_bytes(value):
 
 
 class _PodLookupSignals(QObject):
-    result_ready = pyqtSignal(dict)  # {(namespace, claim_name): [pod_name, ...]}
+    result_ready = pyqtSignal(int, dict)  # (generation, {(namespace, claim_name): [pod_name, ...]})
 
 
 class _PodLookupWorker(QRunnable):
-    def __init__(self, kube_client, namespace_filter):
+    def __init__(self, kube_client, namespace_filter, generation):
         super().__init__()
         self.kube_client = kube_client
         self.namespace_filter = namespace_filter
+        self.generation = generation
         self.signals = _PodLookupSignals()
 
     def run(self):
         result = {}
         try:
             if not self.kube_client:
-                self.signals.result_ready.emit(result)
+                self.signals.result_ready.emit(self.generation, result)
                 return
 
             ns = self.namespace_filter
@@ -64,7 +65,7 @@ class _PodLookupWorker(QRunnable):
             import logging
             logging.debug(f"PodLookupWorker failed: {e}")
         finally:
-            self.signals.result_ready.emit(result)
+            self.signals.result_ready.emit(self.generation, result)
 
 
 class PersistentVolumeClaimsPage(BaseResourcePage):
@@ -77,6 +78,7 @@ class PersistentVolumeClaimsPage(BaseResourcePage):
         self.resource_type = "persistentvolumeclaims"  # Set resource type for kubectl
         self._thread_pool = QThreadPool.globalInstance()
         self._pvc_pods_map = {}
+        self._pod_lookup_gen = 0
         self.setup_page_ui()
 
     def setup_page_ui(self):
@@ -278,14 +280,17 @@ class PersistentVolumeClaimsPage(BaseResourcePage):
             return
         v1_client = getattr(kube_client, "v1", None)
         namespace_filter = getattr(self, "namespace_filter", "All Namespaces")
-        worker = _PodLookupWorker(v1_client, namespace_filter)
+        self._pod_lookup_gen += 1
+        worker = _PodLookupWorker(v1_client, namespace_filter, self._pod_lookup_gen)
         worker.signals.result_ready.connect(self._on_pod_lookup_ready)
         self._thread_pool.start(worker)
 
-    def _on_pod_lookup_ready(self, pvc_to_pods):
+    def _on_pod_lookup_ready(self, generation, pvc_to_pods):
         # Guard against the page/table being torn down while the lookup was
         # in flight (worker runs on the thread pool and can finish late).
         if sip.isdeleted(self) or not getattr(self, "table", None) or sip.isdeleted(self.table):
+            return
+        if generation != self._pod_lookup_gen:
             return
         self._pvc_pods_map = pvc_to_pods or {}
 

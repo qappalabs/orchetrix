@@ -4,11 +4,11 @@ Contains styles that are unique to OverviewPage and defined inline in the page.
 """
 
 from UI.Styles import AppStyles
+from UI.ThemeManager import get_theme_manager
 
 
 def _get_theme():
     """Get current theme"""
-    from UI.ThemeManager import get_theme_manager
     return get_theme_manager().get_current_theme()
 
 

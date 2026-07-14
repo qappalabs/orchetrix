@@ -181,7 +181,7 @@ ACTION_CONTAINER_INACTIVE_STYLE = """
 # Active action container style (hardcoded fallback; prefer get_action_container_active_style() for full theme-awareness)
 ACTION_CONTAINER_ACTIVE_STYLE = """
     QWidget {
-        background-color: rgba(0, 149, 255, 0.08);
+        background-color: rgba(0, 149, 255, 20);
         border-radius: 4px;
     }
 """
@@ -190,13 +190,13 @@ ACTION_CONTAINER_ACTIVE_STYLE = """
 def get_action_container_active_style():
     theme = get_theme_manager().get_current_theme()
 
-    # Convert hex accent color to rgba with 0.08 alpha (matching original opacity)
+    # Convert hex accent color to rgba with alpha 20 (~8% opacity, matching original)
     # ACCENT_BLUE is typically "#0095FF" -> rgb(0, 149, 255)
     r, g, b = _parse_hex_color(theme.colors.ACCENT_BLUE, default=(0, 149, 255))
 
     return f"""
                     QWidget {{
-                        background-color: rgba({r}, {g}, {b}, 0.08);
+                        background-color: rgba({r}, {g}, {b}, 20);
                         border-radius: 4px;
                     }}
                 """

@@ -775,7 +775,7 @@ class BaseTablePage(ThemeAwareMixin, QWidget):
 
         try:
             theme = get_theme_manager().get_current_theme()
-            hover_bg = getattr(theme.colors, 'HOVER_HIGHLIGHT', 'rgba(255, 87, 51, 0.08)')
+            hover_bg = getattr(theme.colors, 'HOVER_HIGHLIGHT', 'rgba(255, 87, 51, 20)')
             bg_color = QColor(hover_bg) if highlight else QColor("transparent")
 
             for col in range(self.table.columnCount()):

@@ -64,7 +64,7 @@ class _DropdownItem(QFrame):
                     border: none;
                 }
                 QToolButton:hover {
-                    background: rgba(128, 128, 128, 0.2);
+                    background: rgba(128, 128, 128, 51);
                     border-radius: 4px;
                 }
             """)
@@ -165,7 +165,7 @@ class _DropdownPopup(QWidget):
         bg = self._colors['bg']
         text_color = self._colors['text']
         border = self._colors['border']
-        hover_bg = f"rgba(255, 107, 53, 0.15)"
+        hover_bg = f"rgba(255, 107, 53, 38)"
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -302,7 +302,7 @@ class _DropdownPopup(QWidget):
         accent = self._colors['accent']
         bg = self._colors['bg']
         text_color = self._colors['text']
-        hover_bg = f"rgba(255, 107, 53, 0.15)"
+        hover_bg = f"rgba(255, 107, 53, 38)"
         
         for item_text in items:
             is_selected = (item_text == current_text)

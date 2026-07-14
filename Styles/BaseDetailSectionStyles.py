@@ -100,10 +100,10 @@ def get_error_widget_error_style():
     return f"""
         QLabel {{
             color: {theme.colors.TEXT_DANGER};
-            background-color: rgba(255, 68, 68, 0.1);
+            background-color: rgba(255, 68, 68, 26);
             padding: 10px;
             border-radius: 4px;
-            border: 1px solid rgba(255, 68, 68, 0.3);
+            border: 1px solid rgba(255, 68, 68, 76);
         }}
     """
 
@@ -114,10 +114,10 @@ def get_error_widget_info_style():
     return f"""
         QLabel {{
             color: {theme.colors.TEXT_SUBTLE};
-            background-color: rgba(136, 136, 136, 0.1);
+            background-color: rgba(136, 136, 136, 26);
             padding: 10px;
             border-radius: 4px;
-            border: 1px solid rgba(136, 136, 136, 0.3);
+            border: 1px solid rgba(136, 136, 136, 76);
         }}
     """
 

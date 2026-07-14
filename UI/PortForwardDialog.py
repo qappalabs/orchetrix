@@ -225,8 +225,8 @@ class PortForwardDialog(ThemeAwareMixin, QDialog):
         icon_badge = QFrame()
         icon_badge.setFixedSize(36, 36)
         icon_badge.setStyleSheet(
-            "QFrame { background-color: rgba(250,114,56,0.10); "
-            "border-radius: 8px; border: 1px solid rgba(250,114,56,0.45); }"
+            "QFrame { background-color: rgba(250, 114, 56, 26); "
+            "border-radius: 8px; border: 1px solid rgba(250, 114, 56, 115); }"
         )
         badge_layout = QHBoxLayout(icon_badge)
         badge_layout.setContentsMargins(0, 0, 0, 0)
@@ -296,7 +296,7 @@ class PortForwardDialog(ThemeAwareMixin, QDialog):
         badge = QFrame()
         badge.setFixedSize(22, 22)
         badge.setStyleSheet(
-            "QFrame { background-color: rgba(250,114,56,0.10); "
+            "QFrame { background-color: rgba(250, 114, 56, 26); "
             "border-radius: 5px; border: none; }"
         )
         b_layout = QHBoxLayout(badge)
@@ -539,7 +539,7 @@ class PortForwardDialog(ThemeAwareMixin, QDialog):
             f"QSpinBox {{"
             f"  background: transparent;"
             f"  color: {c.TEXT_LIGHT};"
-            f"  border: 1px solid rgba(148,163,184,0.40);"
+            f"  border: 1px solid rgba(148, 163, 184, 102);"
             f"  border-radius: 8px;"
             f"  padding: 6px 10px;"
             f"  font-size: 13px;"
@@ -560,7 +560,7 @@ class PortForwardDialog(ThemeAwareMixin, QDialog):
             f"QSpinBox {{"
             f"  background: transparent;"
             f"  color: {c.TEXT_LIGHT};"
-            f"  border: 1px solid rgba(148,163,184,0.40);"
+            f"  border: 1px solid rgba(148, 163, 184, 102);"
             f"  border-radius: 8px;"
             f"  padding: 6px 28px 6px 10px;"
             f"  font-size: 13px;"
@@ -615,9 +615,9 @@ class PortForwardDialog(ThemeAwareMixin, QDialog):
             if pv == self._selected_protocol:
                 btn.setStyleSheet(
                     "QPushButton {"
-                    "  background-color: rgba(250,114,56,0.12);"
+                    "  background-color: rgba(250, 114, 56, 31);"
                     "  color: #fa7238;"
-                    "  border: 1px solid rgba(250,114,56,0.55);"
+                    "  border: 1px solid rgba(250, 114, 56, 140);"
                     "  border-radius: 8px;"
                     "  font-size: 13px; font-weight: 600;"
                     "}"
@@ -627,12 +627,12 @@ class PortForwardDialog(ThemeAwareMixin, QDialog):
                     f"QPushButton {{"
                     f"  background-color: transparent;"
                     f"  color: {text_color};"
-                    f"  border: 1px solid rgba(148,163,184,0.40);"
+                    f"  border: 1px solid rgba(148, 163, 184, 102);"
                     f"  border-radius: 8px;"
                     f"  font-size: 13px; font-weight: normal;"
                     f"}}"
                     f"QPushButton:hover {{"
-                    f"  border: 1px solid rgba(250,114,56,0.60);"
+                    f"  border: 1px solid rgba(250, 114, 56, 153);"
                     f"}}"
                 )
 
@@ -663,7 +663,7 @@ class PortForwardDialog(ThemeAwareMixin, QDialog):
         bind_row.setStyleSheet(
             "QWidget {"
             "  background: transparent;"
-            "  border: 1px solid rgba(148,163,184,0.40);"
+            "  border: 1px solid rgba(148, 163, 184, 102);"
             "  border-radius: 8px;"
             "}"
         )
@@ -721,7 +721,7 @@ class PortForwardDialog(ThemeAwareMixin, QDialog):
         layout.addWidget(self._create_section_header("eye.svg", "Configuration Preview"))
 
         colors = get_theme_manager().get_current_theme().colors
-        b = "rgba(148,163,184,0.30)"
+        b = "rgba(148, 163, 184, 76)"
         
         self.preview_frame = QFrame()
         # Outer card styling
@@ -755,7 +755,7 @@ class PortForwardDialog(ThemeAwareMixin, QDialog):
             circle = QWidget()
             circle.setFixedSize(28, 28)
             circle.setStyleSheet(
-                f"border: 1px solid rgba(148,163,184,0.30);"
+                f"border: 1px solid rgba(148, 163, 184, 76);"
                 f"border-radius: 10px;"
                 f"background: transparent;"
             )
@@ -839,7 +839,7 @@ class PortForwardDialog(ThemeAwareMixin, QDialog):
         
         self.preview_protocol = QLabel()
         self.preview_protocol.setStyleSheet(
-            f"background-color: rgba(0, 149, 255, 0.15);"
+            f"background-color: rgba(0, 149, 255, 38);"
             f"color: {colors.ACCENT_BLUE};"
             f"border-radius: 8px;"
             f"padding: 2px 8px;"
@@ -872,7 +872,7 @@ class PortForwardDialog(ThemeAwareMixin, QDialog):
         status_l.setContentsMargins(8, 2, 8, 2)
         status_l.setSpacing(4)
         self.preview_status_w.setStyleSheet(
-            f"background-color: rgba(76, 175, 80, 0.15);"
+            f"background-color: rgba(76, 175, 80, 38);"
             f"border-radius: 8px;"
             f"padding: 2px 8px;"
         )
@@ -903,7 +903,7 @@ class PortForwardDialog(ThemeAwareMixin, QDialog):
             w.setStyleSheet(
                 f"QWidget {{"
                 f"  background-color: transparent;"
-                f"  border: 1px solid rgba(148,163,184,0.30);"
+                f"  border: 1px solid rgba(148, 163, 184, 76);"
                 f"  border-radius: 6px;"
                 f"}}"
             )
@@ -1047,9 +1047,9 @@ class PortForwardDialog(ThemeAwareMixin, QDialog):
                 # Selected: orange fill + thin orange border
                 btn.setStyleSheet(
                     "QPushButton {"
-                    "  background-color: rgba(250,114,56,0.12);"
+                    "  background-color: rgba(250, 114, 56, 31);"
                     "  color: #fa7238;"
-                    "  border: 1px solid rgba(250,114,56,0.45);"
+                    "  border: 1px solid rgba(250, 114, 56, 115);"
                     "  border-radius: 10px;"
                     "  padding: 2px 10px;"
                     "  font-size: 12px;"
@@ -1063,7 +1063,7 @@ class PortForwardDialog(ThemeAwareMixin, QDialog):
                     f"QPushButton {{"
                     f"  background-color: transparent;"
                     f"  color: {text_color};"
-                    f"  border: 1px solid rgba(148,163,184,0.40);"
+                    f"  border: 1px solid rgba(148, 163, 184, 102);"
                     f"  border-radius: 10px;"
                     f"  padding: 2px 10px;"
                     f"  font-size: 12px;"
@@ -1071,7 +1071,7 @@ class PortForwardDialog(ThemeAwareMixin, QDialog):
                     f"}}"
                     f"QPushButton:hover {{"
                     f"  background-color: transparent;"
-                    f"  border: 1px solid rgba(250,114,56,0.60);"
+                    f"  border: 1px solid rgba(250, 114, 56, 153);"
                     f"}}"
                 )
 
@@ -1147,10 +1147,10 @@ class PortForwardDialog(ThemeAwareMixin, QDialog):
             # Dynamic Status Badge Logic
             status_text = "Ready to create"  # Or update dynamically based on your app's validation
             if "error" in status_text.lower() or status_text != "Ready to create":
-                bg_color = "rgba(239, 68, 68, 0.15)" # Red
+                bg_color = "rgba(239, 68, 68, 38)" # Red
                 fg_color = colors.ACCENT_RED
             else:
-                bg_color = "rgba(76, 175, 80, 0.15)" # Green
+                bg_color = "rgba(76, 175, 80, 38)" # Green
                 fg_color = colors.ACCENT_GREEN
                 
             self.preview_status_w.setStyleSheet(f"background-color: {bg_color}; border-radius: 8px;")
@@ -1345,7 +1345,7 @@ Automatically finds an available local port if the suggested port is already in 
                 f"  font-size: 13px;"
                 f"}}"
                 f"QPushButton:hover {{"
-                f"  background-color: rgba(250, 114, 56, 0.85);"  # Whitish dull orange
+                f"  background-color: rgba(250, 114, 56, 217);"  # Whitish dull orange
                 f"}}"
             )
         
@@ -1361,7 +1361,7 @@ Automatically finds an available local port if the suggested port is already in 
                 f"  font-size: 13px;"
                 f"}}"
                 f"QPushButton:hover {{"
-                f"  background-color: rgba(250, 114, 56, 0.10);"
+                f"  background-color: rgba(250, 114, 56, 26);"
                 f"  color: #fa7238;"
                 f"  border: 1px solid {theme.colors.BORDER_COLOR};"
                 f"}}"
@@ -1380,7 +1380,7 @@ Automatically finds an available local port if the suggested port is already in 
                 f"  border-radius: 6px;"
                 f"}}"
                 f"QPushButton:hover {{"
-                f"  background-color: rgba(250, 114, 56, 0.10);"
+                f"  background-color: rgba(250, 114, 56, 26);"
                 f"  color: #fa7238;"
                 f"}}"
             )
@@ -1407,8 +1407,8 @@ class PortForwardCard(QFrame):
         # Colors
         if has_error:
             status_color = getattr(theme.colors, 'STATUS_ERROR', '#ef4444')
-            bg_color = "rgba(239, 68, 68, 0.03)"
-            border_color = "rgba(239, 68, 68, 0.2)"
+            bg_color = "rgba(239, 68, 68, 8)"
+            border_color = "rgba(239, 68, 68, 51)"
         else:
             status_color = getattr(theme.colors, 'STATUS_SUCCESS', '#22c55e')
             bg_color = "transparent"
@@ -1422,7 +1422,7 @@ class PortForwardCard(QFrame):
                 border-radius: 8px;
             }}
             #PortForwardCard:hover {{
-                background-color: rgba(128, 128, 128, 0.05);
+                background-color: rgba(128, 128, 128, 13);
             }}
         """)
         
@@ -1456,10 +1456,10 @@ class PortForwardCard(QFrame):
         icon_bg.setFixedSize(32, 32)
         
         if has_error:
-            bg = "rgba(239, 68, 68, 0.1)"
+            bg = "rgba(239, 68, 68, 26)"
             icon_name = "alert_triangle.svg"
         else:
-            bg = "rgba(34, 197, 94, 0.1)"
+            bg = "rgba(34, 197, 94, 26)"
             icon_name = "thunder.svg"
             
         icon_bg.setStyleSheet(f"#StatusIconCard {{ background-color: {bg}; border-radius: 10px; border: none; }}")
@@ -1485,7 +1485,7 @@ class PortForwardCard(QFrame):
         # Namespace badge
         ns_badge = QFrame()
         ns_badge.setObjectName("ns_badge")
-        ns_badge.setStyleSheet(f"#ns_badge {{ background-color: rgba(128, 128, 128, 0.1); border-radius: 12px; border: none; }}")
+        ns_badge.setStyleSheet(f"#ns_badge {{ background-color: rgba(128, 128, 128, 26); border-radius: 12px; border: none; }}")
         ns_layout = QHBoxLayout(ns_badge)
         ns_layout.setContentsMargins(8, 2, 8, 2)
         ns_layout.setSpacing(4)
@@ -1507,19 +1507,19 @@ class PortForwardCard(QFrame):
         # Status Badge
         status_badge = QFrame()
         if has_error:
-            status_badge.setStyleSheet("QFrame { background-color: rgba(239, 68, 68, 0.1); border-radius: 12px; border: none; }")
+            status_badge.setStyleSheet("QFrame { background-color: rgba(239, 68, 68, 26); border-radius: 12px; border: none; }")
             s_text = "ERROR"
             curr_status_color = getattr(theme.colors, 'STATUS_ERROR', '#ef4444')
         elif self.config.status == 'inactive':
-            status_badge.setStyleSheet("QFrame { background-color: rgba(148, 163, 184, 0.1); border-radius: 12px; border: none; }")
+            status_badge.setStyleSheet("QFrame { background-color: rgba(148, 163, 184, 26); border-radius: 12px; border: none; }")
             s_text = "INACTIVE"
             curr_status_color = theme.colors.TEXT_SECONDARY
         elif self.config.status == 'starting':
-            status_badge.setStyleSheet("QFrame { background-color: rgba(250, 114, 56, 0.1); border-radius: 12px; border: none; }")
+            status_badge.setStyleSheet("QFrame { background-color: rgba(250, 114, 56, 26); border-radius: 12px; border: none; }")
             s_text = "STARTING"
             curr_status_color = theme.colors.ACCENT_ORANGE
         else:
-            status_badge.setStyleSheet("QFrame { background-color: rgba(34, 197, 94, 0.1); border-radius: 12px; border: none; }")
+            status_badge.setStyleSheet("QFrame { background-color: rgba(34, 197, 94, 26); border-radius: 12px; border: none; }")
             s_text = "ACTIVE"
             curr_status_color = getattr(theme.colors, 'STATUS_SUCCESS', '#22c55e')
             
@@ -1594,15 +1594,15 @@ class PortForwardCard(QFrame):
 
         if not has_error:
             # Link button - Blue on hover, orange-tinted background
-            btn_link = create_btn("external_link.svg", self._open_in_browser, "rgba(249, 115, 22, 0.1)", hover_icon_color="#3b82f6")
+            btn_link = create_btn("external_link.svg", self._open_in_browser, "rgba(249, 115, 22, 26)", hover_icon_color="#3b82f6")
             actions_layout.addWidget(btn_link)
             
             # Copy button - Orange on hover, orange-tinted background
-            btn_copy = create_btn("replica.svg", self._copy_to_clipboard, "rgba(249, 115, 22, 0.1)", hover_icon_color="#f97316")
+            btn_copy = create_btn("replica.svg", self._copy_to_clipboard, "rgba(249, 115, 22, 26)", hover_icon_color="#f97316")
             actions_layout.addWidget(btn_copy)
             
         # Stop button (re-implemented as 32x32 button for consistency)
-        btn_stop = create_btn(None, self._stop_forward, "rgba(239, 68, 68, 0.1)", hover_icon_color="#ef4444", is_stop=True)
+        btn_stop = create_btn(None, self._stop_forward, "rgba(239, 68, 68, 26)", hover_icon_color="#ef4444", is_stop=True)
         actions_layout.addWidget(btn_stop)
             
         # (Removed redundant Stop button code)
@@ -1621,8 +1621,8 @@ class PortForwardCard(QFrame):
             card.setObjectName("MiniCard")
             card.setStyleSheet(
                 f"#MiniCard {{ "
-                f"  background-color: rgba(148, 163, 184, 0.08); "
-                f"  border: 1px solid rgba(148, 163, 184, 0.25); "
+                f"  background-color: rgba(148, 163, 184, 20); "
+                f"  border: 1px solid rgba(148, 163, 184, 64); "
                 f"  border-radius: 12px; "
                 f"}}"
             )
@@ -1655,7 +1655,7 @@ class PortForwardCard(QFrame):
         
         # Protocol Badge
         proto_badge = QLabel(f" {self.config.protocol.upper()} ")
-        proto_badge.setStyleSheet(f"background-color: rgba(59, 130, 246, 0.1); color: {theme.colors.ACCENT_BLUE}; font-size: 10px; font-weight: bold; border-radius: 8px; padding: 2px 6px;")
+        proto_badge.setStyleSheet(f"background-color: rgba(59, 130, 246, 26); color: {theme.colors.ACCENT_BLUE}; font-size: 10px; font-weight: bold; border-radius: 8px; padding: 2px 6px;")
         row2.addWidget(proto_badge)
         
         row2.addStretch()
@@ -1786,8 +1786,8 @@ class ActivePortForwardsDialog(ThemeAwareMixin, QDialog):
         icon_badge = QFrame()
         icon_badge.setFixedSize(40, 40)
         icon_badge.setStyleSheet(
-            "QFrame { background-color: rgba(250,114,56,0.10); "
-            "border-radius: 8px; border: 1px solid rgba(250,114,56,0.45); }"
+            "QFrame { background-color: rgba(250, 114, 56, 26); "
+            "border-radius: 8px; border: 1px solid rgba(250, 114, 56, 115); }"
         )
         badge_layout = QHBoxLayout(icon_badge)
         badge_layout.setContentsMargins(0, 0, 0, 0)
@@ -2094,7 +2094,7 @@ class ActivePortForwardsDialog(ThemeAwareMixin, QDialog):
                 f"  font-size: 13px;"
                 f"}}"
                 f"QPushButton:hover {{"
-                f"  background-color: rgba(250, 114, 56, 0.10);"
+                f"  background-color: rgba(250, 114, 56, 26);"
                 f"  color: #fa7238;"
                 f"  border: 1px solid {theme.colors.BORDER_COLOR};"
                 f"}}"
@@ -2112,7 +2112,7 @@ class ActivePortForwardsDialog(ThemeAwareMixin, QDialog):
                 f"  font-size: 13px;"
                 f"}}"
                 f"QPushButton:hover {{"
-                f"  background-color: rgba(239, 68, 68, 0.12);"
+                f"  background-color: rgba(239, 68, 68, 31);"
                 f"  color: {error_color};"
                 f"  border: 1px solid {error_color};"
                 f"}}"
@@ -2139,8 +2139,8 @@ class ActivePortForwardsDialog(ThemeAwareMixin, QDialog):
                 self.empty_icon_label.setPixmap(_empty_pix)
                 self.empty_icon_label.setFixedSize(80, 80)
                 self.empty_icon_label.setStyleSheet(
-                    f"background-color: rgba(128, 128, 128, 0.05); "
-                    f"border: 1px solid rgba(128, 128, 128, 0.15); "
+                    f"background-color: rgba(128, 128, 128, 13); "
+                    f"border: 1px solid rgba(128, 128, 128, 38); "
                     f"border-radius: 16px;"
                 )
                 self.empty_title.setStyleSheet(f"color: {theme.colors.TEXT_LIGHT}; font-size: 15px; font-weight: bold; background: transparent;")
@@ -2180,7 +2180,7 @@ class ActivePortForwardsDialog(ThemeAwareMixin, QDialog):
         self.status_label.setText(f"{active_count}/{total_count} active")
         
         # Always green style as requested
-        bg_color = "rgba(76, 175, 80, 0.15)"
+        bg_color = "rgba(76, 175, 80, 38)"
         fg_color = colors.ACCENT_GREEN
             
         if hasattr(self, 'status_badge_widget'):

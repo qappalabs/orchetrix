@@ -275,15 +275,15 @@ def get_diagram_area_main_style():
     theme = _get_theme()
     colors = theme.colors
     return f"""
-        QWidget {{
+        #diagramFrame QWidget {{
             background-color: {colors.BG_DARK};
         }}
-        QFrame {{
+        #diagramFrame QFrame {{
             background-color: {colors.BG_DARK};
             border: 1px solid {colors.BORDER_COLOR};
             border-radius: 6px;
         }}
-        QGraphicsView {{
+        #diagramFrame QGraphicsView {{
             background-color: {colors.BG_DARK};
             border: 1px solid {colors.BORDER_LIGHT};
             border-radius: 4px;

@@ -19,7 +19,7 @@ from Styles.NodesPageStyles import get_no_data_icon_style, get_no_data_message_s
 from Base_Components.base_components import SortableTableWidgetItem, StatusLabel
 from Base_Components.base_resource_page import BaseResourcePage
 from Utils.cluster_connector import get_cluster_connector
-from UI.Icons import resource_path
+from UI.Icons import Icons, resource_path
 from Utils.data_formatters import parse_age_to_seconds
 from Utils.kubernetes_client import get_kubernetes_client
 import datetime
@@ -1133,27 +1133,29 @@ class NodesPage(BaseResourcePage):
 
         # Add node - specific actions
         # Use node_name instead of row for actions to handle sorting correctly
+        theme_name = get_theme_manager().get_current_theme_name() or "Dark"
+
         view_metrics = menu.addAction("View Metrics")
         try:
-            view_metrics.setIcon(QIcon(resource_path("icons/chart.png")))
+            view_metrics.setIcon(Icons.get_theme_icon_by_id("activity", theme_name))
         except Exception:
-            pass  # Icon loading failure is not critical
+            pass
         view_metrics.triggered.connect(
             partial(self._handle_action, "View Metrics", node_name))
 
         detail_action = menu.addAction("Detail")
         try:
-            detail_action.setIcon(QIcon(resource_path("icons/edit.png")))
+            detail_action.setIcon(Icons.get_theme_icon_by_id("edit", theme_name))
         except Exception:
-            pass  # Icon loading failure is not critical
+            pass
         detail_action.triggered.connect(
             partial(self._handle_action, "Detail", node_name))
 
         delete_action = menu.addAction("Delete")
         try:
-            delete_action.setIcon(QIcon(resource_path("icons/delete.png")))
+            delete_action.setIcon(Icons.get_theme_icon_by_id("delete", theme_name))
         except Exception:
-            pass  # Icon loading failure is not critical
+            pass
         delete_action.setProperty("dangerous", True)
         delete_action.triggered.connect(
             partial(self._handle_action, "Delete", node_name))

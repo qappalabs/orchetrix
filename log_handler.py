@@ -4,6 +4,7 @@ import logging
 import traceback
 import time
 import functools
+import inspect
 import json
 from datetime import datetime
 from typing import Any, Callable, Dict, Optional
@@ -119,13 +120,13 @@ def serialize_for_logging(obj: Any, max_length: int = 500) -> str:
         return f"<{type(obj).__name__}:unprintable>"
 
 def method_logger(
-    log_level: int = logging.DEBUG,  # Changed to DEBUG to reduce noise
-    log_inputs: bool = False,        # Disabled by default
-    log_outputs: bool = False,       # Disabled by default
-    log_timing: bool = False,        # Disabled by default
-    log_exceptions: bool = True,     # Keep exception logging
-    max_input_length: int = 100,     # Reduced length
-    max_output_length: int = 100,    # Reduced length
+    log_level: int = logging.DEBUG,
+    log_inputs: bool = False,
+    log_outputs: bool = False,
+    log_timing: bool = False,
+    log_exceptions: bool = True,
+    max_input_length: int = 100,
+    max_output_length: int = 100,
     exclude_params: Optional[list] = None
 ) -> Callable:
     """
@@ -158,7 +159,6 @@ def method_logger(
             if log_inputs and (args or kwargs):
                 try:
                     # Get function signature for parameter names
-                    import inspect
                     sig = inspect.signature(func)
                     bound_args = sig.bind(*args, **kwargs)
                     bound_args.apply_defaults()
@@ -229,7 +229,7 @@ def method_logger(
     return decorator
 
 def class_logger(
-    log_level: int = logging.DEBUG,  # Changed to DEBUG to reduce noise
+    log_level: int = logging.DEBUG,
     exclude_methods: Optional[list] = None,
     exclude_private: bool = True,
     exclude_dunder: bool = True,

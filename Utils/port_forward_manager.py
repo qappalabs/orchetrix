@@ -28,7 +28,6 @@ class PortForwardConfig:
     target_port: int
     kube_context: Optional[str] = None  # Explicit cluster context for kubectl
     protocol: str = 'TCP'
-    bind_address: str = 'localhost'  # kubectl --address (e.g. 'localhost' or '0.0.0.0')
     status: str = 'inactive'  # 'starting', 'active', 'inactive', 'error'
     error_message: Optional[str] = None
     created_at: float = None
@@ -103,10 +102,6 @@ class KubernetesPortForwarder:
                 f'{self.config.local_port}:{target_port}',
                 '--namespace', self.config.namespace
             ]
-
-            # Honor the bind address chosen in the dialog (defaults to localhost)
-            if getattr(self.config, 'bind_address', None):
-                cmd.extend(['--address', self.config.bind_address])
 
             if self.config.kube_context:
                 cmd.extend(['--context', self.config.kube_context])
@@ -457,8 +452,7 @@ class PortForwardManager(QObject):
                 local_port=local_port,
                 target_port=target_port,
                 kube_context=resolved_context,
-                protocol=protocol,
-                bind_address=bind_address
+                protocol=protocol
             )
 
             # Check if forward already exists

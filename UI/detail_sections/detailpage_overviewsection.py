@@ -156,7 +156,7 @@ class DetailPageOverviewSection(BaseDetailSection):
         if hasattr(self, 'labels_content'):
             self.labels_content.setStyleSheet(BaseDetailSectionStyles.get_field_value_style() + """
                 font-family: 'Consolas', 'Courier New', monospace;
-                background-color: rgba(255, 255, 255, 0.05);
+                background-color: rgba(255, 255, 255, 13);
                 padding: 8px;
                 border-radius: 4px;
             """)
@@ -898,25 +898,39 @@ class DetailPageOverviewSection(BaseDetailSection):
             resource_info = f"{self.resource_type.capitalize()}"
             if "namespace" in metadata:
                 resource_info += f" / {metadata.get('namespace')}"
-            self.resource_info_label.setText(resource_info)
+            self.resource_type_label.setText(resource_info)
 
             # Set creation time as unavailable
-            self.creation_time_label.setText("Created: Details not available")
+            self.created_card.title_label.setText("CREATED")
+            self.created_card.value_label.setText("Details not available")
 
-            # Set status as limited info
-            self.clear_status_content()
-            self.add_status_item(
-                "Status", "Available in cluster list", "limited")
-            self.add_status_item(
-                "Details", "Not accessible individually", "info")
+            # Set secondary card with limited-info status
+            self.secondary_card.title_label.setText("STATUS")
+            self.secondary_card.value_label.setText(
+                data.get('_note', 'Not accessible individually'))
 
-            # Clear other sections
+            # Update status badge to limited/default
+            self.status_badge.setText("Limited")
+            self.status_badge.setStyleSheet(
+                BaseDetailSectionStyles.get_status_badge_style('default'))
+
+            # Clear conditions and add a note about limited access
             self.clear_conditions_content()
-            self.clear_labels_content()
 
-            # Add note about limited access
-            if data.get('_note'):
-                self.add_status_item("Note", data['_note'], "info")
+            # Clear labels using the new layout-based approach
+            for i in reversed(range(self.labels_layout.count())):
+                item = self.labels_layout.itemAt(i)
+                if item.widget():
+                    item.widget().deleteLater()
+            no_labels = QLabel("No labels")
+            no_labels.setStyleSheet(BaseDetailSectionStyles.get_secondary_text_style() + """
+                font-style: italic;
+                padding: 8px;
+            """)
+            self.labels_layout.addWidget(no_labels)
+
+            # Clear and hide specific section
+            self.clear_specific_content()
 
         except Exception as e:
             self.handle_error(f"Error updating UI with basic info: {str(e)}")
@@ -2425,7 +2439,8 @@ class DetailPageOverviewSection(BaseDetailSection):
     def clear_status_content(self):
 
         self.status_badge.setText("Unknown")
-        self.status_text_label.setText("Status not available")
+        if hasattr(self, 'status_text_label'):
+            self.status_text_label.setText("Status not available")
 
     def clear_conditions_content(self):
 
@@ -2437,7 +2452,13 @@ class DetailPageOverviewSection(BaseDetailSection):
 
     def clear_labels_content(self):
 
-        self.labels_content.setText("No labels")
+        self._clear_layout(self.labels_layout)
+        no_labels = QLabel("No labels")
+        no_labels.setStyleSheet(BaseDetailSectionStyles.get_secondary_text_style() + """
+            font-style: italic;
+            padding: 8px;
+        """)
+        self.labels_layout.addWidget(no_labels)
 
     def clear_specific_content(self):
 
@@ -2742,17 +2763,17 @@ class DetailPageOverviewSection(BaseDetailSection):
                 self._pod_widgets.append(ns_label) # Keep reference
 
                 # Add status cell with pill style (custom widget)
-                status_bg = "rgba(100, 100, 100, 0.1)" # Default gray
+                status_bg = "rgba(100, 100, 100, 26)" # Default gray
                 status_text = theme.colors.TEXT_SECONDARY
                 
                 if status.lower() == "running":
-                    status_bg = "rgba(40, 167, 69, 0.15)" # Light green bg
+                    status_bg = "rgba(40, 167, 69, 38)" # Light green bg
                     status_text = theme.colors.STATUS_ACTIVE # Green text
                 elif status.lower() in ["pending", "containercreating"]:
-                    status_bg = "rgba(255, 193, 7, 0.15)" # Light orange bg
+                    status_bg = "rgba(255, 193, 7, 38)" # Light orange bg
                     status_text = theme.colors.STATUS_WARNING # Orange text
                 elif status.lower() in ["failed", "crashloopbackoff", "error"]:
-                    status_bg = "rgba(220, 53, 69, 0.15)" # Light red bg
+                    status_bg = "rgba(220, 53, 69, 38)" # Light red bg
                     status_text = theme.colors.TEXT_DANGER # Red text
 
                 # Prepare status item first

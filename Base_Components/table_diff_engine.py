@@ -137,25 +137,20 @@ class RowCache:
         """
         data: Dict[str, Dict[str, Any]] = {}
         uids: List[str] = []
+        seen: Set[str] = set()
         for resource in resources or []:
             row = project_fn(resource)
             uid = row.get("uid")
             if uid is None:
                 continue  # skip resources without stable identity
             data[uid] = row
-            if uid not in data or uid not in set(uids):
+            if uid not in seen:
+                seen.add(uid)
                 uids.append(uid)
             # Handle duplicate UIDs: last-write-wins for data,
             # but don't duplicate in the uid list.
-        # Deduplicate uids list (preserves order)
-        seen: Set[str] = set()
-        deduped: List[str] = []
-        for u in uids:
-            if u not in seen:
-                seen.add(u)
-                deduped.append(u)
         self._data = data
-        self._uids = deduped
+        self._uids = uids
 
     @property
     def data(self) -> Dict[str, Dict[str, Any]]:
@@ -267,6 +262,15 @@ def compute_diff(
             is_full_reset=True,
         )
 
+    # ── Order-only change detection ──────────────────────────────────
+    # When no UIDs were added or removed but the sequence order differs,
+    # signal a full reset so the consumer re-applies the new row order.
+    if not removed_uids and not added_uids and old_cache.uids != new_cache.uids:
+        return DiffResult(
+            added=[AddedRow(uid=u, data=new_cache.get(u) or {}) for u in new_cache.uids],
+            is_full_reset=True,
+        )
+
     # ── Build operation lists ───────────────────────────────────────
 
     # Removals: sorted by old index DESCENDING so higher indices are
@@ -277,6 +281,16 @@ def compute_diff(
         key=lambda r: r.old_index,
         reverse=True,
     )
+
+    # Post-removal index for surviving rows: each removal shifts
+    # subsequent survivors up by one position.
+    survived_index = {}
+    offset = 0
+    for idx, uid in enumerate(old_cache.uids):
+        if uid in removed_uids:
+            offset += 1
+        else:
+            survived_index[uid] = idx - offset
 
     # Modifications: compare each surviving row.
     modified: List[ModifiedRow] = []
@@ -289,7 +303,7 @@ def compute_diff(
         if changed:
             modified.append(ModifiedRow(
                 uid=uid,
-                old_index=old_uid_index[uid],
+                old_index=survived_index[uid],
                 changed_keys=changed,
                 new_data=new_row,
             ))

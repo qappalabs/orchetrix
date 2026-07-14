@@ -93,6 +93,7 @@ class VirtualScrollTable(QTableView):
         self._model = None
         self._formatters = {}
         self._last_selected_rows = []
+        self._selection_model = None
 
         # Performance settings
         self.setAlternatingRowColors(True)
@@ -133,12 +134,8 @@ class VirtualScrollTable(QTableView):
         # Connect double-click - this works without model
         self.doubleClicked.connect(self._on_double_clicked)
 
-        # Initialize with empty model
+        # Initialize with empty model (selection wiring is handled in set_resource_data)
         self.set_resource_data([], self.headers)
-
-        # Connect selection changes after model is set
-        if self.selectionModel():
-            self.selectionModel().selectionChanged.connect(self._on_selection_changed)
 
         logging.info(f"VirtualScrollTable initialized with {len(headers)} columns: {headers}")
 
@@ -239,10 +236,13 @@ class VirtualScrollTable(QTableView):
             # Connect model signals
             self._model.data_changed_custom.connect(self.data_changed.emit)
 
-            # Connect selection changes now that model is set
-            if self.selectionModel() and not hasattr(self, '_selection_connected'):
-                self.selectionModel().selectionChanged.connect(self._on_selection_changed)
-                self._selection_connected = True
+            # setModel() installs a fresh selection model each call, so reconnect
+            # whenever it changes to keep tracking working across data reloads
+            # while avoiding duplicate connections to the same selection model.
+            selection_model = self.selectionModel()
+            if selection_model is not None and selection_model is not self._selection_model:
+                selection_model.selectionChanged.connect(self._on_selection_changed)
+                self._selection_model = selection_model
 
             # Apply responsive column sizing
             QTimer.singleShot(100, self._adjust_columns_to_screen)  # Delay to ensure proper widget size

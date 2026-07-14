@@ -15,6 +15,7 @@ from Base_Components.base_resource_page import BaseResourcePage
 from UI.Styles import AppColors
 from Utils.data_formatters import parse_age_to_seconds
 from Utils.kubernetes_client import get_kubernetes_client
+from Services.kubernetes.api_config import APIClientConfig
 from datetime import datetime
 import dateutil.parser
 import Styles.CustomResourceInstancePageStyles as CustomResourceInstancePageStyles
@@ -413,14 +414,16 @@ class CustomResourceInstancePage(BaseResourcePage):
                             version=self.api_version,
                             namespace=namespace,
                             plural=self.plural,
-                            name=resource_name
+                            name=resource_name,
+                            _request_timeout=APIClientConfig.REQUEST_TIMEOUT
                         )
                     else:
                         kubernetes_client.custom_objects_api.delete_cluster_custom_object(
                             group=self.api_group,
                             version=self.api_version,
                             plural=self.plural,
-                            name=resource_name
+                            name=resource_name,
+                            _request_timeout=APIClientConfig.REQUEST_TIMEOUT
                         )
                     success_count += 1
                     logging.info(f"Deleted {self.plural}/{resource_name}")

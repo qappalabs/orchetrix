@@ -1,8 +1,12 @@
-from PyQt6.QtCore import QObject, QThreadPool, QTimer, Qt, pyqtSlot
-import threading
-import weakref
+import gc
 import logging
+import threading
 import time
+import weakref
+from typing import Dict, List, Optional
+
+from PyQt6.QtCore import QMetaObject, QObject, Qt, QThreadPool, QTimer, pyqtSlot
+from PyQt6.QtWidgets import QApplication
 
 # Common stop event for cooperative shutdown
 _global_stop_event = threading.Event()
@@ -11,8 +15,25 @@ def is_shutdown_requested():
     """Check if application shutdown has been requested"""
     return _global_stop_event.is_set()
 
+class _MainThreadTimerHelper(QObject):
+    """Lives on the main thread and creates timers there directly."""
+    def __init__(self, manager):
+        super().__init__()
+        self._manager_ref = weakref.ref(manager)
+
+    @pyqtSlot()
+    def _setup_timers_for_manager(self):
+        mgr = self._manager_ref()
+        if mgr is not None and not hasattr(mgr, 'cleanup_timer'):
+            mgr.cleanup_timer = QTimer()
+            mgr.cleanup_timer.timeout.connect(mgr._cleanup_expired_workers)
+            mgr.cleanup_timer.start(30000)
+
+
 class EnhancedThreadPoolManager(QObject):
-    def __init__(self, max_threads=4):  # Reduced from 8 to 4 for better performance
+    """Manages thread pools with cooperative shutdown and resource tracking."""
+    
+    def __init__(self, max_threads: int = 4):  # Reduced from 8 to 4 for better performance
         super().__init__()
         self.thread_pool = QThreadPool()
         self.thread_pool.setMaxThreadCount(max_threads)
@@ -26,21 +47,26 @@ class EnhancedThreadPoolManager(QObject):
 
     def _setup_timers(self):
         """Initialize and configure timers with thread safety"""
-        # Ensure timers are created on main thread
-        from PyQt6.QtWidgets import QApplication
+        if hasattr(self, 'cleanup_timer'):
+            return
+
         app = QApplication.instance()
         if app and self.thread() != app.thread():
             logging.warning("ThreadManager timers being created from non-main thread - deferring to main thread")
-            from PyQt6.QtCore import QMetaObject
-            QMetaObject.invokeMethod(self, "_setup_timers_on_main_thread", Qt.ConnectionType.QueuedConnection)
+            if not hasattr(self, '_timer_helper'):
+                self._timer_helper = _MainThreadTimerHelper(self)
+                self._timer_helper.moveToThread(app.thread())
+            QMetaObject.invokeMethod(
+                self._timer_helper,
+                "_setup_timers_for_manager",
+                Qt.ConnectionType.QueuedConnection
+            )
             return
 
-        # Cleanup timer for expired workers - less frequent for better performance
         self.cleanup_timer = QTimer()
         self.cleanup_timer.timeout.connect(self._cleanup_expired_workers)
-        self.cleanup_timer.start(30000)  # Cleanup every 30 seconds for better performance
+        self.cleanup_timer.start(30000)
 
-    @pyqtSlot()
     def _setup_timers_on_main_thread(self):
         """Setup timers on main thread - called via QMetaObject.invokeMethod"""
         self._setup_timers()
@@ -159,6 +185,7 @@ class EnhancedThreadPoolManager(QObject):
             self.thread_pool.clear()
 
             # Iterate through all threads and attempt join
+            import threading
             current = threading.current_thread()
             for thread in threading.enumerate():
                 if thread != current:
@@ -170,8 +197,7 @@ class EnhancedThreadPoolManager(QObject):
                         except Exception as e:
                             logging.error(f"Error joining thread {thread.name}: {e}")
 
-            # Force exit as last last resort - but avoid thread._stop()
-            import gc
+            # Force exit as last resort - but avoid thread._stop()
             gc.collect()  # Force garbage collection to clean up thread references
 
             logging.info("Forced thread pool clearing completed")
@@ -196,3 +222,11 @@ def shutdown_thread_manager():
         if _thread_manager_instance is not None:
             _thread_manager_instance.shutdown()
             _thread_manager_instance = None
+
+
+__all__ = [
+    "EnhancedThreadPoolManager",
+    "get_thread_manager",
+    "is_shutdown_requested",
+    "shutdown_thread_manager",
+]

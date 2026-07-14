@@ -3,6 +3,7 @@ Styles for DetailPageDetailsSection component.
 Contains only page-specific unique styles.
 Shared styles should be imported directly from UI.Styles.EnhancedStyles.
 """
+from UI.Styles import AppStyles
 from UI.ThemeManager import get_theme_manager
 
 
@@ -13,7 +14,6 @@ def _get_theme():
 
 def get_scroll_area_style():
     """Scroll area style - uses unified AppStyles scrollbar for consistency"""
-    from UI.Styles import AppStyles
     theme = _get_theme()
     return f"""
         QScrollArea {{

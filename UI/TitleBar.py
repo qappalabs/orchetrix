@@ -271,13 +271,6 @@ class TitleBar(ThemeAwareMixin, QWidget):
                 self.update_pinned_dropdown
             )
 
-        # Connect the open cluster signal to update the label - with proper tracking
-        if self.open_cluster_signal:
-            self._connect_signal_safely(
-                self.open_cluster_signal,
-                self.update_current_cluster
-            )
-
     def _on_theme_changed(self, theme_name):
         """Re-apply all styles when theme changes"""
         self.setStyleSheet(TitleBarStyles.get_title_bar_style())
@@ -401,8 +394,6 @@ class TitleBar(ThemeAwareMixin, QWidget):
         if not item or item == self.current_cluster:
             return
             
-        self.current_cluster = item
-
         # Emit signal to open cluster
         if self.open_cluster_signal and hasattr(self._parent_window.home_page, 'all_data'):
             for view_type in self._parent_window.home_page.all_data:

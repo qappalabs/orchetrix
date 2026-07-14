@@ -25,7 +25,7 @@ class ResourceUpdateWorker(EnhancedBaseWorker):
 
     def __init__(self, client_instance, resource_type, resource_name, namespace, yaml_data):
 
-        super().__init__(f"resource_update_{resource_type}_{resource_name}")
+        super().__init__(f"resource_update_{resource_type}_{namespace}/{resource_name}")
         self.client_instance = client_instance
         self.resource_type = resource_type
         self.resource_name = resource_name
@@ -171,14 +171,19 @@ class KubernetesClient(QObject):
             name = payload.get("name")
             if not name:
                 return
-            if event_type == "ADDED":
-                self._known_namespaces.add(name)
-                self.namespace_added_signal.emit(name)
-            elif event_type == "DELETED":
-                self._known_namespaces.discard(name)
-                self.namespace_deleted_signal.emit(name)
+            with self._namespace_watch_lock:
+                if event_type == "ADDED":
+                    self._known_namespaces.add(name)
+                elif event_type == "DELETED":
+                    self._known_namespaces.discard(name)
             # MODIFIED events for namespaces (label/annotation changes) do
             # not affect the dropdown list or the existence set — ignore.
+            # Emit signals outside the lock: signal handlers should not
+            # be invoked while holding a threading lock.
+            if event_type == "ADDED":
+                self.namespace_added_signal.emit(name)
+            elif event_type == "DELETED":
+                self.namespace_deleted_signal.emit(name)
         except Exception as e:
             logging.debug(f"namespace event fanout failed: {e}")
 
@@ -193,7 +198,8 @@ class KubernetesClient(QObject):
 
         Returns a copy so downstream callers cannot mutate internal state.
         """
-        return set(self._known_namespaces)
+        with self._namespace_watch_lock:
+            return set(self._known_namespaces)
 
     def ensure_namespace_watch(self):
         """Start the app-lifetime namespace watch daemon if not already running.
@@ -404,15 +410,18 @@ class KubernetesClient(QObject):
         # picks up a fresh namespace list on the next connect (ResourceWatch
         # Manager's daemon thread is unjoined; setting None lets a new one
         # spin up cleanly via ensure_namespace_watch).
-        if self._namespace_watch_manager is not None:
-            try:
-                self._namespace_watch_manager.stop()
-            except Exception as e:
-                logging.debug(f"namespace watch stop failed: {e}")
-            self._namespace_watch_manager = None
-        # Phase 5: purge the namespace authority cache so the new cluster
-        # context does not inherit dead namespaces from the prior one.
-        self._known_namespaces.clear()
+        # Hold the same lock ensure_namespace_watch uses so the watch-manager
+        # and known-namespaces state are mutated consistently.
+        with self._namespace_watch_lock:
+            if self._namespace_watch_manager is not None:
+                try:
+                    self._namespace_watch_manager.stop()
+                except Exception as e:
+                    logging.debug(f"namespace watch stop failed: {e}")
+                self._namespace_watch_manager = None
+            # Phase 5: purge the namespace authority cache so the new cluster
+            # context does not inherit dead namespaces from the prior one.
+            self._known_namespaces.clear()
 
     def get_cluster_metrics(self) -> Optional[Dict[str, Any]]:
 
@@ -495,7 +504,7 @@ class KubernetesClient(QObject):
 
         class RolloutHistoryWorker(EnhancedBaseWorker):
             def __init__(self, client_instance, deployment_name, namespace):
-                super().__init__(f"rollout_history_{deployment_name}")
+                super().__init__(f"rollout_history_{namespace}/{deployment_name}")
                 self.client_instance = client_instance
                 self.deployment_name = deployment_name
                 self.namespace = namespace
@@ -529,7 +538,7 @@ class KubernetesClient(QObject):
         # Submit to thread manager
         thread_manager = get_thread_manager()
         thread_manager.submit_worker(
-            f"rollout_history_{deployment_name}", worker)
+            f"rollout_history_{namespace}/{deployment_name}", worker)
 
     def rollback_deployment_async(self, deployment_name: str, revision: int, namespace: str = "default"):
 
@@ -538,7 +547,7 @@ class KubernetesClient(QObject):
 
         class RollbackWorker(EnhancedBaseWorker):
             def __init__(self, client_instance, deployment_name, revision, namespace):
-                super().__init__(f"rollback_{deployment_name}")
+                super().__init__(f"rollback_{namespace}/{deployment_name}")
                 self.client_instance = client_instance
                 self.deployment_name = deployment_name
                 self.revision = revision
@@ -584,7 +593,7 @@ class KubernetesClient(QObject):
 
         # Submit to thread manager
         thread_manager = get_thread_manager()
-        thread_manager.submit_worker(f"rollback_{deployment_name}", worker)
+        thread_manager.submit_worker(f"rollback_{namespace}/{deployment_name}", worker)
 
     # ──── Phase 2: Scale / Restart Rollout / HPA discovery ─────────────────
 
@@ -1244,7 +1253,7 @@ class KubernetesClient(QObject):
         # Submit worker to thread manager
         thread_manager = get_thread_manager()
         thread_manager.submit_worker(
-            f"resource_update_{resource_type}_{resource_name}", worker)
+            f"resource_update_{resource_type}_{namespace}/{resource_name}", worker)
 
     def _update_resource_sync(self, resource_type: str, resource_name: str, namespace: str, resource_data: dict):
 

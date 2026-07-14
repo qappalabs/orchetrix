@@ -24,7 +24,8 @@ from Base_Components.base_resource_page import BaseResourcePage
 from Base_Components.resource_page_style_manager import ResourcePageStyleManager
 from UI.Styles import AppColors, AppStyles, AppConstants
 from UI.CustomComboBox import CustomComboBox
-from UI.Icons import resource_path
+from UI.Icons import Icons
+from UI.ThemeManager import get_theme_manager
 from functools import partial
 
 
@@ -570,13 +571,13 @@ class ChartsPage(BaseResourcePage):
         self.is_loading = False
         self.is_loading_more = False
         self.is_searching = False
-        # Cancel any running threads
+        # Cancel any running threads cooperatively without blocking the UI
         if hasattr(self, 'chart_thread') and self.chart_thread and self.chart_thread.isRunning():
-            self.chart_thread.terminate()
-            self.chart_thread.wait(1000)
+            self._stop_thread_async(self.chart_thread)
+            self.chart_thread = None
         if hasattr(self, 'more_thread') and self.more_thread and self.more_thread.isRunning():
-            self.more_thread.terminate()
-            self.more_thread.wait(1000)
+            self._stop_thread_async(self.more_thread)
+            self.more_thread = None
         # Stop timers
         if hasattr(self, '_loading_timer'):
             self._loading_timer.stop()
@@ -585,6 +586,36 @@ class ChartsPage(BaseResourcePage):
             self._search_timeout = None
         # Hide loading indicators
         super().hide_loading_indicator()
+
+    def _stop_thread_async(self, thread):
+        """Cooperatively stop a running ChartDataThread without blocking the UI.
+
+        Signals cancellation via stop() so the thread's interruption checks skip
+        emitting stale results, and keeps the object alive until it actually
+        finishes so the QThread is never destroyed while still running.
+        """
+        if not thread:
+            return
+        try:
+            thread.stop()
+        except Exception:
+            pass
+        if thread.isRunning():
+            if not hasattr(self, '_stopping_threads'):
+                self._stopping_threads = []
+            self._stopping_threads.append(thread)
+            thread.finished.connect(partial(self._cleanup_stopped_thread, thread))
+        else:
+            thread.deleteLater()
+
+    def _cleanup_stopped_thread(self, thread):
+        """Release a thread that finished after a cooperative stop."""
+        try:
+            if hasattr(self, '_stopping_threads') and thread in self._stopping_threads:
+                self._stopping_threads.remove(thread)
+        except Exception:
+            pass
+        thread.deleteLater()
     
     def showEvent(self, event):
         """Handle show event to ensure proper state when page becomes visible"""
@@ -639,9 +670,9 @@ class ChartsPage(BaseResourcePage):
         """Override to use ArtifactHub search instead of local filtering"""
         # Cancel any existing search
         if hasattr(self, 'search_thread') and self.search_thread and self.search_thread.isRunning():
-            self.search_thread.terminate()
-            self.search_thread.wait()
-        
+            self._stop_thread_async(self.search_thread)
+            self.search_thread = None
+
         if len(text.strip()) >= 2:  # Start searching after 2 characters
             # Use QTimer to debounce search
             if not hasattr(self, '_search_timer'):
@@ -659,12 +690,12 @@ class ChartsPage(BaseResourcePage):
                 self._search_timer.stop()
             # Cancel any running search thread
             if hasattr(self, 'search_thread') and self.search_thread and self.search_thread.isRunning():
-                self.search_thread.terminate()
-                self.search_thread.wait()
+                self._stop_thread_async(self.search_thread)
+                self.search_thread = None
             # Cancel any running chart thread
             if hasattr(self, 'chart_thread') and self.chart_thread and self.chart_thread.isRunning():
-                self.chart_thread.terminate()
-                self.chart_thread.wait()
+                self._stop_thread_async(self.chart_thread)
+                self.chart_thread = None
             # Clean up search timeout
             if hasattr(self, '_search_timeout') and self._search_timeout:
                 self._search_timeout.stop()
@@ -758,11 +789,11 @@ class ChartsPage(BaseResourcePage):
             
         logging.info("ChartsPage.load_chart_data: Starting default data load")
         
-        # Clean up any existing thread
+        # Clean up any existing thread cooperatively
         if hasattr(self, 'chart_thread') and self.chart_thread and self.chart_thread.isRunning():
-            self.chart_thread.terminate()
-            self.chart_thread.wait(1000)
-        
+            self._stop_thread_async(self.chart_thread)
+            self.chart_thread = None
+
         self.is_loading = True
         
         # Only reset resources and offset if this isn't a load_more request
@@ -871,7 +902,7 @@ class ChartsPage(BaseResourcePage):
         self._initial_load_completed = True
         self._load_requested = False
         
-        self.is_more_available = True if data else False
+        self.is_more_available = is_more_available if data else False
         
         # Ensure table is visible
         if hasattr(self, '_table_stack') and self._table_stack:
@@ -1026,7 +1057,7 @@ class ChartsPage(BaseResourcePage):
         icon_label.setStyleSheet("""
             QLabel {
                 border-radius: 3px;
-                background-color: rgba(255, 255, 255, 0.05);
+                background-color: rgba(255, 255, 255, 13);
                 border: none;
                 padding: 0px;
                 margin: 0px;
@@ -1047,7 +1078,7 @@ class ChartsPage(BaseResourcePage):
                             color: #4CAF50;
                             font-size: 14px;
                             border-radius: 3px;
-                            background-color: rgba(255, 255, 255, 0.05);
+                            background-color: rgba(255, 255, 255, 13);
                             border: none;
                             padding: 0px;
                             margin: 0px;
@@ -1060,7 +1091,7 @@ class ChartsPage(BaseResourcePage):
                         color: #4CAF50;
                         font-size: 14px;
                         border-radius: 3px;
-                        background-color: rgba(255, 255, 255, 0.05);
+                        background-color: rgba(255, 255, 255, 13);
                         border: none;
                         padding: 0px;
                         margin: 0px;
@@ -1073,7 +1104,7 @@ class ChartsPage(BaseResourcePage):
                     color: #4CAF50;
                     font-size: 14px;
                     border-radius: 3px;
-                    background-color: rgba(255, 255, 255, 0.05);
+                    background-color: rgba(255, 255, 255, 13);
                     border: none;
                     padding: 0px;
                     margin: 0px;
@@ -1126,6 +1157,15 @@ class ChartsPage(BaseResourcePage):
     
     def _create_action_menu(self, button, row):
         """Create Helm Charts specific action menu."""
+        # Capture the chart's stable identity at creation time so actions stay
+        # correct even after the table is sorted and visual rows are reordered.
+        chart_name = None
+        repository = None
+        if self.table.item(row, 1):
+            chart_name = self.table.item(row, 1).text()
+        if self.table.item(row, 5):
+            repository = self.table.item(row, 5).text()
+
         menu = QMenu(button)
         menu.setStyleSheet(BaseTablePageStyles.get_menu_style())
 
@@ -1133,38 +1173,38 @@ class ChartsPage(BaseResourcePage):
         menu.aboutToHide.connect(lambda: self._highlight_active_row(row, False))
 
         actions = [
-            {"text": "View Details", "icon": "Icons/details.png", "dangerous": False},
-            {"text": "Install Chart", "icon": "Icons/install.png", "dangerous": False}
+            {"text": "View Details", "icon": "details-default", "dangerous": False},
+            {"text": "Install Chart", "icon": "install", "dangerous": False}
         ]
 
         for action_info in actions:
             action = menu.addAction(action_info["text"])
             if "icon" in action_info:
                 try:
-                    action.setIcon(QIcon(resource_path(action_info["icon"])))
+                    theme_name = get_theme_manager().get_current_theme_name() or "Dark"
+                    action.setIcon(Icons.get_theme_icon_by_id(action_info["icon"], theme_name))
                 except Exception:
                     pass
             if action_info.get("dangerous", False):
                 action.setProperty("dangerous", True)
             action.triggered.connect(
-                partial(self._handle_action, action_info["text"], row)
+                partial(self._handle_action, action_info["text"], chart_name, repository)
             )
 
         button.setMenu(menu)
         return menu
     
-    def _handle_install_chart(self, row):
+    def _handle_install_chart(self, chart):
         """Handle chart installation with duplicate prevention"""
-        if row >= len(self.resources):
+        if not chart:
             return
-        
+
         # Prevent multiple installations from running simultaneously
         if self.installation_in_progress:
-            QMessageBox.warning(self, "Installation in Progress", 
+            QMessageBox.warning(self, "Installation in Progress",
                                "Another chart installation is already in progress. Please wait for it to complete.")
             return
-            
-        chart = self.resources[row]
+
         chart_name = chart.get("name", "Unknown")
         repository = chart.get("repository", "")
         
@@ -1211,12 +1251,27 @@ class ChartsPage(BaseResourcePage):
             # Clear dialog reference
             self.current_installation_dialog = None
 
-    def _handle_action(self, action, row):
+    def _resolve_chart(self, chart_name, repository=None):
+        """Resolve a chart from self.resources by its stable name (and repository).
+
+        Using the name instead of a visual row index keeps actions pointed at the
+        right chart after the table has been sorted.
+        """
+        if not chart_name:
+            return None
+        for chart in self.resources:
+            if chart.get("name") == chart_name:
+                if repository is None or chart.get("repository") == repository:
+                    return chart
+        return None
+
+    def _handle_action(self, action, chart_name, repository=None):
         """Handle action button menu selections"""
+        chart = self._resolve_chart(chart_name, repository)
         if action == "View Details":
-            self._handle_view_details(row)
+            self._handle_view_details(chart)
         elif action == "Install Chart":
-            self._handle_install_chart(row)
+            self._handle_install_chart(chart)
     
     def _highlight_active_row(self, row, highlight):
         """Highlight row when action menu is open"""
@@ -1235,12 +1290,11 @@ class ChartsPage(BaseResourcePage):
             if item:
                 item.setBackground(bg_color)
     
-    def _handle_view_details(self, row):
+    def _handle_view_details(self, chart):
         """Handle view details action for charts"""
-        if row >= len(self.resources):
+        if not chart:
             return
-            
-        chart = self.resources[row]
+
         chart_name = chart.get("name", "Unknown")
         
         # Find the ClusterView instance to use its detail manager
@@ -1314,11 +1368,11 @@ class ChartsPage(BaseResourcePage):
             self.load_chart_data()
             return
         
-        # Clean up any existing search thread
+        # Clean up any existing search thread cooperatively
         if hasattr(self, 'chart_thread') and self.chart_thread and self.chart_thread.isRunning():
-            self.chart_thread.terminate()
-            self.chart_thread.wait(1000)
-        
+            self._stop_thread_async(self.chart_thread)
+            self.chart_thread = None
+
         logging.info(f"ChartsPage.handle_search: Setting is_searching=True for search: '{search_text}'")
         self.is_searching = True
         self.is_loading = True
@@ -1425,15 +1479,15 @@ class ChartsPage(BaseResourcePage):
     
     def _handle_search_timeout(self, search_text):
         """Handle search timeout"""
-        # Check and terminate chart_thread (primary search thread)
+        # Cancel the running search thread cooperatively (primary path)
         if hasattr(self, 'chart_thread') and self.chart_thread and self.chart_thread.isRunning():
-            self.chart_thread.terminate()
-            self.chart_thread.wait(1000)
+            self._stop_thread_async(self.chart_thread)
+            self.chart_thread = None
 
-        # Backward compatibility: also check search_thread if present
+        # Backward compatibility: also cancel search_thread if present
         if hasattr(self, 'search_thread') and self.search_thread and self.search_thread.isRunning():
-            self.search_thread.terminate()
-            self.search_thread.wait(1000)
+            self._stop_thread_async(self.search_thread)
+            self.search_thread = None
 
         self.on_search_error("Search timed out. Please try again.")
     
@@ -1441,9 +1495,18 @@ class ChartsPage(BaseResourcePage):
         """Handle row selection when a table cell is clicked"""
         if column != self.table.columnCount() - 1:
             self.table.selectRow(row)
-            
-            if row < len(self.resources):
-                self._handle_view_details(row)
+
+            # Resolve by the name shown at the clicked row so the correct chart
+            # opens even when the table has been sorted.
+            chart_name = None
+            repository = None
+            if self.table.item(row, 1):
+                chart_name = self.table.item(row, 1).text()
+            if self.table.item(row, 5):
+                repository = self.table.item(row, 5).text()
+            chart = self._resolve_chart(chart_name, repository)
+            if chart:
+                self._handle_view_details(chart)
     
     def _show_chart_detail_dialog(self, chart):
         """Show a detailed dialog for the selected Helm chart (fallback if detail manager unavailable)."""
@@ -1601,9 +1664,6 @@ class ChartsPage(BaseResourcePage):
             return
         
         dialog.close()
-        
-        # Find the row for this chart and install
-        for row, resource in enumerate(self.resources):
-            if resource.get("name") == chart.get("name") and resource.get("repository") == chart.get("repository"):
-                self._handle_install_chart(row)
-                break
+
+        # Install the resolved chart directly
+        self._handle_install_chart(chart)

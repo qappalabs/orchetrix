@@ -33,11 +33,11 @@ def get_nav_menu_dropdown_style():
         }}
         QMenu::item[under_development="true"] {{
             color: #FF9500 !important;
-            background-color: rgba(255, 149, 0, 0.15) !important;
+            background-color: rgba(255, 149, 0, 38) !important;
         }}
         QMenu::item[under_development="true"]:hover {{
             color: #FF9500 !important;
-            background-color: rgba(255, 149, 0, 0.25) !important;
+            background-color: rgba(255, 149, 0, 64) !important;
         }}
         QMenu::separator {{
             height: 1px;

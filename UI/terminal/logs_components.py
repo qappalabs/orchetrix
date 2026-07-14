@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
     QCheckBox, QLabel
 )
 from PyQt6.QtGui import QFont, QColor, QTextCharFormat, QTextCursor
+import sip
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 
 from Styles.logs_componentsStyles import (
@@ -162,6 +163,7 @@ class LogsHeaderWidget(QWidget):
         """Populate the container selector once loading finishes (runs on the UI thread)."""
         self.containers = containers
         if not containers:
+            self.container_changed.emit("")
             return
 
         self.container_combo.blockSignals(True)
@@ -178,6 +180,7 @@ class LogsHeaderWidget(QWidget):
         """Handle a failure while loading the container list."""
         logging.error(f"Error loading containers for {self.pod_name}: {message}")
         self.containers = []
+        self.container_changed.emit("")
 
     def _on_lines_changed(self, text):
         """Handle tail lines change."""
@@ -633,7 +636,8 @@ class EnhancedLogsViewer(QWidget):
         self.status_indicator.setVisible(True)
 
         # Hide after 3 seconds
-        QTimer.singleShot(3000, lambda: self.status_indicator.setVisible(False))
+        indicator = self.status_indicator
+        QTimer.singleShot(3000, lambda: indicator.setVisible(False) if not sip.isdeleted(indicator) else None)
 
     def refresh_logs(self):
         """Refresh the log stream."""

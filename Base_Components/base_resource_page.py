@@ -42,7 +42,7 @@ from .resource_page_style_manager import ResourcePageStyleManager
 from .resource_deletion_manager import ResourceDeletionManager
 from .resource_search_handler import ResourceSearchHandler
 
-from UI.Icons import resource_path
+from UI.Icons import Icons
 from UI.ThemeManager import get_theme_manager
 from UI.Styles import AppStyles
 from UI.LoadingSpinner import create_loading_overlay
@@ -1044,6 +1044,21 @@ class BaseResourcePage(BaseTablePage):
         self._start_loading_thread(continue_token=self.current_continue_token)
 
     def _start_loading_thread(self, continue_token=None):
+        # When continue_token is provided, route through load_data since the
+        # unified loader doesn't support continuation token pagination yet.
+        if continue_token:
+            if type(self).load_data is not BaseResourcePage.load_data:
+                try:
+                    self.load_data(load_more=True)
+                except TypeError:
+                    self.load_data()
+                return
+            logging.warning(
+                f"{self.__class__.__name__}: continue_token present but no custom "
+                f"load_data() for pagination — falling back to unified loader "
+                f"(will reload from page 1)."
+            )
+
         # Bypass unified loader completely for resource types that don't use it
         if not getattr(self, "uses_unified_search", True):
             if type(self).load_data is not BaseResourcePage.load_data:
@@ -2463,10 +2478,10 @@ class BaseResourcePage(BaseTablePage):
                 [
                     {
                         "text": "View Logs",
-                        "icon": "Icons/logs.png",
+                        "icon": "logs",
                         "dangerous": False,
                     },
-                    {"text": "SSH", "icon": "Icons/terminal.png", "dangerous": False},
+                    {"text": "SSH", "icon": "terminal", "dangerous": False},
                 ]
             )
             # Check if pod has ports for port forwarding
@@ -2475,7 +2490,7 @@ class BaseResourcePage(BaseTablePage):
                 actions.append(
                     {
                         "text": "Port Forward",
-                        "icon": "Icons/network.png",
+                        "icon": "network",
                         "dangerous": False,
                     }
                 )
@@ -2486,7 +2501,7 @@ class BaseResourcePage(BaseTablePage):
                 actions.append(
                     {
                         "text": "Port Forward",
-                        "icon": "Icons/network.png",
+                        "icon": "network",
                         "dangerous": False,
                     }
                 )
@@ -2495,7 +2510,7 @@ class BaseResourcePage(BaseTablePage):
             actions.append(
                 {
                     "text": "View Metrics",
-                    "icon": "Icons/chart.png",
+                    "icon": "chart",
                     "dangerous": False,
                 }
             )
@@ -2529,8 +2544,8 @@ class BaseResourcePage(BaseTablePage):
         # Standard actions for all resources
         actions.extend(
             [
-                {"text": "Edit", "icon": "Icons/edit.png", "dangerous": False},
-                {"text": "Delete", "icon": "Icons/delete.png", "dangerous": True},
+                {"text": "Edit", "icon": "edit", "dangerous": False},
+                {"text": "Delete", "icon": "delete", "dangerous": True},
             ]
         )
         # Bind each action to the immutable dispatch key (UID for model/view
@@ -2540,15 +2555,10 @@ class BaseResourcePage(BaseTablePage):
                 action = menu.addAction(action_info["text"])
                 if "icon" in action_info:
                     try:
-                        action.setIcon(QIcon(resource_path(action_info["icon"])))
-                    except (OSError, FileNotFoundError) as e:
-                        logging.debug(
-                            f"Icon loading failed for {action_info['icon']}: {e}"
-                        )
-                    except Exception as e:
-                        logging.error(
-                            f"Unexpected error loading icon {action_info['icon']}: {e}"
-                        )
+                        theme_name = get_theme_manager().get_current_theme_name() or "Dark"
+                        action.setIcon(Icons.get_theme_icon_by_id(action_info["icon"], theme_name))
+                    except Exception:
+                        pass
                 if action_info.get("dangerous", False):
                     action.setProperty("dangerous", True)
                 action.triggered.connect(

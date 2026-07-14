@@ -45,6 +45,7 @@ class DetailManager(QObject):
         # Connected on show_detail (UniqueConnection prevents duplicate
         # bindings during rapid re-show), disconnected on hide_detail.
         self._watch_subscribed: bool = False
+        self._watch_client = None
         # Trailing-edge debounce timer so 50 burst events for one scale
         # operation collapse into a single refresh.  300ms is the same
         # window the table-side throttle uses for visual consistency.
@@ -103,6 +104,12 @@ class DetailManager(QObject):
         if self._is_same_resource(resource_type_singular, resource_name, namespace) and detail_page.isVisible():
             self.update_detail_position()
             return
+
+        # Switching to a different resource: drop any debounced watch refresh
+        # queued for the previous one so its snapshot can't be flushed into the
+        # panel we are about to display.
+        self._refresh_debounce_timer.stop()
+        self._pending_watch_payload = None
 
         # Update current resource tracking
         self._current_resource.update({
@@ -189,6 +196,7 @@ class DetailManager(QObject):
                 self._on_watch_event,
                 Qt.ConnectionType.UniqueConnection,
             )
+            self._watch_client = kc
             self._watch_subscribed = True
         except TypeError:
             # UniqueConnection raises TypeError when the slot is already
@@ -208,7 +216,7 @@ class DetailManager(QObject):
         if not self._watch_subscribed:
             return
         try:
-            kc = get_kubernetes_client()
+            kc = getattr(self, "_watch_client", None) or get_kubernetes_client()
             if kc is not None and hasattr(kc, "global_resource_watch_event"):
                 kc.global_resource_watch_event.disconnect(self._on_watch_event)
         except (TypeError, RuntimeError):
@@ -219,6 +227,7 @@ class DetailManager(QObject):
             logging.debug(f"DetailManager: watch unsubscribe failed: {e}")
         finally:
             self._watch_subscribed = False
+            self._watch_client = None
 
     def _on_watch_event(self, payload: Dict[str, Any]) -> None:
         """Filter the firehose down to events matching the displayed resource.
@@ -267,6 +276,15 @@ class DetailManager(QObject):
             return
         try:
             if not is_valid(self):
+                return
+            # The displayed resource may have changed between this event being
+            # queued and the flush firing.  Re-verify identity (same normalise
+            # as _on_watch_event) so a stale payload never lands in the wrong
+            # panel.
+            payload_type = singularize_resource_type(payload.get("resource_type") or "")
+            if (payload_type != self._current_resource.get("type") or
+                    payload.get("name") != self._current_resource.get("name") or
+                    payload.get("namespace") != self._current_resource.get("namespace")):
                 return
             raw_object = payload.get("raw_object") or {}
             if not raw_object:

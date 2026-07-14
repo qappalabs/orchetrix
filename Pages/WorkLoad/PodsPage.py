@@ -51,7 +51,10 @@ class PodsPage(BaseResourcePage):
         self.resource_type = "pods"
         self.port_manager = get_port_forward_manager()
         self.setup_page_ui()
-        self.port_manager.port_forward_started.connect(self.on_port_forward_started)
+        # Note: port_forward_started is intentionally NOT handled here — the
+        # worker-launched signal is too early for UI feedback.  Success/failure
+        # is dispatched centrally by MainWindow via port_forward_active /
+        # port_forward_error signals → toasts.
         self.port_manager.port_forward_stopped.connect(self.on_port_forward_stopped)
         self.port_manager.port_forward_error.connect(self.on_port_forward_error)
 
@@ -516,13 +519,6 @@ class PodsPage(BaseResourcePage):
         """Show port forward management dialog"""
         dialog = ActivePortForwardsDialog(self)
         dialog.exec()
-
-    def on_port_forward_started(self, config: PortForwardConfig):
-        """Handle port forward started signal"""
-        if hasattr(self, "show_transient_message"):
-            self.show_transient_message(
-                f"Port forward started: localhost:{config.local_port} -> {config.target_port}"
-            )
 
     def on_port_forward_stopped(self, key: str):
         """Handle port forward stopped signal"""

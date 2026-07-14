@@ -197,6 +197,11 @@ class EventsPage(BaseResourcePage):
 
         # Enhanced action button in last column
         action_column = self.table.columnCount() - 1
+        resource_name = resource.get("name", "Unknown")
+        resource_namespace = resource.get("namespace", "default")
+        button = self._create_enhanced_action_button(row, resource_name, resource_namespace)
+        container = self._create_perfect_action_container(button)
+        self.table.setCellWidget(row, action_column, container)
 
     def setup_page_ui(self):
 

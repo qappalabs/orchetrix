@@ -494,6 +494,14 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
             max(0, self.active_terminal_index), len(self.terminal_tabs) - 1
         )
         for i, tab_data in enumerate(self.terminal_tabs):
+            if tab_button := tab_data.get("tab_button"):
+                try:
+                    tab_button.clicked.disconnect()
+                except TypeError:
+                    pass
+                tab_button.clicked.connect(
+                    lambda checked=False, idx=i: self.switch_to_terminal_tab(idx)
+                )
             if tab_container := tab_data.get("tab_container"):
                 for child in tab_container.findChildren(QPushButton):
                     if child.text() == "✕":
@@ -552,9 +560,11 @@ class TerminalPanel(QWidget, ThemeAwareMixin):
         for i, tab_data in enumerate(self.terminal_tabs):
             if tab_container := tab_data.get("tab_container"):
                 for child in tab_container.findChildren(QLabel):
-                    if not tab_data.get("is_logs_tab", False):
+                    if not tab_data.get("is_logs_tab", False) and not tab_data.get(
+                        "is_ssh_tab", False
+                    ):
                         child.setText(f"Terminal {i + 1}")
-                    # For logs tabs, keep the original label (pod name)
+                    # For logs and SSH tabs, keep the original label (pod name)
                     break
 
     def toggle_terminal(self):

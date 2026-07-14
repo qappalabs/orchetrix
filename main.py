@@ -119,7 +119,7 @@ def resource_path(relative_path):
             logging.debug(f"Resource path: {full_path}")
             return full_path
         else:
-            base_path = os.path.abspath(".")
+            base_path = os.path.dirname(os.path.abspath(__file__))
             return os.path.join(base_path, relative_path)
     except Exception as e:
         logging.error(f"Error in resource_path for {relative_path}: {e}")
@@ -240,6 +240,10 @@ class MainWindow(QMainWindow):
         # Initialize kubeconfig file watcher to detect external changes
         self._setup_kubeconfig_watcher()
 
+        # Pre-warm KubernetesClient on main thread so background workers
+        # never trigger off-thread construction of QTimer-backed singletons.
+        self._setup_kubernetes_client()
+
     def _periodic_cleanup(self):
         """Enhanced periodic cleanup to prevent memory leaks and performance degradation"""
         try:
@@ -350,6 +354,22 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logging.error(f"Failed to setup kubeconfig watcher: {e}")
             self._kubeconfig_watcher = None
+
+    def _setup_kubernetes_client(self):
+        """Pre-warm the KubernetesClient singleton on the main GUI thread.
+
+        ClusterConnectionWorker.execute() calls get_kubernetes_client() from
+        a background thread.  By initialising the singleton here — before any
+        worker runs — we guarantee the underlying KubernetesService and its
+        QTimers are created with main-thread affinity, matching the pattern
+        used by KubeconfigWatcher (see _setup_kubeconfig_watcher).
+        """
+        try:
+            from Utils.kubernetes_client import get_kubernetes_client
+            get_kubernetes_client()
+            logging.debug("KubernetesClient pre-warmed on main thread")
+        except Exception as e:
+            logging.warning(f"Failed to pre-warm KubernetesClient: {e}")
 
     def _on_kubeconfig_changed(self):
         """Handle kubeconfig file changes by refreshing cluster list"""
@@ -896,6 +916,28 @@ class MainWindow(QMainWindow):
                 if self.stacked_widget.currentWidget() != self.cluster_view:
                     self.stacked_widget.setCurrentWidget(self.cluster_view)
                 self.cluster_view.set_active_cluster(cluster_name)
+
+                # Reload the currently visible page so it fetches fresh data
+                # after _clear_all_page_data (called inside set_active_cluster)
+                # wiped the old cluster's data.
+                try:
+                    current_page = self.cluster_view.stacked_widget.currentWidget()
+                    if current_page:
+                        if hasattr(current_page, 'force_load_data'):
+                            current_page.force_load_data()
+                        elif hasattr(current_page, 'load_data'):
+                            current_page.load_data()
+                        elif hasattr(current_page, 'refresh_data'):
+                            current_page.refresh_data()
+                        else:
+                            logging.debug(
+                                "Page <%s> skipped during fast-path reload for cluster "
+                                "'%s': no force_load_data/load_data/refresh_data interface",
+                                current_page.__class__.__name__, cluster_name
+                            )
+                except Exception as reload_error:
+                    logging.warning(f"Failed to reload current page for {cluster_name}: {reload_error}")
+
                 return
 
             # FIXED: Only show loading overlay if we need to connect

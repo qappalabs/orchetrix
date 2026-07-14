@@ -81,12 +81,18 @@ class ConfigMapsPage(BaseResourcePage):
             4: 60,   # Age
             5: 40,   # Actions
         }
-        
-        # Merge with any caller overrides
         if min_col_widths:
             explicit_mins.update(min_col_widths)
             
-        super()._auto_resize_columns(max_col_widths=max_col_widths, min_col_widths=explicit_mins)
+        explicit_maxes = {
+            2: 150,  # Namespace - cap to prevent crowding Name
+            3: 200,  # Keys
+            4: 80,   # Age
+        }
+        if max_col_widths:
+            explicit_maxes.update(max_col_widths)
+            
+        super()._auto_resize_columns(max_col_widths=explicit_maxes, min_col_widths=explicit_mins)
 
     def populate_resource_row(self, row, resource):
         """

@@ -244,7 +244,8 @@ def update_helm_repositories():
 
 def install_helm_chart_cli(release_name, chart, namespace, values_file=None, values=None,
                            version=None, create_namespace=False, timeout=None,
-                           wait=False, atomic=False, dry_run=False, kube_context=None):
+                           wait=False, atomic=False, dry_run=False, kube_context=None,
+                           debug=False):
     """Install a chart using Helm CLI"""
     cmd = ['install', release_name, chart, '--namespace', namespace]
 
@@ -284,8 +285,8 @@ def install_helm_chart_cli(release_name, chart, namespace, values_file=None, val
         except (TypeError, ValueError):
             pass
 
-    # Add debugging flags to get more information if installation fails
-    cmd.extend(['--debug'])
+    if debug or dry_run:
+        cmd.append('--debug')
 
     return run_helm_command(cmd, timeout=cmd_timeout)
 

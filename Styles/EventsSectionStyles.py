@@ -81,6 +81,5 @@ def get_event_message_style():
     return f"""
         color: {theme.colors.TEXT_SECONDARY};
         font-size: 13px;
-        line-height: 1.4;
     """
 

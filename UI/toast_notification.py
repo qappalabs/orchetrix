@@ -169,6 +169,7 @@ class ToastWidget(QWidget):
         text_col.setSpacing(4)
 
         title_lbl = QLabel(title)
+        title_lbl.setTextFormat(Qt.TextFormat.PlainText)
         title_lbl.setStyleSheet(
             f"color: {c['title']}; font-weight: bold; font-size: 13px;"
             " background: transparent; border: none;"
@@ -179,6 +180,7 @@ class ToastWidget(QWidget):
         if message:
             display_msg = message if len(message) <= 200 else message[:197] + '…'
             msg_lbl = QLabel(display_msg)
+            msg_lbl.setTextFormat(Qt.TextFormat.PlainText)
             msg_lbl.setStyleSheet(
                 f"color: {c['body']}; font-size: 12px;"
                 " background: transparent; border: none;"

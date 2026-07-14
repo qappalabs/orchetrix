@@ -50,6 +50,8 @@ class RollingTextWidget(QWidget):
         
         self.font.setBold(True) # Explicitly set bold for maximum compatibility
         
+        self.dot_count = 3
+
         # Animation for rolling transition
         self.anim = QVariantAnimation(self)
         self.anim.setDuration(400)
@@ -92,7 +94,8 @@ class RollingTextWidget(QWidget):
         
         painter.setFont(self.font)
         
-        current_display = f"{self.base_text}..."
+        dots = "..." if self.dot_count > 0 else ""
+        current_display = f"{self.base_text}{dots}"
         
         # Helper to draw text with a subtle drop shadow
         def draw_text_shadowed(text, rect, opacity):
@@ -379,6 +382,8 @@ class SplashScreen(QWidget, ThemeAwareMixin):
                 self.loading_label.base_text = "Ready!"
                 self.loading_label.dot_count = 0
                 self.loading_label.update()
+            if hasattr(self, "dot_animation"):
+                self.dot_animation.stop_animation()
             self.finished.emit()
             self.loading_finished.emit()
 

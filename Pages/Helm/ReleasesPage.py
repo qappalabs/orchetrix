@@ -24,6 +24,8 @@ import logging
 import sys
 from Utils.thread_manager import is_shutdown_requested
 from Services.kubernetes.kubernetes_service import get_kubernetes_service
+from UI.Icons import Icons
+from UI.ThemeManager import get_theme_manager
 from Styles.BaseTablePageStyles import get_menu_style
 
 # Suppress terminal popup on Windows
@@ -707,11 +709,11 @@ class ReleaseValuesLoader(QThread):
 
     def run(self):
         chart = ""
-        values_text = "# Could not retrieve current values"
+        values_text = ""
         try:
             helm_path = find_helm_executable()
             if not helm_path:
-                self.values_loaded.emit("", "# Helm CLI not found")
+                self.values_loaded.emit("", "")
                 return
 
             # Current chart from helm list
@@ -747,7 +749,7 @@ class ReleaseValuesLoader(QThread):
                 values_text = yaml_content
         except Exception as e:
             logging.warning(f"Error loading current values: {e}")
-            values_text = "# Error loading current values"
+            values_text = ""
 
         self.values_loaded.emit(chart, values_text)
 
@@ -846,8 +848,16 @@ class ReleaseUpgradeDialog(QDialog):
         try:
             if chart:
                 self.chart_input.setPlaceholderText(f"Current: {chart}")
-            self.values_editor.setPlainText(values_text)
-            self.upgrade_button.setEnabled(True)
+            self.values_editor.setPlainText(values_text or "# Could not retrieve current values")
+            if not values_text:
+                # Keep button disabled — values could not be loaded, so any
+                # upgrade would send empty overrides and wipe existing values.
+                self.values_editor.setPlaceholderText(
+                    "# Could not retrieve current values\n"
+                    "# Close and re-open to retry."
+                )
+            else:
+                self.upgrade_button.setEnabled(True)
         except RuntimeError:
             # Dialog widgets already destroyed; ignore a late signal.
             pass
@@ -1270,14 +1280,18 @@ class ReleasesPage(BaseResourcePage):
         menu.setStyleSheet(get_menu_style())
 
         actions = [
-            {"text": "Upgrade", "icon": "Icons/edit.png", "dangerous": False},
-            {"text": "Delete", "icon": "Icons/delete.png", "dangerous": True}
+            {"text": "Upgrade", "icon": "edit", "dangerous": False},
+            {"text": "Delete", "icon": "delete", "dangerous": True}
         ]
 
         for action_info in actions:
             action = menu.addAction(action_info["text"])
             if "icon" in action_info:
-                action.setIcon(QIcon(action_info["icon"]))
+                try:
+                    theme_name = get_theme_manager().get_current_theme_name() or "Dark"
+                    action.setIcon(Icons.get_theme_icon_by_id(action_info["icon"], theme_name))
+                except Exception:
+                    pass
             if action_info.get("dangerous", False):
                 action.setProperty("dangerous", True)
             action.triggered.connect(
@@ -2001,8 +2015,12 @@ class ReleasesPage(BaseResourcePage):
             if not helm_path:
                 return []
 
+            kube_context = self._get_current_kube_context()
+
             # Get the manifest of deployed resources
             cmd = [helm_path, "get", "manifest", release_name, "-n", namespace]
+            if kube_context:
+                cmd.extend(["--kube-context", kube_context])
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=10,
                                     creationflags=SUBPROCESS_FLAGS if sys.platform == 'win32' else 0)
 

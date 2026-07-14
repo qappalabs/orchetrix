@@ -56,9 +56,9 @@ def get_top_bar_style():
 def get_tree_widget_style():
     theme = _get_theme()
     # Use orange-tinted selection like resources pages
-    selection_bg = getattr(theme.colors, 'SELECTED_BG', 'rgba(255, 87, 51, 0.18)')
-    hover_highlight = getattr(theme.colors, 'HOVER_HIGHLIGHT', 'rgba(255, 87, 51, 0.08)')
-    selection_hover = getattr(theme.colors, 'SELECTION_HOVER', 'rgba(255, 87, 51, 0.25)')
+    selection_bg = getattr(theme.colors, 'SELECTED_BG', 'rgba(255, 87, 51, 46)')
+    hover_highlight = getattr(theme.colors, 'HOVER_HIGHLIGHT', 'rgba(255, 87, 51, 20)')
+    selection_hover = getattr(theme.colors, 'SELECTION_HOVER', 'rgba(255, 87, 51, 64)')
     return f"""
         QTreeWidget {{
             background-color: transparent;
@@ -101,16 +101,14 @@ def get_tree_widget_style():
             padding: 10px 16px;
             border: none;
             font-size: 14px;
-            text-align: left;
             font-weight: 600;
             letter-spacing: 0.5px;
         }}
         QHeaderView::section:last {{
             padding: 0;
-            text-align: center;
         }}
         QHeaderView::section:hover {{
-            background-color: rgba(255, 255, 255, 0.1);
+            background-color: rgba(255, 255, 255, 26);
         }}
         QHeaderView::down-arrow, QHeaderView::up-arrow {{
             image: none;
@@ -180,7 +178,7 @@ def get_home_status_badge_style(color):
     """Get pill-shaped status badge style matching the style used in Pods/Nodes pages."""
     from PyQt6.QtGui import QColor
     qc = QColor(color)
-    bg = f"rgba({qc.red()}, {qc.green()}, {qc.blue()}, 0.15)"
+    bg = f"rgba({qc.red()}, {qc.green()}, {qc.blue()}, 38)"
     return f"""
         QLabel {{
             padding: 4px 12px;

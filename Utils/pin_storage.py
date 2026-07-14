@@ -4,6 +4,7 @@ Pin Storage Manager – Handles persistent storage of pinned items in JSON forma
 import json
 import logging
 import os
+import threading
 from datetime import datetime, timezone
 from typing import Optional, Set
 
@@ -93,11 +94,14 @@ class PinStorageManager:
 
 # Module-level singleton – use get_pin_storage_manager() for access
 _pin_storage_manager: Optional[PinStorageManager] = None
+_pin_storage_lock = threading.Lock()
 
 
 def get_pin_storage_manager() -> PinStorageManager:
     """Return the application-wide PinStorageManager instance (lazy init)."""
     global _pin_storage_manager
     if _pin_storage_manager is None:
-        _pin_storage_manager = PinStorageManager()
+        with _pin_storage_lock:
+            if _pin_storage_manager is None:
+                _pin_storage_manager = PinStorageManager()
     return _pin_storage_manager

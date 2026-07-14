@@ -105,10 +105,10 @@ def get_error_widget_style():
     return """
                 QLabel {
                     color: #ff4444;
-                    background-color: rgba(255, 68, 68, 0.1);
+                    background-color: rgba(255, 68, 68, 26);
                     padding: 10px;
                     border-radius: 4px;
-                    border: 1px solid rgba(255, 68, 68, 0.3);
+                    border: 1px solid rgba(255, 68, 68, 76);
                 }
             """
 

@@ -85,6 +85,7 @@ class KubernetesMetricsService:
             continue_token = None
             while True:
                 response = self.api_service.v1.list_pod_for_all_namespaces(
+                    field_selector="status.phase!=Succeeded,status.phase!=Failed",
                     limit=5000,
                     _continue=continue_token,
                     _request_timeout=APIClientConfig.METRICS_COLLECTION_TIMEOUT,
@@ -783,47 +784,6 @@ class KubernetesMetricsService:
             logging.debug(f"Error calculating disk usage for {node.metadata.name}: {e}")
             return 0.0
 
-    def _prefetch_pvcs_for_pods(self, pods: list) -> Dict[Tuple[str, str], Any]:
-        """Batch-read PVCs referenced by the given pods, keyed by (namespace, name).
-
-        Avoids the N+1 pattern of reading each PVC individually inside the disk
-        estimation loop. Only namespaces that actually contain PVC-backed volumes
-        are queried, and a failed list (e.g. RBAC) degrades to skipping that
-        namespace's PVCs rather than raising.
-        """
-        namespaces = {
-            pod.metadata.namespace
-            for pod in pods
-            if pod.status
-            and pod.status.phase == "Running"
-            and pod.spec
-            and pod.spec.volumes
-            and pod.metadata
-            and pod.metadata.namespace
-            and any(v.persistent_volume_claim for v in pod.spec.volumes)
-        }
-        pvc_lookup: Dict[Tuple[str, str], Any] = {}
-        for namespace in namespaces:
-            continue_token = None
-            try:
-                while True:
-                    response = self.api_service.v1.list_namespaced_persistent_volume_claim(
-                        namespace=namespace,
-                        limit=500,
-                        _continue=continue_token,
-                        _request_timeout=APIClientConfig.METRICS_COLLECTION_TIMEOUT,
-                    )
-                    for pvc in response.items:
-                        pvc_lookup[(namespace, pvc.metadata.name)] = pvc
-                    continue_token = getattr(response.metadata, "_continue", None)
-                    if not continue_token:
-                        break
-            except Exception as e:
-                logging.debug(
-                    f"Skipping PVC prefetch for namespace '{namespace}': {e}"
-                )
-        return pvc_lookup
-
     def _estimate_disk_usage_from_pods(
         self, node_name: str, storage_capacity: float, pods: list
     ) -> float:
@@ -834,9 +794,6 @@ class KubernetesMetricsService:
         """
         total_estimated_usage = 0
         running_pods_count = 0
-        # Prefetch every PVC referenced by these pods in one batch per namespace,
-        # so the volume loop below is a dict lookup instead of an N+1 API read.
-        pvc_lookup = self._prefetch_pvcs_for_pods(pods)
         for pod in pods:
             if pod.status and pod.status.phase == "Running":
                 running_pods_count += 1
@@ -857,36 +814,11 @@ class KubernetesMetricsService:
                             pod_storage_estimate += self._parse_storage_value(
                                 storage_request
                             )
-                # Add persistent volume sizes
+                # Add EmptyDir volume estimate
                 if pod.spec and pod.spec.volumes:
                     for volume in pod.spec.volumes:
-                        if volume.persistent_volume_claim:
-                            # Estimate PVC usage (we can't get exact usage, so estimate)
-                            pvc = pvc_lookup.get(
-                                (
-                                    pod.metadata.namespace,
-                                    volume.persistent_volume_claim.claim_name,
-                                )
-                            )
-                            if (
-                                pvc
-                                and pvc.spec
-                                and pvc.spec.resources
-                                and pvc.spec.resources.requests
-                            ):
-                                pvc_size_request = pvc.spec.resources.requests.get(
-                                    "storage", "0"
-                                )
-                                # Assume 60% usage of PVC capacity
-                                pvc_estimated_usage = (
-                                    self._parse_storage_value(pvc_size_request) * 0.6
-                                )
-                                pod_storage_estimate += pvc_estimated_usage
-                        elif volume.empty_dir:
-                            # EmptyDir estimate
-                            pod_storage_estimate += (
-                                100 * 1024 * 1024
-                            )  # 100MB estimate
+                        if volume.empty_dir:
+                            pod_storage_estimate += 100 * 1024 * 1024
                 total_estimated_usage += pod_storage_estimate
         # Add system overhead
         system_overhead = storage_capacity * 0.15  # 15% for OS and system

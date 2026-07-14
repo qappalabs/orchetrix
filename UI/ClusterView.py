@@ -991,89 +991,93 @@ class ClusterView(ThemeAwareMixin, QWidget):
         self._crd_fetch_in_progress.add(cluster_name)
         logging.info(f"ClusterView: Fetching CRDs for cluster {cluster_name}...")
 
-        class CRDFetchWorker(EnhancedBaseWorker):
-            def __init__(self, cn):
-                super().__init__(f"crd_fetch_{cn}")
-                self.cluster_name = cn
+        try:
+            class CRDFetchWorker(EnhancedBaseWorker):
+                def __init__(self, cn):
+                    super().__init__(f"crd_fetch_{cn}")
+                    self.cluster_name = cn
 
-            def execute(self):
-                from Utils.kubernetes_client import get_kubernetes_client_for_cluster
-                from kubernetes.client import ApiextensionsV1Api
+                def execute(self):
+                    from Utils.kubernetes_client import get_kubernetes_client_for_cluster
+                    from kubernetes.client import ApiextensionsV1Api
 
-                isolated_client = get_kubernetes_client_for_cluster(self.cluster_name)
-                if isolated_client is None:
-                    return {"cluster": self.cluster_name, "crds": None, "reason": "no_client"}
+                    isolated_client = get_kubernetes_client_for_cluster(self.cluster_name)
+                    if isolated_client is None:
+                        return {"cluster": self.cluster_name, "crds": None, "reason": "no_client"}
 
-                try:
-                    crd_api = ApiextensionsV1Api(api_client=isolated_client)
-                    crd_list = crd_api.list_custom_resource_definition(_request_timeout=(5, 15))
-                    if not (crd_list and hasattr(crd_list, 'items')):
-                        return {"cluster": self.cluster_name, "crds": [], "reason": "empty"}
-
-                    crds = []
-                    for crd_item in crd_list.items:
-                        crd_dict = isolated_client.sanitize_for_serialization(crd_item)
-                        spec = crd_dict.get("spec", {})
-                        names = spec.get("names", {})
-                        metadata = crd_dict.get("metadata", {})
-                        crds.append({
-                            "name": metadata.get("name", ""),
-                            "kind": names.get("kind", metadata.get("name", "")),
-                            "spec": spec,
-                        })
-                    return {"cluster": self.cluster_name, "crds": crds, "reason": "ok"}
-                finally:
                     try:
-                        isolated_client.close()
-                    except Exception:
-                        pass
+                        crd_api = ApiextensionsV1Api(api_client=isolated_client)
+                        crd_list = crd_api.list_custom_resource_definition(_request_timeout=(5, 15))
+                        if not (crd_list and hasattr(crd_list, 'items')):
+                            return {"cluster": self.cluster_name, "crds": [], "reason": "empty"}
 
-        def on_fetch_finished(result):
-            try:
-                if not isinstance(result, dict):
-                    logging.warning(f"CRD fetch returned unexpected result type: {type(result)}")
-                    return
-                cn = result.get("cluster")
-                crds = result.get("crds")
-                reason = result.get("reason")
+                        crds = []
+                        for crd_item in crd_list.items:
+                            crd_dict = isolated_client.sanitize_for_serialization(crd_item)
+                            spec = crd_dict.get("spec", {})
+                            names = spec.get("names", {})
+                            metadata = crd_dict.get("metadata", {})
+                            crds.append({
+                                "name": metadata.get("name", ""),
+                                "kind": names.get("kind", metadata.get("name", "")),
+                                "spec": spec,
+                            })
+                        return {"cluster": self.cluster_name, "crds": crds, "reason": "ok"}
+                    finally:
+                        try:
+                            isolated_client.close()
+                        except Exception:
+                            pass
 
-                if reason == "no_client":
-                    # Client wasn't ready yet (connection still in progress).
-                    # Treat this as transient: leave the cache untouched so a
-                    # later client-backed fetch can still populate it. Writing []
-                    # here would make get_available_crds() treat it as a terminal
-                    # result and never re-fetch once the client becomes ready, and
-                    # would also clobber any CRDs already cached for this cluster.
-                    logging.warning(f"Kubernetes client not ready for CRD fetch: {cn}; will retry once connected")
-                elif reason == "empty":
-                    logging.info(f"ClusterView: No CRDs found for cluster {cn}")
-                    self._cached_crds[cn] = []
-                else:
-                    self._cached_crds[cn] = crds or []
-                    logging.info(f"ClusterView: Cached {len(self._cached_crds[cn])} CRDs for cluster {cn}")
+            def on_fetch_finished(result):
+                try:
+                    if not isinstance(result, dict):
+                        logging.warning(f"CRD fetch returned unexpected result type: {type(result)}")
+                        return
+                    cn = result.get("cluster")
+                    crds = result.get("crds")
+                    reason = result.get("reason")
 
-                # Only refresh the sidebar for a definitive result; a transient
-                # no_client must not overwrite the currently displayed CRDs.
-                if cn == self.active_cluster and reason != "no_client":
-                    self._update_sidebar_crd_dropdown()
-            finally:
-                self._crd_fetch_in_progress.discard(result.get("cluster") if isinstance(result, dict) else cluster_name)
+                    if reason == "no_client":
+                        # Client wasn't ready yet (connection still in progress).
+                        # Treat this as transient: leave the cache untouched so a
+                        # later client-backed fetch can still populate it. Writing []
+                        # here would make get_available_crds() treat it as a terminal
+                        # result and never re-fetch once the client becomes ready, and
+                        # would also clobber any CRDs already cached for this cluster.
+                        logging.warning(f"Kubernetes client not ready for CRD fetch: {cn}; will retry once connected")
+                    elif reason == "empty":
+                        logging.info(f"ClusterView: No CRDs found for cluster {cn}")
+                        self._cached_crds[cn] = []
+                    else:
+                        self._cached_crds[cn] = crds or []
+                        logging.info(f"ClusterView: Cached {len(self._cached_crds[cn])} CRDs for cluster {cn}")
 
-        def on_fetch_error(error):
-            try:
-                logging.warning(f"Failed to fetch CRDs for cluster {cluster_name}: {error}")
-                self._cached_crds[cluster_name] = []
-                if cluster_name == self.active_cluster:
-                    self._update_sidebar_crd_dropdown()
-            finally:
-                self._crd_fetch_in_progress.discard(cluster_name)
+                    # Only refresh the sidebar for a definitive result; a transient
+                    # no_client must not overwrite the currently displayed CRDs.
+                    if cn == self.active_cluster and reason != "no_client":
+                        self._update_sidebar_crd_dropdown()
+                finally:
+                    self._crd_fetch_in_progress.discard(result.get("cluster") if isinstance(result, dict) else cluster_name)
 
-        worker = CRDFetchWorker(cluster_name)
-        worker.signals.finished.connect(on_fetch_finished, Qt.ConnectionType.QueuedConnection)
-        worker.signals.error.connect(on_fetch_error, Qt.ConnectionType.QueuedConnection)
+            def on_fetch_error(error):
+                try:
+                    logging.warning(f"Failed to fetch CRDs for cluster {cluster_name}: {error}")
+                    self._cached_crds[cluster_name] = []
+                    if cluster_name == self.active_cluster:
+                        self._update_sidebar_crd_dropdown()
+                finally:
+                    self._crd_fetch_in_progress.discard(cluster_name)
 
-        thread_manager = get_thread_manager()
-        thread_manager.submit_worker(f"crd_fetch_{cluster_name}", worker)
+            worker = CRDFetchWorker(cluster_name)
+            worker.signals.finished.connect(on_fetch_finished, Qt.ConnectionType.QueuedConnection)
+            worker.signals.error.connect(on_fetch_error, Qt.ConnectionType.QueuedConnection)
+
+            thread_manager = get_thread_manager()
+            thread_manager.submit_worker(f"crd_fetch_{cluster_name}", worker)
+        except Exception:
+            self._crd_fetch_in_progress.discard(cluster_name)
+            raise
 
     def _update_sidebar_crd_dropdown(self) -> None:
         """Update the Custom Resources dropdown in the sidebar"""
@@ -1096,8 +1100,12 @@ class ClusterView(ThemeAwareMixin, QWidget):
             if success:
                 # Don't show loading message, just load data silently
                 self._update_cached_cluster_data(cluster_name)
-                # Belt-and-suspenders: ensure CRDs are fetched once the client
-                # is confirmed ready. Idempotent via _crd_fetch_in_progress.
+                # Discard any prior in-progress marker so the fetch always
+                # runs when the client is confirmed ready. This covers the
+                # window where set_active_cluster started a no_client worker
+                # that hasn't finished yet — without this, the retry would
+                # be silently skipped and CRDs would never populate.
+                self._crd_fetch_in_progress.discard(cluster_name)
                 self._fetch_crds_for_cluster(cluster_name)
             else:
                 self.loading_overlay.hide_loading()

@@ -3,6 +3,7 @@ Dynamic implementation of the Deployments page with live Kubernetes data and res
 Status display shows color-coded status, including multiple status conditions in different colors.
 """
 import logging
+import concurrent.futures
 
 from PyQt6.QtWidgets import (
     QHeaderView, QLabel, QWidget, QHBoxLayout, QInputDialog, QMessageBox,
@@ -99,6 +100,9 @@ class DeploymentsPage(BaseResourcePage):
     3. Deleting Deployments (individual and batch)
     4. Resource details viewer
     """
+
+    _HPA_SCAN_TIMEOUT = 1.5
+    _MAX_SCALE_LIMIT = 100000
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -309,15 +313,20 @@ class DeploymentsPage(BaseResourcePage):
             self._notify_in_flight(name)
             return
 
-        # Sync HPA pre-scan: blocks the main thread for ~50–500ms while we
-        # query autoscaling/v{2,1}. Done synchronously because QInputDialog
-        # is a one-shot helper that can't be mutated after show() — we need
-        # the HPA result before constructing the dialog message.
+        # HPA pre-scan, bounded so a slow or unreachable API server can't
+        # freeze the UI. QInputDialog can't be mutated after show(), so we need
+        # the result up front to build the message — but instead of blocking on
+        # it we run the autoscaling/v{2,1} lookup on a worker thread and wait
+        # only briefly. If it overruns the budget we open the dialog without the
+        # warning rather than stall on it.
         hpa_warning = ""
+        hpa_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         try:
-            scan = get_kubernetes_client().find_hpas_for_workload(
-                "Deployment", name, namespace
+            future = hpa_executor.submit(
+                get_kubernetes_client().find_hpas_for_workload,
+                "Deployment", name, namespace,
             )
+            scan = future.result(timeout=self._HPA_SCAN_TIMEOUT)
             if scan.get("success") and scan.get("hpas"):
                 hpa_names = ", ".join(scan["hpas"])
                 hpa_warning = (
@@ -325,8 +334,15 @@ class DeploymentsPage(BaseResourcePage):
                     f" ({hpa_names}). A manual scale will be reverted by the HPA's "
                     f"next reconciliation pass."
                 )
+        except concurrent.futures.TimeoutError:
+            logging.debug(
+                f"HPA pre-scan for {name}/{namespace} exceeded "
+                f"{self._HPA_SCAN_TIMEOUT}s; opening scale dialog without warning"
+            )
         except Exception as e:
             logging.debug(f"HPA pre-scan failed for {name}/{namespace}: {e}")
+        finally:
+            hpa_executor.shutdown(wait=False)
 
         current = self._current_replicas(resource)
         prompt = (
@@ -336,7 +352,7 @@ class DeploymentsPage(BaseResourcePage):
         )
         new_replicas, ok = QInputDialog.getInt(
             self, "Scale Deployment", prompt,
-            value=current, min=0, max=1000, step=1,
+            value=current, min=0, max=max(current, self._MAX_SCALE_LIMIT), step=1,
         )
         if not ok:
             return

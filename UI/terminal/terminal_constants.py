@@ -115,7 +115,7 @@ class StyleConstants:
     _LOGS_HEADER_BORDER = "#3D3D3D"  # Border color for logs header
     _LOGS_COMBO_BG = "#1E1E1E"  # Combo box background
     _LOGS_COMBO_BORDER = "#555555"  # Combo box border
-    _LOGS_STATUS_BG = "rgba(45, 45, 45, 0.8)"  # Semi-transparent status background
+    _LOGS_STATUS_BG = "rgba(45, 45, 45, 204)"  # Semi-transparent status background
     _LOGS_HIGHLIGHT_BG = "#FFFF00"  # Yellow highlight background
     _LOGS_HIGHLIGHT_TEXT = "#000000"  # Black highlight text
 

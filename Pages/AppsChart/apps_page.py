@@ -404,7 +404,6 @@ class AppsPage(ThemeAwarePage):
                     resource_names.append(resource['name'])
                 else:
                     logging.warning(f"Unexpected resource format: {type(resource)}")
-                    resource_names.append(str(resource))
 
             # Store the full resource data for later use if needed
             self._current_resources = resources
@@ -804,6 +803,7 @@ class AppsPage(ThemeAwarePage):
 
         # Create diagram container
         self.diagram_frame = QFrame()
+        self.diagram_frame.setObjectName("diagramFrame")
         self.diagram_frame.setStyleSheet(
             AppsPageStyles.get_diagram_area_main_style())
 

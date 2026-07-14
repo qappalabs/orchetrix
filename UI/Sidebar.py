@@ -571,7 +571,7 @@ class NavIconButton(QToolButton):
 
     def get_background_color(self):
         if self.coming_soon:
-            return "rgba(255, 149, 0, 0.15)"  # Restore distinct orange background for coming soon
+            return "rgba(255, 149, 0, 38)"  # Restore distinct orange background for coming soon
         elif self.is_active:
             return SidebarStyles.get_sidebar_active_bg()
         return "transparent"

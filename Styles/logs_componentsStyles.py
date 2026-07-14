@@ -89,7 +89,7 @@ def get_status_indicator_style_with_color(color):
     """Get status indicator style with custom color."""
     return f"""
         QLabel {{
-            background-color: rgba(45, 45, 45, 0.8);
+            background-color: rgba(45, 45, 45, 204);
             color: {color};
             font-size: 11px;
             font-weight: bold;

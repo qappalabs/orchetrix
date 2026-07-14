@@ -1208,21 +1208,21 @@ class LightColors:
     BORDER_SUBTLE = "#F0F0F0"  # Subtle borders (lighter than standard)
 
     # Hover states
-    HOVER_BG = "rgba(0, 0, 0, 0.05)"  # Light hover background
-    HOVER_BG_DARKER = "rgba(0, 0, 0, 0.1)"  # Darker hover
-    SELECTED_BG = "rgba(245, 150, 78, 0.10)"  # Selected background (orange tint)
-    HOVER_HIGHLIGHT = "rgba(245, 150, 78, 0.07)"  # Table row hover (subtle warm peach)
-    SELECTION_HOVER = "rgba(245, 150, 78, 0.15)"  # Table selected+hover (deeper warm peach)
+    HOVER_BG = "rgba(0, 0, 0, 13)"  # Light hover background
+    HOVER_BG_DARKER = "rgba(0, 0, 0, 26)"  # Darker hover
+    SELECTED_BG = "rgba(245, 150, 78, 26)"  # Selected background (orange tint)
+    HOVER_HIGHLIGHT = "rgba(245, 150, 78, 18)"  # Table row hover (subtle warm peach)
+    SELECTION_HOVER = "rgba(245, 150, 78, 38)"  # Table selected+hover (deeper warm peach)
     SIDEBAR_ACTIVE_BG = HOVER_BG  # Same as hover - subtle gray selection background
     SIDEBAR_ACTIVE_TEXT = "#F5964E"  # Sidebar active text color (orange)
-    SIDEBAR_HOVER_BG = "rgba(245, 150, 78, 0.15)"  # Sidebar hover (orange tint)
-    DANGER_HOVER_BG = "rgba(220, 53, 69, 0.1)"  # Danger hover
+    SIDEBAR_HOVER_BG = "rgba(245, 150, 78, 38)"  # Sidebar hover (orange tint)
+    DANGER_HOVER_BG = "rgba(220, 53, 69, 26)"  # Danger hover
     DANGER_PRESSED_BG = "#A52A2A"  # Darker red for light theme pressed state
     SUCCESS_HOVER_BG = "#218838"  # Darker green for hover state
     SUCCESS_PRESSED_BG = "#1E7E34"  # Even darker green for pressed state
 
     # Overlay colors
-    OVERLAY_BG_COLOR = "rgba(241, 241, 241, 0.8)"
+    OVERLAY_BG_COLOR = "rgba(241, 241, 241, 204)"
     OVERLAY_TEXT_COLOR = "#24292F"
 
     # Status colors
@@ -1616,8 +1616,6 @@ class LightTheme(BaseTheme):
             }}
         """
 
-        if hasattr(AppStyles, "GLOBAL_PLATFORM_OVERRIDE_STYLE"):
-            return AppStyles.GLOBAL_PLATFORM_OVERRIDE_STYLE + "\n" + main_style
         return main_style
 
 

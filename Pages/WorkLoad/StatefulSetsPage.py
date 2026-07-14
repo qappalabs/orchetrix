@@ -35,6 +35,7 @@ class StatefulSetsPage(BaseResourcePage):
     # A healthy cluster answers well within this; past it we open the dialog
     # without the HPA warning rather than freeze the UI on a slow API server.
     _HPA_SCAN_TIMEOUT = 1.5
+    _MAX_SCALE_LIMIT = 100000
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -265,7 +266,7 @@ class StatefulSetsPage(BaseResourcePage):
         )
         new_replicas, ok = QInputDialog.getInt(
             self, "Scale StatefulSet", prompt,
-            value=current, min=0, max=1000, step=1,
+            value=current, min=0, max=max(current, self._MAX_SCALE_LIMIT), step=1,
         )
         if not ok:
             return

@@ -673,15 +673,23 @@ class IssuesTable(QTableWidget):
 
     def sizeHint(self):
         """Return optimal size based on rows to prevent layout expanding unnecessarily."""
-        rows_height = sum(self.rowHeight(r) for r in range(self.rowCount()))
+        num_rows = self.rowCount()
         header_height = self.horizontalHeader().height()
-        
-        total_height = rows_height + header_height + 16 
-        
+
+        if num_rows == 0:
+            return QSize(super().sizeHint().width(), header_height + 2)
+
+        rows_height = sum(self.rowHeight(r) for r in range(num_rows))
+        total_height = rows_height + header_height + 16
+
         if self.horizontalScrollBar().isVisible():
             total_height += self.horizontalScrollBar().height()
-            
-        return QSize(super().sizeHint().width(), total_height if self.rowCount() > 0 else header_height + 2)
+
+        # Cap to prevent layout expanding for large datasets (matches _update_table_height)
+        MAX_HEIGHT = 1200
+        total_height = min(total_height, MAX_HEIGHT)
+
+        return QSize(super().sizeHint().width(), total_height)
 
     def minimumSizeHint(self):
         """Allow shrinking down to just the header when layout squashes it."""

@@ -757,6 +757,7 @@ class EnhancedClusterConnector(QObject):
             # empty — so we fall through to polling, matching the node watch.
             if self._watch_verb_allowed:
                 try:
+                    self._events_watch_active = True
                     unified_loader = get_unified_resource_loader()
                     unified_loader.start_watch(
                         'events',
@@ -765,7 +766,6 @@ class EnhancedClusterConnector(QObject):
                         on_modified=self._on_event_modified,
                         on_deleted=self._on_event_deleted,
                     )
-                    self._events_watch_active = True
                     logging.info("Events watch started (field_selector=type!=Normal) — "
                                  "issues polling timer suppressed")
                 except Exception as e:

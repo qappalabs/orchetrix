@@ -214,13 +214,12 @@ def get_issues_table_style():
             padding: 10px 16px;
             border: none;
             font-size: 14px;
-            text-align: left;
             font-weight: 600;
             letter-spacing: 0.5px;
         }}
 
         QHeaderView::section:hover {{
-            background-color: rgba(255, 255, 255, 0.1);
+            background-color: #1AFFFFFF;
         }}
 
         QHeaderView::down-arrow, QHeaderView::up-arrow {{

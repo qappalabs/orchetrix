@@ -49,10 +49,20 @@ class ResourceDeleterThread(QThread):
         except Exception as e:
             if self.is_interrupted():
                 return
-            
+
+            status_code = getattr(e, 'status', None)
+            if status_code == 404:
+                self.delete_completed.emit(
+                    True,
+                    f"{self.resource_type}/{self.resource_name} deleted (already gone).",
+                    self.resource_name,
+                    self.namespace
+                )
+                return
+
             error_msg = self._format_error(e)
             logging.error(f"Deletion failed for {self.resource_type}/{self.resource_name}: {error_msg}")
-            
+
             self.delete_completed.emit(
                 False,
                 error_msg,
@@ -115,8 +125,12 @@ class BatchResourceDeleterThread(QThread):
                 success_list.append((resource_name, namespace))
 
             except Exception as e:
-                error_msg = self._format_error(e, resource_name)
-                error_list.append((resource_name, namespace, error_msg))
+                status_code = getattr(e, 'status', None)
+                if status_code == 404:
+                    success_list.append((resource_name, namespace))
+                else:
+                    error_msg = self._format_error(e, resource_name)
+                    error_list.append((resource_name, namespace, error_msg))
 
         if not self.is_interrupted():
             self.batch_delete_progress.emit(total_count, total_count)
